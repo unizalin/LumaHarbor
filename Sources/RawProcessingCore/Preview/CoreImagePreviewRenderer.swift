@@ -37,7 +37,9 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         let pipeline = self.pipeline
         let renderService = self.renderService
 
-        return try await Task.detached(priority: request.quality == .interactive ? .userInitiated : .utility) {
+        return try await runOffActor(
+            priority: request.quality == .interactive ? .userInitiated : .utility
+        ) {
             try Task.checkCancellation()
             let decoded = try decoder.decode(decodeRequest)
 
@@ -51,6 +53,6 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                 cgImage: cgImage,
                 pixelSize: CGSize(width: cgImage.width, height: cgImage.height)
             )
-        }.value
+        }
     }
 }

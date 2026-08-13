@@ -55,7 +55,8 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
     }
 
     func testMissingSidecarIsNilNotAnError() throws {
-        XCTAssertNil(try repository.loadSidecar(for: PhotoID()))
+        let loaded = try repository.loadSidecar(for: PhotoID())
+        XCTAssertNil(loaded)
     }
 
     func testSidecarJSONMatchesTheDocumentedShape() throws {
@@ -213,7 +214,8 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         // Spec §10: the RAW is untouched and the user can simply edit again.
         let replacement = makeSidecar(photoID: photoID)
         try repository.write(sidecar: replacement)
-        XCTAssertEqual(try repository.loadSidecar(for: photoID), replacement)
+        let reloaded = try repository.loadSidecar(for: photoID)
+        XCTAssertEqual(reloaded, replacement)
     }
 
     func testCorruptManifestIsQuarantined() throws {
@@ -254,7 +256,8 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
 
         XCTAssertTrue(repository.isAvailable)
         XCTAssertFalse(repository.isWritable)
-        XCTAssertEqual(try repository.loadSidecar(for: sidecar.photoID), sidecar)
+        let stillReadable = try repository.loadSidecar(for: sidecar.photoID)
+        XCTAssertEqual(stillReadable, sidecar)
 
         XCTAssertThrowsError(try repository.write(sidecar: sidecar)) { error in
             guard case SidecarError.notWritable = error else {
@@ -293,17 +296,16 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
             at: repository.editsDirectoryURL.appendingPathComponent("notes.txt")
         )
 
-        XCTAssertEqual(
-            Set(try repository.storedSidecarIDs()),
-            [first.photoID, second.photoID]
-        )
+        let storedIDs = try repository.storedSidecarIDs()
+        XCTAssertEqual(Set(storedIDs), [first.photoID, second.photoID])
     }
 
     func testRemoveSidecarIsIdempotent() throws {
         let sidecar = makeSidecar()
         try repository.write(sidecar: sidecar)
         try repository.removeSidecar(for: sidecar.photoID)
-        XCTAssertNil(try repository.loadSidecar(for: sidecar.photoID))
+        let removed = try repository.loadSidecar(for: sidecar.photoID)
+        XCTAssertNil(removed)
         XCTAssertNoThrow(try repository.removeSidecar(for: sidecar.photoID))
     }
 

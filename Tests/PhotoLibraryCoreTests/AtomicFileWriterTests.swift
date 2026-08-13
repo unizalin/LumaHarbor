@@ -7,7 +7,8 @@ final class AtomicFileWriterTests: TemporaryDirectoryTestCase {
     func testWritesANewFile() throws {
         let url = temporaryDirectory.appendingPathComponent("new.json")
         try AtomicFileWriter.write(Data("first".utf8), to: url)
-        XCTAssertEqual(try Data(contentsOf: url), Data("first".utf8))
+        let written = try Data(contentsOf: url)
+        XCTAssertEqual(written, Data("first".utf8))
     }
 
     func testCreatesMissingIntermediateDirectories() throws {
@@ -21,13 +22,15 @@ final class AtomicFileWriterTests: TemporaryDirectoryTestCase {
         let url = temporaryDirectory.appendingPathComponent("existing.json")
         try AtomicFileWriter.write(Data("first".utf8), to: url)
         try AtomicFileWriter.write(Data("second".utf8), to: url)
-        XCTAssertEqual(try Data(contentsOf: url), Data("second".utf8))
+        let replaced = try Data(contentsOf: url)
+        XCTAssertEqual(replaced, Data("second".utf8))
     }
 
     func testLeavesNoTemporaryFilesBehindOnSuccess() throws {
         let url = temporaryDirectory.appendingPathComponent("clean.json")
         try AtomicFileWriter.write(Data("payload".utf8), to: url)
-        XCTAssertEqual(try leftoverTemporaryFiles(in: temporaryDirectory), [])
+        let leftovers = try leftoverTemporaryFiles(in: temporaryDirectory)
+        XCTAssertEqual(leftovers, [])
     }
 
     func testFailedWriteLeavesThePreviousContentIntact() throws {
@@ -46,7 +49,8 @@ final class AtomicFileWriterTests: TemporaryDirectoryTestCase {
             }
         }
         // The whole point: the old edits survive a failed save.
-        XCTAssertEqual(try Data(contentsOf: url), Data("good".utf8))
+        let survivor = try Data(contentsOf: url)
+        XCTAssertEqual(survivor, Data("good".utf8))
     }
 
     func testFailedWriteLeavesNoTemporaryFile() throws {
@@ -60,7 +64,8 @@ final class AtomicFileWriterTests: TemporaryDirectoryTestCase {
         XCTAssertThrowsError(try AtomicFileWriter.write(Data("bad".utf8), to: url))
         try setPosixPermissions(0o755, at: directory)
 
-        XCTAssertEqual(try leftoverTemporaryFiles(in: directory), [])
+        let leftovers = try leftoverTemporaryFiles(in: directory)
+        XCTAssertEqual(leftovers, [])
     }
 
     func testWritingIntoAMissingDirectoryTreeReportsSomethingActionable() {
@@ -89,7 +94,8 @@ final class AtomicFileWriterTests: TemporaryDirectoryTestCase {
         let url = temporaryDirectory.appendingPathComponent("large.json")
         let payload = Data(repeating: 0x7A, count: 2_000_000)
         try AtomicFileWriter.write(payload, to: url)
-        XCTAssertEqual(try Data(contentsOf: url), payload)
+        let roundTripped = try Data(contentsOf: url)
+        XCTAssertEqual(roundTripped, payload)
     }
 
     private func leftoverTemporaryFiles(in directory: URL) throws -> [String] {

@@ -1,0 +1,183 @@
+import CoreGraphics
+import CoreImage
+import XCTest
+@testable import RawProcessingCore
+
+/// Spec §9's chain, exercised on a synthetic image so it runs without a RAW
+/// file, a GPU or a camera. What it can prove is that each slider moves pixels
+/// in the documented direction and that the output is tagged sRGB; what it
+/// cannot prove is how Apple's RAW decoder renders a real `.ARW` — that stays
+/// on the manual acceptance list.
+final class AdjustmentPipelineTests: XCTestCase {
+    private let pipeline = AdjustmentPipeline()
+    private let size = CGSize(width: 16, height: 16)
+
+    /// A mid-grey patch with a slight colour cast, so saturation and white
+    /// balance have something to act on.
+    private func makeSourceImage(
+        red: CGFloat = 0.45,
+        green: CGFloat = 0.35,
+        blue: CGFloat = 0.25
+    ) -> CIImage {
+        CIImage(color: CIColor(red: red, green: green, blue: blue))
+            .cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    /// Renders and samples the centre pixel as 8-bit sRGB.
+    private func centrePixel(
+        _ image: CIImage,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> (red: Int, green: Int, blue: Int) {
+        let renderer = ImageRenderService()
+        let cgImage = try renderer.makeCGImage(image)
+
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (Int(bytes[0]), Int(bytes[1]), Int(bytes[2]))
+    }
+
+    // MARK: - Identity
+
+    func testNeutralAdjustmentsAreAPassthrough() {
+        // Spec §6.2's before/after comparison is only honest if "no edits"
+        // means literally the same image, not an approximately equal one.
+        let source = makeSourceImage()
+        let output = pipeline.apply(PhotoAdjustments.neutral, to: source)
+        XCTAssertEqual(output.extent, source.extent)
+        XCTAssertTrue(output === source, "A neutral edit should skip every filter")
+    }
+
+    func testWhiteBalanceAloneDoesNotAddFiltersToTheChain() {
+        // Temperature and tint are applied by the decoder (spec §9), so the
+        // post-decode chain must stay empty for a white-balance-only edit.
+        let source = makeSourceImage()
+        let output = pipeline.apply(
+            PhotoAdjustments(temperature: 40, tint: -20), to: source
+        )
+        XCTAssertTrue(output === source)
+    }
+
+    func testExtentIsPreservedThroughTheWholeChain() {
+        let source = makeSourceImage()
+        let adjustments = PhotoAdjustments(
+            exposure: 1, contrast: 40, highlights: -30, shadows: 30,
+            whites: 20, blacks: -20, vibrance: 50, saturation: 30
+        )
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertEqual(output.extent, source.extent, "An adjustment must not resize the photo")
+    }
+
+    // MARK: - Direction of each slider
+
+    func testPositiveExposureBrightens() throws {
+        let source = makeSourceImage()
+        let base = try centrePixel(source)
+        let brighter = try centrePixel(pipeline.apply(PhotoAdjustments(exposure: 1), to: source))
+        XCTAssertGreaterThan(brighter.red, base.red)
+        XCTAssertGreaterThan(brighter.green, base.green)
+        XCTAssertGreaterThan(brighter.blue, base.blue)
+    }
+
+    func testNegativeExposureDarkens() throws {
+        let source = makeSourceImage()
+        let base = try centrePixel(source)
+        let darker = try centrePixel(pipeline.apply(PhotoAdjustments(exposure: -1), to: source))
+        XCTAssertLessThan(darker.red, base.red)
+    }
+
+    func testFullyNegativeSaturationProducesGrey() throws {
+        let source = makeSourceImage()
+        let grey = try centrePixel(pipeline.apply(PhotoAdjustments(saturation: -100), to: source))
+        // Allow a unit of rounding from the 8-bit round trip.
+        XCTAssertEqual(grey.red, grey.green, accuracy: 1)
+        XCTAssertEqual(grey.green, grey.blue, accuracy: 1)
+    }
+
+    func testPositiveSaturationWidensTheChannelSpread() throws {
+        let source = makeSourceImage()
+        let base = try centrePixel(source)
+        let saturated = try centrePixel(pipeline.apply(PhotoAdjustments(saturation: 80), to: source))
+        XCTAssertGreaterThan(saturated.red - saturated.blue, base.red - base.blue)
+    }
+
+    func testPositiveContrastPushesAShadowToneDarker() throws {
+        // Contrast pivots around mid grey, so a below-mid tone must fall.
+        let source = makeSourceImage(red: 0.25, green: 0.25, blue: 0.25)
+        let base = try centrePixel(source)
+        let contrasted = try centrePixel(pipeline.apply(PhotoAdjustments(contrast: 100), to: source))
+        XCTAssertLessThan(contrasted.red, base.red)
+    }
+
+    func testPositiveContrastPushesAHighlightToneBrighter() throws {
+        let source = makeSourceImage(red: 0.75, green: 0.75, blue: 0.75)
+        let base = try centrePixel(source)
+        let contrasted = try centrePixel(pipeline.apply(PhotoAdjustments(contrast: 100), to: source))
+        XCTAssertGreaterThan(contrasted.red, base.red)
+    }
+
+    func testLiftingShadowsBrightensADarkToneWithoutTouchingMidGrey() throws {
+        let dark = makeSourceImage(red: 0.25, green: 0.25, blue: 0.25)
+        let darkBase = try centrePixel(dark)
+        let lifted = try centrePixel(pipeline.apply(PhotoAdjustments(shadows: 100), to: dark))
+        XCTAssertGreaterThan(lifted.red, darkBase.red)
+
+        // The tone curve pins 0.5, which is what keeps the four tone sliders
+        // from behaving like a second exposure control.
+        let mid = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        let midBase = try centrePixel(mid)
+        let midLifted = try centrePixel(pipeline.apply(PhotoAdjustments(shadows: 100), to: mid))
+        XCTAssertEqual(midLifted.red, midBase.red, accuracy: 2)
+    }
+
+    func testRecoveringHighlightsDarkensABrightTone() throws {
+        let bright = makeSourceImage(red: 0.8, green: 0.8, blue: 0.8)
+        let base = try centrePixel(bright)
+        let recovered = try centrePixel(pipeline.apply(PhotoAdjustments(highlights: -100), to: bright))
+        XCTAssertLessThan(recovered.red, base.red)
+    }
+
+    func testOpposingToneSlidersStayMonotonicRatherThanSolarising() throws {
+        // The guard in ToneCurveMapping only matters if it survives a real
+        // render: a non-monotonic curve inverts tones instead of flattening.
+        let adjustments = PhotoAdjustments(
+            highlights: -100, shadows: 100, whites: -100, blacks: 100
+        )
+        let dark = try centrePixel(
+            pipeline.apply(adjustments, to: makeSourceImage(red: 0.2, green: 0.2, blue: 0.2))
+        )
+        let bright = try centrePixel(
+            pipeline.apply(adjustments, to: makeSourceImage(red: 0.8, green: 0.8, blue: 0.8))
+        )
+        XCTAssertLessThanOrEqual(dark.red, bright.red, "Tones were inverted")
+    }
+
+    func testAdjustmentsAreDeterministic() throws {
+        let source = makeSourceImage()
+        let adjustments = PhotoAdjustments(exposure: 0.5, contrast: 30, vibrance: 40)
+        let first = try centrePixel(pipeline.apply(adjustments, to: source))
+        let second = try centrePixel(pipeline.apply(adjustments, to: source))
+        XCTAssertEqual(first.red, second.red)
+        XCTAssertEqual(first.green, second.green)
+        XCTAssertEqual(first.blue, second.blue)
+    }
+}
+
+private func XCTAssertEqual(
+    _ lhs: Int,
+    _ rhs: Int,
+    accuracy: Int,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    XCTAssertLessThanOrEqual(abs(lhs - rhs), accuracy, file: file, line: line)
+}
