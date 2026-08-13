@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>LumaHarbor</string>
+	<key>CFBundleDisplayName</key>
+	<string>LumaHarbor</string>
+	<key>CFBundleExecutable</key>
+	<string>LumaHarbor</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.lumaharbor.LumaHarbor</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.photography</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License. LumaHarbor is an independent Swift implementation.</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<!-- Not sandboxed for the MVP. Security-scoped bookmarks are still used so
+	     the same code works unchanged once the sandbox and the
+	     com.apple.security.files.user-selected.read-write entitlement are
+	     turned on. -->
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>LumaHarbor needs access to read the RAW files in the folder you choose.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>LumaHarbor needs access to read the RAW files in the folder you choose.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>LumaHarbor reads your RAW files directly from external drives and saves adjustments beside them.</string>
+</dict>
+</plist>

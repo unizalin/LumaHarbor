@@ -1,0 +1,62 @@
+import Foundation
+
+/// Where the Mac's disposable local data lives.
+///
+/// Spec §8.3:
+///   Application Support/LumaHarbor/
+///   ├─ library.sqlite
+///   ├─ bookmarks/
+///   └─ cache/{thumbnails,previews}
+///
+/// Everything under here is rebuildable from the SSD, and the bookmark folder is
+/// per-Mac by design (spec §7) — it must never be copied to the drive.
+public struct ApplicationSupportLocations: Sendable, Equatable {
+    public let baseURL: URL
+
+    public init(baseURL: URL) {
+        self.baseURL = baseURL
+    }
+
+    public var databaseURL: URL { baseURL.appendingPathComponent("library.sqlite") }
+    public var bookmarksDirectoryURL: URL {
+        baseURL.appendingPathComponent("bookmarks", isDirectory: true)
+    }
+    public var cacheDirectoryURL: URL {
+        baseURL.appendingPathComponent("cache", isDirectory: true)
+    }
+    public var thumbnailCacheURL: URL {
+        cacheDirectoryURL.appendingPathComponent("thumbnails", isDirectory: true)
+    }
+    public var previewCacheURL: URL {
+        cacheDirectoryURL.appendingPathComponent("previews", isDirectory: true)
+    }
+
+    public static func standard(
+        folderName: String = "LumaHarbor",
+        fileManager: FileManager = .default
+    ) throws -> ApplicationSupportLocations {
+        let support = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        return ApplicationSupportLocations(
+            baseURL: support.appendingPathComponent(folderName, isDirectory: true)
+        )
+    }
+
+    public func createDirectories(using fileManager: FileManager = .default) throws {
+        for url in [baseURL, bookmarksDirectoryURL, thumbnailCacheURL, previewCacheURL] {
+            try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+    }
+
+    /// Spec §13.9: deleting the local database and caches must be recoverable.
+    /// Exposed so the app can offer it and so tests can prove the rebuild.
+    public func removeRebuildableData(using fileManager: FileManager = .default) throws {
+        for url in [databaseURL, cacheDirectoryURL] where fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+    }
+}
