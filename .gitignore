@@ -1,0 +1,25 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Built app bundle produced by Scripts/build-app-bundle.sh
+/build/
+
+# Private camera samples. Large RAW files must never enter Git history;
+# point LUMAHARBOR_RAW_FIXTURE_DIR at a local folder instead.
+Fixtures/Private/
+*.ARW
+*.arw
+*.CR2
+*.cr2
+*.CR3
+*.cr3
+*.NEF
+*.nef
+*.RAF
+*.raf
+*.RW2
+*.rw2
