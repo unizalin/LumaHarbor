@@ -142,6 +142,14 @@ public actor JPEGExporter {
             let byteCount = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
             let pixelSize = try await fullResolutionPixelSize(of: request.sourceURL)
 
+            // Re-check right before the rename. Cancellation can land during the
+            // metadata read above, and a decoder that doesn't poll for it will
+            // return a value anyway — at which point the move would publish a
+            // finished-looking .jpg for an export the user already stopped.
+            // The rename is the only irreversible step, so it is the one that
+            // must lose the race.
+            try checkCancellation(cleaningUp: temporaryURL)
+
             try fileManager.moveItem(at: temporaryURL, to: finalURL)
             return ExportOutcome(url: finalURL, pixelSize: pixelSize, byteCount: byteCount)
         } catch {
@@ -164,8 +172,9 @@ public actor JPEGExporter {
         let renderService = self.renderService
         let quality = request.jpegQuality
 
-        // Spec §11: no decoding or encoding on the main thread.
-        try await Task.detached(priority: .userInitiated) {
+        // Spec §11: no decoding or encoding on the main thread. Spec §6.3: the
+        // export stays cancellable while it runs.
+        try await runOffActor(priority: .userInitiated) {
             try Task.checkCancellation()
             let decoded = try decoder.decode(decodeRequest)
 
@@ -174,14 +183,14 @@ public actor JPEGExporter {
 
             try Task.checkCancellation()
             try renderService.writeJPEG(adjusted, to: temporaryURL, quality: quality)
-        }.value
+        }
     }
 
     private func fullResolutionPixelSize(of url: URL) async throws -> CGSize {
         let decoder = self.decoder
-        let metadata = try await Task.detached(priority: .utility) {
+        let metadata = try await runOffActor(priority: .utility) {
             try decoder.readMetadata(at: url)
-        }.value
+        }
         return CGSize(width: metadata.pixelWidth, height: metadata.pixelHeight)
     }
 

@@ -35,9 +35,11 @@ final class FingerprintCalculatorTests: TemporaryDirectoryTestCase {
             Data(repeating: 0x42, count: 4_096),
             at: temporaryDirectory.appendingPathComponent("b/c.ARW")
         )
+        let firstFingerprint = try FingerprintCalculator.fingerprint(forFileAt: first)
+        let secondFingerprint = try FingerprintCalculator.fingerprint(forFileAt: second)
         XCTAssertEqual(
-            try FingerprintCalculator.fingerprint(forFileAt: first),
-            try FingerprintCalculator.fingerprint(forFileAt: second),
+            firstFingerprint,
+            secondFingerprint,
             "Fingerprints must not depend on the path — relinking relies on it"
         )
     }
@@ -85,10 +87,8 @@ final class FingerprintCalculatorTests: TemporaryDirectoryTestCase {
         data[size - 1] = 0x02
 
         let url = try writeFile(data, at: temporaryDirectory.appendingPathComponent("big.ARW"))
-        XCTAssertEqual(
-            try FingerprintCalculator.fingerprint(forFileAt: url),
-            FingerprintCalculator.fingerprint(forData: data)
-        )
+        let fromDisk = try FingerprintCalculator.fingerprint(forFileAt: url)
+        XCTAssertEqual(fromDisk, FingerprintCalculator.fingerprint(forData: data))
     }
 
     func testThresholdBoundaryIsStable() throws {
@@ -98,10 +98,8 @@ final class FingerprintCalculatorTests: TemporaryDirectoryTestCase {
         let url = try writeFile(
             atThreshold, at: temporaryDirectory.appendingPathComponent("threshold.ARW")
         )
-        XCTAssertEqual(
-            try FingerprintCalculator.fingerprint(forFileAt: url),
-            FingerprintCalculator.fingerprint(forData: atThreshold)
-        )
+        let fromDisk = try FingerprintCalculator.fingerprint(forFileAt: url)
+        XCTAssertEqual(fromDisk, FingerprintCalculator.fingerprint(forData: atThreshold))
     }
 
     func testEmptyFileIsHandled() throws {

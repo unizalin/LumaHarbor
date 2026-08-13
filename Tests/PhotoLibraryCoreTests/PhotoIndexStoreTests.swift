@@ -69,11 +69,10 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(loaded.metadata.cameraModel, "ILCE-7M4")
         XCTAssertEqual(loaded.metadata.isoSpeed, 400)
         XCTAssertEqual(loaded.metadata.aperture, 1.8)
-        XCTAssertEqual(
-            loaded.metadata.captureDate?.timeIntervalSince1970,
-            1_700_000_000,
-            accuracy: 0.001
-        )
+        // SQLite stores this as a REAL, so compare with tolerance — but unwrap
+        // first: the accuracy overload needs a concrete FloatingPoint.
+        let captureTime = try XCTUnwrap(loaded.metadata.captureDate?.timeIntervalSince1970)
+        XCTAssertEqual(captureTime, 1_700_000_000, accuracy: 0.001)
     }
 
     func testFailureStateSurvivesTheRoundTrip() throws {
@@ -96,7 +95,8 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
             )
         }
         try store.upsert(photos: photos)
-        XCTAssertEqual(try store.photoCount(inLibrary: library.id), 25)
+        let count = try store.photoCount(inLibrary: library.id)
+        XCTAssertEqual(count, 25)
     }
 
     func testUpsertingTheSamePhotoUpdatesInPlace() throws {
@@ -107,8 +107,10 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
         photo.status = .ready
         try store.upsert(photo: photo)
 
-        XCTAssertEqual(try store.photoCount(inLibrary: library.id), 1)
-        XCTAssertEqual(try store.photo(id: photo.id)?.relativePath, "Moved/DSC0001.ARW")
+        let count = try store.photoCount(inLibrary: library.id)
+        let path = try store.photo(id: photo.id)?.relativePath
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(path, "Moved/DSC0001.ARW")
     }
 
     func testPhotosAreOrderedByCaptureTime() throws {
@@ -125,10 +127,8 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
             photo("b.ARW", capturedAt: 200)
         ])
 
-        XCTAssertEqual(
-            try store.photos(inLibrary: library.id).map(\.relativePath),
-            ["a.ARW", "b.ARW", "c.ARW"]
-        )
+        let ordered = try store.photos(inLibrary: library.id).map(\.relativePath)
+        XCTAssertEqual(ordered, ["a.ARW", "b.ARW", "c.ARW"])
     }
 
     func testPagingReturnsAWindow() throws {
@@ -159,19 +159,19 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
             inLibrary: library.id,
             notSeenSince: Date(timeIntervalSince1970: 5_000)
         )
-        XCTAssertEqual(
-            try store.photos(inLibrary: library.id).map(\.relativePath),
-            ["Kept.ARW"]
-        )
+        let remaining = try store.photos(inLibrary: library.id).map(\.relativePath)
+        XCTAssertEqual(remaining, ["Kept.ARW"])
     }
 
     func testEditFlagCanBeToggled() throws {
         let photo = PhotoAsset.stub(libraryID: library.id)
         try store.upsert(photo: photo)
-        XCTAssertEqual(try store.photo(id: photo.id)?.hasEdits, false)
+        let before = try store.photo(id: photo.id)?.hasEdits
+        XCTAssertEqual(before, false)
 
         try store.setHasEdits(true, for: photo.id)
-        XCTAssertEqual(try store.photo(id: photo.id)?.hasEdits, true)
+        let after = try store.photo(id: photo.id)?.hasEdits
+        XCTAssertEqual(after, true)
     }
 
     func testAvailabilityCanBeUpdatedWhenTheDriveGoesAway() throws {
@@ -184,8 +184,10 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
         try store.upsert(photo: PhotoAsset.stub(libraryID: library.id))
         try store.removeLibrary(id: library.id)
 
-        XCTAssertTrue(try store.libraries().isEmpty)
-        XCTAssertEqual(try store.photoCount(inLibrary: library.id), 0)
+        let remainingLibraries = try store.libraries()
+        let remainingPhotos = try store.photoCount(inLibrary: library.id)
+        XCTAssertTrue(remainingLibraries.isEmpty)
+        XCTAssertEqual(remainingPhotos, 0)
     }
 
     func testDataSurvivesReopeningTheDatabase() throws {
@@ -195,7 +197,8 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
 
         let reopened = try PhotoIndexStore(databaseURL: databaseURL)
         defer { reopened.close() }
-        XCTAssertEqual(try reopened.photo(id: photo.id)?.relativePath, photo.relativePath)
+        let path = try reopened.photo(id: photo.id)?.relativePath
+        XCTAssertEqual(path, photo.relativePath)
     }
 
     func testDeletingTheDatabaseFileLeavesARebuildableEmptyIndex() throws {
@@ -206,12 +209,14 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
 
         let rebuilt = try PhotoIndexStore(databaseURL: databaseURL)
         defer { rebuilt.close() }
-        XCTAssertTrue(try rebuilt.libraries().isEmpty)
+        let emptied = try rebuilt.libraries()
+        XCTAssertTrue(emptied.isEmpty)
 
         // And it accepts the same data again, which is what a rescan replays.
         try rebuilt.upsert(library: library)
         try rebuilt.upsert(photo: PhotoAsset.stub(libraryID: library.id))
-        XCTAssertEqual(try rebuilt.photoCount(inLibrary: library.id), 1)
+        let rebuiltCount = try rebuilt.photoCount(inLibrary: library.id)
+        XCTAssertEqual(rebuiltCount, 1)
     }
 
     func testConcurrentWritesAreSerialisedSafely() async throws {
@@ -228,6 +233,7 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
                 }
             }
         }
-        XCTAssertEqual(try store.photoCount(inLibrary: libraryID), 20)
+        let count = try store.photoCount(inLibrary: libraryID)
+        XCTAssertEqual(count, 20)
     }
 }

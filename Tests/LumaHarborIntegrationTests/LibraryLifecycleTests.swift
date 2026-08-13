@@ -81,7 +81,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let service = try makeService()
         let library = try await addLibrary(service)
 
-        let result = try XCTUnwrap(await runScan(service, libraryID: library.id))
+        let scan = await runScan(service, libraryID: library.id)
+        let result = try XCTUnwrap(scan)
         XCTAssertEqual(result.indexedCount, 3)
         XCTAssertFalse(result.wasCancelled)
         XCTAssertNil(result.manifestWriteFailure)
@@ -153,7 +154,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
 
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
         let edit = PhotoAdjustments(exposure: 1.25, contrast: 30, shadows: -20)
         try await service.saveAdjustments(edit, for: photo)
 
@@ -163,10 +165,10 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let restoredLibrary = try XCTUnwrap(restored.first)
         XCTAssertEqual(restoredLibrary.id, library.id)
 
-        let restoredPhoto = try XCTUnwrap(
-            try await relaunched.photos(inLibrary: library.id).first
-        )
-        XCTAssertEqual(try await relaunched.adjustments(for: restoredPhoto), edit)
+        let restoredPhotos = try await relaunched.photos(inLibrary: library.id)
+        let restoredPhoto = try XCTUnwrap(restoredPhotos.first)
+        let restoredEdit = try await relaunched.adjustments(for: restoredPhoto)
+        XCTAssertEqual(restoredEdit, edit)
     }
 
     func testAnUneditedPhotoOpensAtNeutral() async throws {
@@ -175,8 +177,10 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
 
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
-        XCTAssertEqual(try await service.adjustments(for: photo), .neutral)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
+        let adjustments = try await service.adjustments(for: photo)
+        XCTAssertEqual(adjustments, .neutral)
     }
 
     func testSavingWritesAPortableSidecarBesideThePhotos() async throws {
@@ -185,7 +189,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
 
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
         try await service.saveAdjustments(PhotoAdjustments(exposure: 2), for: photo)
 
         let repository = FileSidecarRepository(libraryRootURL: libraryRoot)
@@ -205,11 +210,13 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let service = try makeService()
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
         try await service.saveAdjustments(PhotoAdjustments(exposure: 3), for: photo)
 
         let afterAttributes = try FileManager.default.attributesOfItem(atPath: rawURL.path)
-        XCTAssertEqual(try Data(contentsOf: rawURL), before)
+        let after = try Data(contentsOf: rawURL)
+        XCTAssertEqual(after, before)
         XCTAssertEqual(
             afterAttributes[.modificationDate] as? Date,
             beforeAttributes[.modificationDate] as? Date
@@ -225,10 +232,12 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
 
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
         let edit = PhotoAdjustments(exposure: -1, vibrance: 40)
         try await service.saveAdjustments(edit, for: photo)
-        let originalIDs = Set(try await service.photos(inLibrary: library.id).map(\.id))
+        let originalPhotos = try await service.photos(inLibrary: library.id)
+        let originalIDs = Set(originalPhotos.map(\.id))
 
         // Nuke everything the Mac keeps locally except the bookmarks.
         try locations.removeRebuildableData()
@@ -247,7 +256,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         )
 
         let rebuiltPhoto = try XCTUnwrap(rebuiltPhotos.first { $0.id == photo.id })
-        XCTAssertEqual(try await rebuilt.adjustments(for: rebuiltPhoto), edit)
+        let rebuiltEdit = try await rebuilt.adjustments(for: rebuiltPhoto)
+        XCTAssertEqual(rebuiltEdit, edit)
     }
 
     // MARK: - Offline and read-only
@@ -268,7 +278,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(refreshed.availability.allowsDecoding)
 
         // Spec §10: the index and its cached thumbnails stay put.
-        XCTAssertEqual(try await service.photos(inLibrary: library.id).count, 1)
+        let cached = try await service.photos(inLibrary: library.id)
+        XCTAssertEqual(cached.count, 1)
     }
 
     func testScanningAnOfflineLibraryFailsWithSomethingActionable() async throws {
@@ -294,7 +305,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
 
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
         let edit = PhotoAdjustments(exposure: 0.75)
         try await service.saveAdjustments(edit, for: photo)
 
@@ -318,10 +330,10 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(relinked.isOnline)
 
         _ = await runScan(service, libraryID: library.id)
-        let reconnected = try XCTUnwrap(
-            try await service.photos(inLibrary: library.id).first { $0.id == photo.id }
-        )
-        XCTAssertEqual(try await service.adjustments(for: reconnected), edit)
+        let reconnectedPhotos = try await service.photos(inLibrary: library.id)
+        let reconnected = try XCTUnwrap(reconnectedPhotos.first { $0.id == photo.id })
+        let reconnectedEdit = try await service.adjustments(for: reconnected)
+        XCTAssertEqual(reconnectedEdit, edit)
     }
 
     func testReadOnlyLibraryBrowsesButRefusesToSave() async throws {
@@ -331,7 +343,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let service = try makeService()
         let library = try await addLibrary(service)
         _ = await runScan(service, libraryID: library.id)
-        let photo = try XCTUnwrap(try await service.photos(inLibrary: library.id).first)
+        let indexed = try await service.photos(inLibrary: library.id)
+        let photo = try XCTUnwrap(indexed.first)
 
         try setPosixPermissions(0o555, at: libraryRoot)
         defer { try? setPosixPermissions(0o755, at: libraryRoot) }
@@ -361,7 +374,8 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         try setPosixPermissions(0o555, at: libraryRoot)
         defer { try? setPosixPermissions(0o755, at: libraryRoot) }
 
-        let result = try XCTUnwrap(await runScan(service, libraryID: library.id))
+        let scan = await runScan(service, libraryID: library.id)
+        let result = try XCTUnwrap(scan)
         XCTAssertEqual(result.indexedCount, 1, "A locked drive must still be browsable")
         XCTAssertNotNil(
             result.manifestWriteFailure,
