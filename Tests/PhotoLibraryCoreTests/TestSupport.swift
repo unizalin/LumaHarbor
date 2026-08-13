@@ -1,11 +1,13 @@
 import Foundation
 import XCTest
+@testable import PhotoLibraryCore
+@testable import RawProcessingCore
 
-/// Shared scaffolding for the cross-module tests.
+/// Base class for tests that need a real directory.
 ///
-/// Integration tests here work against a real temporary directory, because the
-/// behaviour under test — atomic replace, read-only volumes, relinking — is
-/// exactly what a mocked file system would paper over.
+/// These behaviours — atomic replace, read-only volumes, quarantine, relinking —
+/// are precisely the ones a mocked file system would paper over, so they run
+/// against the real thing in a throwaway folder.
 class TemporaryDirectoryTestCase: XCTestCase {
     private(set) var temporaryDirectory: URL!
 
@@ -21,8 +23,8 @@ class TemporaryDirectoryTestCase: XCTestCase {
 
     override func tearDownWithError() throws {
         if let temporaryDirectory {
-            // A test may have made a directory read-only on purpose; restore
-            // permissions so cleanup can't leak temp data across runs.
+            // A test may have made something read-only on purpose; restore
+            // permissions so cleanup can't leak temp data between runs.
             restoreWritePermissions(at: temporaryDirectory)
             try? FileManager.default.removeItem(at: temporaryDirectory)
         }
@@ -55,7 +57,7 @@ class TemporaryDirectoryTestCase: XCTestCase {
     }
 
     /// Some CI images run tests as root, where a 0o555 directory is still
-    /// writable and the read-only assertions would prove nothing.
+    /// writable and the read-only assertions would be meaningless.
     var canSimulateReadOnlyDirectory: Bool {
         getuid() != 0
     }
@@ -77,5 +79,46 @@ class TemporaryDirectoryTestCase: XCTestCase {
                 ofItemAtPath: url.path
             )
         }
+    }
+}
+
+extension PhotoRecord {
+    static func stub(
+        photoID: PhotoID = PhotoID(),
+        relativePath: String,
+        fingerprint: FileFingerprint
+    ) -> PhotoRecord {
+        PhotoRecord(
+            photoID: photoID,
+            relativePath: relativePath,
+            fingerprint: fingerprint,
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+}
+
+extension FileFingerprint {
+    static func stub(_ digest: String, size: Int64 = 1_024) -> FileFingerprint {
+        FileFingerprint(fileSize: size, edgeDigest: digest)
+    }
+}
+
+extension PhotoAsset {
+    static func stub(
+        id: PhotoID = PhotoID(),
+        libraryID: LibraryID,
+        relativePath: String = "Trip/DSC0001.ARW",
+        fingerprint: FileFingerprint = .stub("abc"),
+        status: PhotoStatus = .ready
+    ) -> PhotoAsset {
+        PhotoAsset(
+            id: id,
+            libraryID: libraryID,
+            relativePath: relativePath,
+            fingerprint: fingerprint,
+            metadata: RawMetadata(pixelWidth: 6_000, pixelHeight: 4_000),
+            status: status,
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
     }
 }
