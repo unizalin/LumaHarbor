@@ -9,12 +9,19 @@ public struct CacheKey: Hashable, Sendable, CustomStringConvertible {
 
     public var description: String { rawValue }
 
-    public static func thumbnail(photoID: PhotoID, pixelDimension: Int) -> CacheKey {
-        CacheKey("thumb-\(photoID)-\(pixelDimension)")
-    }
+    /// Bump when the thumbnail encoding, size policy or colour handling
+    /// changes, so bytes written by an older build are never served for the new
+    /// one (addendum §3.2).
+    public static let thumbnailFormatVersion = 1
 
-    public static func preview(photoID: PhotoID, pixelDimension: Int, editHash: Int) -> CacheKey {
-        CacheKey("preview-\(photoID)-\(pixelDimension)-\(UInt(bitPattern: editHash))")
+    /// The only persistent cache identity in the MVP.
+    ///
+    /// Deliberately just the photo, its size and a format version: grid
+    /// thumbnails are always the neutral render of the source RAW, so there is
+    /// no adjustment component to encode — and nothing here derives from
+    /// `hashValue`, which is unstable across launches.
+    public static func thumbnail(photoID: PhotoID, pixelDimension: Int) -> CacheKey {
+        CacheKey("thumb-v\(thumbnailFormatVersion)-\(photoID)-\(pixelDimension)")
     }
 
     /// Safe as a filename: the components above are UUIDs and integers, but this

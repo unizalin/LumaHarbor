@@ -32,19 +32,17 @@ struct ExportState: Equatable {
 @MainActor
 public final class LibraryViewModel: ObservableObject {
     @Published private(set) var libraries: [LibraryFolder] = []
-    @Published var selectedLibraryID: LibraryID? {
-        didSet {
-            guard oldValue != selectedLibraryID else { return }
-            handleLibrarySelectionChange()
-        }
-    }
     @Published private(set) var photos: [PhotoAsset] = []
-    @Published var selectedPhotoID: PhotoID? {
-        didSet {
-            guard oldValue != selectedPhotoID else { return }
-            handlePhotoSelectionChange()
-        }
-    }
+
+    /// Selection is read-only from the outside.
+    ///
+    /// Addendum §3.1: moving away from a photo has to flush its edits first,
+    /// and that is asynchronous — a plain `didSet` can't hold the UI back until
+    /// the sidecar is actually written. Views go through
+    /// `requestSelectPhoto(_:)` / `requestSelectLibrary(_:)` (or the bindings
+    /// below) instead, and the selection only changes once the write lands.
+    @Published private(set) var selectedLibraryID: LibraryID?
+    @Published private(set) var selectedPhotoID: PhotoID?
     @Published private(set) var scanProgress: ScanProgress?
     @Published private(set) var exportState: ExportState?
     @Published private(set) var startupFailure: String?
@@ -58,7 +56,137 @@ public final class LibraryViewModel: ObservableObject {
     private var exportTask: Task<Void, Never>?
     private var hasBootstrapped = false
 
+    /// Only ever holds the most recent request: clicking three thumbnails
+    /// quickly should land on the third, not walk through all of them.
+    private var pendingSelection: SelectionRequest?
+    private var isApplyingSelection = false
+
+    /// Reading a sidecar is asynchronous, so a fast A→B can land B's selection
+    /// while A's read is still out. The token is what lets a late read tell
+    /// that it is answering a question nobody is asking any more.
+    private var openTask: Task<Void, Never>?
+    private var selectionGeneration: UInt64 = 0
+
+    private enum SelectionRequest: Equatable {
+        case photo(PhotoID?)
+        case library(LibraryID?)
+    }
+
     public init() {}
+
+    private func install(services: AppServices) {
+        self.services = services
+        editor.attach(services: services)
+        editor.onSaved = { [weak self] photoID, hasEdits in
+            self?.updateEditBadge(photoID: photoID, hasEdits: hasEdits)
+        }
+    }
+
+    /// Test seam: wires already-built services and reads current state from
+    /// them, skipping the Application Support discovery `bootstrap()` does.
+    ///
+    /// Everything downstream — the flush-before-transition rule, the selection
+    /// token, the edit badge — is the production code path; only where the
+    /// services come from differs.
+    func attachForTesting(services: AppServices) async {
+        hasBootstrapped = true
+        install(services: services)
+        libraries = await services.libraryService.knownLibraries()
+    }
+
+    /// Test seam: loads the photo list for a library without going through a
+    /// selection transition, so a test can set up state before exercising one.
+    func selectForTesting(libraryID: LibraryID?) async {
+        selectedLibraryID = libraryID
+        selectedPhotoID = nil
+        await reloadPhotos()
+    }
+
+    // MARK: - Selection
+
+    /// Asks to open a photo. The change lands once the current photo's edits
+    /// are safely on disk; if that write fails, the selection stays put.
+    func requestSelectPhoto(_ photoID: PhotoID?) {
+        guard photoID != selectedPhotoID else { return }
+        enqueue(.photo(photoID))
+    }
+
+    func requestSelectLibrary(_ libraryID: LibraryID?) {
+        guard libraryID != selectedLibraryID else { return }
+        enqueue(.library(libraryID))
+    }
+
+    /// For `List(selection:)` and anything else that needs a two-way binding.
+    var photoSelection: Binding<PhotoID?> {
+        Binding(
+            get: { [weak self] in self?.selectedPhotoID ?? nil },
+            set: { [weak self] in self?.requestSelectPhoto($0) }
+        )
+    }
+
+    var librarySelection: Binding<LibraryID?> {
+        Binding(
+            get: { [weak self] in self?.selectedLibraryID ?? nil },
+            set: { [weak self] in self?.requestSelectLibrary($0) }
+        )
+    }
+
+    private func enqueue(_ request: SelectionRequest) {
+        pendingSelection = request
+        guard !isApplyingSelection else { return }
+        isApplyingSelection = true
+        Task { [weak self] in
+            await self?.applyPendingSelections()
+        }
+    }
+
+    /// Serialised on purpose: two overlapping transitions could each flush the
+    /// same dirty edit, or worse, commit out of order.
+    private func applyPendingSelections() async {
+        defer { isApplyingSelection = false }
+
+        while let request = pendingSelection {
+            pendingSelection = nil
+
+            // Addendum §3.1: the edit reaches the sidecar before the UI moves on.
+            guard await editor.flushPendingEdits() else {
+                // The editor has already raised an actionable error. Stay
+                // exactly where we are — including dropping queued requests,
+                // since the user needs to deal with this before navigating.
+                pendingSelection = nil
+                return
+            }
+
+            switch request {
+            case .photo(let photoID):
+                commitPhotoSelection(photoID)
+            case .library(let libraryID):
+                commitLibrarySelection(libraryID)
+            }
+        }
+    }
+
+    /// Keeps the grid badge in step with what was just written. Resetting a
+    /// photo back to neutral clears it again, which is why this takes the flag
+    /// rather than only ever setting it.
+    private func updateEditBadge(photoID: PhotoID, hasEdits: Bool) {
+        guard let index = photos.firstIndex(where: { $0.id == photoID }),
+              photos[index].hasEdits != hasEdits else { return }
+        photos[index].hasEdits = hasEdits
+    }
+
+    private func commitPhotoSelection(_ photoID: PhotoID?) {
+        guard photoID != selectedPhotoID else { return }
+        selectedPhotoID = photoID
+        handlePhotoSelectionChange()
+    }
+
+    private func commitLibrarySelection(_ libraryID: LibraryID?) {
+        guard libraryID != selectedLibraryID else { return }
+        selectedLibraryID = libraryID
+        selectedPhotoID = nil
+        handleLibrarySelectionChange()
+    }
 
     var selectedLibrary: LibraryFolder? {
         guard let selectedLibraryID else { return nil }
@@ -85,12 +213,14 @@ public final class LibraryViewModel: ObservableObject {
 
         do {
             let services = try AppServices.makeDefault()
-            self.services = services
-            editor.attach(services: services)
+            install(services: services)
             // Spec §7: resolve every saved bookmark and re-take its scope.
             libraries = try await services.libraryService.restoreLibraries()
             if selectedLibraryID == nil {
-                selectedLibraryID = libraries.first(where: { $0.isOnline })?.id ?? libraries.first?.id
+                // Nothing is open yet, so there is no edit to flush.
+                commitLibrarySelection(
+                    libraries.first(where: { $0.isOnline })?.id ?? libraries.first?.id
+                )
             }
         } catch {
             startupFailure = (error as? LocalizedError)?.errorDescription
@@ -120,7 +250,7 @@ public final class LibraryViewModel: ObservableObject {
         do {
             let folder = try await services.libraryService.addLibrary(at: url)
             libraries = await services.libraryService.knownLibraries()
-            selectedLibraryID = folder.id
+            requestSelectLibrary(folder.id)
             startScan(libraryID: folder.id)
         } catch {
             alert = UserAlert(title: "Couldn't add that folder", error: error)
@@ -160,11 +290,23 @@ public final class LibraryViewModel: ObservableObject {
 
     func removeLibrary(_ libraryID: LibraryID) async {
         guard let services else { return }
+
+        // Removing the folder the user is editing in takes the sidecar's
+        // destination with it, so a pending edit has to land first. A failed
+        // flush cancels the removal outright: losing the edit is far worse than
+        // leaving the folder in the list, and the editor has already put an
+        // actionable error on screen.
+        if selectedLibraryID == libraryID {
+            guard await editor.flushPendingEdits() else { return }
+        }
+
         do {
             try await services.libraryService.removeLibrary(id: libraryID)
             libraries = await services.libraryService.knownLibraries()
             if selectedLibraryID == libraryID {
-                selectedLibraryID = libraries.first?.id
+                // Safe to drop history now — it is already on disk.
+                editor.close()
+                commitLibrarySelection(libraries.first?.id)
             }
         } catch {
             alert = UserAlert(title: "Couldn't remove that folder", error: error)
@@ -183,8 +325,11 @@ public final class LibraryViewModel: ObservableObject {
         editor.retrySaveAfterReconnect(isReadOnly: !updated.isWritable)
     }
 
+    /// Runs after `commitLibrarySelection` has already cleared the photo
+    /// selection — by this point any dirty edit has been flushed.
     private func handleLibrarySelectionChange() {
-        selectedPhotoID = nil
+        // A pending open belongs to the folder we just left.
+        invalidateOpenTask()
         editor.close()
         scanTask?.cancel()
         scanProgress = nil
@@ -292,7 +437,19 @@ public final class LibraryViewModel: ObservableObject {
 
     // MARK: - Photo selection
 
+    /// Invalidates any in-flight photo open and hands back the token the next
+    /// one should carry.
+    @discardableResult
+    private func invalidateOpenTask() -> UInt64 {
+        openTask?.cancel()
+        openTask = nil
+        selectionGeneration += 1
+        return selectionGeneration
+    }
+
     private func handlePhotoSelectionChange() {
+        let generation = invalidateOpenTask()
+
         guard let selectedPhotoID else {
             editor.close()
             return
@@ -312,18 +469,35 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
 
-        Task { [weak self] in
+        openTask = Task { [weak self] in
             guard let self, let services else { return }
             let url = photo.url(inLibraryRootedAt: library.rootURL)
+
+            let loaded: Result<PhotoAdjustments, Error>
             do {
-                let adjustments = try await services.libraryService.adjustments(for: photo)
+                loaded = .success(try await services.loadAdjustments(photo))
+            } catch {
+                loaded = .failure(error)
+            }
+
+            // The user may have moved on while the sidecar was being read. The
+            // token *and* the current selection are both checked: a late read
+            // must not open the photo they left, and must not drop its error
+            // on top of the one they're looking at now either.
+            guard !Task.isCancelled,
+                  self.selectionGeneration == generation,
+                  self.selectedPhotoID == photo.id,
+                  self.selectedLibraryID == library.id else { return }
+
+            switch loaded {
+            case .success(let adjustments):
                 self.editor.open(
                     photo: photo,
                     sourceURL: url,
                     adjustments: adjustments,
                     isReadOnly: !library.isWritable
                 )
-            } catch {
+            case .failure(let error):
                 // Spec §10: a damaged sidecar is reported, never silently
                 // replaced. Open at neutral so the photo is still viewable.
                 self.editor.open(
@@ -349,12 +523,12 @@ public final class LibraryViewModel: ObservableObject {
         guard !photos.isEmpty else { return }
         guard let current = selectedPhotoID,
               let index = photos.firstIndex(where: { $0.id == current }) else {
-            selectedPhotoID = photos.first?.id
+            requestSelectPhoto(photos.first?.id)
             return
         }
         let next = index + offset
         guard photos.indices.contains(next) else { return }
-        selectedPhotoID = photos[next].id
+        requestSelectPhoto(photos[next].id)
     }
 
     // MARK: - Export

@@ -25,7 +25,7 @@ struct LibraryGridView: View {
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            model.selectedPhotoID = photo.id
+                            model.requestSelectPhoto(photo.id)
                         }
                     }
                 }

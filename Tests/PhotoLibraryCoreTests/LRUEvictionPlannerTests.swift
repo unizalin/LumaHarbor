@@ -97,20 +97,24 @@ final class LRUEvictionPlannerTests: XCTestCase {
 
     // MARK: - Cache keys
 
-    func testThumbnailAndPreviewKeysDoNotCollide() {
-        let photoID = PhotoID()
+    func testThumbnailKeysAreDistinctPerPhotoAndSize() {
+        let first = PhotoID()
+        let second = PhotoID()
         XCTAssertNotEqual(
-            CacheKey.thumbnail(photoID: photoID, pixelDimension: 512),
-            CacheKey.preview(photoID: photoID, pixelDimension: 512, editHash: 0)
+            CacheKey.thumbnail(photoID: first, pixelDimension: 512),
+            CacheKey.thumbnail(photoID: second, pixelDimension: 512)
+        )
+        XCTAssertNotEqual(
+            CacheKey.thumbnail(photoID: first, pixelDimension: 512),
+            CacheKey.thumbnail(photoID: first, pixelDimension: 256)
         )
     }
 
-    func testDifferentEditsProduceDifferentPreviewKeys() {
-        let photoID = PhotoID()
-        XCTAssertNotEqual(
-            CacheKey.preview(photoID: photoID, pixelDimension: 512, editHash: 1),
-            CacheKey.preview(photoID: photoID, pixelDimension: 512, editHash: 2)
-        )
+    func testThumbnailKeyCarriesAFormatVersion() {
+        // Addendum §3.2: changing the thumbnail encoding must be able to
+        // invalidate every cached file at once.
+        let key = CacheKey.thumbnail(photoID: PhotoID(), pixelDimension: 512)
+        XCTAssertTrue(key.rawValue.contains("v\(CacheKey.thumbnailFormatVersion)"), key.rawValue)
     }
 
     func testKeyFilenamesAreSafeOnDisk() {

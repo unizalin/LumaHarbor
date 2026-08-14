@@ -15,7 +15,20 @@ struct AppServices {
     let exporter: JPEGExporter
     let decoder: any RawDecoding
     let renderService: ImageRenderService
-    let previewRenderer: CoreImagePreviewRenderer
+    let previewRenderer: any PreviewRendering
+
+    /// How the editor gets a photo's saved adjustments.
+    ///
+    /// A function rather than a direct call so a test can decide *when* the read
+    /// completes — that ordering is the whole point of the stale-load rule in
+    /// the addendum, and it can't be exercised by racing a real file read.
+    /// Production wires this straight to `libraryService.adjustments(for:)`.
+    let loadAdjustments: @Sendable (PhotoAsset) async throws -> PhotoAdjustments
+
+    /// The matching write. Same reasoning: the addendum requires that an edit
+    /// made *during* a save is still the one that ends up on disk, and proving
+    /// that needs control over when the write completes.
+    let saveAdjustments: @Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void
 
     static func makeDefault() throws -> AppServices {
         let locations = try ApplicationSupportLocations.standard()
@@ -35,13 +48,16 @@ struct AppServices {
             renderService: renderService
         )
 
+        let libraryService = try PhotoLibraryService(locations: locations, decoder: decoder)
+
         return AppServices(
             locations: locations,
-            libraryService: try PhotoLibraryService(locations: locations, decoder: decoder),
+            libraryService: libraryService,
+            // Grid thumbnails are the neutral source render (addendum §3.2), so
+            // the provider has no adjustment pipeline of its own.
             thumbnailProvider: ThumbnailProvider(
                 cache: thumbnailCache,
                 decoder: decoder,
-                pipeline: pipeline,
                 renderService: renderService
             ),
             previewScheduler: PreviewScheduler(renderer: previewRenderer),
@@ -52,7 +68,13 @@ struct AppServices {
             ),
             decoder: decoder,
             renderService: renderService,
-            previewRenderer: previewRenderer
+            previewRenderer: previewRenderer,
+            loadAdjustments: { photo in
+                try await libraryService.adjustments(for: photo)
+            },
+            saveAdjustments: { adjustments, photo in
+                try await libraryService.saveAdjustments(adjustments, for: photo)
+            }
         )
     }
 }

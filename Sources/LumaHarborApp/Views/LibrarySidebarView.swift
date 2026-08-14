@@ -7,7 +7,9 @@ struct LibrarySidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            List(selection: $model.selectedLibraryID) {
+            // Goes through the request API so switching folders can't outrun a
+            // pending sidecar write (addendum §3.1).
+            List(selection: model.librarySelection) {
                 Section("Photo Folders") {
                     ForEach(model.libraries) { library in
                         LibraryRow(library: library)
