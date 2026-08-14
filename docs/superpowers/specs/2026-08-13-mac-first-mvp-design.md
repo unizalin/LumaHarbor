@@ -294,7 +294,7 @@ ARW source
 
 ## 12. 測試策略
 
-> 2026-08-14 補充：Thumbnail cache identity、編輯離開前保存、掃描取消與 bounded backpressure 的實作／驗收細節，以 [`2026-08-14-thumbnail-scan-cancellation-hardening.md`](2026-08-14-thumbnail-scan-cancellation-hardening.md) 為準。
+> 2026-08-14 補充：Thumbnail cache identity、編輯離開前保存與掃描取消，以 [`2026-08-14-thumbnail-scan-cancellation-hardening.md`](2026-08-14-thumbnail-scan-cancellation-hardening.md) 為準；lossless bounded 掃描管線的固定架構與驗收，另以 [`2026-08-14-lossless-bounded-scan-pipeline.md`](2026-08-14-lossless-bounded-scan-pipeline.md) 為準。
 
 ### 12.1 單元測試
 
