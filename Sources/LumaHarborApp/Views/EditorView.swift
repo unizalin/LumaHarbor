@@ -69,7 +69,7 @@ struct EditorView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
-                model.selectedPhotoID = nil
+                model.requestSelectPhoto(nil)
             } label: {
                 Label("Back to Library", systemImage: "square.grid.2x2")
             }

@@ -125,6 +125,10 @@ public actor DiskCache {
         try fileManager.removeItem(at: directoryURL)
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         entries.removeAll()
+        // Addendum §3.4: a key pinned before the wipe would otherwise stay
+        // un-evictable forever, since nothing will ever unpin an entry that no
+        // longer exists.
+        pinnedKeys.removeAll()
     }
 
     /// Runs the LRU plan. Returns what it dropped, so callers can log or assert.

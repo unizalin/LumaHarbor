@@ -71,6 +71,15 @@ public actor PhotoLibraryService {
     private var access: [LibraryID: ScopedFolderAccess] = [:]
     private var libraries: [LibraryID: LibraryFolder] = [:]
 
+    /// The scan each library is currently running. Anything older that comes
+    /// back late is a ghost and must not write (addendum §3.5).
+    private var currentScanGeneration: [LibraryID: UInt64] = [:]
+    private var scanGenerationCounter: UInt64 = 0
+
+    private func isCurrentScan(libraryID: LibraryID, generation: UInt64) -> Bool {
+        currentScanGeneration[libraryID] == generation
+    }
+
     public init(
         locations: ApplicationSupportLocations,
         bookmarkStore: (any BookmarkStoring)? = nil,
@@ -292,6 +301,16 @@ public actor PhotoLibraryService {
             return
         }
 
+        // Addendum §3.5: the UI cancels a scan and starts another immediately.
+        // A non-cooperative inspection from the old run can come back *after*
+        // the new one finished, still holding the manifest snapshot it read at
+        // its own start — writing that back would roll the newer scan's work
+        // backwards. Claiming the token here is what makes the older run
+        // recognise it has been replaced.
+        scanGenerationCounter += 1
+        let generation = scanGenerationCounter
+        currentScanGeneration[libraryID] = generation
+
         continuation.yield(.started(libraryID))
         let scanStartedAt = Date()
 
@@ -314,7 +333,7 @@ public actor PhotoLibraryService {
         var cancelled = false
 
         for await event in scanner.scan(root: folder.rootURL) {
-            if Task.isCancelled {
+            if Task.isCancelled || !isCurrentScan(libraryID: libraryID, generation: generation) {
                 cancelled = true
                 break
             }
@@ -342,6 +361,12 @@ public actor PhotoLibraryService {
                     )
 
                     switch outcome {
+                    case .cancelled:
+                        // Addendum §3.5: giving up is not a damaged photo. A
+                        // non-cooperative decoder is allowed to finish the file
+                        // it already started, but the result is dropped and the
+                        // next file is never begun.
+                        cancelled = true
                     case .failure(let reason):
                         failed += 1
                         continuation.yield(
@@ -357,9 +382,17 @@ public actor PhotoLibraryService {
                         batch.append(asset)
                         indexed += 1
                     }
+
+                    if cancelled { break }
                 }
 
                 if !batch.isEmpty {
+                    // A whole batch is inspected between loop-top checks, so
+                    // re-test before committing any of it.
+                    guard isCurrentScan(libraryID: libraryID, generation: generation) else {
+                        cancelled = true
+                        break
+                    }
                     do {
                         try index.upsert(photos: batch)
                         continuation.yield(.photosIndexed(batch))
@@ -373,6 +406,27 @@ public actor PhotoLibraryService {
             case .finished:
                 continue
             }
+        }
+
+        let isSuperseded = !isCurrentScan(libraryID: libraryID, generation: generation)
+        if isSuperseded { cancelled = true }
+
+        guard !isSuperseded else {
+            // Everything below writes state derived from a snapshot taken before
+            // the newer scan existed. A superseded run therefore touches
+            // nothing at all — not the index, not the manifest, not the folder
+            // record — and only reports that it stopped.
+            continuation.yield(.finished(LibraryScanResult(
+                libraryID: libraryID,
+                indexedCount: indexed,
+                failedCount: failed,
+                ambiguousCount: ambiguous,
+                movedCount: moved,
+                wasCancelled: true,
+                manifestWriteFailure: nil,
+                completedAt: Date()
+            )))
+            return
         }
 
         // Drop rows for files that disappeared from the drive.
@@ -392,7 +446,13 @@ public actor PhotoLibraryService {
         }
 
         if var updated = libraries[libraryID] {
-            updated.lastScanAt = Date()
+            // Addendum §3.5: `lastScanAt` means "a full scan finished". The UI
+            // uses `nil` to decide a folder still needs its first scan, so
+            // stamping it here after a cancel would quietly skip that scan
+            // forever. Cancelled runs keep whatever was there before.
+            if !cancelled {
+                updated.lastScanAt = Date()
+            }
             updated.photoCount = (try? index.photoCount(inLibrary: libraryID)) ?? indexed
             updated.isWritable = repository.isWritable
             libraries[libraryID] = updated
@@ -414,12 +474,18 @@ public actor PhotoLibraryService {
     private enum InspectionOutcome: Sendable {
         case success(PhotoAsset, PhotoRecord, RelinkDecision)
         case failure(reason: String)
+        /// The caller gave up. Explicitly not a `failure`: a cancelled scan must
+        /// never leave the user looking at photos marked damaged (addendum §3.5).
+        case cancelled
     }
 
     /// Fingerprint, identity and metadata for one file.
     ///
-    /// Detached so hashing and EXIF reads stay off the main thread (spec §11),
-    /// and `nonisolated static` so it can't accidentally capture actor state.
+    /// Runs off the actor so hashing and EXIF reads stay off the main thread
+    /// (spec §11), via `runOffActor` rather than a bare `Task.detached` so the
+    /// caller's cancellation actually reaches the work. A decoder that refuses
+    /// to notice is allowed to finish this one file — the checkpoint after it
+    /// returns is what stops the result being used.
     private static func inspect(
         file: ScannedFile,
         manifest: LibraryManifest,
@@ -429,10 +495,38 @@ public actor PhotoLibraryService {
         let records = manifest.photos
         let url = file.url
 
-        return await Task.detached(priority: .utility) { () -> InspectionOutcome in
+        let outcome: InspectionOutcome
+        do {
+            outcome = try await runOffActor(priority: .utility) { () -> InspectionOutcome in
+                try Task.checkCancellation()
+                return Self.inspectSynchronously(
+                    file: file, url: url, records: records,
+                    decoder: decoder, libraryID: libraryID
+                )
+            }
+        } catch {
+            return .cancelled
+        }
+
+        // The uncooperative case: the work came back with a perfectly good
+        // answer for a scan nobody is waiting for any more.
+        if Task.isCancelled { return .cancelled }
+        return outcome
+    }
+
+    private static func inspectSynchronously(
+        file: ScannedFile,
+        url: URL,
+        records: [PhotoRecord],
+        decoder: any RawDecoding,
+        libraryID: LibraryID
+    ) -> InspectionOutcome {
+        do {
             let fingerprint: FileFingerprint
             do {
                 fingerprint = try FingerprintCalculator.fingerprint(forFileAt: url)
+            } catch is CancellationError {
+                return .cancelled
             } catch {
                 return .failure(
                     reason: (error as? LocalizedError)?.errorDescription
@@ -475,6 +569,10 @@ public actor PhotoLibraryService {
                     failureReason = RawDecodingError
                         .unsupportedFormat(path: url.path).errorDescription
                 }
+            } catch RawDecodingError.cancelled {
+                return .cancelled
+            } catch is CancellationError {
+                return .cancelled
             } catch let error as RawDecodingError {
                 // Spec §10: flag the single photo, let the scan continue.
                 switch error {
@@ -507,7 +605,7 @@ public actor PhotoLibraryService {
                 needsConfirmation: needsConfirmation
             )
             return .success(asset, record, decision)
-        }.value
+        }
     }
 
     private static func hasStoredEdits(

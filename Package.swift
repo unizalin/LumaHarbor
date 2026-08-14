@@ -32,6 +32,10 @@ let package = Package(
         .executableTarget(name: "LumaHarbor", dependencies: ["LumaHarborApp"]),
 
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
+        .testTarget(
+            name: "LumaHarborAppTests",
+            dependencies: ["LumaHarborApp", "PhotoLibraryCore", "RawProcessingCore"]
+        ),
         .testTarget(name: "PhotoLibraryCoreTests", dependencies: ["PhotoLibraryCore"]),
         .testTarget(
             name: "LumaHarborIntegrationTests",

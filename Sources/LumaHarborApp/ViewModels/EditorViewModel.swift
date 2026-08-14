@@ -29,6 +29,10 @@ final class EditorViewModel: ObservableObject {
     /// dozens of full renders, short enough to feel automatic.
     static let settleDelay = Duration.milliseconds(350)
     static let autosaveDelay = Duration.milliseconds(700)
+    /// How many times `flushPendingEdits()` will re-save when the user keeps
+    /// editing during the write. Generous enough never to be hit by a human,
+    /// small enough that a stuck state can't spin forever.
+    static let maximumFlushAttempts = 8
 
     @Published private(set) var photo: PhotoAsset?
     @Published private(set) var sourceURL: URL?
@@ -44,6 +48,11 @@ final class EditorViewModel: ObservableObject {
 
     /// Longest edge the preview should cover, in backing-store pixels.
     @Published var previewPixelDimension = 1_600
+
+    /// Fires after a successful sidecar write so the grid's edit badge can
+    /// follow along. Addendum §3.2: this is the *only* thing a save changes in
+    /// the browser — the neutral thumbnail is deliberately left alone.
+    var onSaved: ((PhotoID, Bool) -> Void)?
 
     private var history = EditHistory<PhotoAdjustments>(initial: .neutral)
     private var services: AppServices?
@@ -107,6 +116,10 @@ final class EditorViewModel: ObservableObject {
         renderOriginalReference()
     }
 
+    /// Tears the editor down.
+    ///
+    /// Callers must have called `flushPendingEdits()` first and seen it succeed
+    /// — this drops `history`, so anything unsaved at this point is gone.
     func close() {
         cancelPendingWork()
         photo = nil
@@ -265,11 +278,12 @@ final class EditorViewModel: ObservableObject {
         let adjustments = history.current
         saveState = .saving
         do {
-            try await services.libraryService.saveAdjustments(adjustments, for: photo)
+            try await services.saveAdjustments(adjustments, photo)
             // Only report success once the atomic write actually returned.
             if history.current == adjustments {
                 saveState = .saved(Date())
             }
+            onSaved?(photo.id, !adjustments.isNeutral)
         } catch {
             saveState = .failed(
                 (error as? LocalizedError)?.errorDescription
@@ -277,6 +291,54 @@ final class EditorViewModel: ObservableObject {
             )
             alert = UserAlert(title: "Couldn't save your edits", error: error)
         }
+    }
+
+    /// Writes everything the user has typed, and keeps writing until the sidecar
+    /// matches what is actually on screen.
+    ///
+    /// Addendum §3.1: leaving a photo must not race the autosave debounce. The
+    /// loop exists because the user can keep dragging while a write is in
+    /// flight — reporting the first snapshot as "all saved" would lose whatever
+    /// they did during it.
+    ///
+    /// Returns `false` when the edit is still unsaved, in which case the caller
+    /// must stay exactly where it is.
+    @discardableResult
+    func flushPendingEdits() async -> Bool {
+        // The debounce is about to be redundant either way.
+        autosaveTask?.cancel()
+        autosaveTask = nil
+
+        guard photo != nil, saveState.isDirty else { return true }
+
+        if isReadOnlyLibrary {
+            // Nothing can be written. Saying so here is what stops the caller
+            // navigating away and dropping the edit on the floor.
+            saveState = .failed("This drive is read-only, so edits can't be saved.")
+            alert = UserAlert(
+                title: "Couldn't save your edits",
+                message: "This drive is read-only, so LumaHarbor can't write next to your photos.",
+                nextStep: "Unlock the drive, or copy the library somewhere writable, then try again."
+            )
+            return false
+        }
+
+        // Bounded so a user who never stops dragging can't wedge the transition.
+        for _ in 0..<Self.maximumFlushAttempts {
+            guard saveState.isDirty else { return true }
+            await save()
+            switch saveState {
+            case .failed:
+                return false
+            case .saved, .unchanged:
+                return true
+            case .pending, .saving:
+                // `save()` only reports success when the snapshot it wrote is
+                // still current; anything else means the edit moved under us.
+                continue
+            }
+        }
+        return !saveState.isDirty
     }
 
     /// Called when the drive comes back after being unplugged mid-edit.

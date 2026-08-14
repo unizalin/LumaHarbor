@@ -15,7 +15,7 @@ import Foundation
 /// Bridging through `withTaskCancellationHandler` keeps the work off the actor
 /// and still forwards cancellation, so the `Task.checkCancellation()` calls
 /// inside `body` do what they look like they do.
-func runOffActor<T: Sendable>(
+public func runOffActor<T: Sendable>(
     priority: TaskPriority,
     _ body: @escaping @Sendable () throws -> T
 ) async throws -> T {

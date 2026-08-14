@@ -30,7 +30,7 @@ struct FilmstripView: View {
                         .id(photo.id)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            model.selectedPhotoID = photo.id
+                            model.requestSelectPhoto(photo.id)
                         }
                     }
                 }

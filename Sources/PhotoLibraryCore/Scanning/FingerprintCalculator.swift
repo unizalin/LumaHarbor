@@ -63,12 +63,18 @@ public enum FingerprintCalculator {
                 // Small file: hash everything, streamed so a surprise large file
                 // can't balloon memory if the size attribute lied.
                 while let chunk = try handle.read(upToCount: streamingChunkSize), !chunk.isEmpty {
+                    // Addendum §3.5: chunk boundaries are the checkpoints that
+                    // let a cancelled scan stop mid-file instead of hashing a
+                    // whole drive nobody is waiting for.
+                    try Task.checkCancellation()
                     hasher.update(data: chunk)
                 }
             } else {
+                try Task.checkCancellation()
                 if let head = try handle.read(upToCount: edgeChunkByteCount) {
                     hasher.update(data: head)
                 }
+                try Task.checkCancellation()
                 try handle.seek(toOffset: UInt64(fileSize - Int64(edgeChunkByteCount)))
                 if let tail = try handle.read(upToCount: edgeChunkByteCount) {
                     hasher.update(data: tail)
@@ -78,6 +84,11 @@ public enum FingerprintCalculator {
             return FileFingerprint(fileSize: fileSize, edgeDigest: hexString(hasher.finalize()))
         } catch let error as FingerprintError {
             throw error
+        } catch is CancellationError {
+            // Propagate as itself: the caller has to tell "you gave up" apart
+            // from "this file is unreadable", or a cancelled scan ends up
+            // marking healthy photos as damaged.
+            throw CancellationError()
         } catch {
             throw FingerprintError.readFailed(
                 path: url.path,
