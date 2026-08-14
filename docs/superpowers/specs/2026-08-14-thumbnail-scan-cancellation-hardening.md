@@ -116,6 +116,8 @@ Mac-first MVP 的 grid thumbnail 定義為「由原始 RAW 產生、未套用 si
 
 可採 custom bounded async channel、producer/consumer acknowledgement，或把 enumeration 改成 pull-based AsyncSequence；不得用 busy-loop polling。PhotoLibraryService 對 UI 的事件流也不得無上限累積：UI 只需目前批次與進度，設計必須保證批次不遺失並有明確的消費節奏。
 
+> 2026-08-14 實作決策：具體 channel、sequence、paged cursor、取消 race 與 high-water 驗收，以 [`2026-08-14-lossless-bounded-scan-pipeline.md`](2026-08-14-lossless-bounded-scan-pipeline.md) 為準。
+
 ## 4. 必要測試
 
 ### 4.1 編輯保存
