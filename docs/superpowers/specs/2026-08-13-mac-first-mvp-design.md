@@ -294,6 +294,8 @@ ARW source
 
 ## 12. 測試策略
 
+> 2026-08-14 補充：Thumbnail cache identity、編輯離開前保存、掃描取消與 bounded backpressure 的實作／驗收細節，以 [`2026-08-14-thumbnail-scan-cancellation-hardening.md`](2026-08-14-thumbnail-scan-cancellation-hardening.md) 為準。
+
 ### 12.1 單元測試
 
 - sidecar JSON 編解碼與預設值
