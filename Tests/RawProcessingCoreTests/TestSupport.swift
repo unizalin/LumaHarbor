@@ -50,11 +50,17 @@ struct ManualPreviewRenderer: PreviewRendering {
     actor Gate {
         private var waiters: [String: CheckedContinuation<Void, Never>] = [:]
         private var released: Set<String> = []
+        /// Set once `releaseAll()` has ever been called. `submit()` hands the
+        /// render work to an unstructured `Task`, so a slower one can still
+        /// reach `wait(for:)` *after* the test already called `releaseAll()` —
+        /// without this flag that continuation would never be registered in
+        /// time to be resumed, and would hang forever.
+        private var allReleased = false
         private var startedKeys: [String] = []
 
         func wait(for key: String) async {
             startedKeys.append(key)
-            guard !released.contains(key) else { return }
+            guard !released.contains(key), !allReleased else { return }
             await withCheckedContinuation { continuation in
                 waiters[key] = continuation
             }
@@ -66,6 +72,7 @@ struct ManualPreviewRenderer: PreviewRendering {
         }
 
         func releaseAll() {
+            allReleased = true
             for (key, continuation) in waiters {
                 released.insert(key)
                 continuation.resume()

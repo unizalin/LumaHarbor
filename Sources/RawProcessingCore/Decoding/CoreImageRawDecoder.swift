@@ -15,7 +15,14 @@ public struct CoreImageRawDecoder: RawDecoding {
     public init() {}
 
     public func supportsFile(at url: URL) -> Bool {
-        CIRAWFilter(imageURL: url) != nil
+        // `CIRAWFilter(imageURL:)` itself is lazy: it returns non-nil for a
+        // missing file or for garbage bytes alike, deferring any real
+        // validation to `nativeSize`/`outputImage`. `nativeSize` is the same
+        // signal `decode(_:)` already uses to detect a corrupted file, so it
+        // is what actually answers "is this a supported RAW".
+        guard let filter = CIRAWFilter(imageURL: url) else { return false }
+        let size = filter.nativeSize
+        return size.width > 0 && size.height > 0
     }
 
     public func readMetadata(at url: URL) throws -> RawMetadata {
