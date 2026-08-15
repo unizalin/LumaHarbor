@@ -31,6 +31,18 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Resolve the repo root from this script's own location, not $PWD, so the
+# runner behaves the same no matter where the caller invoked it from. Done
+# before anything else (including the self-test dispatch below) because
+# run_with_timeout needs ROOT_DIR under `set -u`, and the self-test exercises
+# run_with_timeout directly.
+# ---------------------------------------------------------------------------
+
+SCRIPT_PATH="${0:A}"
+SCRIPT_DIR="${SCRIPT_PATH:h}"
+ROOT_DIR="${SCRIPT_DIR:h}"
+
+# ---------------------------------------------------------------------------
 # XCTest summary parsing. `swift test` exits 0 even when XCTest reports
 # skipped tests, so a bare exit-code check would mislabel a run with silent
 # skips as PASS. These two functions are also exercised by an internal,
@@ -194,6 +206,49 @@ run_selftest() {
         print -r -- "selftest: unparsable log -> FAIL (expected FAIL): ok"
     fi
 
+    # A synthetic fast command: run_with_timeout must complete it well inside
+    # its budget, report no timeout, and preserve its exit code.
+    if run_with_timeout 10 "${tmp}/fast.log" zsh -c 'exit 0'; then
+        if (( TIMEOUT_HIT == 0 )); then
+            print -r -- "selftest: fast command -> PASS, no timeout (expected): ok"
+        else
+            print -r -- "selftest: fast command -> unexpectedly reported a timeout"
+            failures=$((failures + 1))
+        fi
+    else
+        print -r -- "selftest: fast command -> unexpectedly failed"
+        failures=$((failures + 1))
+    fi
+
+    # A synthetic hanging command: a short 2s budget must cut it off within a
+    # few seconds (2s wait + up to 5s grace, bounded), report a timeout, and
+    # leave no descendant process running afterward.
+    local hang_start=$SECONDS
+    local hang_rc=0
+    run_with_timeout 2 "${tmp}/hang.log" zsh -c 'sleep 60' || hang_rc=$?
+    local hang_elapsed=$((SECONDS - hang_start))
+    if (( TIMEOUT_HIT == 1 && hang_rc == 124 )); then
+        print -r -- "selftest: hanging command -> reported timeout (expected): ok"
+    else
+        print -r -- "selftest: hanging command -> did not report a timeout as expected"
+        failures=$((failures + 1))
+    fi
+    if (( hang_elapsed <= 15 )); then
+        print -r -- "selftest: hanging command -> cut off within ${hang_elapsed}s (expected): ok"
+    else
+        print -r -- "selftest: hanging command -> took ${hang_elapsed}s, expected well under 15s"
+        failures=$((failures + 1))
+    fi
+    # `pgrep -f` here matches only the exact synthetic self-test payload this
+    # function just launched (a `sleep 60` under a `zsh -c` argument unique to
+    # this check), never a broad process-name pattern.
+    if pgrep -f 'zsh -c sleep 60' >/dev/null 2>&1; then
+        print -r -- "selftest: hanging command -> a descendant process survived the kill"
+        failures=$((failures + 1))
+    else
+        print -r -- "selftest: hanging command -> no descendant process left running (expected): ok"
+    fi
+
     # This mktemp -d is the self-check's own private scratch directory, not
     # a user fixture or storage test directory — cleaning it up here is not
     # the destructive-operation-on-user-data this script otherwise forbids.
@@ -206,6 +261,107 @@ run_selftest() {
         print -r -- "selftest: ${failures} case(s) behaved unexpectedly"
         return 1
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Timeout watchdog. Stock-macOS-only (no GNU coreutils `timeout`, no
+# Homebrew): a command is launched inside its own subshell — the "wrapper
+# process" — so the wrapper's PID is a stable root for walking exactly its
+# own descendants via `pgrep -P`, never a broad process-name match. On
+# timeout, every live descendant gets TERM, then (after a short grace period)
+# KILL for anyone still alive.
+# ---------------------------------------------------------------------------
+
+# kill_descendants_of <root_pid> <signal>
+# Recursively collects every live descendant of root_pid (root_pid included)
+# via `pgrep -P` and signals each one. Scoped entirely to this process's own
+# subtree, so it cannot touch an unrelated swift/xcodebuild process elsewhere
+# on the machine.
+kill_descendants_of() {
+    local root_pid="$1" sig="$2"
+    local -a to_visit=("$root_pid") all_pids=()
+    while (( ${#to_visit[@]} > 0 )); do
+        local pid="${to_visit[1]}"
+        to_visit=("${to_visit[@]:1}")
+        [[ -n "$pid" ]] || continue
+        all_pids+=("$pid")
+        local -a children
+        local pgrep_output=""
+        # `set -e` treats a failed command substitution inside an assignment
+        # as the assignment's own failure, and pgrep exits 1 whenever a pid
+        # simply has no children — the normal, expected case at the bottom
+        # of the tree — so that has to be caught explicitly rather than left
+        # to abort the whole watchdog.
+        pgrep_output="$(pgrep -P "$pid" 2>/dev/null)" || true
+        children=("${(f)pgrep_output}")
+        local child
+        for child in "${children[@]}"; do
+            [[ -n "$child" ]] && to_visit+=("$child")
+        done
+    done
+    local p
+    for p in "${all_pids[@]}"; do
+        [[ -n "$p" ]] || continue
+        kill -"$sig" "$p" 2>/dev/null || true
+    done
+}
+
+# run_with_timeout <timeout_seconds> <logfile> cmd...
+# Runs cmd... (cwd = ROOT_DIR) as the sole child of a dedicated wrapper
+# subshell, mirroring its combined output to both the console and logfile.
+# Sets the global TIMEOUT_HIT (0/1) and RUN_WITH_TIMEOUT_PID (the wrapper's
+# PID, valid only while the command is running — callers needing to react to
+# an external interrupt read it before this function returns). Returns the
+# command's own exit code, or 124 on a timeout.
+TIMEOUT_HIT=0
+RUN_WITH_TIMEOUT_PID=0
+run_with_timeout() {
+    local timeout_seconds="$1" logfile="$2"
+    shift 2
+    TIMEOUT_HIT=0
+
+    : > "$logfile"
+    ( cd "$ROOT_DIR" && "$@" ) >>"$logfile" 2>&1 &
+    local cmd_pid=$!
+    RUN_WITH_TIMEOUT_PID=$cmd_pid
+
+    # Mirrors the log to the console live. Not part of the watched subtree —
+    # it reads the file, never touches the command — so it is always safe to
+    # kill on our own once the command finishes or is timed out.
+    tail -f -n +1 -- "$logfile" &
+    local tail_pid=$!
+
+    local elapsed=0 grace=5
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        if (( elapsed >= timeout_seconds )); then
+            TIMEOUT_HIT=1
+            kill_descendants_of "$cmd_pid" TERM
+            local waited=0
+            while (( waited < grace )) && kill -0 "$cmd_pid" 2>/dev/null; do
+                sleep 1
+                waited=$((waited + 1))
+            done
+            kill_descendants_of "$cmd_pid" KILL
+            break
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    # `wait` returns the child's own exit status, which `set -e` would treat
+    # as this line failing (and abort the script) whenever the command it
+    # waited on was non-zero — exactly the case being reported here, so it
+    # has to be captured through `||`, not read from a bare `wait; $?`.
+    local exit_code=0
+    wait "$cmd_pid" 2>/dev/null || exit_code=$?
+    kill "$tail_pid" 2>/dev/null || true
+    wait "$tail_pid" 2>/dev/null || true
+    RUN_WITH_TIMEOUT_PID=0
+
+    if (( TIMEOUT_HIT )); then
+        return 124
+    fi
+    return $exit_code
 }
 
 if [[ -n "${LUMAHARBOR_RUNNER_SELFTEST:-}" ]]; then
@@ -232,13 +388,8 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
-# Resolve the repo root from this script's own location, not $PWD, so the
-# runner behaves the same no matter where the caller invoked it from.
+# Per-run scratch directory. ROOT_DIR itself was already resolved above.
 # ---------------------------------------------------------------------------
-
-SCRIPT_PATH="${0:A}"
-SCRIPT_DIR="${SCRIPT_PATH:h}"
-ROOT_DIR="${SCRIPT_DIR:h}"
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="${ROOT_DIR}/.build/mvp-acceptance/${TIMESTAMP}"
@@ -249,6 +400,12 @@ BUILD_LOG="${RUN_DIR}/strict-build.log"
 TEST_LOG="${RUN_DIR}/swift-test.log"
 RAWFIXTURE_LOG="${RUN_DIR}/raw-fixture-test.log"
 SUMMARY_FILE="${RUN_DIR}/summary.md"
+
+# Per-step watchdog budget (Phase 3). Validated and possibly overridden by
+# run_preflight below; this default is what a run gets when the environment
+# variable is unset.
+STEP_TIMEOUT_SECONDS_DEFAULT=900
+STEP_TIMEOUT_SECONDS=$STEP_TIMEOUT_SECONDS_DEFAULT
 
 : > "$PREFLIGHT_LOG"
 
@@ -371,6 +528,18 @@ run_preflight() {
         fail_check "swift --version" "command failed"
     fi
 
+    if [[ -z "${LUMAHARBOR_STEP_TIMEOUT_SECONDS:-}" ]]; then
+        STEP_TIMEOUT_SECONDS=$STEP_TIMEOUT_SECONDS_DEFAULT
+        pass_check "LUMAHARBOR_STEP_TIMEOUT_SECONDS" "not set, defaulting to ${STEP_TIMEOUT_SECONDS_DEFAULT}s"
+    elif [[ "${LUMAHARBOR_STEP_TIMEOUT_SECONDS}" == <-> ]] && (( LUMAHARBOR_STEP_TIMEOUT_SECONDS > 0 )); then
+        STEP_TIMEOUT_SECONDS=$LUMAHARBOR_STEP_TIMEOUT_SECONDS
+        pass_check "LUMAHARBOR_STEP_TIMEOUT_SECONDS" "${STEP_TIMEOUT_SECONDS}s"
+    else
+        fail_check "LUMAHARBOR_STEP_TIMEOUT_SECONDS" \
+            "must be a positive integer, got '${LUMAHARBOR_STEP_TIMEOUT_SECONDS}'"
+        STEP_TIMEOUT_SECONDS=$STEP_TIMEOUT_SECONDS_DEFAULT
+    fi
+
     if [[ -z "${LUMAHARBOR_RAW_FIXTURE_DIR:-}" ]]; then
         fail_check "LUMAHARBOR_RAW_FIXTURE_DIR" "not set"
     elif [[ ! -d "$LUMAHARBOR_RAW_FIXTURE_DIR" ]]; then
@@ -415,19 +584,48 @@ STEP_TEST="SKIPPED (preflight failed)"
 STEP_RAWFIXTURE="SKIPPED (preflight failed)"
 overall_ok=$preflight_ok
 
+# Tracks whichever step is actually running right now, so a signal that
+# arrives mid-step can mark it accurately and clean up its process tree —
+# see the trap handler below, which reads RUN_WITH_TIMEOUT_PID (kept live by
+# run_with_timeout itself) for the actual PID to clean up. Empty whenever no
+# step is in flight.
+CURRENT_STEP_LABEL=""
+
+LAST_STEP_TIMED_OUT=0
 run_logged_step() {
-    # run_logged_step "Step name" "$logfile" cmd...
-    # Only runs the command and mirrors its output into the log. It never
-    # prints a final PASS/FAIL itself: for the test steps, the command's own
-    # exit code is not the full story (see evaluate_xctest_log — `swift
-    # test` exits 0 even when XCTest skipped something), so printing PASS
-    # here could put a wrong PASS on the console before the caller has
-    # actually checked the summary. Each call site below prints exactly one
-    # final state line per step, once it knows the real answer.
-    local name="$1" logfile="$2"
-    shift 2
+    # run_logged_step "step-label" "Step name" "$logfile" cmd...
+    # Only runs the command (under the timeout watchdog) and mirrors its
+    # output into the log. It never prints a final PASS/FAIL itself: for the
+    # test steps, the command's own exit code is not the full story (see
+    # evaluate_xctest_log — `swift test` exits 0 even when XCTest skipped
+    # something), so printing PASS here could put a wrong PASS on the console
+    # before the caller has actually checked the summary. Each call site
+    # below prints exactly one final state line per step, once it knows the
+    # real answer. Sets LAST_STEP_TIMED_OUT so the caller can decide whether
+    # a dependent step (RawFixtureTests after the full test suite) must be
+    # skipped rather than run against a wedged process.
+    local label="$1" name="$2" logfile="$3"
+    shift 3
     print -r -- "==> ${name}"
-    if ( cd "$ROOT_DIR" && "$@" ) 2>&1 | tee -a "$logfile"; then
+    CURRENT_STEP_LABEL="$label"
+
+    # Called directly, not backgrounded: zsh backgrounding forks a subshell,
+    # and RUN_WITH_TIMEOUT_PID/TIMEOUT_HIT are only meaningful as globals the
+    # signal trap below can read if run_with_timeout executes in this same
+    # process. The command it launches internally still runs as a real
+    # background child, which is what actually lets the timeout loop and a
+    # signal both observe/act on it concurrently.
+    local rc=0
+    run_with_timeout "$STEP_TIMEOUT_SECONDS" "$logfile" "$@" || rc=$?
+    CURRENT_STEP_LABEL=""
+
+    if (( TIMEOUT_HIT )); then
+        LAST_STEP_TIMED_OUT=1
+        print -r -- "${name}: command timed out after ${STEP_TIMEOUT_SECONDS}s"
+        return 1
+    fi
+    LAST_STEP_TIMED_OUT=0
+    if (( rc == 0 )); then
         print -r -- "${name}: command completed"
         return 0
     else
@@ -447,9 +645,12 @@ if (( ! PREFLIGHT_ONLY )); then
     if (( preflight_ok )); then
         overall_ok=1
 
-        if run_logged_step "strict-concurrency build" "$BUILD_LOG" \
+        if run_logged_step build "strict-concurrency build" "$BUILD_LOG" \
             swift build -Xswiftc -strict-concurrency=complete; then
             STEP_BUILD="PASS"
+        elif (( LAST_STEP_TIMED_OUT )); then
+            STEP_BUILD="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${BUILD_LOG:t})"
+            overall_ok=0
         else
             STEP_BUILD="FAIL"
             overall_ok=0
@@ -457,7 +658,8 @@ if (( ! PREFLIGHT_ONLY )); then
         announce_step_result "strict-concurrency build" "$STEP_BUILD"
 
         if [[ "$STEP_BUILD" == "PASS" ]]; then
-            if run_logged_step "full swift test" "$TEST_LOG" \
+            local full_test_timed_out=0
+            if run_logged_step test "full swift test" "$TEST_LOG" \
                 swift test -Xswiftc -strict-concurrency=complete; then
                 if step_reason="$(evaluate_xctest_log "$TEST_LOG")"; then
                     STEP_TEST="PASS"
@@ -465,13 +667,25 @@ if (( ! PREFLIGHT_ONLY )); then
                     STEP_TEST="FAIL (${step_reason})"
                     overall_ok=0
                 fi
+            elif (( LAST_STEP_TIMED_OUT )); then
+                full_test_timed_out=1
+                STEP_TEST="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${TEST_LOG:t})"
+                overall_ok=0
             else
                 STEP_TEST="FAIL (command exited non-zero; see ${TEST_LOG:t})"
                 overall_ok=0
             fi
             announce_step_result "full swift test" "$STEP_TEST"
 
-            if run_logged_step "RawFixtureTests" "$RAWFIXTURE_LOG" \
+            if (( full_test_timed_out )); then
+                # A timed-out full test leaves the process tree freshly torn
+                # down (or wedged mid-teardown); running RawFixtureTests on
+                # top of that would race a half-terminated `swift test`
+                # rather than proving anything about the fixtures.
+                STEP_RAWFIXTURE="SKIPPED (full swift test failed)"
+                overall_ok=0
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+            elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
                 swift test --filter RawFixtureTests; then
                 if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
                     STEP_RAWFIXTURE="PASS"
@@ -479,11 +693,16 @@ if (( ! PREFLIGHT_ONLY )); then
                     STEP_RAWFIXTURE="FAIL (${step_reason})"
                     overall_ok=0
                 fi
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+            elif (( LAST_STEP_TIMED_OUT )); then
+                STEP_RAWFIXTURE="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${RAWFIXTURE_LOG:t})"
+                overall_ok=0
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
             else
                 STEP_RAWFIXTURE="FAIL (command exited non-zero; see ${RAWFIXTURE_LOG:t})"
                 overall_ok=0
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
             fi
-            announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
         else
             STEP_TEST="SKIPPED (strict-concurrency build failed)"
             STEP_RAWFIXTURE="SKIPPED (strict-concurrency build failed)"
@@ -494,40 +713,84 @@ if (( ! PREFLIGHT_ONLY )); then
 fi
 
 # ---------------------------------------------------------------------------
-# Summary
+# Summary. Refactored into an idempotent function so both the normal exit
+# path and the signal traps below can call it — whichever happens first wins,
+# and later calls are no-ops. Written atomically (temp file + rename) so a
+# reader never observes a partially written summary.md.
 # ---------------------------------------------------------------------------
 
-{
-    print -r -- "# MVP acceptance run ${TIMESTAMP}"
-    print -r -- ""
-    print -r -- "## Preflight"
-    print -r -- ""
-    for line in "${PREFLIGHT_LINES[@]}"; do
-        print -r -- "- ${line}"
-    done
-    print -r -- ""
-    if (( PREFLIGHT_ONLY )); then
-        print -r -- "Preflight-only run: no build or test steps executed."
+SUMMARY_WRITTEN=0
+write_summary() {
+    (( SUMMARY_WRITTEN )) && return 0
+    SUMMARY_WRITTEN=1
+
+    local tmp_summary="${SUMMARY_FILE}.tmp.$$"
+    {
+        print -r -- "# MVP acceptance run ${TIMESTAMP}"
         print -r -- ""
-        if (( preflight_ok )); then
-            print -r -- "Preflight result: PASS"
+        print -r -- "## Preflight"
+        print -r -- ""
+        for line in "${PREFLIGHT_LINES[@]}"; do
+            print -r -- "- ${line}"
+        done
+        print -r -- ""
+        if (( PREFLIGHT_ONLY )); then
+            print -r -- "Preflight-only run: no build or test steps executed."
+            print -r -- ""
+            if (( preflight_ok )); then
+                print -r -- "Preflight result: PASS"
+            else
+                print -r -- "Preflight result: FAIL"
+            fi
         else
-            print -r -- "Preflight result: FAIL"
+            print -r -- "## Steps"
+            print -r -- ""
+            print -r -- "- strict-concurrency build: ${STEP_BUILD}"
+            print -r -- "- full swift test: ${STEP_TEST}"
+            print -r -- "- RawFixtureTests: ${STEP_RAWFIXTURE}"
+            print -r -- ""
+            if (( overall_ok )); then
+                print -r -- "Overall result: PASS"
+            else
+                print -r -- "Overall result: FAIL"
+            fi
         fi
-    else
-        print -r -- "## Steps"
-        print -r -- ""
-        print -r -- "- strict-concurrency build: ${STEP_BUILD}"
-        print -r -- "- full swift test: ${STEP_TEST}"
-        print -r -- "- RawFixtureTests: ${STEP_RAWFIXTURE}"
-        print -r -- ""
-        if (( overall_ok )); then
-            print -r -- "Overall result: PASS"
-        else
-            print -r -- "Overall result: FAIL"
+    } > "$tmp_summary"
+    mv -f -- "$tmp_summary" "$SUMMARY_FILE"
+}
+
+# handle_terminating_signal <SIGNAL>
+# INT/TERM/HUP must still produce a usable summary.md (acceptance criterion
+# 10): mark whichever step was in flight as interrupted, tear down exactly
+# that step's own process tree (never a broad process-name kill), then write
+# the summary before exiting.
+handle_terminating_signal() {
+    local sig="$1"
+    if [[ -n "$CURRENT_STEP_LABEL" ]]; then
+        local reason="FAIL (interrupted by ${sig})"
+        case "$CURRENT_STEP_LABEL" in
+            build) STEP_BUILD="$reason" ;;
+            test) STEP_TEST="$reason"; STEP_RAWFIXTURE="SKIPPED (full swift test failed)" ;;
+            rawfixture) STEP_RAWFIXTURE="$reason" ;;
+        esac
+        overall_ok=0
+        if (( RUN_WITH_TIMEOUT_PID != 0 )); then
+            kill_descendants_of "$RUN_WITH_TIMEOUT_PID" TERM
+            sleep 1
+            kill_descendants_of "$RUN_WITH_TIMEOUT_PID" KILL
         fi
     fi
-} > "$SUMMARY_FILE"
+    write_summary
+    print -r -- ""
+    print -r -- "Full logs and summary: ${RUN_DIR}"
+    exit 130
+}
+
+trap 'handle_terminating_signal INT' INT
+trap 'handle_terminating_signal TERM' TERM
+trap 'handle_terminating_signal HUP' HUP
+
+write_summary
 
 print -r -- ""
 print -r -- "Full logs and summary: ${RUN_DIR}"
