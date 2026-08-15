@@ -57,15 +57,25 @@ final class DiskCacheTests: TemporaryDirectoryTestCase {
         let pinned = CacheKey("onScreen")
         try await cache.store(Data(repeating: 0, count: 100), for: pinned)
         await cache.pin(pinned)
-        try await cache.store(Data(repeating: 0, count: 100), for: CacheKey("other"))
 
+        // Storing a second 100-byte entry pushes total usage to 200, over the
+        // 150-byte budget. The pinned entry must survive; the competing
+        // unpinned entry is the one the planner evicts.
+        try await cache.store(Data(repeating: 0, count: 100), for: CacheKey("other"))
         let stillThere = await cache.contains(pinned)
         XCTAssertTrue(stillThere, "The photo on screen was evicted mid-render")
+        let otherStillThere = await cache.contains(CacheKey("other"))
+        XCTAssertFalse(otherStillThere, "The unpinned competitor should have been evicted instead")
 
         await cache.unpin(pinned)
-        try await cache.evictIfNeeded()
+        // Unpinning alone creates no pressure (100 bytes is under the
+        // 150-byte budget), so force real pressure before expecting eviction.
+        try await cache.store(Data(repeating: 0, count: 100), for: CacheKey("pressure"))
         let afterUnpin = await cache.contains(pinned)
-        XCTAssertFalse(afterUnpin)
+        XCTAssertFalse(afterUnpin, "The formerly pinned entry should now be evictable under pressure")
+
+        let total = await cache.totalByteCount
+        XCTAssertLessThanOrEqual(total, 150)
     }
 
     func testLoweringTheBudgetPrunesImmediately() async throws {

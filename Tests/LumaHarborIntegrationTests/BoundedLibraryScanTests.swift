@@ -242,8 +242,9 @@ final class BoundedLibraryScanTests: TemporaryDirectoryTestCase {
         let gate = InspectionGate()
         let decoder = GatedScanDecoder()
         decoder.gate = gate
-        // Gate *after* both files, so the batch is complete when we cancel.
-        decoder.gateAfterFileCount = 2
+        // One read completes normally; the second (last) file enters the gate,
+        // so the batch is fully inspected by the time we cancel.
+        decoder.gateAfterFileCount = 1
         decoder.gateIgnoresCancellation = true
 
         let service = try makeService(decoder: decoder, batchSize: 2)
@@ -253,7 +254,7 @@ final class BoundedLibraryScanTests: TemporaryDirectoryTestCase {
             for await _ in service.scan(libraryID: library.id) {}
         }
 
-        await waitForCondition("both files to be inspected") { gate.started > 0 }
+        await waitForCondition("the second (last) file to enter the gate") { gate.started > 0 }
         consumer.cancel()
         gate.release()
         await consumer.value

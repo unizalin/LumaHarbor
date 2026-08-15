@@ -74,7 +74,13 @@ final class GatedScanDecoder: RawDecoding, @unchecked Sendable {
         if index > gateAfterFileCount {
             gate?.enterAndWait(ignoringCancellation: gateIgnoresCancellation)
         }
-        try Task.checkCancellation()
+        // A cooperative decoder polls and throws; a non-cooperative one (as
+        // modelled by `gateIgnoresCancellation`) hands back a perfectly good
+        // result for a scan nobody is waiting for any more, so the service's
+        // own pre-commit checkpoint — not this helper — is what has to catch it.
+        if !gateIgnoresCancellation {
+            try Task.checkCancellation()
+        }
         return RawMetadata(pixelWidth: 64, pixelHeight: 48)
     }
 
