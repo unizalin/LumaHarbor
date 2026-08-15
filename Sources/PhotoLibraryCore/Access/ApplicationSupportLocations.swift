@@ -30,6 +30,18 @@ public struct ApplicationSupportLocations: Sendable, Equatable {
     public var previewCacheURL: URL {
         cacheDirectoryURL.appendingPathComponent("previews", isDirectory: true)
     }
+    /// WAL-mode sidecars, named `library.sqlite-wal` / `library.sqlite-shm`
+    /// alongside the database file itself. Only present while (or just after)
+    /// a connection is open, but a reset must not leave them behind for a
+    /// fresh connection to trip over.
+    public var databaseWALURL: URL {
+        databaseURL.deletingLastPathComponent()
+            .appendingPathComponent(databaseURL.lastPathComponent + "-wal")
+    }
+    public var databaseSHMURL: URL {
+        databaseURL.deletingLastPathComponent()
+            .appendingPathComponent(databaseURL.lastPathComponent + "-shm")
+    }
 
     public static func standard(
         folderName: String = "LumaHarbor",
@@ -54,8 +66,12 @@ public struct ApplicationSupportLocations: Sendable, Equatable {
 
     /// Spec §13.9: deleting the local database and caches must be recoverable.
     /// Exposed so the app can offer it and so tests can prove the rebuild.
+    ///
+    /// Never touches `bookmarksDirectoryURL` — those are per-Mac and not
+    /// rebuildable from the drive.
     public func removeRebuildableData(using fileManager: FileManager = .default) throws {
-        for url in [databaseURL, cacheDirectoryURL] where fileManager.fileExists(atPath: url.path) {
+        let targets = [databaseURL, databaseWALURL, databaseSHMURL, cacheDirectoryURL]
+        for url in targets where fileManager.fileExists(atPath: url.path) {
             try fileManager.removeItem(at: url)
         }
     }

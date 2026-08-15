@@ -239,15 +239,25 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let originalPhotos = try await service.photos(inLibrary: library.id)
         let originalIDs = Set(originalPhotos.map(\.id))
 
-        // Nuke everything the Mac keeps locally except the bookmarks.
-        try locations.removeRebuildableData()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: locations.databaseURL.path))
+        // The product-owned reset: closes the live SQLite connection before
+        // deleting library.sqlite and its sidecars, then recreates a fresh,
+        // empty database in place — never a manual `indexStore.close()`.
+        try await service.resetRebuildableLocalData()
 
-        let rebuilt = try makeService()
-        _ = try await rebuilt.restoreLibraries()
-        _ = await runScan(rebuilt, libraryID: library.id)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: locations.databaseURL.path),
+            "The reset must recreate the database, not just delete it"
+        )
+        let emptiedRows = try await service.photos(inLibrary: library.id)
+        XCTAssertTrue(emptiedRows.isEmpty, "Photo rows must stay empty until the next scan")
 
-        let rebuiltPhotos = try await rebuilt.photos(inLibrary: library.id)
+        // Bookmarks survive the reset: the library is still known, no relink
+        // needed, and the normal service path rebuilds the index.
+        let stillKnown = await service.library(id: library.id)
+        XCTAssertNotNil(stillKnown)
+        _ = await runScan(service, libraryID: library.id)
+
+        let rebuiltPhotos = try await service.photos(inLibrary: library.id)
         XCTAssertEqual(rebuiltPhotos.count, 2)
         XCTAssertEqual(
             Set(rebuiltPhotos.map(\.id)),
@@ -256,8 +266,66 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         )
 
         let rebuiltPhoto = try XCTUnwrap(rebuiltPhotos.first { $0.id == photo.id })
-        let rebuiltEdit = try await rebuilt.adjustments(for: rebuiltPhoto)
+        let rebuiltEdit = try await service.adjustments(for: rebuiltPhoto)
         XCTAssertEqual(rebuiltEdit, edit)
+    }
+
+    func testResettingIsRefusedWhileAScanIsActiveAndSucceedsOnceItEnds() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW"])
+        let gate = InspectionGate()
+        let decoder = GatedScanDecoder()
+        decoder.gate = gate
+        let service = try PhotoLibraryService(
+            locations: locations,
+            decoder: decoder,
+            scanner: FolderScanner(batchSize: 1)
+        )
+        let library = try await addLibrary(service)
+
+        let consumer = Task {
+            for await _ in service.scan(libraryID: library.id) {}
+        }
+
+        let deadline = Date().addingTimeInterval(5)
+        while gate.started == 0, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertGreaterThan(gate.started, 0, "The scan never reached the gate")
+
+        do {
+            try await service.resetRebuildableLocalData()
+            XCTFail("Resetting while a scan is active should have been refused")
+        } catch let error as LibraryError {
+            guard case .resetRefusedWhileScanning = error else {
+                return XCTFail("Expected .resetRefusedWhileScanning, got \(error)")
+            }
+        }
+
+        // The live index must still be usable — the refused reset must not
+        // have closed it out from under the active scan.
+        _ = try await service.photos(inLibrary: library.id)
+
+        consumer.cancel()
+        gate.release()
+        await consumer.value
+
+        // The consumer's `for await` loop can finish slightly before the
+        // producer-side `performScan` actor method has itself returned and
+        // decremented the active-scan count, so poll rather than assume it
+        // has already reached zero.
+        var resetSucceeded = false
+        let resetDeadline = Date().addingTimeInterval(5)
+        while Date() < resetDeadline {
+            do {
+                try await service.resetRebuildableLocalData()
+                resetSucceeded = true
+                break
+            } catch LibraryError.resetRefusedWhileScanning {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        XCTAssertTrue(resetSucceeded, "Reset never succeeded after the scan ended")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: locations.databaseURL.path))
     }
 
     // MARK: - Offline and read-only
