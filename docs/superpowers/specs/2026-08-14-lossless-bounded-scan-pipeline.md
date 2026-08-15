@@ -236,3 +236,26 @@ Claude 交付應包含：
 - `/Users/u/AI-Shared/HANDOFF.md` 的進度、驗證、剩餘風險與 Codex review checklist。
 
 不得包含 commit、push、無關格式化或 MVP 以外功能。
+
+## 10. 實作狀態（2026-08-15，Codex review 通過）
+
+**這一節只描述本規格的範圍。Mac-first MVP 整體仍未完成**——完整 Xcode `swift test`、Apple Silicon、Sony ARW、Metal/CIRAWFilter、APFS/exFAT 與 bookmark 實機驗收都還沒做。
+
+已實作並經 Codex 原始碼覆核：
+
+| 規格條目 | 狀態 |
+|---|---|
+| §3.1 acknowledgement channel | 完成 `Sources/PhotoLibraryCore/Scanning/AcknowledgedAsyncChannel.swift` |
+| §3.2 `FolderScanSequence` / `LibraryScanSequence` | 完成；`for await` 呼叫語法未變，兩個 iterator 皆為 **class**，`deinit` 取消 producer |
+| §3.3 分頁 cursor | 完成 `FolderScanCursor.swift`（protocol + `FileManagerFolderScanCursor` + factory） |
+| §3.3 cancellation 時的 `.finished` | **固定選擇：嘗試送出但絕不阻塞**。consumer 已離開時 send 會 throw，該事件即被丟棄，因此實務上只有跑完的 walk 會交付 `.finished` |
+| §3.4 service 全部 send 改 await | 完成；`emit` 以 channel 自身的 `isCancelled` 判斷 consumer 是否還在，不用跨 await 的 captured flag |
+| §3.5 high-water ≤ 2 | 以 instrumented cursor 的 `nextPageCallCount - deliveredBatches + 1` 計數驗證 |
+| §6.1 channel 單元測試 | 完成 19 個 |
+| §6.2 FolderScanner 測試 | 完成 12 個（含 10,000 synthetic entries） |
+| §6.3 service／整合測試 | 新增 9 個；既有 `ScanCancellationTests`／`LibraryLifecycleTests` **未修改即 source-compatible** |
+| §8.6 `rg` gate | `Sources/PhotoLibraryCore` 已無 `AsyncStream(bufferingPolicy: .unbounded)` |
+
+Codex 已獨立通過 `swift build -Xswiftc -strict-concurrency=complete`、8 組 runtime smoke（含 10,000 筆 high-water、pre-cancelled receiver、failure page budget 與 two-phase acknowledgement cancellation）、四個 test target 的 strict-concurrency typecheck、全部測試原始碼 parse，以及 `git diff --check`。
+
+完整 XCTest 仍未真正執行：目前 Command Line Tools 環境沒有 XCTest module。Apple Silicon、Sony ARW、Metal/CIRAWFilter、APFS/exFAT 與 bookmark 仍須在完整 Xcode／實機環境驗收，不能把本節視為整體 MVP 完成。

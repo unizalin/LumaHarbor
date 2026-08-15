@@ -169,3 +169,18 @@ Claude 實作階段不得 commit/push；由 Codex review 後處理。交付前�
 3. 修 scan cancellation state semantics。
 4. 最後處理 lossless bounded scan pipeline；不得以 drop batches 的方式快速收尾。
 5. 每一小段更新 `/Users/u/AI-Shared/HANDOFF.md`；context 使用約 80% 或出現 usage warning 時停止新增功能、保留可 build 的 dirty tree交給 Codex。
+
+## 7. 實作狀態（2026-08-15，Codex review 通過）
+
+- §6.1 P0 selection/close flush：已實作。
+- §6.2 neutral thumbnail API 與 cache key version：已實作。
+- §6.3 scan cancellation state semantics：已實作。
+- §6.4 lossless bounded scan pipeline：**已實作**，細節與範圍見
+  `2026-08-14-lossless-bounded-scan-pipeline.md` §10。§3.5 的 scan generation、
+  partial commit、manifest 與 `LibraryFolder.lastScanAt` 語意在改為 bounded
+  pipeline 後保持不變，既有 `ScanCancellationTests` 未經修改即通過 typecheck。
+
+上述項目已通過 Codex 原始碼覆核；bounded pipeline 另通過 strict build、8 組
+runtime smoke、四個 test target 的 strict-concurrency typecheck、全部測試原始碼
+parse 與 `git diff --check`。但**本機無 XCTest module，完整 XCTest assertions
+仍未真正執行**。Mac-first MVP 整體仍未完成，勿據此標記 MVP 完成。
