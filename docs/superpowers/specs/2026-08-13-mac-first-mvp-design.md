@@ -328,6 +328,11 @@ ARW source
 
 ## 13. MVP 驗收條件
 
+> 2026-08-15 補充：完整 Xcode、Apple Silicon、Sony `.ARW`、APFS／exFAT、
+> bookmark lifecycle 與效能收尾，依
+> [`2026-08-15-mac-first-mvp-acceptance-plan.md`](2026-08-15-mac-first-mvp-acceptance-plan.md)
+> 執行與留存證據。
+
 以下條件全部成立才視為 Mac-first MVP 完成：
 
 1. 可選擇外接 SSD 目錄並在 App 重啟後恢復授權。
