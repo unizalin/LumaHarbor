@@ -276,28 +276,42 @@ public actor PhotoLibraryService {
     ///
     /// Rebuilding a deleted SQLite database is the same code path: the manifest
     /// on the SSD supplies the `PhotoID`s, so photos keep their edits (spec §13.9).
-    public nonisolated func scan(libraryID: LibraryID) -> AsyncStream<LibraryScanEvent> {
-        AsyncStream(bufferingPolicy: .unbounded) { continuation in
-            let task = Task {
-                await self.performScan(libraryID: libraryID, continuation: continuation)
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+    public nonisolated func scan(libraryID: LibraryID) -> LibraryScanSequence {
+        LibraryScanSequence(service: self, libraryID: libraryID)
     }
 
-    private func performScan(
+    /// Runs one scan against an acknowledging emitter.
+    ///
+    /// Every `send` below suspends until the UI has taken the event, so the
+    /// service cannot inspect the next batch while the previous one is still on
+    /// screen-side. That is what carries backpressure all the way from the view
+    /// model back to the directory cursor (bounded-pipeline spec §3.4).
+    func performScan(
         libraryID: LibraryID,
-        continuation: AsyncStream<LibraryScanEvent>.Continuation
+        emitter: AcknowledgedAsyncChannel<LibraryScanEvent>
     ) async {
+        // Delivery suspends until the consumer takes the event. The return
+        // value matters: a `false` means nobody received it, and carrying on
+        // from there means doing real work — opening the manifest, walking the
+        // drive — for an audience that has already left.
+        @discardableResult
+        func emit(_ event: LibraryScanEvent) async -> Bool {
+            do {
+                try await emitter.send(event)
+                return true
+            } catch {
+                return false
+            }
+        }
+
         guard let folder = libraries[libraryID] else {
-            continuation.yield(.failed(.notFound(libraryID)))
+            await emit(.failed(.notFound(libraryID)))
             return
         }
 
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
         guard repository.isAvailable else {
-            continuation.yield(.failed(.offline(path: folder.rootURL.path)))
+            await emit(.failed(.offline(path: folder.rootURL.path)))
             return
         }
 
@@ -311,7 +325,9 @@ public actor PhotoLibraryService {
         let generation = scanGenerationCounter
         currentScanGeneration[libraryID] = generation
 
-        continuation.yield(.started(libraryID))
+        // If `.started` never lands the consumer is already gone, so there is
+        // nothing to gain from reading the manifest or starting the walk.
+        guard await emit(.started(libraryID)) else { return }
         let scanStartedAt = Date()
 
         var manifest: LibraryManifest
@@ -320,7 +336,7 @@ public actor PhotoLibraryService {
         } catch let error as SidecarError {
             // A damaged manifest has already been quarantined; rebuilding from
             // the sidecars still on disk is better than refusing to scan.
-            continuation.yield(.failed(.sidecar(error)))
+            guard await emit(.failed(.sidecar(error))) else { return }
             manifest = LibraryManifest(libraryID: libraryID)
         } catch {
             manifest = LibraryManifest(libraryID: libraryID)
@@ -332,8 +348,16 @@ public actor PhotoLibraryService {
         var moved = 0
         var cancelled = false
 
+        // Breaking out of this loop releases the folder-scan iterator, whose
+        // `deinit` cancels the walk. Equally, while this loop is suspended in
+        // `emit` it is not calling the folder iterator's `next()`, so the
+        // cursor stops advancing — that is the backpressure chain reaching the
+        // directory.
         for await event in scanner.scan(root: folder.rootURL) {
-            if Task.isCancelled || !isCurrentScan(libraryID: libraryID, generation: generation) {
+            let consumerGone = await emitter.isCancelled
+            if Task.isCancelled
+                || consumerGone
+                || !isCurrentScan(libraryID: libraryID, generation: generation) {
                 cancelled = true
                 break
             }
@@ -344,14 +368,15 @@ public actor PhotoLibraryService {
 
             case .fileFailed(let relativePath, let reason):
                 failed += 1
-                continuation.yield(.photoFailed(relativePath: relativePath, reason: reason))
+                await emit(.photoFailed(relativePath: relativePath, reason: reason))
 
             case .discovered(let files):
                 var batch: [PhotoAsset] = []
                 batch.reserveCapacity(files.count)
 
                 for file in files {
-                    if Task.isCancelled { cancelled = true; break }
+                    let consumerLeft = await emitter.isCancelled
+                    if Task.isCancelled || consumerLeft { cancelled = true; break }
 
                     let outcome = await Self.inspect(
                         file: file,
@@ -369,9 +394,7 @@ public actor PhotoLibraryService {
                         cancelled = true
                     case .failure(let reason):
                         failed += 1
-                        continuation.yield(
-                            .photoFailed(relativePath: file.relativePath, reason: reason)
-                        )
+                        await emit(.photoFailed(relativePath: file.relativePath, reason: reason))
                     case .success(var asset, let record, let decision):
                         if case .ambiguous = decision { ambiguous += 1 }
                         if case .moved = decision { moved += 1 }
@@ -387,17 +410,27 @@ public actor PhotoLibraryService {
                 }
 
                 if !batch.isEmpty {
-                    // A whole batch is inspected between loop-top checks, so
-                    // re-test before committing any of it.
-                    guard isCurrentScan(libraryID: libraryID, generation: generation) else {
+                    // Bounded-pipeline spec §3.4: a batch that wasn't inspected
+                    // all the way through never reaches the index. `cancelled`
+                    // is set the moment an inspection is abandoned, so it is
+                    // what tells a half-inspected batch from a whole one — and
+                    // a cancel can also land in the gap between the last
+                    // inspection and this commit, which the other three checks
+                    // cover. Batches already committed before this point stay;
+                    // only the current, incomplete one is dropped.
+                    let consumerHasLeft = await emitter.isCancelled
+                    guard !cancelled,
+                          !Task.isCancelled,
+                          !consumerHasLeft,
+                          isCurrentScan(libraryID: libraryID, generation: generation) else {
                         cancelled = true
                         break
                     }
                     do {
                         try index.upsert(photos: batch)
-                        continuation.yield(.photosIndexed(batch))
+                        await emit(.photosIndexed(batch))
                     } catch {
-                        continuation.yield(.failed(
+                        await emit(.failed(
                             .indexUnavailable((error as NSError).localizedDescription)
                         ))
                     }
@@ -408,6 +441,15 @@ public actor PhotoLibraryService {
             }
         }
 
+        // The loop can end for reasons that never set `cancelled`: the walk
+        // finished normally while the consumer was already gone, or the folder
+        // channel returned nil because this task was cancelled. Merge every
+        // reason here — this is the last gate before anything is treated as a
+        // completed scan.
+        let taskWasCancelled = Task.isCancelled
+        let consumerHasGone = await emitter.isCancelled
+        if taskWasCancelled || consumerHasGone { cancelled = true }
+
         let isSuperseded = !isCurrentScan(libraryID: libraryID, generation: generation)
         if isSuperseded { cancelled = true }
 
@@ -416,7 +458,7 @@ public actor PhotoLibraryService {
             // the newer scan existed. A superseded run therefore touches
             // nothing at all — not the index, not the manifest, not the folder
             // record — and only reports that it stopped.
-            continuation.yield(.finished(LibraryScanResult(
+            await emit(.finished(LibraryScanResult(
                 libraryID: libraryID,
                 indexedCount: indexed,
                 failedCount: failed,
@@ -459,7 +501,7 @@ public actor PhotoLibraryService {
             try? index.upsert(library: updated)
         }
 
-        continuation.yield(.finished(LibraryScanResult(
+        await emit(.finished(LibraryScanResult(
             libraryID: libraryID,
             indexedCount: indexed,
             failedCount: failed,
