@@ -23,6 +23,17 @@ final class AdjustmentPipelineTests: XCTestCase {
             .cropped(to: CGRect(origin: .zero, size: size))
     }
 
+    /// Converts a perceptual (gamma-encoded) sRGB component to its linear-light
+    /// equivalent using the standard sRGB transfer function. `makeSourceImage`
+    /// feeds the pipeline's linear working space directly, so a fixture that
+    /// wants to describe "25% grey" the way it looks must be gamma-decoded
+    /// first, or it lands somewhere else on the curve entirely.
+    private func linearComponent(fromPerceptual perceptual: CGFloat) -> CGFloat {
+        perceptual <= 0.04045
+            ? perceptual / 12.92
+            : pow((perceptual + 0.055) / 1.055, 2.4)
+    }
+
     /// Renders and samples the centre pixel as 8-bit sRGB.
     private func centrePixel(
         _ image: CIImage,
@@ -126,14 +137,21 @@ final class AdjustmentPipelineTests: XCTestCase {
     }
 
     func testLiftingShadowsBrightensADarkToneWithoutTouchingMidGrey() throws {
-        let dark = makeSourceImage(red: 0.25, green: 0.25, blue: 0.25)
+        // A perceptual 25% shadow patch, expressed in the pipeline's linear
+        // working space so it actually lands at the tone curve's x=0.25
+        // control point instead of near the midpoint.
+        let darkComponent = linearComponent(fromPerceptual: 0.25)
+        let dark = makeSourceImage(red: darkComponent, green: darkComponent, blue: darkComponent)
         let darkBase = try centrePixel(dark)
         let lifted = try centrePixel(pipeline.apply(PhotoAdjustments(shadows: 100), to: dark))
         XCTAssertGreaterThan(lifted.red, darkBase.red)
 
         // The tone curve pins 0.5, which is what keeps the four tone sliders
-        // from behaving like a second exposure control.
-        let mid = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        // from behaving like a second exposure control. The perceptual
+        // midpoint must be gamma-decoded the same way to actually land on
+        // that pinned control point.
+        let midComponent = linearComponent(fromPerceptual: 0.5)
+        let mid = makeSourceImage(red: midComponent, green: midComponent, blue: midComponent)
         let midBase = try centrePixel(mid)
         let midLifted = try centrePixel(pipeline.apply(PhotoAdjustments(shadows: 100), to: mid))
         XCTAssertEqual(midLifted.red, midBase.red, accuracy: 2)

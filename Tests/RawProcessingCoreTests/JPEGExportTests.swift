@@ -175,9 +175,8 @@ final class JPEGExportTests: XCTestCase {
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
         let colorSpace = try XCTUnwrap(image.colorSpace)
         let name = colorSpace.name as String?
-        XCTAssertNotNil(name)
-        XCTAssertTrue(
-            (name ?? "").contains("sRGB"),
+        XCTAssertEqual(
+            name, CGColorSpace.sRGB as String,
             "Expected an sRGB profile, got \(name ?? "none")"
         )
     }
