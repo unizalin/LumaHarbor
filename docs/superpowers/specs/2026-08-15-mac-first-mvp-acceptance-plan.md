@@ -106,6 +106,78 @@ Claude 只處理下列範圍，不改產品功能：
 
 Codex review gate：檢查 runner 不會洩漏私人路徑、不會對磁碟做 destructive operation、測試不是只 parse/typecheck，並在可用環境重跑後才 commit。
 
+#### Gate C 實作狀態（2026-08-15，Claude 實作，Codex review 通過，待 commit）
+
+新增檔案（尚未 commit）：
+
+- `Tests/PhotoLibraryCoreTests/FileBookmarkStoreTests.swift`：13 個測試，覆蓋 save/load round-trip、`load` 未知 library 回傳 nil、同 library 重複 save 覆寫、`loadAll` 依 `addedAt` 排序（刻意以非插入順序 save 驗證排序來源）、`loadAll` 對不存在目錄回傳空陣列、單一損壞 JSON／空檔隔離且其他有效檔仍可讀、忽略非 JSON 檔案與忽略 JSON 但 schema 不符的檔案、remove、remove 只刪對應 library、remove 對未知 library 與重複 remove 皆為 no-op。全部使用真實暫存目錄（`TemporaryDirectoryTestCase`）與合成 `bookmarkData`，不依賴 security-scoped bookmark runtime，無 sleep。
+- `Scripts/run-mvp-acceptance.zsh`：repo 內 acceptance runner。`--preflight-only` 供無 Apple Silicon／Xcode 主機做 fail-closed 驗證；預設完整跑 preflight → strict-concurrency build → 完整 `swift test -Xswiftc -strict-concurrency=complete` → `swift test --filter RawFixtureTests`。preflight 驗 `arm64`、`/Applications/Xcode.app`、`xcode-select -p` 指向 Xcode、`xcodebuild -version`、`swift --version`，以及三個必要環境變數（`LUMAHARBOR_RAW_FIXTURE_DIR` 存在且至少一個大小寫皆可的 `.ARW`；`LUMAHARBOR_APFS_TEST_DIR`／`LUMAHARBOR_EXFAT_TEST_DIR` 存在且經 `df`＋`mount`（而非解析路徑文字，避免空白路徑歧義）識別為對應 filesystem）；任一項缺失即整體 fail closed，不進入後續步驟。全程只讀（`stat`／`df`／`mount`／glob 列檔名），不 mount、格式化、刪除或 chmod 使用者測試資料。從不印出三個環境變數的完整路徑，只印變數名稱、PASS/FAIL 與必要時的安全 basename。結果與原始 log 寫入 repo-ignored 的 `.build/mvp-acceptance/<timestamp>/`（`preflight.log`、`strict-build.log`、`swift-test.log`、`raw-fixture-test.log`、`summary.md`）。任一步驟失敗即整體 exit non-zero，後續步驟標記 `SKIPPED (...)` 而非宣稱 PASS。
+- `docs/testing/mvp-acceptance-report-template.md`：驗收報告模板，涵蓋硬體/OS/Xcode/Swift、fixture 安全代號與 SHA-256（不含私人絕對路徑）、APFS/exFAT、Gate B executed/passed/failed/skipped 分類、`RawFixtureTests` 8 案例逐項與人工補驗、Gate E 十項 APFS/exFAT 對照表、Gate F 人工矩陣與 Instruments 指標、P0/P1/P2 清單、主規格 §13 十項 sign-off。
+
+未改動任何 production 原始碼；`BookmarkStoring` 公開 API、`.lumaharbor` sidecar schema、掃描語意與 UI 流程均未動。
+
+**實際執行的命令與結果**（本機：`x86_64`、`xcode-select -p` 為 `/Library/Developer/CommandLineTools`、無 `/Applications/Xcode.app`）：
+
+| 命令 | 結果 |
+|---|---|
+| `swift build -Xswiftc -strict-concurrency=complete` | exit 0 |
+| 四個 test target（含新檔）`swiftc -typecheck -enable-testing -strict-concurrency=complete -I /private/tmp -I .build/x86_64-apple-macosx/debug/Modules` | 各 exit 0，0 error |
+| 全部 `Tests/**/*.swift` + `Package.swift` `swiftc -frontend -parse` | exit 0，0 error |
+| `git diff --check` | exit 0，無輸出 |
+| `zsh -n Scripts/run-mvp-acceptance.zsh` | exit 0 |
+| `Scripts/run-mvp-acceptance.zsh --preflight-only`（env 變數皆未設） | 依預期 fail closed，exit 1，逐項列出缺失（arm64／Xcode.app／xcode-select／xcodebuild／三個環境變數），無私人路徑輸出 |
+| `Scripts/run-mvp-acceptance.zsh --preflight-only`（以合成 fixture 目錄與 `$HOME`／`/tmp` 作為假 APFS/exFAT 目錄手動驗證） | 正確判斷 `.ARW`（含大小寫）、正確識別 `apfs`，並在 filesystem 類型不符時正確 FAIL；含空白路徑目錄同樣正確識別 |
+| `Scripts/run-mvp-acceptance.zsh`（無 `--preflight-only`，preflight 失敗情境） | 正確跳過 build/test 步驟並標記 `SKIPPED`，不宣稱 PASS，exit 1 |
+
+**環境阻擋（非產品失敗，未真正執行 XCTest）**：
+
+- 本機 `x86_64`、只有 Command Line Tools、無 `/Applications/Xcode.app`，因此 runner 的 preflight 必然 fail closed；`FileBookmarkStoreTests` 與其餘 313+13 個測試方法尚未在真正 XCTest runtime 執行，typecheck／parse 通過不等於測試通過。
+- 未取得 Apple Silicon、Sony `.ARW` fixture、APFS／exFAT 專用測試目錄，因此 runner 的完整路徑（strict build → full test → `RawFixtureTests`）與 `docs/testing/mvp-acceptance-report-template.md` 都尚未在真實條件下填寫過。
+- Gate D/E/F（Sony ARW、Metal/CIRAWFilter、APFS/exFAT bookmark lifecycle、UI、Instruments）仍待 Gate A 就緒後在目標機執行；本工作包不涵蓋。
+
+#### Gate C Codex review 第一輪：兩個 blocker 已修（2026-08-15，Claude，未 commit）
+
+Codex review 找到兩個真的問題，皆已修正：
+
+1. **`run_logged_step` 只看 `swift test` exit code，會把有 skip 的執行誤標 PASS。** `swift test` 在 XCTest 回報 skipped tests 時通常仍 exit 0；原本的 runner 只檢查指令 exit code，等於把「有 skip」跟「真正全部執行且通過」混為一談，違反 spec「skip 不得當成通過」。修法：新增 `parse_xctest_summary`（抓 log 中最後一行 XCTest `Executed N tests, with (M tests? skipped, )?F failures? (...)` 摘要，回傳 executed/skipped/failures 三個數字；抓不到就視為無法判定，不得放行）與 `evaluate_xctest_log`（skipped 必須恰好 0；若指定必要 executed 數則必須完全相等；failures 必須 0；任一條件不成立就回傳非零並附上具體原因字串）。「full swift test」與「RawFixtureTests」兩步驟現在在指令 exit 0 之後還會呼叫 `evaluate_xctest_log`，只有真正 0 skip（且 RawFixtureTests 恰好 executed 8）才標 `PASS`；否則標 `FAIL (原因)`，`overall_ok` 一併歸零。**strict-concurrency build 步驟不套用此檢查**（它沒有 test skip 的概念，維持只看 exit code）。regex 特別處理 XCTest 單複數（`test skipped` vs `tests skipped`，包含 `0 tests skipped`）：判斷邏輯是把擷取到的數字跟 `0` 做數值比較，不是用「有沒有出現 skipped 字樣」這種容易把「0 tests skipped」誤判成「有 skip」的字串比對。
+2. **報告模板 `RawFixtureTests` 表格第 2–8 列測試名稱是空的。** 已補上 `Tests/LumaHarborIntegrationTests/RawFixtureTests.swift` 現有的完整 8 個測試名稱（`testEveryFixtureDecodes`、`testSonyArwReportsPlausibleMetadata`、`testPreviewDecodeHonoursTheRequestedSize`、`testFullDecodeReturnsNativeResolution`、`testWhiteBalanceOffsetChangesTheRender`、`testFullResolutionExportMatchesTheSourceDimensions`、`testExportingNeverModifiesTheOriginal`、`testPreviewSchedulerDeliversARenderedFrameForARealRaw`），與原始碼逐一核對過。
+
+新增的 parser/self-check 用內部函式 `run_selftest`，由**未公開的環境變數** `LUMAHARBOR_RUNNER_SELFTEST=1` 觸發（不是新的 CLI 參數，`--preflight-only` 是唯一對外參數，維持不變），用合成 XCTest summary 文字驗證 6 種情境：0 skip 通過、1 test skipped 失敗、executed=7/required=8 失敗、executed=8/required=8 且 0 skip 通過、executed=9/required=8 失敗、log 裡完全沒有 summary 行時失敗（不得誤判成通過）。全部使用 `mktemp -d` 建立的私有暫存目錄，跟使用者的 fixture／APFS／exFAT 測試目錄無關，執行完自行 `rm -rf` 清理自己的暫存目錄（不是對使用者測試資料的破壞性操作）。
+
+**本輪重跑的命令與結果**（本機同前：`x86_64`、CommandLineTools、無 Xcode）：
+
+| 命令 | 結果 |
+|---|---|
+| `zsh -n Scripts/run-mvp-acceptance.zsh` | exit 0 |
+| `LUMAHARBOR_RUNNER_SELFTEST=1 Scripts/run-mvp-acceptance.zsh` | exit 0，6 個合成情境全部符合預期（PASS/FAIL 各自正確） |
+| `Scripts/run-mvp-acceptance.zsh --preflight-only`（env 變數皆未設） | exit 1，fail closed，訊息不含私人路徑 |
+| `Scripts/run-mvp-acceptance.zsh --bogus-flag` | exit 2，未知參數被拒絕（確認沒有意外新增 CLI 參數） |
+| `git diff --check` | 第一次抓到 spec 文件一處 trailing whitespace，已修正；重跑 exit 0 |
+| `swift build -Xswiftc -strict-concurrency=complete` | exit 0（production 未變動） |
+| `PhotoLibraryCoreTests`（含既有 `FileBookmarkStoreTests.swift`，本輪未改）`swiftc -typecheck -enable-testing -strict-concurrency=complete -I /private/tmp -I .build/x86_64-apple-macosx/debug/Modules` | exit 0 |
+
+未再改動任何 production 原始碼，也未改動 `FileBookmarkStoreTests.swift`；只動 `Scripts/run-mvp-acceptance.zsh`、`docs/testing/mvp-acceptance-report-template.md` 與本 spec 檔案。
+
+#### Gate C Codex review 第二輪：兩個 runner blocker 已修（2026-08-15，Claude，未 commit）
+
+Codex 第二輪只 review `Scripts/run-mvp-acceptance.zsh`，找到兩個真的問題，皆已修正；`FileBookmarkStoreTests.swift`、`docs/testing/mvp-acceptance-report-template.md` 本輪未再改動：
+
+1. **`run_logged_step` 在指令 exit 0 就先印出 `PASS`，之後才對 test step 做 `evaluate_xctest_log` skip 判定，導致 console 在有 skip 時會先出現一個錯誤的 `PASS`。** 即使最終 summary 檔與最終 exit code 是對的，console 這一行本身已經是矛盾／誤導狀態。修法：`run_logged_step` 改成中性輸出，指令跑完只印 `"<name>: command completed"` 或 `"<name>: command failed"`，不再自稱 PASS/FAIL。新增 `announce_step_result`，是全腳本唯一印出某個 step 最終 PASS/FAIL(原因) 的地方：strict build 由呼叫端在拿到 `run_logged_step` 結果後立刻呼叫；full swift test／RawFixtureTests 則是在 `run_logged_step` 成功之後、`evaluate_xctest_log` 也判定通過後才呼叫並印 `PASS`，任一環節失敗就只印 `FAIL (原因)`，不會有 console 先 PASS 後 FAIL 的矛盾輸出。console 與 `summary.md` 現在保證是同一份最終狀態字串。
+2. **`parse_xctest_summary` 只認得 `"N tests skipped, F failures"`（逗號分隔），沒有涵蓋 XCTest 另一種常見措辭 `"N tests skipped and F failures"`（`and` 分隔）。** 若實機 XCTest 印出的是 `and` 形式，原本的 regex 完全不會命中 skip 子句，會直接落到「沒有 skip 子句」那個分支、把 skip 數當成 0——等於 Finding 1 修好的問題在另一種措辭下又會重現。修法：regex 的分隔字改成 `(,| and)`，兩種分隔都能命中，並保留原本「擷取到的數字跟 0 做數值比較」而非「有沒有出現 skipped 字樣」的判斷方式，`0 tests skipped` 兩種分隔形式一樣不會被誤判成有 skip。
+
+self-check（`LUMAHARBOR_RUNNER_SELFTEST=1`，同上一輪，未新增 CLI 參數）新增兩個情境並保留原有 6 個：`and`-form 單數 skip（`"1 test skipped and 0 failures"`）必須 FAIL、comma-form 複數 skip（`"2 tests skipped, 0 failures"`）必須 FAIL；連同原有的 0 skip 通過、comma-form 單數 skip 失敗、executed=7/8/9 vs required=8、log 無 summary 行，現為 8 個情境全部通過。另外用一個獨立於 self-check 的臨時 harness（複製 `run_logged_step`／`announce_step_result`／`evaluate_xctest_log` 邏輯，餵一個會印出帶 skip 摘要且 exit 0 的假指令）人工確認過 console 輸出順序：`"==> RawFixtureTests"` → 指令原始輸出 → `"RawFixtureTests: command completed"` → `"RawFixtureTests: FAIL (1 test(s) skipped ...)"`，全程沒有出現任何 `PASS` 字樣。
+
+**本輪重跑的命令與結果**（本機同前：`x86_64`、CommandLineTools、無 Xcode）：
+
+| 命令 | 結果 |
+|---|---|
+| `zsh -n Scripts/run-mvp-acceptance.zsh` | exit 0 |
+| `LUMAHARBOR_RUNNER_SELFTEST=1 Scripts/run-mvp-acceptance.zsh` | exit 0，8 個合成情境（含新增的 and-form 單數與 comma-form 複數 skip）全部符合預期 |
+| `Scripts/run-mvp-acceptance.zsh --preflight-only`（env 變數皆未設） | exit 1，fail closed，訊息不含私人路徑 |
+| `git diff --check` | exit 0，無輸出 |
+
+未改動任何 production 或 test 原始碼；只改 `Scripts/run-mvp-acceptance.zsh` 與本 spec 檔案（本節）。
+
 ### Gate D：Sony ARW／Metal／匯出
 
 使用 repo 外 fixture：
@@ -203,7 +275,9 @@ Apple Silicon + Instruments：
 
 ## 6. 下一個可執行動作
 
-1. 先準備符合 Gate A 的 Apple Silicon + Xcode 驗收機、Sony `.ARW` fixtures、APFS 與 exFAT 專用測試目錄。
-2. 在基準 commit `3a5f679` 跑 Gate B，保存完整 baseline。
-3. 同時可讓 Claude 實作 Gate C，但不得碰 production behavior；Codex review 後再合併。
-4. Gate B/C 都通過後依序做 D、E、F；只針對實際失敗建立修正工作包。
+Gate C 已完成並通過 Codex review。推送後在另一台驗收機：
+
+1. checkout 最新 `origin/main`，確認符合 Gate A 的 Apple Silicon + Xcode、Sony `.ARW` fixtures、APFS 與 exFAT 專用測試目錄都已就緒。
+2. 設定 `LUMAHARBOR_RAW_FIXTURE_DIR`、`LUMAHARBOR_APFS_TEST_DIR`、`LUMAHARBOR_EXFAT_TEST_DIR`，先執行 `Scripts/run-mvp-acceptance.zsh --preflight-only`。
+3. preflight 通過後執行 `Scripts/run-mvp-acceptance.zsh`，保存 `.build/mvp-acceptance/<timestamp>/` 的原始 logs 與 summary。
+4. 複製 `docs/testing/mvp-acceptance-report-template.md` 填寫 Gate D、E、F 與主規格 §13 sign-off；只針對實際失敗建立後續修正工作包。
