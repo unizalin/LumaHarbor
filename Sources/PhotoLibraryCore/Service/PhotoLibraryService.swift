@@ -30,6 +30,10 @@ public enum LibraryError: Error, Equatable, Sendable {
     case offline(path: String)
     case notFound(LibraryID)
     case indexUnavailable(String)
+    /// Spec §13.9: resetting the local index closes the live SQLite connection,
+    /// which an active scan is still writing through.
+    case resetRefusedWhileScanning
+    case resetFailed(String)
 }
 
 extension LibraryError: LocalizedError {
@@ -40,6 +44,10 @@ extension LibraryError: LocalizedError {
         case .offline: return "The drive holding this library isn't connected."
         case .notFound: return "That photo folder is no longer in your library list."
         case .indexUnavailable(let message): return "The local index is unavailable. \(message)"
+        case .resetRefusedWhileScanning:
+            return "The local index can't be reset while a scan is in progress."
+        case .resetFailed(let message):
+            return "The local index couldn't be reset. \(message)"
         }
     }
 
@@ -50,6 +58,8 @@ extension LibraryError: LocalizedError {
         case .offline: return "Reconnect the drive, then try again."
         case .notFound: return "Add the folder again."
         case .indexUnavailable: return "Quit and reopen LumaHarbor to rebuild the index."
+        case .resetRefusedWhileScanning: return "Wait for the current scan to finish, then try again."
+        case .resetFailed: return "Quit and reopen LumaHarbor, then try again."
         }
     }
 }
@@ -62,7 +72,10 @@ extension LibraryError: LocalizedError {
 public actor PhotoLibraryService {
     private let locations: ApplicationSupportLocations
     private let bookmarkStore: any BookmarkStoring
-    private let index: PhotoIndexStore
+    /// Replaceable so `resetRebuildableLocalData()` can swap in a fresh SQLite
+    /// connection after closing this one, instead of the two ever being open
+    /// on the same file at once.
+    private var index: PhotoIndexStore
     private let decoder: any RawDecoding
     private let scanner: FolderScanner
 
@@ -70,6 +83,12 @@ public actor PhotoLibraryService {
     /// security scope, so these must outlive every read of the folder.
     private var access: [LibraryID: ScopedFolderAccess] = [:]
     private var libraries: [LibraryID: LibraryFolder] = [:]
+
+    /// How many `performScan` calls are currently running, across every
+    /// library. Incremented at the top of `performScan` and decremented via
+    /// `defer`, so every exit path — cancellation, early failure, normal
+    /// completion — accounts for itself.
+    private var activeScanCount = 0
 
     /// The scan each library is currently running. Anything older that comes
     /// back late is a ghost and must not write (addendum §3.5).
@@ -270,6 +289,43 @@ public actor PhotoLibraryService {
         return photo.url(inLibraryRootedAt: folder.rootURL)
     }
 
+    // MARK: - Rebuildable local data
+
+    /// Deletes and recreates the local SQLite index and thumbnail/preview
+    /// caches, leaving bookmarks and portable sidecars untouched (spec §13.9).
+    ///
+    /// This is the only supported way to do it: closing the connection here,
+    /// before the file is unlinked, is what prevents the disk I/O error that
+    /// comes from a second connection opening the same path while this actor
+    /// still holds the first one.
+    public func resetRebuildableLocalData() throws {
+        guard activeScanCount == 0 else {
+            throw LibraryError.resetRefusedWhileScanning
+        }
+
+        index.close()
+
+        do {
+            try locations.removeRebuildableData()
+            try locations.createDirectories()
+            let freshIndex = try PhotoIndexStore(databaseURL: locations.databaseURL)
+            for folder in libraries.values {
+                try freshIndex.upsert(library: folder)
+            }
+            index = freshIndex
+        } catch {
+            // The old connection is already closed and must not be mistaken for
+            // usable. Leaving it as `index` here still surfaces every
+            // subsequent index call as a thrown error rather than silently
+            // succeeding; quitting and reopening the app runs `init` again and
+            // recreates the index from scratch.
+            throw LibraryError.resetFailed(
+                (error as? LocalizedError)?.errorDescription
+                    ?? (error as NSError).localizedDescription
+            )
+        }
+    }
+
     // MARK: - Scanning
 
     /// Streams a full folder scan.
@@ -290,6 +346,9 @@ public actor PhotoLibraryService {
         libraryID: LibraryID,
         emitter: AcknowledgedAsyncChannel<LibraryScanEvent>
     ) async {
+        activeScanCount += 1
+        defer { activeScanCount -= 1 }
+
         // Delivery suspends until the consumer takes the event. The return
         // value matters: a `false` means nobody received it, and carrying on
         // from there means doing real work — opening the manifest, walking the
