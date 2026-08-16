@@ -111,8 +111,16 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
     func testFullDecodeReturnsNativeResolution() throws {
         let url = try firstSonyFixture()
         let decoded = try CoreImageRawDecoder().decode(RawDecodeRequest(url: url, quality: .full))
-        XCTAssertEqual(decoded.decodedPixelSize.width, decoded.nativePixelSize.width, accuracy: 2)
-        XCTAssertEqual(decoded.decodedPixelSize.height, decoded.nativePixelSize.height, accuracy: 2)
+
+        // CIRAWFilter.nativeSize ignores the orientation property, but the
+        // decoded output's extent respects it, so a portrait-tagged fixture
+        // (EXIF orientation 8, confirmed via CIRAWFilter debug output on
+        // _DSC1896.ARW: nativeSize=6000x4000, outputExtent=4000x6000) swaps
+        // axes here. Compare the pair rather than each side.
+        let decodedPair = [decoded.decodedPixelSize.width, decoded.decodedPixelSize.height].sorted()
+        let nativePair = [decoded.nativePixelSize.width, decoded.nativePixelSize.height].sorted()
+        XCTAssertEqual(decodedPair[0], nativePair[0], accuracy: 2)
+        XCTAssertEqual(decodedPair[1], nativePair[1], accuracy: 2)
     }
 
     func testWhiteBalanceOffsetChangesTheRender() throws {
@@ -161,7 +169,11 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(exported, expected, "Export was not full resolution")
 
         let colorSpace = try XCTUnwrap(image.colorSpace)
-        XCTAssertTrue(((colorSpace.name as String?) ?? "").contains("sRGB"))
+        XCTAssertEqual(
+            colorSpace.name as String?,
+            CGColorSpace.sRGB as String,
+            "Expected an sRGB profile, got \((colorSpace.name as String?) ?? "none")"
+        )
     }
 
     func testExportingNeverModifiesTheOriginal() async throws {
