@@ -234,36 +234,73 @@ final class BoundedLibraryScanTests: TemporaryDirectoryTestCase {
         XCTAssertNil(manifest?.lastSuccessfulScanAt)
     }
 
-    func testABatchFullyInspectedBeforeCancellationIsStillDropped() async throws {
-        // The other position for the same race: every file in the batch was
-        // inspected, and the cancel lands in the gap before the commit. The
-        // pre-commit checkpoint has to catch that too.
+    func testABatchFullyInspectedBeforeASupersedingScanIsStillDropped() async throws {
+        // The other position for the same race: every file in the batch is
+        // inspected successfully — the batch array is fully built — and only
+        // *then* does the drop signal land, in the gap between the last
+        // inspection and the commit. The pre-commit checkpoint has to catch
+        // that too, and specifically via one of "the other three checks" its
+        // own comment calls out (`Task.isCancelled` / `consumerHasLeft` /
+        // `isCurrentScan`), not via the for-loop's `cancelled` flag, which is
+        // what `testAPartiallyInspectedBatchIsNeverCommitted` already covers.
+        //
+        // Consumer cancellation can't model this: with a non-cooperative
+        // decoder, cancelling the consumer while a file is parked in the gate
+        // reliably reaches the producer's own `Task.isCancelled` before that
+        // file's read returns, so it always comes back `.cancelled`, never
+        // `.success` — confirmed by instrumenting `PhotoLibraryService`
+        // directly and observing both files' outcomes for both this test and
+        // `testAPartiallyInspectedBatchIsNeverCommitted` before this fix: they
+        // were byte-for-byte identical, and the second file in *this* test
+        // was in fact never fully inspected either, contradicting its own
+        // former name and comment.
+        //
+        // `isCurrentScan` is the one guard clause the for-file loop itself
+        // never consults — it's re-read fresh, only at the commit guard — so
+        // a second scan for the same library claiming the generation while
+        // the first is stalled is the only way this codebase can produce a
+        // batch where every read genuinely succeeded, dropped only by the
+        // commit guard.
         try seedPhotos(2)
         let gate = InspectionGate()
         let decoder = GatedScanDecoder()
         decoder.gate = gate
-        // One read completes normally; the second (last) file enters the gate,
-        // so the batch is fully inspected by the time we cancel.
+        // One read completes normally; the second (last) file enters the
+        // gate. Nothing here ever cancels the first scan's own task, so once
+        // released it returns a real result — the batch is genuinely built,
+        // not abandoned mid-inspection.
         decoder.gateAfterFileCount = 1
-        decoder.gateIgnoresCancellation = true
 
         let service = try makeService(decoder: decoder, batchSize: 2)
         let library = try await addLibrary(service)
 
-        let consumer = Task {
+        let firstScan = Task {
             for await _ in service.scan(libraryID: library.id) {}
         }
 
         await waitForCondition("the second (last) file to enter the gate") { gate.started > 0 }
-        consumer.cancel()
+
+        // Claim the generation out from under the stalled scan, exactly as a
+        // user re-opening the same folder would. Detach the shared decoder
+        // from the gate first so the superseding scan's own reads aren't
+        // blocked by it too.
+        decoder.gate = nil
+        for await _ in service.scan(libraryID: library.id) {}
+        let afterSupersedingScan = try await service.photos(inLibrary: library.id)
+        XCTAssertEqual(
+            afterSupersedingScan.count, 2,
+            "The superseding scan itself should index both files cleanly"
+        )
+
         gate.release()
-        await consumer.value
+        await firstScan.value
         try await Task.sleep(for: .milliseconds(300))
 
         let rows = try await service.photos(inLibrary: library.id)
-        XCTAssertTrue(
-            rows.isEmpty,
-            "A batch was committed after the consumer had gone: \(rows.map(\.relativePath))"
+        XCTAssertEqual(
+            Set(rows.map(\.id)), Set(afterSupersedingScan.map(\.id)),
+            "The stale, fully-inspected batch from the superseded scan landed in the index: "
+                + "\(rows.map(\.relativePath))"
         )
     }
 
