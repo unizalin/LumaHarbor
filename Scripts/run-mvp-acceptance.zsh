@@ -641,82 +641,16 @@ announce_step_result() {
     print -r -- "$1: $2"
 }
 
-if (( ! PREFLIGHT_ONLY )); then
-    if (( preflight_ok )); then
-        overall_ok=1
-
-        if run_logged_step build "strict-concurrency build" "$BUILD_LOG" \
-            swift build -Xswiftc -strict-concurrency=complete; then
-            STEP_BUILD="PASS"
-        elif (( LAST_STEP_TIMED_OUT )); then
-            STEP_BUILD="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${BUILD_LOG:t})"
-            overall_ok=0
-        else
-            STEP_BUILD="FAIL"
-            overall_ok=0
-        fi
-        announce_step_result "strict-concurrency build" "$STEP_BUILD"
-
-        if [[ "$STEP_BUILD" == "PASS" ]]; then
-            local full_test_timed_out=0
-            if run_logged_step test "full swift test" "$TEST_LOG" \
-                swift test -Xswiftc -strict-concurrency=complete; then
-                if step_reason="$(evaluate_xctest_log "$TEST_LOG")"; then
-                    STEP_TEST="PASS"
-                else
-                    STEP_TEST="FAIL (${step_reason})"
-                    overall_ok=0
-                fi
-            elif (( LAST_STEP_TIMED_OUT )); then
-                full_test_timed_out=1
-                STEP_TEST="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${TEST_LOG:t})"
-                overall_ok=0
-            else
-                STEP_TEST="FAIL (command exited non-zero; see ${TEST_LOG:t})"
-                overall_ok=0
-            fi
-            announce_step_result "full swift test" "$STEP_TEST"
-
-            if (( full_test_timed_out )); then
-                # A timed-out full test leaves the process tree freshly torn
-                # down (or wedged mid-teardown); running RawFixtureTests on
-                # top of that would race a half-terminated `swift test`
-                # rather than proving anything about the fixtures.
-                STEP_RAWFIXTURE="SKIPPED (full swift test failed)"
-                overall_ok=0
-                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
-            elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
-                swift test --filter RawFixtureTests; then
-                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
-                    STEP_RAWFIXTURE="PASS"
-                else
-                    STEP_RAWFIXTURE="FAIL (${step_reason})"
-                    overall_ok=0
-                fi
-                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
-            elif (( LAST_STEP_TIMED_OUT )); then
-                STEP_RAWFIXTURE="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${RAWFIXTURE_LOG:t})"
-                overall_ok=0
-                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
-            else
-                STEP_RAWFIXTURE="FAIL (command exited non-zero; see ${RAWFIXTURE_LOG:t})"
-                overall_ok=0
-                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
-            fi
-        else
-            STEP_TEST="SKIPPED (strict-concurrency build failed)"
-            STEP_RAWFIXTURE="SKIPPED (strict-concurrency build failed)"
-            announce_step_result "full swift test" "$STEP_TEST"
-            announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
-        fi
-    fi
-fi
-
 # ---------------------------------------------------------------------------
-# Summary. Refactored into an idempotent function so both the normal exit
-# path and the signal traps below can call it — whichever happens first wins,
-# and later calls are no-ops. Written atomically (temp file + rename) so a
-# reader never observes a partially written summary.md.
+# Summary + signal handling. Defined and trapped *before* any step runs (not
+# after), because the whole reason Phase 3 exists is to guarantee a report
+# when a step is interrupted — a step is exactly when INT/TERM/HUP can land,
+# so registering these traps only after the step block finishes would leave
+# every step running with no handler in place at all. Refactored into an
+# idempotent function so both the normal exit path and the signal traps below
+# can call it — whichever happens first wins, and later calls are no-ops.
+# Written atomically (temp file + rename) so a reader never observes a
+# partially written summary.md.
 # ---------------------------------------------------------------------------
 
 SUMMARY_WRITTEN=0
@@ -789,6 +723,77 @@ handle_terminating_signal() {
 trap 'handle_terminating_signal INT' INT
 trap 'handle_terminating_signal TERM' TERM
 trap 'handle_terminating_signal HUP' HUP
+
+if (( ! PREFLIGHT_ONLY )); then
+    if (( preflight_ok )); then
+        overall_ok=1
+
+        if run_logged_step build "strict-concurrency build" "$BUILD_LOG" \
+            swift build -Xswiftc -strict-concurrency=complete; then
+            STEP_BUILD="PASS"
+        elif (( LAST_STEP_TIMED_OUT )); then
+            STEP_BUILD="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${BUILD_LOG:t})"
+            overall_ok=0
+        else
+            STEP_BUILD="FAIL"
+            overall_ok=0
+        fi
+        announce_step_result "strict-concurrency build" "$STEP_BUILD"
+
+        if [[ "$STEP_BUILD" == "PASS" ]]; then
+            local full_test_timed_out=0
+            if run_logged_step test "full swift test" "$TEST_LOG" \
+                swift test -Xswiftc -strict-concurrency=complete; then
+                if step_reason="$(evaluate_xctest_log "$TEST_LOG")"; then
+                    STEP_TEST="PASS"
+                else
+                    STEP_TEST="FAIL (${step_reason})"
+                    overall_ok=0
+                fi
+            elif (( LAST_STEP_TIMED_OUT )); then
+                full_test_timed_out=1
+                STEP_TEST="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${TEST_LOG:t})"
+                overall_ok=0
+            else
+                STEP_TEST="FAIL (command exited non-zero; see ${TEST_LOG:t})"
+                overall_ok=0
+            fi
+            announce_step_result "full swift test" "$STEP_TEST"
+
+            if (( full_test_timed_out )); then
+                # A timed-out full test leaves the process tree freshly torn
+                # down (or wedged mid-teardown); running RawFixtureTests on
+                # top of that would race a half-terminated `swift test`
+                # rather than proving anything about the fixtures.
+                STEP_RAWFIXTURE="SKIPPED (full swift test failed)"
+                overall_ok=0
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+            elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
+                swift test --filter RawFixtureTests; then
+                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
+                    STEP_RAWFIXTURE="PASS"
+                else
+                    STEP_RAWFIXTURE="FAIL (${step_reason})"
+                    overall_ok=0
+                fi
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+            elif (( LAST_STEP_TIMED_OUT )); then
+                STEP_RAWFIXTURE="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${RAWFIXTURE_LOG:t})"
+                overall_ok=0
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+            else
+                STEP_RAWFIXTURE="FAIL (command exited non-zero; see ${RAWFIXTURE_LOG:t})"
+                overall_ok=0
+                announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+            fi
+        else
+            STEP_TEST="SKIPPED (strict-concurrency build failed)"
+            STEP_RAWFIXTURE="SKIPPED (strict-concurrency build failed)"
+            announce_step_result "full swift test" "$STEP_TEST"
+            announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
+        fi
+    fi
+fi
 
 write_summary
 
