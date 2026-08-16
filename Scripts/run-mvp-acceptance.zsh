@@ -254,6 +254,34 @@ run_selftest() {
     # the destructive-operation-on-user-data this script otherwise forbids.
     rm -rf -- "$tmp"
 
+    # -----------------------------------------------------------------------
+    # Real-signal cases: spawn a genuine subprocess of this very script,
+    # substitute a cheap controllable command for whichever step is the
+    # interruption target (via the LUMAHARBOR_SELFTEST_*_CMD hooks near the
+    # step block below), send a real OS signal once that step has
+    # demonstrably started, then read back the summary.md the same way an
+    # operator would. This is the only way to prove the trap/summary
+    # behavior end to end rather than just the log-parsing helpers above.
+    #
+    # Requires a real preflight pass, so it only runs when the caller has
+    # already exported the three fixture/storage directories — otherwise it
+    # is reported SKIPPED, never silently omitted and never a failure, so
+    # `LUMAHARBOR_RUNNER_SELFTEST=1` alone stays usable on a host with no
+    # real fixtures at all.
+    # -----------------------------------------------------------------------
+    if [[ -n "${LUMAHARBOR_RAW_FIXTURE_DIR:-}" && -n "${LUMAHARBOR_APFS_TEST_DIR:-}" \
+        && -n "${LUMAHARBOR_EXFAT_TEST_DIR:-}" ]]; then
+        run_signal_selftest_case build TERM 143 || failures=$((failures + 1))
+        run_signal_selftest_case test TERM 143 || failures=$((failures + 1))
+        run_signal_selftest_case rawfixture TERM 143 || failures=$((failures + 1))
+        run_signal_selftest_case build INT 130 || failures=$((failures + 1))
+        run_signal_selftest_case build HUP 129 || failures=$((failures + 1))
+    else
+        print -r -- "selftest: signal-interruption cases -> SKIPPED (export" \
+            "LUMAHARBOR_RAW_FIXTURE_DIR/LUMAHARBOR_APFS_TEST_DIR/LUMAHARBOR_EXFAT_TEST_DIR" \
+            "first to exercise this tier)"
+    fi
+
     if (( failures == 0 )); then
         print -r -- "selftest: all cases behaved as expected"
         return 0
@@ -261,6 +289,193 @@ run_selftest() {
         print -r -- "selftest: ${failures} case(s) behaved unexpectedly"
         return 1
     fi
+}
+
+# run_signal_selftest_case <target-step> <signal-name> <expected-exit-code>
+#
+# target-step is one of build/test/rawfixture — whichever step should be
+# mid-flight when the signal lands. A fresh subprocess of this very script is
+# launched with LUMAHARBOR_RUNNER_SELFTEST unset (so it runs the real
+# preflight-and-steps path, not another self-test) and the real fixture env
+# vars inherited from the caller, but with every step up to and including
+# the target substituted for a cheap, controllable command via the
+# LUMAHARBOR_SELFTEST_*_CMD hooks the main step block reads. Once that
+# target step has demonstrably started (its log file exists — created the
+# instant run_with_timeout begins, which is also the instant
+# CURRENT_STEP_LABEL is set), a real OS signal is sent to the subprocess
+# itself, and the resulting summary.md is read back and checked the same way
+# an operator would: does it exist, is the overall result FAIL, does the
+# interrupted step say so, do steps that never ran carry the *actual* reason
+# rather than the stale "preflight failed" default, is the exit code the
+# shell-conventional 128+signum, is no descendant left running, and does the
+# file avoid leaking the private fixture/storage paths.
+run_signal_selftest_case() {
+    local target_step="$1" signal_name="$2" expected_exit="$3"
+    local label="signal ${signal_name} during ${target_step}"
+    local case_failures=0
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}"/.build/mvp-acceptance/*(N))
+
+    (
+        unset LUMAHARBOR_RUNNER_SELFTEST
+        case "$target_step" in
+            build)
+                export LUMAHARBOR_SELFTEST_BUILD_CMD="zsh -c 'sleep 3'"
+                ;;
+            test)
+                export LUMAHARBOR_SELFTEST_BUILD_CMD="true"
+                export LUMAHARBOR_SELFTEST_TEST_CMD="zsh -c 'sleep 3'"
+                ;;
+            rawfixture)
+                export LUMAHARBOR_SELFTEST_BUILD_CMD="true"
+                export LUMAHARBOR_SELFTEST_TEST_CMD="true"
+                export LUMAHARBOR_SELFTEST_RAWFIXTURE_CMD="zsh -c 'sleep 3'"
+                ;;
+        esac
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    local child_pid=$!
+
+    # Find the run directory the child just created.
+    local new_dir="" deadline=$((SECONDS + 10))
+    while (( SECONDS < deadline )); do
+        local d
+        for d in "${ROOT_DIR}"/.build/mvp-acceptance/*(N); do
+            if (( ${before_dirs[(Ie)$d]} == 0 )); then
+                new_dir="$d"
+                break
+            fi
+        done
+        [[ -n "$new_dir" ]] && break
+        sleep 0.05
+    done
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> the subprocess never created a run directory"
+        kill -KILL "$child_pid" 2>/dev/null || true
+        wait "$child_pid" 2>/dev/null || true
+        return 1
+    fi
+
+    local target_log
+    case "$target_step" in
+        build) target_log="strict-build.log" ;;
+        test) target_log="swift-test.log" ;;
+        rawfixture) target_log="raw-fixture-test.log" ;;
+    esac
+
+    deadline=$((SECONDS + 10))
+    while (( SECONDS < deadline )); do
+        [[ -f "${new_dir}/${target_log}" ]] && break
+        sleep 0.02
+    done
+    if [[ ! -f "${new_dir}/${target_log}" ]]; then
+        print -r -- "selftest: ${label} -> the target step never started"
+        kill -KILL "$child_pid" 2>/dev/null || true
+        wait "$child_pid" 2>/dev/null || true
+        case_failures=$((case_failures + 1))
+    else
+        kill -s "$signal_name" "$child_pid" 2>/dev/null || true
+        local rc=0
+        wait "$child_pid" 2>/dev/null || rc=$?
+
+        if (( rc == expected_exit )); then
+            print -r -- "selftest: ${label} -> exit code ${rc} (expected ${expected_exit}): ok"
+        else
+            print -r -- "selftest: ${label} -> exit code ${rc}, expected ${expected_exit}"
+            case_failures=$((case_failures + 1))
+        fi
+
+        local summary="${new_dir}/summary.md"
+        if [[ ! -f "$summary" ]]; then
+            print -r -- "selftest: ${label} -> no summary.md was written"
+            case_failures=$((case_failures + 1))
+        else
+            if grep -q '^Overall result: FAIL$' "$summary"; then
+                print -r -- "selftest: ${label} -> Overall result: FAIL (expected): ok"
+            else
+                print -r -- "selftest: ${label} -> summary.md did not report an overall FAIL"
+                case_failures=$((case_failures + 1))
+            fi
+
+            local step_line_name
+            case "$target_step" in
+                build) step_line_name="strict-concurrency build" ;;
+                test) step_line_name="full swift test" ;;
+                rawfixture) step_line_name="RawFixtureTests" ;;
+            esac
+            if grep -qF -- "- ${step_line_name}: FAIL (interrupted by ${signal_name})" "$summary"; then
+                print -r -- "selftest: ${label} -> interrupted step labelled correctly: ok"
+            else
+                print -r -- "selftest: ${label} -> interrupted step was not labelled" \
+                    "\"FAIL (interrupted by ${signal_name})\""
+                case_failures=$((case_failures + 1))
+            fi
+
+            # The bug this tier exists to catch: a downstream step that never
+            # ran must carry the *actual* reason, never the stale "preflight
+            # failed" default it was initialized to before any step ran.
+            if grep -qF -- 'SKIPPED (preflight failed)' "$summary"; then
+                print -r -- "selftest: ${label} -> a downstream step still said" \
+                    "\"SKIPPED (preflight failed)\" despite preflight having passed"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no stale \"preflight failed\" reason leaked" \
+                    "into a downstream step: ok"
+            fi
+
+            if [[ "$target_step" == "build" ]]; then
+                if grep -qF -- '- full swift test: SKIPPED (strict-concurrency build failed)' "$summary" \
+                    && grep -qF -- '- RawFixtureTests: SKIPPED (strict-concurrency build failed)' "$summary"; then
+                    print -r -- "selftest: ${label} -> downstream steps correctly blame the build: ok"
+                else
+                    print -r -- "selftest: ${label} -> downstream steps did not correctly blame the build"
+                    case_failures=$((case_failures + 1))
+                fi
+            elif [[ "$target_step" == "test" ]]; then
+                if grep -qF -- '- RawFixtureTests: SKIPPED (full swift test failed)' "$summary"; then
+                    print -r -- "selftest: ${label} -> RawFixtureTests correctly blames the full test: ok"
+                else
+                    print -r -- "selftest: ${label} -> RawFixtureTests did not correctly blame the full test"
+                    case_failures=$((case_failures + 1))
+                fi
+            fi
+
+            local -a leak_needles
+            leak_needles=(
+                "$LUMAHARBOR_RAW_FIXTURE_DIR" "$LUMAHARBOR_APFS_TEST_DIR" "$LUMAHARBOR_EXFAT_TEST_DIR"
+            )
+            local needle leaked=0
+            for needle in "${leak_needles[@]}"; do
+                if grep -qF -- "$needle" "$summary"; then
+                    leaked=1
+                fi
+            done
+            if grep -q '/Users/' "$summary"; then
+                leaked=1
+            fi
+            if (( leaked )); then
+                print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no private path in summary.md (expected): ok"
+            fi
+        fi
+    fi
+
+    # Give the KILL from handle_terminating_signal's own cleanup a moment to
+    # land, then verify nothing from this specific synthetic payload is left
+    # running. Unique to this case's own `sleep 3` marker, never a broad
+    # process-name pattern.
+    sleep 1
+    if pgrep -f 'zsh -c sleep 3' >/dev/null 2>&1; then
+        print -r -- "selftest: ${label} -> a descendant process survived the interruption"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> no descendant process left running (expected): ok"
+    fi
+
+    (( case_failures == 0 ))
 }
 
 # ---------------------------------------------------------------------------
@@ -698,12 +913,27 @@ write_summary() {
 # 10): mark whichever step was in flight as interrupted, tear down exactly
 # that step's own process tree (never a broad process-name kill), then write
 # the summary before exiting.
+#
+# STEP_BUILD/STEP_TEST/STEP_RAWFIXTURE all start out defaulted to "SKIPPED
+# (preflight failed)" before any step runs (see their initialization above)
+# — a default that is only ever true when preflight itself failed. An
+# interruption during `build` leaves STEP_TEST/STEP_RAWFIXTURE holding that
+# stale, misleading default unless this handler overwrites them with the
+# same "SKIPPED (strict-concurrency build failed)" reason the non-interrupted
+# build-failure path already uses below — preflight passed; it was the build
+# that didn't finish. An interruption during `test` already carries its own
+# correct downstream reason ("SKIPPED (full swift test failed)"); `rawfixture`
+# has no downstream step to correct.
 handle_terminating_signal() {
     local sig="$1"
     if [[ -n "$CURRENT_STEP_LABEL" ]]; then
         local reason="FAIL (interrupted by ${sig})"
         case "$CURRENT_STEP_LABEL" in
-            build) STEP_BUILD="$reason" ;;
+            build)
+                STEP_BUILD="$reason"
+                STEP_TEST="SKIPPED (strict-concurrency build failed)"
+                STEP_RAWFIXTURE="SKIPPED (strict-concurrency build failed)"
+                ;;
             test) STEP_TEST="$reason"; STEP_RAWFIXTURE="SKIPPED (full swift test failed)" ;;
             rawfixture) STEP_RAWFIXTURE="$reason" ;;
         esac
@@ -717,19 +947,43 @@ handle_terminating_signal() {
     write_summary
     print -r -- ""
     print -r -- "Full logs and summary: ${RUN_DIR}"
-    exit 130
+
+    # Shell convention: exit code = 128 + signal number, so a caller (or a
+    # test) can tell which signal actually stopped the run from the exit
+    # code alone, rather than every interruption collapsing to the same 130.
+    local exit_code
+    case "$sig" in
+        HUP) exit_code=129 ;;
+        INT) exit_code=130 ;;
+        TERM) exit_code=143 ;;
+        *) exit_code=130 ;;
+    esac
+    exit "$exit_code"
 }
 
 trap 'handle_terminating_signal INT' INT
 trap 'handle_terminating_signal TERM' TERM
 trap 'handle_terminating_signal HUP' HUP
 
+# The real build/test commands, unless a self-test is substituting something
+# cheap and controllable in their place. These three env vars are read only
+# when set — never a default a real run could stumble into — and exist
+# purely so the signal self-test below can send a genuine OS signal to a
+# genuine subprocess of this script without needing minutes of real
+# compilation to land it mid-step.
+build_cmd=(swift build -Xswiftc -strict-concurrency=complete)
+test_cmd=(swift test -Xswiftc -strict-concurrency=complete)
+rawfixture_cmd=(swift test --filter RawFixtureTests)
+[[ -n "${LUMAHARBOR_SELFTEST_BUILD_CMD:-}" ]] && build_cmd=(${(z)LUMAHARBOR_SELFTEST_BUILD_CMD})
+[[ -n "${LUMAHARBOR_SELFTEST_TEST_CMD:-}" ]] && test_cmd=(${(z)LUMAHARBOR_SELFTEST_TEST_CMD})
+[[ -n "${LUMAHARBOR_SELFTEST_RAWFIXTURE_CMD:-}" ]] && rawfixture_cmd=(${(z)LUMAHARBOR_SELFTEST_RAWFIXTURE_CMD})
+
 if (( ! PREFLIGHT_ONLY )); then
     if (( preflight_ok )); then
         overall_ok=1
 
         if run_logged_step build "strict-concurrency build" "$BUILD_LOG" \
-            swift build -Xswiftc -strict-concurrency=complete; then
+            "${build_cmd[@]}"; then
             STEP_BUILD="PASS"
         elif (( LAST_STEP_TIMED_OUT )); then
             STEP_BUILD="FAIL (timed out after ${STEP_TIMEOUT_SECONDS}s; see ${BUILD_LOG:t})"
@@ -743,7 +997,7 @@ if (( ! PREFLIGHT_ONLY )); then
         if [[ "$STEP_BUILD" == "PASS" ]]; then
             local full_test_timed_out=0
             if run_logged_step test "full swift test" "$TEST_LOG" \
-                swift test -Xswiftc -strict-concurrency=complete; then
+                "${test_cmd[@]}"; then
                 if step_reason="$(evaluate_xctest_log "$TEST_LOG")"; then
                     STEP_TEST="PASS"
                 else
@@ -769,7 +1023,7 @@ if (( ! PREFLIGHT_ONLY )); then
                 overall_ok=0
                 announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
             elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
-                swift test --filter RawFixtureTests; then
+                "${rawfixture_cmd[@]}"; then
                 if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
                     STEP_RAWFIXTURE="PASS"
                 else
