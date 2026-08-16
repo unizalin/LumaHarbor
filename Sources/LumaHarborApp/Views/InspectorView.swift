@@ -116,7 +116,7 @@ private struct AdjustmentSliderRow: View {
             model.editor.resetAdjustment(definition.kind)
         }
         .contextMenu {
-            Button("Reset \(definition.kind.displayName)") {
+            Button("\(String(localized: "Reset")) \(definition.kind.displayName)") {
                 model.editor.resetAdjustment(definition.kind)
             }
             .disabled(!isModified)

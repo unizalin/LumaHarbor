@@ -72,8 +72,10 @@ struct WelcomeView: View {
             Text("Add a photo folder")
                 .font(.title2.weight(.semibold))
 
-            Text("Choose a folder on your drive. LumaHarbor reads your RAW files "
-                 + "where they are and never moves or changes them.")
+            Text("""
+                 Choose a folder on your drive. LumaHarbor reads your RAW files \
+                 where they are and never moves or changes them.
+                 """)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
