@@ -110,9 +110,11 @@ private struct LibraryRow: View {
 
     private var subtitle: String {
         switch library.availability {
-        case .offline: return "Offline"
+        case .offline: return String(localized: "Offline")
         case .readOnly, .ready:
-            return library.photoCount == 1 ? "1 photo" : "\(library.photoCount) photos"
+            return library.photoCount == 1
+                ? String(localized: "1 photo")
+                : "\(library.photoCount) " + String(localized: "photos")
         }
     }
 }

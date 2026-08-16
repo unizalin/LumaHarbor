@@ -7,6 +7,7 @@ import PackageDescription
 // future iPadOS target a matter of adding a platform, not swapping libraries.
 let package = Package(
     name: "LumaHarbor",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -26,7 +27,11 @@ let package = Package(
         .target(name: "PhotoLibraryCore", dependencies: ["RawProcessingCore"]),
 
         // SwiftUI + AppKit layer. Never touches CIRAWFilter directly.
-        .target(name: "LumaHarborApp", dependencies: ["PhotoLibraryCore", "RawProcessingCore"]),
+        .target(
+            name: "LumaHarborApp",
+            dependencies: ["PhotoLibraryCore", "RawProcessingCore"],
+            resources: [.process("Resources")]
+        ),
 
         // Thin launcher so the SwiftUI App type stays in a testable library target.
         .executableTarget(name: "LumaHarbor", dependencies: ["LumaHarborApp"]),

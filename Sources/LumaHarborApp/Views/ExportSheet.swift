@@ -24,16 +24,18 @@ struct ExportSheet: View {
                 HStack {
                     Text("JPEG quality")
                     Spacer()
-                    Text("\(Int((quality * 100).rounded()))%")
+                    Text(verbatim: "\(Int((quality * 100).rounded()))%")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
                 Slider(value: $quality, in: 0.4...1.0)
             }
 
-            Text("LumaHarbor re-decodes the original RAW at full resolution and "
-                 + "tags the result sRGB. If a file with the same name already "
-                 + "exists, a number is added — nothing is overwritten.")
+            Text("""
+                 LumaHarbor re-decodes the original RAW at full resolution and \
+                 tags the result sRGB. If a file with the same name already \
+                 exists, a number is added — nothing is overwritten.
+                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -44,7 +46,7 @@ struct ExportSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text("Exported \(state.filename)")
+                        Text("\(String(localized: "Exported")) \(state.filename)")
                         Spacer()
                         Button("Show in Finder") { model.revealExportInFinder() }
                             .controlSize(.small)
@@ -52,7 +54,7 @@ struct ExportSheet: View {
                 } else {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Exporting \(state.filename)…")
+                        Text("\(String(localized: "Exporting")) \(state.filename)…")
                         Spacer()
                         Button("Cancel") { model.cancelExport() }
                             .controlSize(.small)
