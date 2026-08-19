@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import XCTest
 @testable import LumaHarborApp
@@ -398,5 +399,44 @@ final class LibraryViewModelTransitionTests: AppViewModelTestCase {
         let sidecar = try FileSidecarRepository(libraryRootURL: libraryRoot)
             .loadSidecar(for: photo.id)
         XCTAssertEqual(sidecar?.adjustments, .neutral)
+    }
+
+    // MARK: - Editor changes reaching the UI
+
+    /// `InspectorView` and `EditorView` only ever declare
+    /// `@EnvironmentObject var model: LibraryViewModel` -- `editor` is never
+    /// injected on its own (`LumaHarborMainApp.swift`, `RootView.swift`). If an
+    /// editor-only change (a new preview arriving, a slider moving) doesn't
+    /// republish through `model`, SwiftUI has no signal to redraw those views:
+    /// they keep showing whatever editor state existed at the last unrelated
+    /// `LibraryViewModel` publish -- one photo selection behind, which is
+    /// exactly the stale-inspector-panel bug found manually on 2026-08-18.
+    func testEditorOnlyChangesRepublishThroughTheLibraryViewModel() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+
+        var publishCount = 0
+        let cancellable = model.objectWillChange.sink { publishCount += 1 }
+        defer { cancellable.cancel() }
+
+        // Mutates only EditorViewModel's own @Published state (saveState,
+        // undo flags) -- nothing on LibraryViewModel itself changes here.
+        model.editor.setAdjustment(.exposure, to: 2.0)
+
+        XCTAssertGreaterThan(
+            publishCount, 0,
+            "An editor-only state change must republish through LibraryViewModel, or InspectorView/EditorView never redraw"
+        )
     }
 }
