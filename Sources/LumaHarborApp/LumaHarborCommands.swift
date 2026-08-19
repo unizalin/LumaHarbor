@@ -13,13 +13,22 @@ struct LumaHarborCommands: Commands {
             .keyboardShortcut("o", modifiers: .command)
         }
 
+        // No `.keyboardShortcut` on these two: a SwiftUI/AppKit `.undoRedo`
+        // CommandGroup quirk means a ⌘Z/⌘⇧Z registered *here* claims the key
+        // equivalent at the menu's performKeyEquivalent stage and swallows it
+        // -- even though the item shows enabled and a mouse click on it works
+        // fine -- so the keystroke never reaches anything, including the
+        // `UndoRedoKeyEquivalentFix` local monitor in `LumaHarborMainApp.swift`
+        // that actually handles the shortcut (found manually 2026-08-18: the
+        // first attempt, adding *only* that monitor while leaving these two
+        // `.keyboardShortcut` calls in place, still did nothing). Leaving the
+        // key equivalent off here is what lets the monitor's raw key-down
+        // handler receive the event at all.
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") { model.editor.undo() }
-                .keyboardShortcut("z", modifiers: .command)
                 .disabled(!model.editor.canUndo)
 
             Button("Redo") { model.editor.redo() }
-                .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!model.editor.canRedo)
         }
 
