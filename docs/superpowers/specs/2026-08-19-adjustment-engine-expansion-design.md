@@ -254,4 +254,27 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 ## 進度日誌
 
-（目前是空的。接手的 session 如果需要中途記錄進度、或因為 token/用量即將耗盡需要交接，從這裡往下接著寫，格式不拘，但至少要包含：日期、目前做到哪個 §7 子項目、對應的 commit hash、下一步是什麼。寫完立刻 commit＋push。）
+### 2026-08-20：全部 8 項子任務完成，交接至實體機器驗證
+
+**進度**：§7 項 1 ～ 8 全部實作完成並已 commit。
+
+**commit 範圍**：`dadcb2d` (Task 1 資料型別) 到 `3a63c46` (Task 7 HSL kernel 最終修正)，共 11 個 commit 涵蓋任務 1 ～ 7 的全部實作。Task 8 (文件與視覺驗證清單) 尚未 commit。
+
+**環境限制**：本機為 x86_64 無 Xcode/XCTest。全部 7 個任務的驗證均採用 `swift build` 編譯檢查只（Sources/ 程式碼層），測試檔已寫成並手工追蹤邏輯，但無法實際編譯執行。真正的 `swift test` 與 Task 8 的人工視覺驗證必須在 Apple Silicon + Xcode 的機器上進行。
+
+**兩個關鍵未驗證風險（必須優先檢查）**：
+
+1. **Task 6 `advancedToneCurveKernel` CIKL 未編譯／執行過**：kernel source 字串已由獨立兩位審查者驗證為與計畫文件逐字相同的正確轉錄，但其在實際 GPU 上能否成功編譯與運作完全未知。請在 Apple Silicon 機器上優先執行 `swift test` 時，最先跑 `testAdvancedCurveDarkeningPointsDarkenTheImage` 這個 test 確認 kernel 可正常初始化與運行。
+
+2. **Task 7 `hslKernel` CIKL 未編譯／執行過**：kernel source (33 個純量參數、本地 `float[8]` 陣列) 同樣已驗證為正確轉錄，但本地陣列在目標 Core Image 版本的 CIKL 方言支援狀態未知。若 `CIColorKernel(source:)` 初始化失敗，計畫文檔 (Task 7 Step 9) 已預先文件化替代方案：改用 8 個展開的 if/weight 項（無陣列）重寫 kernel。優先測試 `testReducingRedSaturationDesaturatesARedPatch` 和 `testAdjustingBlueDoesNotVisiblyMoveARedPatch` 這兩個 HSL 像素導向 test 確認。
+
+**其他小發現（已延後，非阻礙）**：
+
+- Task 2：`PhotoAdjustmentsTests.swift:211` 遺失了 "// Spec §8.2 fixes this exact key set." 註解（只是美化）。
+- Task 3：`AdjustmentPipelineTests.swift` 的角落／中心採樣實際下採樣整個 16×16 影像而非真正的單像素採樣；在此場景穩健（角落完全飽和），但註解誇大了精度。另外 `applyVignette` 的圓角度計算是初步近似，於此未測試（兩個測試都用 `roundness:0`）——標記留給 Task 8 人工視覺檢驗。
+- Task 6：`AdvancedToneCurveLUT.build` 的空點分支在 resolution==1 時除以 (resolution-1) 會得 NaN；此路徑未啟用（唯一呼叫端用 256）。
+- Task 7：`AdjustmentPipeline.swift` 現有兩個 "// 6." 步驟註解（編號碰撞）——化妝品級問題，繼承自先前任務的插入順序。另外 halfWidth=30 修正使得 60 度間隔的 HSL 色帶中點（黃／綠、綠／青、青／藍）在該中點色調上收到任何色帶的權重恰好為零——真實行為，未測試，建議在 Task 8 人工視覺檢驗時確認。
+
+**人工視覺驗證清單**：已於 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 建立。此清單未執行——須真實 Sony `.ARW` fixture + Apple Silicon + Xcode，本機皆無。
+
+**下一步**：於 Apple Silicon 機器上執行 `swift test`（優先 CIKL kernel 那兩個 test），確認綠燈後始進行 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 的人工視覺驗證。如有 CIKL 編譯問題，參考計畫文檔 Task 7 Step 9 的替代方案。
