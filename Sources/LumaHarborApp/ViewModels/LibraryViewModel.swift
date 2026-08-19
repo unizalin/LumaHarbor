@@ -398,11 +398,21 @@ public final class LibraryViewModel: ObservableObject {
                     self.libraries = await services.libraryService.knownLibraries()
                     await self.reloadPhotos()
                     if let failure = result.manifestWriteFailure {
+                        // The specific reason (read-only vs. out of space vs.
+                        // ...) determines the right next step -- "unlock the
+                        // drive" is correct advice for the first and actively
+                        // wrong for the second, so this must come from the
+                        // failing error's own recoverySuggestion rather than
+                        // one hardcoded string for every cause (found by hand
+                        // 2026-08-19 testing a disk-full drive: the message
+                        // correctly said "insufficient space" but the next
+                        // step still said to unlock the drive).
+                        let nextStep = result.manifestWriteRecoverySuggestion
+                            ?? L10n.t("Unlock the drive to save changes back to it.")
                         self.alert = UserAlert(
                             title: L10n.t("Scanned, but couldn't update the library file"),
                             message: failure,
-                            nextStep: L10n.t("Your photos are still browsable.")
-                                + " " + L10n.t("Unlock the drive to save changes back to it.")
+                            nextStep: L10n.t("Your photos are still browsable.") + " " + nextStep
                         )
                     }
 

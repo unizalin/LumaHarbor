@@ -337,3 +337,19 @@ hdiutil attach Fixtures/Private/DiskFull-Test.dmg
 **還沒做（人工待測）**：
 - 加入這個資料夾後，掃描／建立 library manifest 這一步本身可能就會先失敗（因為連目錄都建不了）——預期會走到 `LibraryViewModel.swift` 裡「Scanned, but couldn't update the library file」那個既有的 alert 路徑（跟 `ReadOnly-Test` 測過的路徑相同基礎設施，但這次的根因是 `AtomicWriteError.insufficientDiskSpace` 不是唯讀權限拒絕，訊息文案應該不同，需要人工確認畫面上顯示的是正確的「空間不足」訊息而不是「唯讀」訊息）。
 - 如果掃描本身能過（例如 manifest 檔案剛好能擠進最後一點空間），再測拉滑桿存檔、匯出 JPEG 這兩個路徑是否也正確顯示空間不足、不會偽成功、不會 crash。
+
+## 2026-08-19（續九）：人工測 disk-full 時發現一個真的 bug，已修——訊息對了，下一步指引卻是唯讀那句
+
+**人工測試結果（截圖）**：加入 `/Volumes/LumaHarbor-DiskFull-Test` 後，跳出「已掃描，但無法更新相片庫檔案」alert，`message` 正確顯示「空間不足，無法儲存你的編輯。」——**這部分是對的**。但 `nextStep` 顯示「你的照片仍然可以瀏覽。解鎖磁碟即可把變更存回去。」——**「解鎖磁碟」對空間不足的情境完全沒有意義**（解鎖權限不會生出磁碟空間），這是唯讀情境專用的建議，被誤用在空間不足的情境上。
+
+**根因**：`LibraryViewModel.swift`（修前）掃描完成時，只要 `result.manifestWriteFailure` 有值（不管實際原因是唯讀還是空間不足還是磁碟離線），`nextStep` 一律寫死成同一句「Unlock the drive to save changes back to it.」。而 `PhotoLibraryService.swift` 那邊，`manifestFailure`（傳給 `LibraryViewModel` 的錯誤描述文字）只擷取了失敗錯誤的 `errorDescription`，完全沒有把同一個錯誤物件的 `recoverySuggestion`（每種錯誤原因各自對應的正確建議，例如唯讀該說「解鎖磁碟」、空間不足該說「騰出空間」）一起往上傳——`message` 是對的因為它來自 `errorDescription`，`nextStep` 是錯的因為它根本沒用到 `recoverySuggestion`，是另外寫死的一句話。
+
+**修法**（已完成）：
+- `LibraryScanResult`（`PhotoLibraryService.swift`）新增 `manifestWriteRecoverySuggestion: String?` 欄位，跟 `manifestWriteFailure` 一起從同一個 catch 到的 error 擷取（`(error as? LocalizedError)?.recoverySuggestion`）。
+- `LibraryViewModel.swift` 的 `nextStep` 改成優先用 `result.manifestWriteRecoverySuggestion`（沒有才退回舊的寫死文字，防呆用）。
+
+**回歸測試**：`Tests/LumaHarborAppTests/LibraryViewModelTransitionTests.swift` 新增 `testAReadOnlyManifestFailureShowsThatErrorsOwnRecoverySuggestionNotAHardcodedOne`——用唯讀資料夾重現（這個測試環境沒辦法快速重現真的空間不足，唯讀比較好用單元測試重現，但驗證的是「有沒有正確接上每種錯誤各自的建議」這個接線邏輯本身，不是唯讀機制），斷言 `nextStep` 等於這個錯誤（`SidecarError.notWritable`）自己的 `recoverySuggestion`，不是舊的寫死文字。用 `git stash` 只還原修法程式碼（保留測試）跑過，確認沒有修法時這個測試真的會失敗（顯示舊的寫死文字「解鎖磁碟即可把變更存回去。」），修法回來後轉綠，避免空測試。
+
+**全套件跑過**：341 個測試，0 failures。build 也過。working tree 已 commit。
+
+**還沒做**：這個修法還沒人工在真正的 disk-full 環境重新驗證過畫面（照理說下一步文字現在應該會顯示「空間不足時該做的事」，但還沒有人親眼確認）——下次接續驗收時記得回頭看一次 `/Volumes/LumaHarbor-DiskFull-Test` 這個 alert 現在的 `nextStep` 文字是不是真的變了。
