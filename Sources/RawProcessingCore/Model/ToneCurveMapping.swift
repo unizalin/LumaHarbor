@@ -1,7 +1,7 @@
 import Foundation
 
 /// One control point of the five-point tone curve, in normalised 0...1 space.
-public struct ToneCurvePoint: Equatable, Sendable {
+public struct ToneCurvePoint: Codable, Equatable, Hashable, Sendable {
     public let x: Double
     public let y: Double
 
