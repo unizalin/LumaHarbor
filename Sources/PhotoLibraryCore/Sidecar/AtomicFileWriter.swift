@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 public enum AtomicWriteError: Error, Equatable, Sendable {
     case destinationNotWritable(path: String)
@@ -11,26 +12,26 @@ extension AtomicWriteError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .destinationNotWritable:
-            return String(localized: "This drive is read-only, so edits can't be saved next to your photos.")
+            return L10n.t("This drive is read-only, so edits can't be saved next to your photos.")
         case .volumeUnavailable:
-            return String(localized: "The drive holding this library isn't available.")
+            return L10n.t("The drive holding this library isn't available.")
         case .insufficientDiskSpace:
-            return String(localized: "There isn't enough free space to save your edits.")
+            return L10n.t("There isn't enough free space to save your edits.")
         case .writeFailed(_, let reason):
-            return "\(String(localized: "Your edits couldn't be saved.")) \(reason)"
+            return "\(L10n.t("Your edits couldn't be saved.")) \(reason)"
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .destinationNotWritable:
-            return String(localized: "Unlock the drive or copy the library somewhere writable, then retry.")
+            return L10n.t("Unlock the drive or copy the library somewhere writable, then retry.")
         case .volumeUnavailable:
-            return String(localized: "Reconnect the drive, then retry.")
+            return L10n.t("Reconnect the drive, then retry.")
         case .insufficientDiskSpace:
-            return String(localized: "Free up space on the drive, then retry.")
+            return L10n.t("Free up space on the drive, then retry.")
         case .writeFailed:
-            return String(localized: "Retry saving.")
+            return L10n.t("Retry saving.")
         }
     }
 }

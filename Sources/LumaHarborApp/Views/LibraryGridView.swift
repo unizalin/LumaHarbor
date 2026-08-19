@@ -1,4 +1,5 @@
 import PhotoLibraryCore
+import Localization
 import SwiftUI
 
 /// The browser grid. Cells appear as the scan finds them (spec §6.1).
@@ -39,10 +40,10 @@ struct LibraryGridView: View {
                 Button {
                     model.startScan()
                 } label: {
-                    Label("Rescan", systemImage: "arrow.clockwise")
+                    Label(L10n.t("Rescan"), systemImage: "arrow.clockwise")
                 }
                 .disabled(!(model.selectedLibrary?.isOnline ?? false))
-                .help("Scan this folder again")
+                .help(L10n.t("Scan this folder again"))
             }
         }
     }
@@ -52,20 +53,20 @@ struct LibraryGridView: View {
         VStack(spacing: 10) {
             if let progress = model.scanProgress, !progress.isFinished {
                 ProgressView()
-                Text("Scanning for RAW files…")
+                Text(L10n.t("Scanning for RAW files…"))
                     .foregroundStyle(.secondary)
             } else if model.selectedLibrary?.isOnline == false {
                 Image(systemName: "externaldrive.badge.xmark")
                     .font(.system(size: 40, weight: .light))
                     .foregroundStyle(.secondary)
-                Text("This drive isn't connected")
+                Text(L10n.t("This drive isn't connected"))
                     .font(.headline)
-                Text("Reconnect it to browse and edit these photos.")
+                Text(L10n.t("Reconnect it to browse and edit these photos."))
                     .foregroundStyle(.secondary)
             } else {
-                Text("No RAW files found in this folder")
+                Text(L10n.t("No RAW files found in this folder"))
                     .font(.headline)
-                Text("LumaHarbor looks for camera RAW files such as Sony .ARW.")
+                Text(L10n.t("LumaHarbor looks for camera RAW files such as Sony .ARW."))
                     .foregroundStyle(.secondary)
             }
         }

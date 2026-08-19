@@ -1,4 +1,5 @@
 import CryptoKit
+import Localization
 import Foundation
 
 public enum FingerprintError: Error, Equatable, Sendable {
@@ -10,14 +11,14 @@ extension FingerprintError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .fileUnavailable(let path):
-            return "\(String(localized: "Couldn't read")) \(path)."
+            return "\(L10n.t("Couldn't read")) \(path)."
         case .readFailed(_, let reason):
-            return "\(String(localized: "Couldn't read the file.")) \(reason)"
+            return "\(L10n.t("Couldn't read the file.")) \(reason)"
         }
     }
 
     public var recoverySuggestion: String? {
-        String(localized: "Reconnect the drive holding this photo, then rescan.")
+        L10n.t("Reconnect the drive holding this photo, then rescan.")
     }
 }
 

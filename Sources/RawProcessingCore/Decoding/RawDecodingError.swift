@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 /// Failures the UI has to tell apart.
 ///
@@ -20,15 +21,15 @@ extension RawDecodingError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .fileUnavailable(let path):
-            return "\(String(localized: "The original file is not available at")) \(path)."
+            return "\(L10n.t("The original file is not available at")) \(path)."
         case .unsupportedFormat:
-            return String(localized: "This camera's RAW format isn't supported yet.")
+            return L10n.t("This camera's RAW format isn't supported yet.")
         case .corruptedFile:
-            return String(localized: "This RAW file appears to be damaged.")
+            return L10n.t("This RAW file appears to be damaged.")
         case .decodeFailed(_, let reason):
-            return "\(String(localized: "The RAW file couldn't be decoded.")) \(reason)"
+            return "\(L10n.t("The RAW file couldn't be decoded.")) \(reason)"
         case .cancelled:
-            return String(localized: "The operation was cancelled.")
+            return L10n.t("The operation was cancelled.")
         }
     }
 
@@ -36,13 +37,13 @@ extension RawDecodingError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .fileUnavailable:
-            return String(localized: "Reconnect the drive holding this photo, then try again.")
+            return L10n.t("Reconnect the drive holding this photo, then try again.")
         case .unsupportedFormat:
-            return String(localized: "Keep the file in your library — support may arrive in a future macOS release.")
+            return L10n.t("Keep the file in your library — support may arrive in a future macOS release.")
         case .corruptedFile:
-            return String(localized: "Try re-copying this file from the memory card.")
+            return L10n.t("Try re-copying this file from the memory card.")
         case .decodeFailed:
-            return String(localized: "Try again, or re-copy this file from the memory card.")
+            return L10n.t("Try again, or re-copy this file from the memory card.")
         case .cancelled:
             return nil
         }

@@ -1,4 +1,5 @@
 import CoreGraphics
+import Localization
 import CoreImage
 import Foundation
 
@@ -52,15 +53,15 @@ extension ExportError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .destinationNotWritable:
-            return String(localized: "That export location is read-only.")
+            return L10n.t("That export location is read-only.")
         case .destinationUnavailable:
-            return String(localized: "The export location isn't available.")
+            return L10n.t("The export location isn't available.")
         case .couldNotFindUniqueName(let baseName):
-            return "\(String(localized: "Couldn't find an unused filename for")) \"\(baseName)\"."
+            return "\(L10n.t("Couldn't find an unused filename for")) \"\(baseName)\"."
         case .insufficientDiskSpace:
-            return String(localized: "There isn't enough free space to finish the export.")
+            return L10n.t("There isn't enough free space to finish the export.")
         case .cancelled:
-            return String(localized: "The export was cancelled.")
+            return L10n.t("The export was cancelled.")
         case .decoding(let error):
             return error.errorDescription
         case .rendering(let error):
@@ -71,9 +72,9 @@ extension ExportError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .destinationNotWritable, .destinationUnavailable, .couldNotFindUniqueName:
-            return String(localized: "Choose a different output location.")
+            return L10n.t("Choose a different output location.")
         case .insufficientDiskSpace:
-            return String(localized: "Free up space or choose a different destination, then export again.")
+            return L10n.t("Free up space or choose a different destination, then export again.")
         case .cancelled:
             return nil
         case .decoding(let error):

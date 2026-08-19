@@ -1,4 +1,5 @@
 import CoreGraphics
+import Localization
 import Foundation
 import PhotoLibraryCore
 import RawProcessingCore
@@ -309,7 +310,7 @@ final class EditorViewModel: ObservableObject {
             // A failed decode must not leave the previous photo's frame on
             // screen looking like a successful one (Gate E: no fake success).
             previewImage = nil
-            alert = UserAlert(title: String(localized: "Couldn't show this photo"), error: error)
+            alert = UserAlert(title: L10n.t("Couldn't show this photo"), error: error)
         }
     }
 
@@ -317,7 +318,7 @@ final class EditorViewModel: ObservableObject {
 
     private func scheduleAutosave() {
         guard !isReadOnlyLibrary else {
-            saveState = .failed(String(localized: "This drive is read-only, so edits can't be saved."))
+            saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
             return
         }
         autosaveTask?.cancel()
@@ -346,7 +347,7 @@ final class EditorViewModel: ObservableObject {
                 (error as? LocalizedError)?.errorDescription
                     ?? (error as NSError).localizedDescription
             )
-            alert = UserAlert(title: String(localized: "Couldn't save your edits"), error: error)
+            alert = UserAlert(title: L10n.t("Couldn't save your edits"), error: error)
         }
     }
 
@@ -371,11 +372,11 @@ final class EditorViewModel: ObservableObject {
         if isReadOnlyLibrary {
             // Nothing can be written. Saying so here is what stops the caller
             // navigating away and dropping the edit on the floor.
-            saveState = .failed(String(localized: "This drive is read-only, so edits can't be saved."))
+            saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
             alert = UserAlert(
-                title: String(localized: "Couldn't save your edits"),
-                message: String(localized: "This drive is read-only, so LumaHarbor can't write next to your photos."),
-                nextStep: String(localized: "Unlock the drive, or copy the library somewhere writable, then try again.")
+                title: L10n.t("Couldn't save your edits"),
+                message: L10n.t("This drive is read-only, so LumaHarbor can't write next to your photos."),
+                nextStep: L10n.t("Unlock the drive, or copy the library somewhere writable, then try again.")
             )
             return false
         }

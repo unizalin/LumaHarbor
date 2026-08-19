@@ -1,4 +1,5 @@
 import PhotoLibraryCore
+import Localization
 import RawProcessingCore
 import SwiftUI
 
@@ -30,10 +31,10 @@ struct InspectorView: View {
 
     private var header: some View {
         HStack {
-            Text("Adjustments")
+            Text(L10n.t("Adjustments"))
                 .font(.headline)
             Spacer()
-            Button("Reset All") {
+            Button(L10n.t("Reset All")) {
                 model.editor.resetAll()
             }
             .controlSize(.small)
@@ -50,7 +51,7 @@ private struct ContentUnavailableMessage: View {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: 28, weight: .light))
                 .foregroundStyle(.tertiary)
-            Text("Select a photo to start editing")
+            Text(L10n.t("Select a photo to start editing"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -116,12 +117,12 @@ private struct AdjustmentSliderRow: View {
             model.editor.resetAdjustment(definition.kind)
         }
         .contextMenu {
-            Button("\(String(localized: "Reset")) \(definition.kind.displayName)") {
+            Button("\(L10n.t("Reset")) \(definition.kind.displayName)") {
                 model.editor.resetAdjustment(definition.kind)
             }
             .disabled(!isModified)
         }
-        .help("Double-click the row to reset")
+        .help(L10n.t("Double-click the row to reset"))
     }
 
     private var formatted: String {

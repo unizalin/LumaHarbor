@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 public enum BookmarkError: Error, Equatable, Sendable {
     case couldNotCreate(path: String, reason: String)
@@ -12,16 +13,16 @@ extension BookmarkError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .couldNotCreate:
-            return String(localized: "LumaHarbor couldn't remember access to that folder.")
+            return L10n.t("LumaHarbor couldn't remember access to that folder.")
         case .couldNotResolve:
-            return String(localized: "LumaHarbor no longer has access to this photo folder.")
+            return L10n.t("LumaHarbor no longer has access to this photo folder.")
         case .accessDenied(let path):
-            return "\(String(localized: "macOS denied access to")) \(path)."
+            return "\(L10n.t("macOS denied access to")) \(path)."
         }
     }
 
     public var recoverySuggestion: String? {
-        String(localized: "Choose the photo folder again to restore access.")
+        L10n.t("Choose the photo folder again to restore access.")
     }
 }
 

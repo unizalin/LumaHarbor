@@ -1,4 +1,5 @@
 import PhotoLibraryCore
+import Localization
 import SwiftUI
 
 /// Centre pane: the large preview plus the filmstrip (spec §6.2).
@@ -25,7 +26,7 @@ struct EditorView: View {
                 message: Text([alert.message, alert.nextStep]
                     .compactMap { $0 }
                     .joined(separator: "\n\n")),
-                dismissButton: .default(Text("OK"))
+                dismissButton: .default(Text(L10n.t("OK")))
             )
         }
     }
@@ -41,12 +42,12 @@ struct EditorView: View {
                         .aspectRatio(contentMode: .fit)
                         .padding(16)
                 } else {
-                    ProgressView("Decoding RAW…")
+                    ProgressView(L10n.t("Decoding RAW…"))
                         .controlSize(.large)
                 }
 
                 if model.editor.isShowingOriginal {
-                    Text("Original")
+                    Text(L10n.t("Original"))
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -83,9 +84,9 @@ struct EditorView: View {
             Button {
                 model.requestSelectPhoto(nil)
             } label: {
-                Label("Back to Library", systemImage: "square.grid.2x2")
+                Label(L10n.t("Back to Library"), systemImage: "square.grid.2x2")
             }
-            .help("Back to the library grid")
+            .help(L10n.t("Back to the library grid"))
         }
 
         ToolbarItemGroup(placement: .principal) {
@@ -94,14 +95,14 @@ struct EditorView: View {
             Button {
                 model.editor.undo()
             } label: {
-                Label("Undo", systemImage: "arrow.uturn.backward")
+                Label(L10n.t("Undo"), systemImage: "arrow.uturn.backward")
             }
             .disabled(!model.editor.canUndo)
 
             Button {
                 model.editor.redo()
             } label: {
-                Label("Redo", systemImage: "arrow.uturn.forward")
+                Label(L10n.t("Redo"), systemImage: "arrow.uturn.forward")
             }
             .disabled(!model.editor.canRedo)
         }
@@ -114,10 +115,10 @@ struct EditorView: View {
             Button {
                 model.isShowingExportSheet = true
             } label: {
-                Label("Export", systemImage: "square.and.arrow.up")
+                Label(L10n.t("Export"), systemImage: "square.and.arrow.up")
             }
             .disabled(model.selectedPhoto == nil)
-            .help("Export a full-resolution JPEG")
+            .help(L10n.t("Export a full-resolution JPEG"))
         }
     }
 }
@@ -152,10 +153,10 @@ private struct CompareButton: View {
             // there is nothing left to race and nothing waiting on a timer
             // that a live drag can starve.
         } label: {
-            Label("Original", systemImage: "rectangle.righthalf.inset.filled.arrow.right")
+            Label(L10n.t("Original"), systemImage: "rectangle.righthalf.inset.filled.arrow.right")
         }
         .disabled(!model.editor.canCompareWithOriginal)
-        .help("Hold to compare with the original, or click to pin it")
+        .help(L10n.t("Hold to compare with the original, or click to pin it"))
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
@@ -193,16 +194,16 @@ private struct SaveStateLabel: View {
         case .unchanged:
             EmptyView()
         case .pending:
-            Label("Unsaved", systemImage: "circle.dotted")
+            Label(L10n.t("Unsaved"), systemImage: "circle.dotted")
                 .foregroundStyle(.secondary)
         case .saving:
-            Label("Saving…", systemImage: "arrow.triangle.2.circlepath")
+            Label(L10n.t("Saving…"), systemImage: "arrow.triangle.2.circlepath")
                 .foregroundStyle(.secondary)
         case .saved:
-            Label("Saved", systemImage: "checkmark.circle")
+            Label(L10n.t("Saved"), systemImage: "checkmark.circle")
                 .foregroundStyle(.secondary)
         case .failed(let message):
-            Label("Not saved", systemImage: "exclamationmark.triangle.fill")
+            Label(L10n.t("Not saved"), systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
                 .help(message)
         }

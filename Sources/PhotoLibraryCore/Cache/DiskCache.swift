@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 public enum CacheError: Error, Equatable, Sendable {
     case insufficientDiskSpace
@@ -9,15 +10,15 @@ extension CacheError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .insufficientDiskSpace:
-            return String(localized: "There isn't enough free space to cache previews.")
+            return L10n.t("There isn't enough free space to cache previews.")
         case .writeFailed(let reason):
-            return "\(String(localized: "A cached preview couldn't be written.")) \(reason)"
+            return "\(L10n.t("A cached preview couldn't be written.")) \(reason)"
         }
     }
 
     public var recoverySuggestion: String? {
         // Spec §10: never leave the user with a dead end.
-        String(localized: "Free up space on your startup disk, or lower the cache limit in Settings.")
+        L10n.t("Free up space on your startup disk, or lower the cache limit in Settings.")
     }
 }
 

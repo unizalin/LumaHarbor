@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 import RawProcessingCore
 
 public struct LibraryScanResult: Sendable, Equatable {
@@ -41,14 +42,14 @@ extension LibraryError: LocalizedError {
         switch self {
         case .bookmark(let error): return error.errorDescription
         case .sidecar(let error): return error.errorDescription
-        case .offline: return String(localized: "The drive holding this library isn't connected.")
-        case .notFound: return String(localized: "That photo folder is no longer in your library list.")
+        case .offline: return L10n.t("The drive holding this library isn't connected.")
+        case .notFound: return L10n.t("That photo folder is no longer in your library list.")
         case .indexUnavailable(let message):
-            return "\(String(localized: "The local index is unavailable.")) \(message)"
+            return "\(L10n.t("The local index is unavailable.")) \(message)"
         case .resetRefusedWhileScanning:
-            return String(localized: "The local index can't be reset while a scan is in progress.")
+            return L10n.t("The local index can't be reset while a scan is in progress.")
         case .resetFailed(let message):
-            return "\(String(localized: "The local index couldn't be reset.")) \(message)"
+            return "\(L10n.t("The local index couldn't be reset.")) \(message)"
         }
     }
 
@@ -56,12 +57,12 @@ extension LibraryError: LocalizedError {
         switch self {
         case .bookmark(let error): return error.recoverySuggestion
         case .sidecar(let error): return error.recoverySuggestion
-        case .offline: return String(localized: "Reconnect the drive, then try again.")
-        case .notFound: return String(localized: "Add the folder again.")
-        case .indexUnavailable: return String(localized: "Quit and reopen LumaHarbor to rebuild the index.")
+        case .offline: return L10n.t("Reconnect the drive, then try again.")
+        case .notFound: return L10n.t("Add the folder again.")
+        case .indexUnavailable: return L10n.t("Quit and reopen LumaHarbor to rebuild the index.")
         case .resetRefusedWhileScanning:
-            return String(localized: "Wait for the current scan to finish, then try again.")
-        case .resetFailed: return String(localized: "Quit and reopen LumaHarbor, then try again.")
+            return L10n.t("Wait for the current scan to finish, then try again.")
+        case .resetFailed: return L10n.t("Quit and reopen LumaHarbor, then try again.")
         }
     }
 }
