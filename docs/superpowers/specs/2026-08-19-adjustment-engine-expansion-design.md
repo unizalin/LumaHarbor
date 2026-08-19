@@ -258,7 +258,7 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 **進度**：§7 項 1 ～ 8 全部實作完成並已 commit。
 
-**commit 範圍**：`dadcb2d` (Task 1 資料型別) 到 `3a63c46` (Task 7 HSL kernel 最終修正)，共 11 個 commit 涵蓋任務 1 ～ 7 的全部實作。Task 8 (文件與視覺驗證清單) 尚未 commit。
+**commit 範圍**：`dadcb2d` (Task 1 資料型別) 到 `82370bc` (Task 8 文件與視覺驗證清單)，共 12 個 commit 涵蓋任務 1 ～ 8 全部實作與文件。
 
 **環境限制**：本機為 x86_64 無 Xcode/XCTest。全部 7 個任務的驗證均採用 `swift build` 編譯檢查只（Sources/ 程式碼層），測試檔已寫成並手工追蹤邏輯，但無法實際編譯執行。真正的 `swift test` 與 Task 8 的人工視覺驗證必須在 Apple Silicon + Xcode 的機器上進行。
 
@@ -270,7 +270,6 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 **其他小發現（已延後，非阻礙）**：
 
-- Task 2：`PhotoAdjustmentsTests.swift:211` 遺失了 "// Spec §8.2 fixes this exact key set." 註解（只是美化）。
 - Task 3：`AdjustmentPipelineTests.swift` 的角落／中心採樣實際下採樣整個 16×16 影像而非真正的單像素採樣；在此場景穩健（角落完全飽和），但註解誇大了精度。另外 `applyVignette` 的圓角度計算是初步近似，於此未測試（兩個測試都用 `roundness:0`）——標記留給 Task 8 人工視覺檢驗。
 - Task 6：`AdvancedToneCurveLUT.build` 的空點分支在 resolution==1 時除以 (resolution-1) 會得 NaN；此路徑未啟用（唯一呼叫端用 256）。
 - Task 7：`AdjustmentPipeline.swift` 現有兩個 "// 6." 步驟註解（編號碰撞）——化妝品級問題，繼承自先前任務的插入順序。另外 halfWidth=30 修正使得 60 度間隔的 HSL 色帶中點（黃／綠、綠／青、青／藍）在該中點色調上收到任何色帶的權重恰好為零——真實行為，未測試，建議在 Task 8 人工視覺檢驗時確認。
