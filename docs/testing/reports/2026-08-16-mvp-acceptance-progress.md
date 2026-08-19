@@ -352,4 +352,6 @@ hdiutil attach Fixtures/Private/DiskFull-Test.dmg
 
 **全套件跑過**：341 個測試，0 failures。build 也過。working tree 已 commit。
 
-**還沒做**：這個修法還沒人工在真正的 disk-full 環境重新驗證過畫面（照理說下一步文字現在應該會顯示「空間不足時該做的事」，但還沒有人親眼確認）——下次接續驗收時記得回頭看一次 `/Volumes/LumaHarbor-DiskFull-Test` 這個 alert 現在的 `nextStep` 文字是不是真的變了。
+**人工重測結果（2026-08-19，同一天）**：使用者對 `LumaHarbor-DiskFull-Test` 按 Rescan Folder 重新觸發，截圖確認 alert 顯示「已掃描，但無法更新相片庫檔案／空間不足，無法儲存你的編輯。／你的照片仍然可以瀏覽。騰出磁碟空間，然後重試。」——`nextStep` 正確變成空間不足專屬的建議，不再是「解鎖磁碟」。**通過，disk-full 這一項的 Gate E 精神（不能顯示偽成功、要有正確的下一步指引）確認達成。**
+
+**Gate D/E/F 全部項目狀態小結（2026-08-19 這天結束時）**：APFS／exFAT／改名 relink／刪除 SQLite 重建／SSD 拔插／唯讀資料夾／損壞 RAW／損壞 sidecar／disk-full 全部通過；Undo/Redo 快捷鍵維持已知問題（滑鼠可用，不擋簽收）；unsupported 格式實測確認在這個平台上無法觸發，不是缺素材；Gate F 效能量測完成（interactive 解碼穩定 137–138ms，壓線在 150ms 目標內）。Gate F UI 矩陣裡還沒系統性走過的細項（例如個別調整項目的 Reset、原圖比較以外的其他細節）如果有沒提到的，下次接續時可以逐項對照 `docs/superpowers/specs/2026-08-15-mac-first-mvp-acceptance-plan.md` §Gate F 再檢查一次是否有漏項。
