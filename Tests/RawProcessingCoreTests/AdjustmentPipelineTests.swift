@@ -330,6 +330,34 @@ final class AdjustmentPipelineTests: XCTestCase {
         let darkened = try centrePixel(pipeline.apply(adjustments, to: source))
         XCTAssertLessThan(darkened.red, base.red)
     }
+
+    // MARK: - HSL
+
+    func testNeutralHSLStaysAPassthrough() {
+        let source = makeSourceImage()
+        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
+    }
+
+    func testReducingRedSaturationDesaturatesARedPatch() throws {
+        let red = makeSourceImage(red: 0.7, green: 0.2, blue: 0.2)
+        let base = try centrePixel(red)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.hsl.red = HSLBand(hue: 0, saturation: -100, luminance: 0)
+        let desaturated = try centrePixel(pipeline.apply(adjustments, to: red))
+        XCTAssertLessThan(desaturated.red - desaturated.blue, base.red - base.blue)
+    }
+
+    func testAdjustingBlueDoesNotVisiblyMoveARedPatch() throws {
+        // A band-selective tool must leave hues far from its centre close to
+        // untouched -- this is what makes it "selective" rather than a
+        // second global saturation slider.
+        let red = makeSourceImage(red: 0.7, green: 0.2, blue: 0.2)
+        let base = try centrePixel(red)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.hsl.blue = HSLBand(hue: 0, saturation: 100, luminance: 0)
+        let stillRed = try centrePixel(pipeline.apply(adjustments, to: red))
+        XCTAssertEqual(stillRed.red, base.red, accuracy: 3)
+    }
 }
 
 private func XCTAssertEqual(

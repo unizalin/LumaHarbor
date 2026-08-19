@@ -170,4 +170,16 @@ final class AdjustmentMappingTests: XCTestCase {
     func testNeutralAdvancedToneCurveIsIdentity() {
         XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isAdvancedToneCurveIdentity)
     }
+
+    func testHSLIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.hsl.blue = HSLBand(hue: -20, saturation: 40, luminance: 0)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.hsl, adjustments.hsl)
+        XCTAssertFalse(parameters.isHSLIdentity)
+    }
+
+    func testNeutralHSLIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isHSLIdentity)
+    }
 }

@@ -40,6 +40,7 @@ public struct AdjustmentPipeline: Sendable {
             || !parameters.isVibranceIdentity
             || !parameters.isAdvancedToneCurveIdentity
             || !parameters.isSplitToningIdentity
+            || !parameters.isHSLIdentity
 
         if needsPerceptualStage {
             // 2. Move to a gamma-encoded space. Tone curves, contrast and
@@ -76,6 +77,11 @@ public struct AdjustmentPipeline: Sendable {
             // independent curve layered on top of the four-slider one.
             if !parameters.isAdvancedToneCurveIdentity {
                 working = Self.applyAdvancedToneCurve(parameters.advancedToneCurve, to: working)
+            }
+
+            // 6. HSL (spec §4.2 step 6).
+            if !parameters.isHSLIdentity {
+                working = Self.applyHSL(parameters.hsl, to: working)
             }
 
             // 7. Split toning (spec §4.2 step 7): tint shadows and highlights
@@ -273,6 +279,110 @@ public struct AdjustmentPipeline: Sendable {
                 colorSpace: nil
             )
         }
+    }
+
+    /// One pass over all 8 bands per pixel, blending each band's hue/sat/lum
+    /// adjustment by `HSLKernelWeights`-equivalent triangular falloff (spec
+    /// §4.3). The falloff math is duplicated here in CIKL rather than calling
+    /// into `HSLKernelWeights` -- the GPU kernel can't call Swift -- so any
+    /// change to the falloff shape must be made in both places; the unit
+    /// tests on `HSLKernelWeights` exist specifically to keep this constant
+    /// correct even though the kernel body itself can't be unit tested.
+    private static let hslKernel: CIColorKernel? = {
+        let source = """
+        kernel vec4 hslAdjust(
+            sampler image,
+            float centers0, float centers1, float centers2, float centers3,
+            float centers4, float centers5, float centers6, float centers7,
+            float hues0, float hues1, float hues2, float hues3,
+            float hues4, float hues5, float hues6, float hues7,
+            float sats0, float sats1, float sats2, float sats3,
+            float sats4, float sats5, float sats6, float sats7,
+            float lums0, float lums1, float lums2, float lums3,
+            float lums4, float lums5, float lums6, float lums7,
+            float halfWidth
+        ) {
+            vec4 pixel = sample(image, samplerCoord(image));
+            float maxC = max(pixel.r, max(pixel.g, pixel.b));
+            float minC = min(pixel.r, min(pixel.g, pixel.b));
+            float delta = maxC - minC;
+            float luma = (maxC + minC) * 0.5;
+
+            float hueDeg = 0.0;
+            if (delta > 0.0001) {
+                if (maxC == pixel.r) {
+                    hueDeg = 60.0 * mod((pixel.g - pixel.b) / delta, 6.0);
+                } else if (maxC == pixel.g) {
+                    hueDeg = 60.0 * (((pixel.b - pixel.r) / delta) + 2.0);
+                } else {
+                    hueDeg = 60.0 * (((pixel.r - pixel.g) / delta) + 4.0);
+                }
+            }
+            if (hueDeg < 0.0) { hueDeg = hueDeg + 360.0; }
+
+            float centers[8];
+            centers[0]=centers0; centers[1]=centers1; centers[2]=centers2; centers[3]=centers3;
+            centers[4]=centers4; centers[5]=centers5; centers[6]=centers6; centers[7]=centers7;
+            float hues[8];
+            hues[0]=hues0; hues[1]=hues1; hues[2]=hues2; hues[3]=hues3;
+            hues[4]=hues4; hues[5]=hues5; hues[6]=hues6; hues[7]=hues7;
+            float sats[8];
+            sats[0]=sats0; sats[1]=sats1; sats[2]=sats2; sats[3]=sats3;
+            sats[4]=sats4; sats[5]=sats5; sats[6]=sats6; sats[7]=sats7;
+            float lums[8];
+            lums[0]=lums0; lums[1]=lums1; lums[2]=lums2; lums[3]=lums3;
+            lums[4]=lums4; lums[5]=lums5; lums[6]=lums6; lums[7]=lums7;
+
+            float hueShift = 0.0;
+            float satShift = 0.0;
+            float lumShift = 0.0;
+            for (int i = 0; i < 8; i++) {
+                float rawDistance = abs(mod(hueDeg, 360.0) - mod(centers[i], 360.0));
+                float distance = min(rawDistance, 360.0 - rawDistance);
+                float weight = max(0.0, 1.0 - distance / halfWidth);
+                hueShift += weight * hues[i];
+                satShift += weight * sats[i];
+                lumShift += weight * lums[i];
+            }
+
+            // hue in degrees/100 keeps the shift in the same -1...1-ish order
+            // of magnitude as sat/lum before they're applied as fractional
+            // adjustments -- a 100-degree slider maps to roughly a 27-degree
+            // hue rotation, consistent with the ±100 UI range meaning "full
+            // strength", not "spin the hue wheel".
+            float shiftedHue = mod(hueDeg + hueShift * 0.27, 360.0);
+            float newSat = clamp(1.0 + satShift / 100.0, 0.0, 2.0);
+            float newLum = luma + (lumShift / 100.0) * 0.25;
+
+            float c = delta * newSat;
+            float x = c * (1.0 - abs(mod(shiftedHue / 60.0, 2.0) - 1.0));
+            float m = newLum - c * 0.5;
+            vec3 rgbPrime;
+            if (shiftedHue < 60.0) { rgbPrime = vec3(c, x, 0.0); }
+            else if (shiftedHue < 120.0) { rgbPrime = vec3(x, c, 0.0); }
+            else if (shiftedHue < 180.0) { rgbPrime = vec3(0.0, c, x); }
+            else if (shiftedHue < 240.0) { rgbPrime = vec3(0.0, x, c); }
+            else if (shiftedHue < 300.0) { rgbPrime = vec3(x, 0.0, c); }
+            else { rgbPrime = vec3(c, 0.0, x); }
+
+            return vec4(clamp(rgbPrime + m, 0.0, 1.0), pixel.a);
+        }
+        """
+        return CIColorKernel(source: source)
+    }()
+
+    private static func applyHSL(_ hsl: HSLAdjustments, to image: CIImage) -> CIImage {
+        guard let kernel = hslKernel else { return image }
+        let bands = [hsl.red, hsl.orange, hsl.yellow, hsl.green, hsl.aqua, hsl.blue, hsl.purple, hsl.magenta]
+        let centers = HSLKernelWeights.bandCenters
+        var arguments: [Any] = [image]
+        arguments.append(contentsOf: centers.map { Double($0) })
+        arguments.append(contentsOf: bands.map { Double($0.hue) })
+        arguments.append(contentsOf: bands.map { Double($0.saturation) })
+        arguments.append(contentsOf: bands.map { Double($0.luminance) })
+        arguments.append(HSLKernelWeights.halfWidthDegrees)
+        let extent = image.extent
+        return kernel.apply(extent: extent, roiCallback: { _, rect in rect }, arguments: arguments) ?? image
     }
 
     private static func applySplitToning(_ splitToning: SplitToning, to image: CIImage) -> CIImage {
