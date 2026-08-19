@@ -1,0 +1,257 @@
+# 調整引擎擴充設計（HSL／曲線／分離色調／銳化降噪／暈影／顆粒）
+
+> 本檔案是「風格檔系統（含 Lightroom `.xmp` 匯入）」這個下一階段目標底下，**先動手**的第一份 spec。順序決定（2026-08-19，使用者核准）：先有這些調整項目本身，風格檔／XMP 匯入才有東西可以套用，因此拆成兩份 spec 依序寫，這份只涵蓋調整引擎本身，不含風格檔儲存、套用 UI 或 XMP 匯入——那些留給下一份 spec，建在這份完成之上。
+>
+> 對應主規格 [`2026-08-13-mac-first-mvp-design.md`](2026-08-13-mac-first-mvp-design.md) §14.1／§14.2 路線圖；範圍決策脈絡見 `docs/reference/next-phase-scope-notes.md`（2026-08-16）。MVP 本身已於 [`2026-08-19-mvp-acceptance.md`](../../testing/reports/2026-08-19-mvp-acceptance.md) 簽收完成，這是簽收後第一個新階段。
+
+## 給接手者的話（重要，先讀這段）
+
+這份 spec 可能由另一台機器上的 session（例如 Codex）接續執行。跨工具/跨 session 交接的既有慣例：**進度絕對不能只存在單一工具的私有 memory 裡**，一定要寫回專案內的文件，下一個接手的 session（不管是同一個工具重置後，還是換一個工具）才讀得到。
+
+- 開始實作前，先讀完這整份 spec，並用 `writing-plans` skill（或等價流程）產出一份實作計畫。
+- 每完成一個獨立子項目（見 §7 拆解），**立刻 commit**，commit message 寫清楚做了什麼、為什麼——不要囤積一堆未提交的變更。
+- 如果 token／用量快耗盡：**不要不聲不響斷掉**。在這份文件的「## 進度日誌」章節（見文末，目前是空的，直接接著寫）附加一段，寫清楚：目前做到哪一個子項目、哪些檔案已經改完／哪些改到一半、下一步該做什麼、有沒有踩到任何需要人工決策的坑。寫完立刻 commit＋push，不要留在本機未提交狀態。下一個 session（不管是誰）第一件事就是先讀這個進度日誌，接著讀對應的 commit log，才開始動手，不要重新從頭讀整份 spec 猜進度。
+- 這個專案的慣例是**一個修正/一個子項目一個可回溯的 commit**，不要把好幾個子項目擠在一個 commit 裡，也不要留大量未 commit 的工作到 session 結束。
+
+## 1. 範圍
+
+### 包含
+
+- 擴充 `PhotoAdjustments` 資料模型，新增六類調整：HSL 分色、獨立進階曲線、分離色調、銳化、降噪、暈影、顆粒（共七個子模組，見 §3；「六類」是概念分類，顆粒／暈影算兩個獨立子模組）。
+- 擴充 `AdjustmentPipeline`／`AdjustmentMapping`，讓這些新欄位真的能渲染出畫面（見 §4）。
+- Sidecar（`.lumaharbor` JSON）的讀寫相容性與 schema 版本升級（見 §5）。
+- 對應的單元測試（純數學換算部分）與人工視覺驗證清單（見 §6）。
+
+### 明確不包含（留給後續 spec 或未來階段）
+
+- **不做任何新的人工 UI 控制項**。Inspector 面板維持現有 10 個滑桿不變。新欄位目前唯一的寫入來源是「以後套用風格檔」，這份 spec 完成後，新欄位在 UI 上還沒有任何地方可以手動調——這是刻意的，範圍已在 2026-08-19 brainstorming 階段跟使用者確認過。
+- **不做風格檔儲存／套用／管理系統**（那是下一份 spec）。
+- **不做 Lightroom `.xmp` 解析或匯入**（那是下一份 spec，會用到這份 spec 建立的資料模型）。
+- **不做批次編輯、評分／篩選**（§14.2 其餘範圍，未來另開 spec）。
+- **不做裁切／旋轉／局部遮罩**（§14.1／§14.3 其餘範圍，未來另開 spec）。
+
+## 2. 目標
+
+- 每個新調整項目都有明確定義的數值範圍、預設值（中性值＝沒有效果）、以及「滑桿式數值 → Core Image 濾鏡參數」的換算公式，換算邏輯全部集中、可單元測試，比照現有 `AdjustmentMapping`／`ToneCurveMapping` 的做法。
+- 新欄位對既有的舊 sidecar 完全向後相容：讀取時沒有這些欄位＝視為中性值，不影響任何既有調整。
+- 沒有套用任何新效果的照片，渲染路徑效能跟現在幾乎相同（每個新濾鏡在中性值時整段跳過，不執行）。
+- 數值範圍盡量貼近 Lightroom XMP 原生欄位的單位與範圍（見 §3 各子結構），讓下一份 XMP 匯入 spec 的映射邏輯是直接對應、不需要額外猜測換算公式。
+
+## 3. 資料模型
+
+`PhotoAdjustments` 新增七個巢狀 `Codable, Equatable, Hashable, Sendable` 子結構，每個都有自己的 `.neutral` 靜態值。原本的 10 個扁平欄位完全不動。
+
+> 以下程式碼片段是**示意型別形狀**（欄位名稱、型別、範圍、預設值才是規格本體），不是可以直接複製貼上的完整 Swift——實際 `init`／`clamp`／`Codable` 樣板寫法照現有 `PhotoAdjustments.swift`／`AdjustmentCatalog.swift` 的既有慣例（`decodeIfPresent` + 預設值回退、`clamp` 防呆等），實作時比照既有檔案的寫法，不要重新發明。
+
+```swift
+public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
+    // 既有 10 個欄位不變：exposure, temperature, tint, contrast,
+    // highlights, shadows, whites, blacks, vibrance, saturation
+
+    public var advancedToneCurve: AdvancedToneCurve   // 見下方
+    public var hsl: HSLAdjustments
+    public var splitToning: SplitToning
+    public var sharpening: Sharpening
+    public var noiseReduction: NoiseReduction
+    public var vignette: Vignette
+    public var grain: Grain
+}
+```
+
+### 3.1 `AdvancedToneCurve`——獨立於 4 滑桿曲線之外疊加的曲線
+
+```swift
+public struct AdvancedToneCurve: Codable, Equatable, Hashable, Sendable {
+    /// 任意數量的控制點，0...1 正規化座標，x 嚴格遞增。空陣列＝identity（不套用）。
+    public var points: [ToneCurvePoint]
+    public static let neutral = AdvancedToneCurve(points: [])
+}
+```
+
+跟現有 `ToneCurveMapping.controlPoints(for:)`（由 4 個滑桿算出的 5 點曲線）是**兩層分開的曲線，渲染時依序疊加**（先套 4-滑桿曲線，再套這條），不是互相取代。`points` 為空陣列時整段跳過。
+
+### 3.2 `HSLAdjustments`——8 色分別調色相／飽和度／明度
+
+```swift
+public struct HSLBand: Codable, Equatable, Hashable, Sendable {
+    public var hue: Double        // -100...100，預設 0
+    public var saturation: Double // -100...100，預設 0
+    public var luminance: Double  // -100...100，預設 0
+}
+
+public struct HSLAdjustments: Codable, Equatable, Hashable, Sendable {
+    public var red: HSLBand
+    public var orange: HSLBand
+    public var yellow: HSLBand
+    public var green: HSLBand
+    public var aqua: HSLBand
+    public var blue: HSLBand
+    public var purple: HSLBand
+    public var magenta: HSLBand
+    public static let neutral = HSLAdjustments(
+        red: HSLBand(), orange: HSLBand(), yellow: HSLBand(), green: HSLBand(),
+        aqua: HSLBand(), blue: HSLBand(), purple: HSLBand(), magenta: HSLBand()
+    )
+}
+```
+
+八色分區與命名直接對應 Lightroom 的 HSL 面板（Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta），下一份 XMP spec 可以直接一對一映射，不需要色彩空間換算猜測。
+
+### 3.3 `SplitToning`——陰影／高光分別上色
+
+```swift
+public struct SplitToning: Codable, Equatable, Hashable, Sendable {
+    public var shadowHue: Double        // 0...360，預設 0
+    public var shadowSaturation: Double // 0...100，預設 0
+    public var highlightHue: Double     // 0...360，預設 0
+    public var highlightSaturation: Double // 0...100，預設 0
+    /// 負值偏向陰影範圍、正值偏向高光範圍，Lightroom 同名欄位語意
+    public var balance: Double          // -100...100，預設 0
+    public static let neutral = SplitToning(
+        shadowHue: 0, shadowSaturation: 0, highlightHue: 0, highlightSaturation: 0, balance: 0
+    )
+    // 判斷是否 identity 只看兩個 saturation 是否都是 0，hue／balance 在飽和度 0 時無意義（見下方說明）
+}
+```
+
+`shadowSaturation == 0 && highlightSaturation == 0` 時整段跳過，不管 hue／balance 是什麼值。
+
+### 3.4 `Sharpening`
+
+```swift
+public struct Sharpening: Codable, Equatable, Hashable, Sendable {
+    public var amount: Double  // 0...150，預設 0
+    public var radius: Double  // 0.5...3.0，預設 1.0
+    public var detail: Double  // 0...100，預設 25
+    public var masking: Double // 0...100，預設 0
+    public static let neutral = Sharpening(amount: 0, radius: 1.0, detail: 25, masking: 0)
+}
+```
+
+`amount == 0` 時整段跳過。四個欄位的範圍跟預設值直接照 Lightroom 慣例，方便下一份 spec 映射。
+
+### 3.5 `NoiseReduction`
+
+```swift
+public struct NoiseReduction: Codable, Equatable, Hashable, Sendable {
+    public var luminanceAmount: Double  // 0...100，預設 0
+    public var luminanceDetail: Double  // 0...100，預設 50
+    public var colorAmount: Double      // 0...100，預設 25（Lightroom 預設就有一點色彩降噪）
+    public var colorDetail: Double      // 0...100，預設 50
+    public static let neutral = NoiseReduction(luminanceAmount: 0, luminanceDetail: 50, colorAmount: 0, colorDetail: 50)
+}
+```
+
+`neutral` 把 `colorAmount` 也設為 0（不是 Lightroom 預設的 25）——這裡「中性」定義是「LumaHarbor 完全不介入」，不是「模仿 Lightroom 新增照片時的預設值」，跟其他欄位邏輯一致。`luminanceAmount == 0 && colorAmount == 0` 時整段跳過。
+
+### 3.6 `Vignette`（後製暈影，不是鏡頭校正暈影）
+
+```swift
+public struct Vignette: Codable, Equatable, Hashable, Sendable {
+    public var amount: Double     // -100...100，預設 0（負值變暗、正值提亮）
+    public var midpoint: Double   // 0...100，預設 50
+    public var roundness: Double  // -100...100，預設 0
+    public var feather: Double    // 0...100，預設 50
+    public static let neutral = Vignette(amount: 0, midpoint: 50, roundness: 0, feather: 50)
+}
+```
+
+`amount == 0` 時整段跳過。
+
+### 3.7 `Grain`
+
+```swift
+public struct Grain: Codable, Equatable, Hashable, Sendable {
+    public var amount: Double     // 0...100，預設 0
+    public var size: Double       // 0...100，預設 25
+    public var roughness: Double  // 0...100，預設 50
+    public static let neutral = Grain(amount: 0, size: 25, roughness: 50)
+}
+```
+
+`amount == 0` 時整段跳過。
+
+### 3.8 `PhotoAdjustments.isNeutral` 與 `modifiedKinds`
+
+`isNeutral` 沿用現有 `self == .neutral` 邏輯（`Equatable` 自動涵蓋新欄位，不用特別改）。`modifiedKinds`（目前只列舉 10 個滑桿的 `AdjustmentKind`）**不需要**擴充去涵蓋新欄位——因為新欄位沒有對應的 UI `AdjustmentKind`（見 §1「不包含」），這個屬性語意維持「哪些滑桿被動過」不變。之後如果真的要在 UI 呈現「這張照片有沒有套風格檔帶來的調整」，那是下一份 spec 的事，屆時再決定要不要新增一個平行的「哪些進階效果被動過」查詢。
+
+## 4. 渲染管線
+
+### 4.1 現有管線順序（不動）
+
+```
+1. Exposure（線性光）
+2. 轉到 gamma 空間
+3. 4-滑桿曲線（ToneCurveMapping）
+4. Contrast + Saturation（CIColorControls）
+5. Vibrance
+6. 轉回線性
+```
+
+### 4.2 新增順序
+
+在既有第 5 步（Vibrance）之後、轉回線性之前插入：
+
+```
+5.5. 進階曲線（AdvancedToneCurve，自訂 CIColorKernel，任意點數查表）
+6.  HSL 分色（自訂 CIColorKernel，一次處理 8 色分區）
+7.  分離色調（亮度遮罩 + 色彩混合，可用內建 CIFilter 組合，不一定要自訂 kernel）
+    ↓ 轉回線性 ↓
+8.  銳化（CISharpenLuminance 或 CIUnsharpMask，系統內建）
+9.  降噪（CINoiseReduction，系統內建，luminance/color 兩個參數都有對應輸入）
+10. 暈影（CIVignette，系統內建）
+11. 顆粒（CIRandomGenerator 產生雜訊 + 混合模式疊加，業界標準做法，無系統內建濾鏡直接對應但技術成熟）
+```
+
+銳化／降噪／暈影／顆粒放在色彩處理完、轉回線性之後——這四個是「後製效果」，不是色彩分級，Lightroom 的處理順序也是細節面板／效果面板在色彩調整之後套用。
+
+### 4.3 自訂濾鏡（HSL、進階曲線）
+
+兩者都用 `CIColorKernel`（Core Image 官方支援的 GPU 自訂濾鏡機制，寫法是一段 Core Image Kernel Language 或 Metal Shading Language 程式碼，`CIColorKernel(source:)` 載入後跟內建濾鏡一樣接進 filter chain，不是什麼地下技巧）：
+
+- **HSL**：kernel 對每個像素算出色相角度，用平滑的分區權重（8 個色相中心點各自的高斯或三角形 falloff，避免區塊交界處色調斷層）混合 8 組 hue/saturation/luminance 調整量，一次 pass 完成，不需要對每個顏色分別跑一次濾鏡再疊圖。
+- **進階曲線**：`points` 陣列先在 CPU 端（純 Swift，可單元測試）resample／插值成一張固定解析度的查表（例如 256 級的 1D LUT），再用 `CIColorKernel` 對每個像素的 RGB 分別查表——這樣不管風格檔帶來的曲線有幾個控制點，畫面精確度都不受限於 `CIToneCurve` 內建的 5 點限制。CPU 端插值邏輯（`points` → LUT）是純數學，可以比照 `ToneCurveMapping` 寫測試；GPU 端查表 kernel 本身無法單元測試，需要人工視覺驗證。
+
+### 4.4 效能與跳過邏輯
+
+比照現有 `AdjustmentPipeline.apply`：每一段都先檢查是否為 identity/neutral，是的話完全跳過（不建立 filter、不加進 chain）。`RenderParameters` 需要對應新增 `isHSLIdentity`、`isAdvancedCurveIdentity` 等旗標，邏輯風格照抄現有的 `isToneCurveIdentity`／`isVibranceIdentity`。
+
+## 5. Sidecar 相容性與 schema 版本
+
+- `PhotoSidecar.currentSchemaVersion` 往上跳一版（目前是多少要看實作時的當下狀態，實作者自行確認）。
+- `PhotoAdjustments.init(from:)` 對七個新欄位比照現有寫法：`decodeIfPresent`，找不到就用對應的 `.neutral`——舊 sidecar 讀進來，新欄位全部是中性值，畫面不變。
+- `PhotoAdjustments.encode(to:)` 一律寫出全部欄位（含新的七個），沿用現有「自我描述、不省略」的原則。
+- **關鍵**：因為 schema 版本跳號了，`SidecarRepository` 既有的「新版本 schema 拒絕部分讀取」機制（`SidecarError.unsupportedSchemaVersion`，見 §0 對應主規格）會自動生效——舊版 App 打開新版 sidecar 會直接走隔離流程、跳出「這些編輯是由新版本儲存」的錯誤，不會發生「舊版 App 打開、存檔、把新欄位悄悄沖掉」的資料遺失。這條路徑已經有既有測試覆蓋（`SidecarRepositoryTests`），只要 schema 版本號真的往上跳，不需要為這個情境另外寫新測試，但實作完成後建議手動確認一次（改一個假的更高 schema 版本號讀取，確認真的被拒絕）。
+
+## 6. 測試策略
+
+- **純數學單元測試**（比照 `ToneCurveMappingTests`）：
+  - 每個新子結構的 `.neutral` 值對映射函式必須產出「identity」旗標為 true。
+  - 每個滑桿式數值換算成 Core Image 參數的邊界值測試（最小、最大、預設）。
+  - `AdvancedToneCurve.points` → LUT 插值邏輯：空陣列＝identity；已知幾組控制點對應已知輸出值；確保單調遞增（跟現有 `enforceMonotonicOutput` 同樣的疑慮，任意風格檔帶來的曲線點也可能需要類似的防呆）。
+- **Sidecar round-trip 測試**（比照現有 `PhotoAdjustments` 相關測試）：
+  - 舊格式 JSON（沒有新欄位）解出來新欄位皆為 `.neutral`。
+  - 新格式寫入讀出一致。
+  - schema 版本跳號後，舊版本號的讀取路徑正確走隔離流程（見 §5）。
+- **人工視覺驗證**（GPU 渲染部分無法自動化，比照 Gate D 的人工補驗清單）：
+  - 對真實 Sony ARW 照片，八個 HSL 色相分別大幅調整，確認畫面對應區塊變色、交界處沒有明顯色階斷層。
+  - 套用一條有多個控制點、形狀複雜的進階曲線，確認畫面明暗分佈符合曲線形狀，沒有色彩反轉（solarization）等已知風險（見現有 `enforceMonotonicOutput` 註解裡描述的問題）。
+  - 分離色調、銳化、降噪、暈影、顆粒各自套用極端值，確認畫面有對應變化、無崩潰、無明顯 artifact。
+  - 全部效果同時套用一次，確認管線整體不崩潰、渲染時間仍在可接受範圍（不要求精確量測，肉眼判斷「沒有變得很慢」即可，精確效能量測留給之後真正接上風格檔、實際套用大量照片時再做）。
+
+## 7. 建議拆解成的獨立子項目（給 `writing-plans` 用）
+
+每項建議獨立 commit，順序大致依技術風險由低到高：
+
+1. `AdvancedToneCurve`／`HSLAdjustments`／`SplitToning`／`Sharpening`／`NoiseReduction`／`Vignette`／`Grain` 七個子結構本身（純資料型別＋單元測試，不碰渲染或 sidecar）。
+2. `PhotoAdjustments` 整合新欄位＋schema 版本跳號＋sidecar round-trip 測試。
+3. 銳化／降噪／暈影（系統內建 `CIFilter`，風險低，可以一起做）。
+4. 顆粒（`CIRandomGenerator` + 混合，風險中）。
+5. 分離色調（亮度遮罩 + 色彩混合，風險中）。
+6. 進階曲線自訂 `CIColorKernel`（風險高，含 CPU 端 LUT 插值的獨立可測邏輯）。
+7. HSL 自訂 `CIColorKernel`（風險最高，8 色分區平滑過渡的 kernel 邏輯）。
+8. 全部整合後的人工視覺驗證（見 §6）。
+
+## 進度日誌
+
+（目前是空的。接手的 session 如果需要中途記錄進度、或因為 token/用量即將耗盡需要交接，從這裡往下接著寫，格式不拘，但至少要包含：日期、目前做到哪個 §7 子項目、對應的 commit hash、下一步是什麼。寫完立刻 commit＋push。）
