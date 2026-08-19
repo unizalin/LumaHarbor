@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import PhotoLibraryCore
 import RawProcessingCore
@@ -51,6 +52,15 @@ public final class LibraryViewModel: ObservableObject {
 
     let editor = EditorViewModel()
 
+    /// Views only ever hold `@EnvironmentObject var model: LibraryViewModel`
+    /// and read `model.editor.*` through it — `editor` is never injected as its
+    /// own environment object. Without this, `editor`'s own `@Published`
+    /// mutations (a new photo opening, its preview arriving) never republish
+    /// through `self`, so SwiftUI has nothing telling it to redraw: the
+    /// inspector and preview pane show whatever editor state existed at the
+    /// last unrelated `LibraryViewModel` publish, one selection behind.
+    private var editorForwarding: AnyCancellable?
+
     private var services: AppServices?
     private var scanTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
@@ -72,7 +82,11 @@ public final class LibraryViewModel: ObservableObject {
         case library(LibraryID?)
     }
 
-    public init() {}
+    public init() {
+        editorForwarding = editor.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
 
     private func install(services: AppServices) {
         self.services = services
