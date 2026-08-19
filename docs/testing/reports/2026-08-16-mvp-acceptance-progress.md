@@ -254,3 +254,15 @@ build／337 tests 都過。**這也是手勢層級修法，沒辦法寫自動化
 3. unsupported／disk-full 測試素材 — 非阻塞，視需要再做
 4. Undo/Redo 快捷鍵 — 使用者確認「快捷鍵不好驗測」，決定不繼續深究「一直有錯誤」的具體內容；維持已知問題狀態，**滑鼠點選單是唯一目前確認可用的路徑，快捷鍵維持無效**，不擋簽收
 5. Gate F 效能量測（Instruments）— 未開始
+
+## 2026-08-19（續五）：中文化補完（調整名稱、錯誤訊息、系統面板），另外發現一個需要人工驗證的疑點
+
+派 agent 補完所有還沒接上 `Localizable.strings` 的使用者可見字串——最主要的缺口是 `InspectorView` 的十個調整滑桿名稱（Exposure/Contrast/…）跟三個分類標題（White Balance/Tone/Color），這些走的是 `Text(String)`（逐字顯示，不查表），不管 `.strings` 裡有沒有對應 key 都不會被翻譯，是目前為止最明顯但沒人發現的中文化漏洞。同時補了 `NSOpenPanel` 的 9 個標題/訊息/按鈕字串（直接指派 `panel.title` 也不會走 SwiftUI 自動查表），以及所有 `LocalizedError` 的 `errorDescription`/`recoverySuggestion`。`.strings` 兩份各從 55 個 key 增加到 169 個（新增 114，key 數兩邊一致，`plutil -lint` 過）。build／337 tests 都過。
+
+**主 session 審查時額外修正**：agent 交回來的版本裡，掃描進度那句「N photos, M skipped」直譯後在中文讀起來語意不完整（`"12 張", "3 略過"`——缺名詞），已改成 `"found"` = 「張照片」、`"skipped"` = 「張跳過」，讓「掃描中── 12 張照片」「12 張照片, 3 張跳過」這種組合句讀起來是完整的中文句子，不是逐字拼接。
+
+**主 session 審查時發現的疑點（尚未解決，需要人工用真機驗證）**：用 `-AppleLanguages '(zh-Hant-TW)'` 這個標準的 Apple 語言測試參數（Xcode 的「App Language」launch argument 背後也是用這個）直接啟動編譯出來的 `LumaHarbor` binary，實測 `Bundle.main.preferredLocalizations` 跟 `Bundle.module.preferredLocalizations` 都回傳 `["en"]`，即使 `Locale.preferredLanguages` 已經正確顯示 `["zh-Hant-TW"]`，且已經排除大小寫問題（`Sources/.../Resources/zh-Hant.lproj` 被 SwiftPM 的 `.process()` 資源規則轉成 `zh-hant.lproj` 全小寫是既有已知行為，2026-08-16 那次就已經在 `Tests/LumaHarborAppTests/LocalizationSmokeTest.swift` 裡繞開處理過，這次連刻意改用 `.copy()` 保留原始大小寫 `zh-Hant.lproj` 都測不出差異）。換句話說：**用命令列參數強制語言，`Bundle` 的語言協商機制完全沒反應，一直卡在英文**。
+
+這跟現有的 `LocalizationSmokeTest.swift` 不衝突——那個測試是直接用路徑指到特定 `.lproj` 子目錄讀值（繞過系統語言協商），驗證的是「翻譯檔案內容本身正確」，不是「系統語言切換後真的會顯示中文」。我這次測的是後者，用的是命令列模擬，不是真的改 macOS 系統設定，測試方法本身也可能不夠準確（例如純 command-line 執行的 binary 跟透過 Finder/LaunchServices 啟動的 `.app` 在 bundle 語言協商上可能行為不同，這點我没有進一步驗證的工具，這台環境沒有輔助使用/螢幕錄製權限，沒辦法真的切系統語言後開 App 用眼睛看）。
+
+**建議**：下次人工驗收時，麻煩實際去「系統設定 → 一般 → 語言與地區」把偏好語言切成繁體中文（或至少確認目前就是），然後 `swift run LumaHarbor` 打開 App 看調整面板名稱、Undo/Redo 選單這些**這次新加的**中文有沒有真的出現。如果沒有，代表這是一個獨立於本次字串補完之外、範圍更大的既有 bug（可能連 2026-08-16 那批最早的中文化都沒有真的在 `swift run` 環境下顯示過），需要另開 spec 處理，不是能立刻在這個環境憑空修好的事。
