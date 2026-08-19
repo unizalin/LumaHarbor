@@ -1,3 +1,4 @@
+import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
@@ -37,6 +38,7 @@ public struct AdjustmentPipeline: Sendable {
             || !parameters.isContrastIdentity
             || !parameters.isSaturationIdentity
             || !parameters.isVibranceIdentity
+            || !parameters.isSplitToningIdentity
 
         if needsPerceptualStage {
             // 2. Move to a gamma-encoded space. Tone curves, contrast and
@@ -67,6 +69,16 @@ public struct AdjustmentPipeline: Sendable {
                 vibrance.inputImage = working
                 vibrance.amount = Float(parameters.vibrance)
                 working = vibrance.outputImage ?? working
+            }
+
+            // MARK: - Insertion seam for Task 6 (advanced curve, step 5.5) and
+            // Task 7 (HSL, step 6) — both belong here, before split toning.
+
+            // 7. Split toning (spec §4.2 step 7): tint shadows and highlights
+            // independently using a luminance mask to blend two flat colour
+            // layers, weighted by `balance`.
+            if !parameters.isSplitToningIdentity {
+                working = Self.applySplitToning(parameters.splitToning, to: working)
             }
 
             // 6. Back to linear so the CIContext's own output transform is the
@@ -207,6 +219,66 @@ public struct AdjustmentPipeline: Sendable {
         composite.inputImage = mask.cropped(to: extent)
         composite.backgroundImage = image
         return composite.outputImage ?? image
+    }
+
+    private static func applySplitToning(_ splitToning: SplitToning, to image: CIImage) -> CIImage {
+        let extent = image.extent
+
+        func flatColor(hue: Double, saturation: Double) -> CIImage {
+            let color = CIColor(
+                color: NSColor(
+                    hue: hue / 360, saturation: saturation / 100, brightness: 0.5, alpha: 1
+                )
+            ) ?? CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+            return CIImage(color: color).cropped(to: extent)
+        }
+
+        let shadowColor = flatColor(hue: splitToning.shadowHue, saturation: splitToning.shadowSaturation)
+        let highlightColor = flatColor(hue: splitToning.highlightHue, saturation: splitToning.highlightSaturation)
+
+        // Luminance mask: 0 at black, 1 at white, biased by balance (positive
+        // balance shrinks the shadow range so highlights dominate more of the
+        // midtones, and vice versa) -- CIMaskToAlpha-style use of the source
+        // image's own luminance via CIColorMatrix collapsing to grey, offset
+        // by balance/200 before use as a blend mask.
+        let luminanceMask = CIFilter.colorMatrix()
+        luminanceMask.inputImage = image
+        let lumaVector = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        luminanceMask.rVector = lumaVector
+        luminanceMask.gVector = lumaVector
+        luminanceMask.bVector = lumaVector
+        luminanceMask.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        luminanceMask.biasVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        let balanceOffset = splitToning.balance / 200
+        let biasedMask = CIFilter.colorMatrix()
+        biasedMask.inputImage = luminanceMask.outputImage
+        biasedMask.rVector = CIVector(x: 1, y: 0, z: 0, w: 0)
+        biasedMask.gVector = CIVector(x: 1, y: 0, z: 0, w: 0)
+        biasedMask.bVector = CIVector(x: 1, y: 0, z: 0, w: 0)
+        biasedMask.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        biasedMask.biasVector = CIVector(x: CGFloat(balanceOffset), y: CGFloat(balanceOffset), z: CGFloat(balanceOffset), w: 0)
+        guard let mask = biasedMask.outputImage else { return image }
+
+        let shadowsBlend = CIFilter.blendWithMask()
+        shadowsBlend.inputImage = shadowColor
+        shadowsBlend.backgroundImage = image
+        shadowsBlend.maskImage = mask.applyingFilter("CIColorInvert")
+        guard let withShadows = shadowsBlend.outputImage else { return image }
+
+        let highlightsBlend = CIFilter.blendWithMask()
+        highlightsBlend.inputImage = highlightColor
+        highlightsBlend.backgroundImage = withShadows
+        highlightsBlend.maskImage = mask
+        guard let withHighlights = highlightsBlend.outputImage else { return withShadows }
+
+        // The flat tint layers are opaque colour, so blending them straight in
+        // would flatten contrast entirely; soft-light keeps the underlying
+        // luminance structure while still shifting hue, matching how
+        // Lightroom's split toning reads.
+        let softLight = CIFilter.softLightBlendMode()
+        softLight.inputImage = withHighlights
+        softLight.backgroundImage = image
+        return softLight.outputImage?.cropped(to: extent) ?? image
     }
 
     private static func applyToneCurve(_ points: [ToneCurvePoint], to image: CIImage) -> CIImage {

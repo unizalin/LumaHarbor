@@ -285,6 +285,33 @@ final class AdjustmentPipelineTests: XCTestCase {
         let anyPixelDiffers = stride(from: 0, to: bytes.count, by: 4).contains { bytes[$0] != firstPixelRed }
         XCTAssertTrue(anyPixelDiffers, "Grain at full amount on a flat source must not render perfectly flat")
     }
+
+    // MARK: - Split toning
+
+    func testNeutralSplitToningStaysAPassthrough() {
+        let source = makeSourceImage()
+        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
+    }
+
+    func testShadowTintShiftsADarkPixelTowardTheShadowHue() throws {
+        // A blue shadow tint (hue 240) on a dark-grey patch should push blue
+        // above red at the pixel level.
+        let darkComponent = linearComponent(fromPerceptual: 0.2)
+        let dark = makeSourceImage(red: darkComponent, green: darkComponent, blue: darkComponent)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.splitToning = SplitToning(shadowHue: 240, shadowSaturation: 80, highlightHue: 0, highlightSaturation: 0, balance: 0)
+        let tinted = try centrePixel(pipeline.apply(adjustments, to: dark))
+        XCTAssertGreaterThan(tinted.blue, tinted.red, "A blue shadow tint should leave blue above red in a dark patch")
+    }
+
+    func testHighlightTintShiftsABrightPixelTowardTheHighlightHue() throws {
+        let brightComponent = linearComponent(fromPerceptual: 0.8)
+        let bright = makeSourceImage(red: brightComponent, green: brightComponent, blue: brightComponent)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.splitToning = SplitToning(shadowHue: 0, shadowSaturation: 0, highlightHue: 30, highlightSaturation: 80, balance: 0)
+        let tinted = try centrePixel(pipeline.apply(adjustments, to: bright))
+        XCTAssertGreaterThan(tinted.red, tinted.blue, "An orange (hue 30) highlight tint should leave red above blue in a bright patch")
+    }
 }
 
 private func XCTAssertEqual(

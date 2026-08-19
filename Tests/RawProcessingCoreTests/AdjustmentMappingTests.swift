@@ -146,4 +146,16 @@ final class AdjustmentMappingTests: XCTestCase {
     func testNeutralGrainIsIdentity() {
         XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isGrainIdentity)
     }
+
+    func testSplitToningIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.splitToning = SplitToning(shadowHue: 210, shadowSaturation: 30, highlightHue: 45, highlightSaturation: 20, balance: 0)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.splitToning, adjustments.splitToning)
+        XCTAssertFalse(parameters.isSplitToningIdentity)
+    }
+
+    func testNeutralSplitToningIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isSplitToningIdentity)
+    }
 }
