@@ -1,8 +1,66 @@
+import CoreGraphics
 import Foundation
 import XCTest
 @testable import LumaHarborApp
 @testable import PhotoLibraryCore
 @testable import RawProcessingCore
+
+enum AppTestImage {
+    /// A tiny opaque bitmap. These tests care about scheduling and view-model
+    /// state, not pixels.
+    static func make() throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 4,
+            height: 4,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(gray: 0.5, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        return try XCTUnwrap(context.makeImage())
+    }
+}
+
+/// Records every interactive preview request the view model actually submitted
+/// to the scheduler — its exposure value and when the renderer saw it — so a
+/// test can prove a rapid drag was throttled instead of queuing one decode per
+/// tick.
+actor RecordingPreviewRenderer: PreviewRendering {
+    struct Call {
+        let exposure: Double
+        let time: ContinuousClock.Instant
+    }
+
+    private(set) var calls: [Call] = []
+
+    func render(_ request: PreviewRequest) async throws -> PreviewImage {
+        calls.append(Call(exposure: request.adjustments.exposure, time: .now))
+        let image = try AppTestImage.make()
+        return PreviewImage(cgImage: image, pixelSize: CGSize(width: 4, height: 4))
+    }
+}
+
+/// Succeeds for every request except ones whose exposure is in `failingExposures`
+/// — lets a test make one specific submission fail without the renderer failing
+/// wholesale.
+actor SelectivelyFailingPreviewRenderer: PreviewRendering {
+    private let failingExposures: Set<Double>
+
+    init(failingExposures: Set<Double>) {
+        self.failingExposures = failingExposures
+    }
+
+    func render(_ request: PreviewRequest) async throws -> PreviewImage {
+        if failingExposures.contains(request.adjustments.exposure) {
+            throw RawDecodingError.unsupportedFormat(path: request.url.path)
+        }
+        let image = try AppTestImage.make()
+        return PreviewImage(cgImage: image, pixelSize: CGSize(width: 4, height: 4))
+    }
+}
 
 /// A preview renderer that never produces anything.
 ///
@@ -117,7 +175,8 @@ class AppViewModelTestCase: XCTestCase {
     /// two async steps under the test's control.
     func makeServices(
         loadAdjustments: (@Sendable (PhotoAsset) async throws -> PhotoAdjustments)? = nil,
-        saveAdjustments: (@Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void)? = nil
+        saveAdjustments: (@Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void)? = nil,
+        previewRenderer: (any PreviewRendering)? = nil
     ) throws -> AppServices {
         try locations.createDirectories()
         let decoder = StubRawDecoder()
@@ -131,6 +190,7 @@ class AppViewModelTestCase: XCTestCase {
             directoryURL: locations.thumbnailCacheURL,
             byteBudget: 1_000_000
         )
+        let renderer = previewRenderer ?? IdlePreviewRenderer()
 
         return AppServices(
             locations: locations,
@@ -138,11 +198,11 @@ class AppViewModelTestCase: XCTestCase {
             thumbnailProvider: ThumbnailProvider(
                 cache: cache, decoder: decoder, renderService: renderService
             ),
-            previewScheduler: PreviewScheduler(renderer: IdlePreviewRenderer()),
+            previewScheduler: PreviewScheduler(renderer: renderer),
             exporter: JPEGExporter(decoder: decoder, renderService: renderService),
             decoder: decoder,
             renderService: renderService,
-            previewRenderer: IdlePreviewRenderer(),
+            previewRenderer: renderer,
             loadAdjustments: loadAdjustments ?? { photo in
                 try await libraryService.adjustments(for: photo)
             },

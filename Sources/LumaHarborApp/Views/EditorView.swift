@@ -16,6 +16,18 @@ struct EditorView: View {
         .background(Color(nsColor: .underPageBackgroundColor))
         .navigationTitle(model.selectedPhoto?.filename ?? "LumaHarbor")
         .toolbar { toolbarContent }
+        .alert(item: Binding(
+            get: { model.editor.alert },
+            set: { model.editor.alert = $0 }
+        )) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text([alert.message, alert.nextStep]
+                    .compactMap { $0 }
+                    .joined(separator: "\n\n")),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     private var previewArea: some View {
