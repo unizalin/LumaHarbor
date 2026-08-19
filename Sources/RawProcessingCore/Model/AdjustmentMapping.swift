@@ -25,6 +25,7 @@ public struct RenderParameters: Equatable, Sendable {
     public let grain: Grain
     public let splitToning: SplitToning
     public let advancedToneCurve: AdvancedToneCurve
+    public let hsl: HSLAdjustments
 
     public var whiteBalance: RawWhiteBalance {
         RawWhiteBalance(
@@ -45,6 +46,7 @@ public struct RenderParameters: Equatable, Sendable {
     public var isGrainIdentity: Bool { grain.isIdentity }
     public var isSplitToningIdentity: Bool { splitToning.isIdentity }
     public var isAdvancedToneCurveIdentity: Bool { advancedToneCurve.isIdentity }
+    public var isHSLIdentity: Bool { hsl.isIdentity }
 }
 
 /// The one place slider units become Core Image units.
@@ -91,7 +93,8 @@ public enum AdjustmentMapping {
             vignette: clamped.vignette,
             grain: clamped.grain,
             splitToning: clamped.splitToning,
-            advancedToneCurve: clamped.advancedToneCurve
+            advancedToneCurve: clamped.advancedToneCurve,
+            hsl: clamped.hsl
         )
     }
 }
