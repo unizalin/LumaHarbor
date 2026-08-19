@@ -11,26 +11,26 @@ extension AtomicWriteError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .destinationNotWritable:
-            return "This drive is read-only, so edits can't be saved next to your photos."
+            return String(localized: "This drive is read-only, so edits can't be saved next to your photos.")
         case .volumeUnavailable:
-            return "The drive holding this library isn't available."
+            return String(localized: "The drive holding this library isn't available.")
         case .insufficientDiskSpace:
-            return "There isn't enough free space to save your edits."
+            return String(localized: "There isn't enough free space to save your edits.")
         case .writeFailed(_, let reason):
-            return "Your edits couldn't be saved. \(reason)"
+            return "\(String(localized: "Your edits couldn't be saved.")) \(reason)"
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .destinationNotWritable:
-            return "Unlock the drive or copy the library somewhere writable, then retry."
+            return String(localized: "Unlock the drive or copy the library somewhere writable, then retry.")
         case .volumeUnavailable:
-            return "Reconnect the drive, then retry."
+            return String(localized: "Reconnect the drive, then retry.")
         case .insufficientDiskSpace:
-            return "Free up space on the drive, then retry."
+            return String(localized: "Free up space on the drive, then retry.")
         case .writeFailed:
-            return "Retry saving."
+            return String(localized: "Retry saving.")
         }
     }
 }

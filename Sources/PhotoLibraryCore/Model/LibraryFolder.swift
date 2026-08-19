@@ -57,9 +57,9 @@ public enum LibraryAvailability: Equatable, Sendable {
 
     public var statusMessage: String {
         switch self {
-        case .ready: return "Ready"
-        case .offline: return "Offline — reconnect the drive to edit or export"
-        case .readOnly: return "Read-only — edits can't be saved to this drive"
+        case .ready: return String(localized: "Ready")
+        case .offline: return String(localized: "Offline — reconnect the drive to edit or export")
+        case .readOnly: return String(localized: "Read-only — edits can't be saved to this drive")
         }
     }
 }

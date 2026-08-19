@@ -119,7 +119,9 @@ struct PhotoGridCell: View {
 
     private var subtitle: String {
         if let message = photo.statusMessage { return message }
-        guard let date = photo.metadata.captureDate else { return "No capture time" }
+        guard let date = photo.metadata.captureDate else {
+            return String(localized: "No capture time")
+        }
         return Self.dateFormatter.string(from: date)
     }
 

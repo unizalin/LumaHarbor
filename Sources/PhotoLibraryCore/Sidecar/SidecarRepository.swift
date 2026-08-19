@@ -17,16 +17,16 @@ extension SidecarError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupportedSchemaVersion(let found, let supported):
-            return "These edits were saved by a newer version of LumaHarbor "
+            return "\(String(localized: "These edits were saved by a newer version of LumaHarbor")) "
                 + "(format \(found); this version reads up to \(supported))."
         case .corruptSidecar:
-            return "The saved edits for this photo are damaged."
+            return String(localized: "The saved edits for this photo are damaged.")
         case .corruptManifest:
-            return "This library's index file is damaged."
+            return String(localized: "This library's index file is damaged.")
         case .libraryUnavailable:
-            return "The drive holding this library isn't available."
+            return String(localized: "The drive holding this library isn't available.")
         case .notWritable(let path):
-            return "\(path) is read-only."
+            return "\(path) \(String(localized: "is read-only."))"
         case .write(let error):
             return error.errorDescription
         }
@@ -35,16 +35,17 @@ extension SidecarError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .unsupportedSchemaVersion:
-            return "Update LumaHarbor, or edit this photo on the device that wrote it."
+            return String(localized: "Update LumaHarbor, or edit this photo on the device that wrote it.")
         case .corruptSidecar:
-            return "The damaged file has been set aside and your RAW is untouched. "
-                + "Start editing again to write fresh settings."
+            return String(localized:
+                "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings."
+            )
         case .corruptManifest:
-            return "The damaged file has been set aside. Rescan the folder to rebuild it."
+            return String(localized: "The damaged file has been set aside. Rescan the folder to rebuild it.")
         case .libraryUnavailable:
-            return "Reconnect the drive, then retry."
+            return String(localized: "Reconnect the drive, then retry.")
         case .notWritable:
-            return "Unlock the drive, or copy the library somewhere writable."
+            return String(localized: "Unlock the drive, or copy the library somewhere writable.")
         case .write(let error):
             return error.recoverySuggestion
         }

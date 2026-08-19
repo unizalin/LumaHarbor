@@ -84,7 +84,7 @@ struct ExportSheet: View {
     }
 
     private func sizeDescription(_ width: Int, _ height: Int) -> String {
-        guard width > 0, height > 0 else { return "Unknown" }
+        guard width > 0, height > 0 else { return String(localized: "Unknown") }
         let megapixels = Double(width * height) / 1_000_000
         return String(format: "%d × %d (%.1f MP)", width, height, megapixels)
     }

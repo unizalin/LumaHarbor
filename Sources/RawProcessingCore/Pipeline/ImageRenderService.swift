@@ -15,24 +15,24 @@ extension ImageRenderError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .renderFailed:
-            return "The image couldn't be rendered."
+            return String(localized: "The image couldn't be rendered.")
         case .encodingFailed:
-            return "The JPEG couldn't be encoded."
+            return String(localized: "The JPEG couldn't be encoded.")
         case .insufficientDiskSpace:
-            return "There isn't enough free space to finish writing the file."
+            return String(localized: "There isn't enough free space to finish writing the file.")
         case .destinationNotWritable:
-            return "That location can't be written to."
+            return String(localized: "That location can't be written to.")
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .insufficientDiskSpace:
-            return "Free up space or choose a different destination, then export again."
+            return String(localized: "Free up space or choose a different destination, then export again.")
         case .destinationNotWritable:
-            return "Choose a different output location."
+            return String(localized: "Choose a different output location.")
         case .renderFailed, .encodingFailed:
-            return "Try exporting again."
+            return String(localized: "Try exporting again.")
         }
     }
 }

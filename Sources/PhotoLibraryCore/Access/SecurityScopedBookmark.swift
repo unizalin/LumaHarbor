@@ -12,16 +12,16 @@ extension BookmarkError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .couldNotCreate:
-            return "LumaHarbor couldn't remember access to that folder."
+            return String(localized: "LumaHarbor couldn't remember access to that folder.")
         case .couldNotResolve:
-            return "LumaHarbor no longer has access to this photo folder."
+            return String(localized: "LumaHarbor no longer has access to this photo folder.")
         case .accessDenied(let path):
-            return "macOS denied access to \(path)."
+            return "\(String(localized: "macOS denied access to")) \(path)."
         }
     }
 
     public var recoverySuggestion: String? {
-        "Choose the photo folder again to restore access."
+        String(localized: "Choose the photo folder again to restore access.")
     }
 }
 

@@ -64,7 +64,7 @@ private struct AdjustmentSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(group.displayName)
+            Text(verbatim: group.displayName)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
@@ -93,7 +93,7 @@ private struct AdjustmentSliderRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text(definition.kind.displayName)
+                Text(verbatim: definition.kind.displayName)
                     .font(.callout)
                 Spacer()
                 Text(formatted)
