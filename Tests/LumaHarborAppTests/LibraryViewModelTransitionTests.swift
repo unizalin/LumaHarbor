@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Localization
 import XCTest
 @testable import LumaHarborApp
 @testable import PhotoLibraryCore
@@ -437,6 +438,53 @@ final class LibraryViewModelTransitionTests: AppViewModelTestCase {
         XCTAssertGreaterThan(
             publishCount, 0,
             "An editor-only state change must republish through LibraryViewModel, or InspectorView/EditorView never redraw"
+        )
+    }
+
+    // MARK: - Manifest write failure next-step text
+
+    /// Found by hand 2026-08-19 testing a genuinely full drive: the alert's
+    /// message correctly said "insufficient space", but its next step still
+    /// said "unlock the drive" -- correct advice for a read-only volume,
+    /// actively wrong for one that's simply full. `startScan` used to hardcode
+    /// that one next-step string for every `manifestWriteFailure` regardless
+    /// of cause; it must now come from the failing error's own
+    /// `recoverySuggestion` (`LibraryScanResult.manifestWriteRecoverySuggestion`)
+    /// instead. This drives the read-only case specifically, since it is the
+    /// one this test suite can reproduce without a real full disk, but the
+    /// assertion is on the wiring (does the real per-error text arrive, not
+    /// the old hardcoded one) rather than on read-only mechanics themselves.
+    func testAReadOnlyManifestFailureShowsThatErrorsOwnRecoverySuggestionNotAHardcodedOne() async throws {
+        try XCTSkipUnless(canSimulateReadOnlyDirectory, "Test must not run as root")
+
+        try seedPhotos(["DSC0001.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555], ofItemAtPath: library.rootURL.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: library.rootURL.path
+            )
+        }
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        model.startScan()
+        await waitUntilAppCondition("the read-only rescan to finish") {
+            await MainActor.run { model.scanProgress?.isFinished == true }
+        }
+
+        let alert = try XCTUnwrap(model.alert, "A manifest write failure must still tell the user")
+        XCTAssertEqual(
+            alert.nextStep,
+            "\(L10n.t("Your photos are still browsable.")) "
+                + "\(L10n.t("Unlock the drive, or copy the library somewhere writable."))",
+            "The next step must be this error's own recoverySuggestion (SidecarError.notWritable's), "
+                + "not the old hardcoded \"Unlock the drive to save changes back to it.\" that was "
+                + "wrong for non-read-only causes"
         )
     }
 }

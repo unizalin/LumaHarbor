@@ -13,6 +13,13 @@ public struct LibraryScanResult: Sendable, Equatable {
     /// instance. The local index is still usable; the portable copy just didn't
     /// get updated.
     public var manifestWriteFailure: String?
+    /// The failing error's own `recoverySuggestion`, when it has one. Callers
+    /// showing `manifestWriteFailure` to the user should prefer this over any
+    /// generic advice of their own — "unlock the drive" is correct for a
+    /// read-only volume but actively wrong for e.g. insufficient disk space,
+    /// and the two are indistinguishable from `manifestWriteFailure`'s plain
+    /// text alone.
+    public var manifestWriteRecoverySuggestion: String?
     public var completedAt: Date
 }
 
@@ -528,6 +535,7 @@ public actor PhotoLibraryService {
                 movedCount: moved,
                 wasCancelled: true,
                 manifestWriteFailure: nil,
+                manifestWriteRecoverySuggestion: nil,
                 completedAt: Date()
             )))
             return
@@ -539,6 +547,7 @@ public actor PhotoLibraryService {
         }
 
         var manifestFailure: String?
+        var manifestFailureRecoverySuggestion: String?
         manifest.lastSuccessfulScanAt = cancelled ? manifest.lastSuccessfulScanAt : Date()
         do {
             try repository.write(manifest: manifest)
@@ -547,6 +556,7 @@ public actor PhotoLibraryService {
             // stale, but nothing is lost and the user is told why.
             manifestFailure = (error as? LocalizedError)?.errorDescription
                 ?? (error as NSError).localizedDescription
+            manifestFailureRecoverySuggestion = (error as? LocalizedError)?.recoverySuggestion
         }
 
         if var updated = libraries[libraryID] {
@@ -571,6 +581,7 @@ public actor PhotoLibraryService {
             movedCount: moved,
             wasCancelled: cancelled,
             manifestWriteFailure: manifestFailure,
+            manifestWriteRecoverySuggestion: manifestFailureRecoverySuggestion,
             completedAt: Date()
         )))
     }
