@@ -259,16 +259,30 @@ public struct AdjustmentPipeline: Sendable {
         biasedMask.biasVector = CIVector(x: CGFloat(balanceOffset), y: CGFloat(balanceOffset), z: CGFloat(balanceOffset), w: 0)
         guard let mask = biasedMask.outputImage else { return image }
 
+        // balanceOffset can push the mask outside 0...1 (e.g. a luma-0.9
+        // highlight pixel with balance +40 biases to 1.1); CIBlendWithMask
+        // doesn't clamp its mask input and extrapolates past either source
+        // instead of fully committing, so clamp before using it as a mask.
+        let clampedMaskFilter = CIFilter.colorClamp()
+        clampedMaskFilter.inputImage = mask
+        clampedMaskFilter.minComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
+        clampedMaskFilter.maxComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
+        guard let clampedMask = clampedMaskFilter.outputImage else { return image }
+
+        let invert = CIFilter.colorInvert()
+        invert.inputImage = clampedMask
+        guard let invertedMask = invert.outputImage else { return image }
+
         let shadowsBlend = CIFilter.blendWithMask()
         shadowsBlend.inputImage = shadowColor
         shadowsBlend.backgroundImage = image
-        shadowsBlend.maskImage = mask.applyingFilter("CIColorInvert")
+        shadowsBlend.maskImage = invertedMask
         guard let withShadows = shadowsBlend.outputImage else { return image }
 
         let highlightsBlend = CIFilter.blendWithMask()
         highlightsBlend.inputImage = highlightColor
         highlightsBlend.backgroundImage = withShadows
-        highlightsBlend.maskImage = mask
+        highlightsBlend.maskImage = clampedMask
         guard let withHighlights = highlightsBlend.outputImage else { return withShadows }
 
         // The flat tint layers are opaque colour, so blending them straight in
