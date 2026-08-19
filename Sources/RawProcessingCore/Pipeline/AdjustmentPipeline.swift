@@ -110,7 +110,55 @@ public struct AdjustmentPipeline: Sendable {
             working = Self.applyVignette(parameters.vignette, to: working)
         }
 
+        // 11. Grain (spec §4.2 step 11) — synthetic per-pixel luminance noise,
+        // generated once at the image's own extent and blended in proportion
+        // to amount. size / roughness shape the noise before blending: size
+        // widens the grain (blur radius scales up), roughness controls how
+        // much of a soft-light vs. straight-overlay blend is used (a rougher
+        // grain reads grittier at high blend contribution).
+        if !parameters.isGrainIdentity {
+            working = Self.applyGrain(parameters.grain, to: working)
+        }
+
         return working
+    }
+
+    private static func applyGrain(_ grain: Grain, to image: CIImage) -> CIImage {
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return image }
+
+        let noise = CIFilter.randomGenerator()
+        guard var noiseImage = noise.outputImage else { return image }
+
+        // size 0...100 -> blur radius 0...4; identical noise blurred more
+        // reads as larger grain clumps.
+        let blurRadius = (grain.size / 100) * 4
+        if blurRadius > 0 {
+            let blur = CIFilter.gaussianBlur()
+            blur.inputImage = noiseImage
+            blur.radius = Float(blurRadius)
+            noiseImage = blur.outputImage ?? noiseImage
+        }
+
+        // Recentre the (0...1 per channel, high-frequency) random noise around
+        // 0.5 grey and scale its deviation by amount and roughness, so it can
+        // be composited as a soft-light layer that leaves flat mid-tones
+        // mostly alone and roughens texture elsewhere.
+        let amountScale = (grain.amount / 100) * (0.15 + (grain.roughness / 100) * 0.25)
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage = noiseImage
+        let vector = CIVector(x: CGFloat(amountScale), y: 0, z: 0, w: 0)
+        matrix.rVector = vector
+        matrix.gVector = vector
+        matrix.bVector = vector
+        matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        matrix.biasVector = CIVector(x: 0.5, y: 0.5, z: 0.5, w: 1)
+        guard let scaledNoise = matrix.outputImage else { return image }
+
+        let blend = CIFilter.softLightBlendMode()
+        blend.inputImage = scaledNoise.cropped(to: extent)
+        blend.backgroundImage = image
+        return blend.outputImage ?? image
     }
 
     private static func applyVignette(_ vignette: Vignette, to image: CIImage) -> CIImage {
