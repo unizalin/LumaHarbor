@@ -251,7 +251,7 @@ build／337 tests 都過。**這也是手勢層級修法，沒辦法寫自動化
 **Gate F 待辦清單（原五項）目前狀態**：
 1. ~~Original 比較鍵~~ — 通過
 2. ~~Show in Finder~~ — 通過
-3. unsupported／disk-full 測試素材 — 非阻塞，視需要再做
+3. unsupported／disk-full 測試素材 — 見下方「續八」：unsupported 實測不可觸發（不是素材問題，是這個平台上這條錯誤分支基本測不到）；disk-full 已備妥並掛載中，待人工測
 4. Undo/Redo 快捷鍵 — 使用者確認「快捷鍵不好驗測」，決定不繼續深究「一直有錯誤」的具體內容；維持已知問題狀態，**滑鼠點選單是唯一目前確認可用的路徑，快捷鍵維持無效**，不擋簽收
 5. Gate F 效能量測（Instruments）— 完成，見下方「續七」（沒用 Instruments.app 本體，用等效的自動化量測，見下方細節）
 
@@ -306,3 +306,34 @@ spec §11 目標：≤150ms
 沒有設定強制 pass/fail 的門檻（不同機器效能不同，把測量結果變成會炸的 CI 閘門沒有意義，這也是為什麼這整批測試本來就是靠環境變數選擇性啟用），數字用 `print` 印出來給人看，不是斷言。
 
 `swift test`（設環境變數後）340 個測試全過（含新增這 1 個，原本 339 + 1）。**Gate F 效能量測項目視為完成，不再是「未開始」。**
+
+## 2026-08-19（續八）：準備 unsupported／disk-full 測試素材——unsupported 實測不可觸發，disk-full 已備妥
+
+### unsupported 格式：實測結論是這個平台上用本地檔案不可能觸發
+
+用真實的 `CIRAWFilter`／`CGImageSourceCreateWithURL` 完整模擬 `CoreImageRawDecoder.decode(_:)` 的判斷順序（`makeImageSource` → `CIRAWFilter(imageURL:)` → `nativeSize`），對六種候選素材實測：
+
+| 素材 | 結果 |
+|---|---|
+| 真的 JPEG 圖檔，改副檔名成 `.arw`/`.cr2`/`.nef`/`.dng` | `CGImageSource` 跟 `CIRAWFilter` 都成功，`nativeSize` 是 JPEG 的真實尺寸——**當成「解碼成功」處理，不是 unsupported，也不是 corrupted** |
+| 純亂數 bytes（4096 bytes，改副檔名 `.arw`/`.dng`） | `CGImageSourceCreateWithURL` 直接失敗（count 0）→ `corruptedFile`，根本沒機會走到 `CIRAWFilter` 那一步 |
+| 純文字檔（改副檔名 `.dng`） | 同上，`corruptedFile` |
+| 全零 bytes（8192 bytes） | 同上，`corruptedFile` |
+| 目錄（改副檔名 `.arw`） | 同上，`corruptedFile` |
+
+六種都測不出 `unsupportedFormat`（`CIRAWFilter(imageURL:) == nil`）這個分支——結果只會落在「當成有效圖片解碼成功」或「`corruptedFile`」兩者之一。程式碼裡 `CoreImageRawDecoder.swift:46-48` 那個 `guard let filter = CIRAWFilter(imageURL: url) else { throw .unsupportedFormat }` 目前看起來**在這個 macOS／CIRAWFilter 版本上對任何本地存在的檔案都不會觸發**，是一個防禦性但實務上很可能打不到的分支（`candidateFileExtensions` 裡列的格式 `CIRAWFilter` 全部支援，真的要測到一台相機拍出「Apple RAW 解碼器完全不認得」的檔案，需要一台格式冷門到 CIRAWFilter 沒收錄的相機——現有素材裡沒有，我也無法憑空生出一份「格式正確但 CIRAWFilter 拒認」的合法 RAW 檔）。
+
+**結論**：這項不是「還沒準備素材」，是「這個分支在目前平台上基本測不到，不是準備素材的問題」。不建議繼續投入時間找一個一定測不出來的東西；如果之後真的想驗證這條錯誤訊息本身的文案／下一步指引，可以考慮改成 unit test 直接建構 `RawDecodingError.unsupportedFormat` 拋出後檢查 `UserAlert` 顯示邏輯（跳過真的觸發 `CIRAWFilter` 的環節），而不是找一個真的會讓 `CIRAWFilter` 回傳 `nil` 的檔案。
+
+### disk-full：素材已備妥，目前正在掛載中
+
+建了一個 130MB APFS disk image：`Fixtures/Private/DiskFull-Test.dmg`（跟其他 `Fixtures/Private/` 底下的東西一樣被 `.gitignore` 排除，不會誤 commit）。裡面複製了 3 張真實 ARW（`_DSC1896`/`_DSC1897`/`_DSC1899`，跟 `ReadOnly-Test`/`Corrupt-Test` 用的同一批），再用 padding 檔案把剩餘空間灌到真的寫不進新東西為止——**已經實測驗證過連建立 `.lumaharbor` 目錄、寫入幾百 bytes 的小檔案都會直接收到 `ENOSPC`（"No space left on device"）**，不是「快滿了」而是真的滿到任何新寫入都會失敗。
+
+**目前狀態**：已經 `hdiutil attach` 掛載在 `/Volumes/LumaHarbor-DiskFull-Test`，現在就可以直接在 App 裡「加入照片資料夾」選這個磁碟測試。之後如果 volume 被卸載或重開機，用這行指令重新掛載：
+```sh
+hdiutil attach Fixtures/Private/DiskFull-Test.dmg
+```
+
+**還沒做（人工待測）**：
+- 加入這個資料夾後，掃描／建立 library manifest 這一步本身可能就會先失敗（因為連目錄都建不了）——預期會走到 `LibraryViewModel.swift` 裡「Scanned, but couldn't update the library file」那個既有的 alert 路徑（跟 `ReadOnly-Test` 測過的路徑相同基礎設施，但這次的根因是 `AtomicWriteError.insufficientDiskSpace` 不是唯讀權限拒絕，訊息文案應該不同，需要人工確認畫面上顯示的是正確的「空間不足」訊息而不是「唯讀」訊息）。
+- 如果掃描本身能過（例如 manifest 檔案剛好能擠進最後一點空間），再測拉滑桿存檔、匯出 JPEG 這兩個路徑是否也正確顯示空間不足、不會偽成功、不會 crash。
