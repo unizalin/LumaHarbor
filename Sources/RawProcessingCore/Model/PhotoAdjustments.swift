@@ -16,6 +16,13 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     public var blacks: Double
     public var vibrance: Double
     public var saturation: Double
+    public var advancedToneCurve: AdvancedToneCurve
+    public var hsl: HSLAdjustments
+    public var splitToning: SplitToning
+    public var sharpening: Sharpening
+    public var noiseReduction: NoiseReduction
+    public var vignette: Vignette
+    public var grain: Grain
 
     public init(
         exposure: Double = 0,
@@ -27,7 +34,14 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         whites: Double = 0,
         blacks: Double = 0,
         vibrance: Double = 0,
-        saturation: Double = 0
+        saturation: Double = 0,
+        advancedToneCurve: AdvancedToneCurve = .neutral,
+        hsl: HSLAdjustments = .neutral,
+        splitToning: SplitToning = .neutral,
+        sharpening: Sharpening = .neutral,
+        noiseReduction: NoiseReduction = .neutral,
+        vignette: Vignette = .neutral,
+        grain: Grain = .neutral
     ) {
         self.exposure = AdjustmentCatalog.definition(for: .exposure).clamp(exposure)
         self.temperature = AdjustmentCatalog.definition(for: .temperature).clamp(temperature)
@@ -39,6 +53,13 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.blacks = AdjustmentCatalog.definition(for: .blacks).clamp(blacks)
         self.vibrance = AdjustmentCatalog.definition(for: .vibrance).clamp(vibrance)
         self.saturation = AdjustmentCatalog.definition(for: .saturation).clamp(saturation)
+        self.advancedToneCurve = advancedToneCurve
+        self.hsl = hsl
+        self.splitToning = splitToning
+        self.sharpening = sharpening
+        self.noiseReduction = noiseReduction
+        self.vignette = vignette
+        self.grain = grain
     }
 
     /// All sliders at their documented default — the "no edit applied" state.
@@ -95,7 +116,10 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         PhotoAdjustments(
             exposure: exposure, temperature: temperature, tint: tint, contrast: contrast,
             highlights: highlights, shadows: shadows, whites: whites, blacks: blacks,
-            vibrance: vibrance, saturation: saturation
+            vibrance: vibrance, saturation: saturation,
+            advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
+            sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
+            grain: grain
         )
     }
 
@@ -111,6 +135,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case exposure, temperature, tint, contrast, highlights
         case shadows, whites, blacks, vibrance, saturation
+        case advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
     }
 
     /// Missing keys fall back to the catalogue default and out-of-range values
@@ -135,6 +160,13 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.blacks = try value(.blacks, .blacks)
         self.vibrance = try value(.vibrance, .vibrance)
         self.saturation = try value(.saturation, .saturation)
+        self.advancedToneCurve = try container.decodeIfPresent(AdvancedToneCurve.self, forKey: .advancedToneCurve) ?? .neutral
+        self.hsl = try container.decodeIfPresent(HSLAdjustments.self, forKey: .hsl) ?? .neutral
+        self.splitToning = try container.decodeIfPresent(SplitToning.self, forKey: .splitToning) ?? .neutral
+        self.sharpening = try container.decodeIfPresent(Sharpening.self, forKey: .sharpening) ?? .neutral
+        self.noiseReduction = try container.decodeIfPresent(NoiseReduction.self, forKey: .noiseReduction) ?? .neutral
+        self.vignette = try container.decodeIfPresent(Vignette.self, forKey: .vignette) ?? .neutral
+        self.grain = try container.decodeIfPresent(Grain.self, forKey: .grain) ?? .neutral
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -151,5 +183,12 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(blacks, forKey: .blacks)
         try container.encode(vibrance, forKey: .vibrance)
         try container.encode(saturation, forKey: .saturation)
+        try container.encode(advancedToneCurve, forKey: .advancedToneCurve)
+        try container.encode(hsl, forKey: .hsl)
+        try container.encode(splitToning, forKey: .splitToning)
+        try container.encode(sharpening, forKey: .sharpening)
+        try container.encode(noiseReduction, forKey: .noiseReduction)
+        try container.encode(vignette, forKey: .vignette)
+        try container.encode(grain, forKey: .grain)
     }
 }

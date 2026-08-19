@@ -51,12 +51,13 @@ final class PhotoAdjustmentsTests: XCTestCase {
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any]
         )
-        // Spec §8.2 fixes this exact key set.
         XCTAssertEqual(
             Set(object.keys),
             [
                 "exposure", "temperature", "tint", "contrast", "highlights",
-                "shadows", "whites", "blacks", "vibrance", "saturation"
+                "shadows", "whites", "blacks", "vibrance", "saturation",
+                "advancedToneCurve", "hsl", "splitToning", "sharpening",
+                "noiseReduction", "vignette", "grain"
             ]
         )
     }
@@ -95,5 +96,43 @@ final class PhotoAdjustmentsTests: XCTestCase {
         let first = try encoder.encode(PhotoAdjustments(exposure: 1))
         let second = try encoder.encode(PhotoAdjustments(exposure: 1))
         XCTAssertEqual(first, second)
+    }
+
+    func testNewFieldsDefaultToNeutral() {
+        let adjustments = PhotoAdjustments.neutral
+        XCTAssertEqual(adjustments.advancedToneCurve, .neutral)
+        XCTAssertEqual(adjustments.hsl, .neutral)
+        XCTAssertEqual(adjustments.splitToning, .neutral)
+        XCTAssertEqual(adjustments.sharpening, .neutral)
+        XCTAssertEqual(adjustments.noiseReduction, .neutral)
+        XCTAssertEqual(adjustments.vignette, .neutral)
+        XCTAssertEqual(adjustments.grain, .neutral)
+    }
+
+    func testOldSidecarWithoutNewFieldsDecodesToNeutralExpansions() throws {
+        // Exactly the old MVP sidecar shape — none of the seven new keys present.
+        let json = Data(#"""
+        {"exposure": 1.0, "temperature": 0, "tint": 0, "contrast": 0, "highlights": 0,
+         "shadows": 0, "whites": 0, "blacks": 0, "vibrance": 0, "saturation": 0}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.exposure, 1.0)
+        XCTAssertEqual(decoded.advancedToneCurve, .neutral)
+        XCTAssertEqual(decoded.hsl, .neutral)
+        XCTAssertEqual(decoded.splitToning, .neutral)
+        XCTAssertEqual(decoded.sharpening, .neutral)
+        XCTAssertEqual(decoded.noiseReduction, .neutral)
+        XCTAssertEqual(decoded.vignette, .neutral)
+        XCTAssertEqual(decoded.grain, .neutral)
+    }
+
+    func testRoundTripsNewFieldsThroughJSON() throws {
+        var original = PhotoAdjustments.neutral
+        original.sharpening = Sharpening(amount: 40)
+        original.hsl.red = HSLBand(hue: 10, saturation: 20, luminance: -5)
+        original.vignette = Vignette(amount: -30)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
+        XCTAssertEqual(decoded, original)
     }
 }

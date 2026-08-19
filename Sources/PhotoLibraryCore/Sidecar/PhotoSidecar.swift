@@ -29,7 +29,7 @@ public struct DecoderDescriptor: Codable, Equatable, Sendable {
 public struct PhotoSidecar: Codable, Equatable, Sendable {
     /// Bumped only for breaking changes. A sidecar carrying a *higher* value is
     /// rejected rather than partially read (spec §12.1).
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var photoID: PhotoID
