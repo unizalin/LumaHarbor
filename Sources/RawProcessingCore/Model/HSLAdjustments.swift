@@ -17,6 +17,8 @@ public struct HSLBand: Codable, Equatable, Hashable, Sendable {
         return Swift.min(Swift.max(value, -100), 100)
     }
 
+    public static let neutral = HSLBand()
+
     private enum CodingKeys: String, CodingKey { case hue, saturation, luminance }
 
     public init(from decoder: Decoder) throws {
