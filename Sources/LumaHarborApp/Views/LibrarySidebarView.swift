@@ -1,4 +1,5 @@
 import PhotoLibraryCore
+import Localization
 import SwiftUI
 
 /// Left pane: which folders exist and what state each one is in (spec §6.2).
@@ -10,20 +11,20 @@ struct LibrarySidebarView: View {
             // Goes through the request API so switching folders can't outrun a
             // pending sidecar write (addendum §3.1).
             List(selection: model.librarySelection) {
-                Section("Photo Folders") {
+                Section(L10n.t("Photo Folders")) {
                     ForEach(model.libraries) { library in
                         LibraryRow(library: library)
                             .tag(library.id)
                             .contextMenu {
                                 if !library.isOnline {
-                                    Button("Reconnect…") {
+                                    Button(L10n.t("Reconnect…")) {
                                         model.presentRelinkPanel(for: library.id)
                                     }
                                 }
-                                Button("Rescan") { model.startScan(libraryID: library.id) }
+                                Button(L10n.t("Rescan")) { model.startScan(libraryID: library.id) }
                                     .disabled(!library.isOnline)
                                 Divider()
-                                Button("Remove from LumaHarbor", role: .destructive) {
+                                Button(L10n.t("Remove from LumaHarbor"), role: .destructive) {
                                     Task { await model.removeLibrary(library.id) }
                                 }
                             }
@@ -46,7 +47,7 @@ struct LibrarySidebarView: View {
                     .foregroundStyle(library.availability == .ready ? .secondary : .primary)
 
                 if !library.isOnline {
-                    Button("Reconnect…") {
+                    Button(L10n.t("Reconnect…")) {
                         model.presentRelinkPanel(for: library.id)
                     }
                     .controlSize(.small)
@@ -63,13 +64,13 @@ struct LibrarySidebarView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     if !progress.isFinished {
-                        Button("Stop") { model.cancelScan() }
+                        Button(L10n.t("Stop")) { model.cancelScan() }
                             .controlSize(.small)
                     }
                 }
             }
 
-            Button("Add Photo Folder…") {
+            Button(L10n.t("Add Photo Folder…")) {
                 model.presentAddFolderPanel()
             }
             .controlSize(.small)
@@ -102,7 +103,7 @@ private struct LibraryRow: View {
                 Image(systemName: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .help("Read-only drive — edits can't be saved here")
+                    .help(L10n.t("Read-only drive — edits can't be saved here"))
             }
         }
         .padding(.vertical, 2)
@@ -110,11 +111,11 @@ private struct LibraryRow: View {
 
     private var subtitle: String {
         switch library.availability {
-        case .offline: return String(localized: "Offline")
+        case .offline: return L10n.t("Offline")
         case .readOnly, .ready:
             return library.photoCount == 1
-                ? String(localized: "1 photo")
-                : "\(library.photoCount) " + String(localized: "photos")
+                ? L10n.t("1 photo")
+                : "\(library.photoCount) " + L10n.t("photos")
         }
     }
 }

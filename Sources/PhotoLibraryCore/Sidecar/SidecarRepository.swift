@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 import RawProcessingCore
 
 public enum SidecarError: Error, Equatable, Sendable {
@@ -17,16 +18,16 @@ extension SidecarError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupportedSchemaVersion(let found, let supported):
-            return "\(String(localized: "These edits were saved by a newer version of LumaHarbor")) "
+            return "\(L10n.t("These edits were saved by a newer version of LumaHarbor")) "
                 + "(format \(found); this version reads up to \(supported))."
         case .corruptSidecar:
-            return String(localized: "The saved edits for this photo are damaged.")
+            return L10n.t("The saved edits for this photo are damaged.")
         case .corruptManifest:
-            return String(localized: "This library's index file is damaged.")
+            return L10n.t("This library's index file is damaged.")
         case .libraryUnavailable:
-            return String(localized: "The drive holding this library isn't available.")
+            return L10n.t("The drive holding this library isn't available.")
         case .notWritable(let path):
-            return "\(path) \(String(localized: "is read-only."))"
+            return "\(path) \(L10n.t("is read-only."))"
         case .write(let error):
             return error.errorDescription
         }
@@ -35,17 +36,17 @@ extension SidecarError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .unsupportedSchemaVersion:
-            return String(localized: "Update LumaHarbor, or edit this photo on the device that wrote it.")
+            return L10n.t("Update LumaHarbor, or edit this photo on the device that wrote it.")
         case .corruptSidecar:
-            return String(localized:
+            return L10n.t(
                 "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings."
             )
         case .corruptManifest:
-            return String(localized: "The damaged file has been set aside. Rescan the folder to rebuild it.")
+            return L10n.t("The damaged file has been set aside. Rescan the folder to rebuild it.")
         case .libraryUnavailable:
-            return String(localized: "Reconnect the drive, then retry.")
+            return L10n.t("Reconnect the drive, then retry.")
         case .notWritable:
-            return String(localized: "Unlock the drive, or copy the library somewhere writable.")
+            return L10n.t("Unlock the drive, or copy the library somewhere writable.")
         case .write(let error):
             return error.recoverySuggestion
         }

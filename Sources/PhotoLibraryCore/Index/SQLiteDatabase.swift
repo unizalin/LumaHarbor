@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 import SQLite3
 
 public enum SQLiteError: Error, Equatable, Sendable {
@@ -12,16 +13,16 @@ extension SQLiteError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .openFailed:
-            return String(localized: "LumaHarbor's local index couldn't be opened.")
+            return L10n.t("LumaHarbor's local index couldn't be opened.")
         case .prepareFailed, .stepFailed, .bindFailed:
-            return String(localized: "LumaHarbor's local index reported an error.")
+            return L10n.t("LumaHarbor's local index reported an error.")
         }
     }
 
     public var recoverySuggestion: String? {
         // The index is disposable by design (spec §8.3), so the answer is always
         // "throw it away and rescan".
-        String(localized: "Delete the local index and rescan your folders to rebuild it.")
+        L10n.t("Delete the local index and rescan your folders to rebuild it.")
     }
 }
 

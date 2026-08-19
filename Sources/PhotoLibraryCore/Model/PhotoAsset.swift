@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 import RawProcessingCore
 
 /// Per-photo state the browser needs to render a cell.
@@ -69,11 +70,11 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         case .ready, .pending:
             return nil
         case .unsupported:
-            return String(localized: "This camera's RAW isn't supported yet")
+            return L10n.t("This camera's RAW isn't supported yet")
         case .failed:
-            return failureReason ?? String(localized: "This file couldn't be read")
+            return failureReason ?? L10n.t("This file couldn't be read")
         case .needsConfirmation:
-            return String(localized: "Several files match — confirm which photo this is")
+            return L10n.t("Several files match — confirm which photo this is")
         }
     }
 }

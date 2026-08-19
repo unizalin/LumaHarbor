@@ -17,20 +17,26 @@ let package = Package(
         .library(name: "RawProcessingCore", targets: ["RawProcessingCore"])
     ],
     targets: [
+        // Holds Localizable.strings and the L10n lookup that every other
+        // target routes user-facing text through. Its own target (rather
+        // than living in LumaHarborApp's Resources) so RawProcessingCore and
+        // PhotoLibraryCore -- which have no Resources of their own -- can
+        // depend on it too without a circular dependency on the UI layer.
+        .target(name: "Localization", resources: [.process("Resources")]),
+
         // Decoding, adjustment pipeline, preview scheduling and export.
         // Knows nothing about folders, bookmarks or screen state.
-        .target(name: "RawProcessingCore"),
+        .target(name: "RawProcessingCore", dependencies: ["Localization"]),
 
         // Folder access, scanning, index, sidecars and caches.
         // Depends on RawProcessingCore only for the pure `PhotoAdjustments`
         // value type that the sidecar serialises. Never imports SwiftUI.
-        .target(name: "PhotoLibraryCore", dependencies: ["RawProcessingCore"]),
+        .target(name: "PhotoLibraryCore", dependencies: ["RawProcessingCore", "Localization"]),
 
         // SwiftUI + AppKit layer. Never touches CIRAWFilter directly.
         .target(
             name: "LumaHarborApp",
-            dependencies: ["PhotoLibraryCore", "RawProcessingCore"],
-            resources: [.process("Resources")]
+            dependencies: ["PhotoLibraryCore", "RawProcessingCore", "Localization"]
         ),
 
         // Thin launcher so the SwiftUI App type stays in a testable library target.
@@ -39,7 +45,7 @@ let package = Package(
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
         .testTarget(
             name: "LumaHarborAppTests",
-            dependencies: ["LumaHarborApp", "PhotoLibraryCore", "RawProcessingCore"]
+            dependencies: ["LumaHarborApp", "PhotoLibraryCore", "RawProcessingCore", "Localization"]
         ),
         .testTarget(name: "PhotoLibraryCoreTests", dependencies: ["PhotoLibraryCore"]),
         .testTarget(

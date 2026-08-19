@@ -1,4 +1,5 @@
 import CoreImage
+import Localization
 import Foundation
 import RawProcessingCore
 
@@ -13,22 +14,22 @@ extension ThumbnailError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unavailableOffline:
-            return String(localized: "This photo hasn't been cached yet and its drive isn't connected.")
+            return L10n.t("This photo hasn't been cached yet and its drive isn't connected.")
         case .decoding(let error):
             return error.errorDescription
         case .renderFailed:
-            return String(localized: "The thumbnail couldn't be rendered.")
+            return L10n.t("The thumbnail couldn't be rendered.")
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .unavailableOffline:
-            return String(localized: "Reconnect the drive to generate a thumbnail.")
+            return L10n.t("Reconnect the drive to generate a thumbnail.")
         case .decoding(let error):
             return error.recoverySuggestion
         case .renderFailed:
-            return String(localized: "Try again.")
+            return L10n.t("Try again.")
         }
     }
 }

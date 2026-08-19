@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 /// A photo folder the user has authorised, as the app sees it at runtime.
 public struct LibraryFolder: Identifiable, Equatable, Sendable {
@@ -57,9 +58,9 @@ public enum LibraryAvailability: Equatable, Sendable {
 
     public var statusMessage: String {
         switch self {
-        case .ready: return String(localized: "Ready")
-        case .offline: return String(localized: "Offline — reconnect the drive to edit or export")
-        case .readOnly: return String(localized: "Read-only — edits can't be saved to this drive")
+        case .ready: return L10n.t("Ready")
+        case .offline: return L10n.t("Offline — reconnect the drive to edit or export")
+        case .readOnly: return L10n.t("Read-only — edits can't be saved to this drive")
         }
     }
 }

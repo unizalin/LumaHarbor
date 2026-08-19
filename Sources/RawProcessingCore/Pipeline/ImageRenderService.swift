@@ -1,4 +1,5 @@
 import CoreGraphics
+import Localization
 import CoreImage
 import Foundation
 import ImageIO
@@ -15,24 +16,24 @@ extension ImageRenderError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .renderFailed:
-            return String(localized: "The image couldn't be rendered.")
+            return L10n.t("The image couldn't be rendered.")
         case .encodingFailed:
-            return String(localized: "The JPEG couldn't be encoded.")
+            return L10n.t("The JPEG couldn't be encoded.")
         case .insufficientDiskSpace:
-            return String(localized: "There isn't enough free space to finish writing the file.")
+            return L10n.t("There isn't enough free space to finish writing the file.")
         case .destinationNotWritable:
-            return String(localized: "That location can't be written to.")
+            return L10n.t("That location can't be written to.")
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .insufficientDiskSpace:
-            return String(localized: "Free up space or choose a different destination, then export again.")
+            return L10n.t("Free up space or choose a different destination, then export again.")
         case .destinationNotWritable:
-            return String(localized: "Choose a different output location.")
+            return L10n.t("Choose a different output location.")
         case .renderFailed, .encodingFailed:
-            return String(localized: "Try exporting again.")
+            return L10n.t("Try exporting again.")
         }
     }
 }

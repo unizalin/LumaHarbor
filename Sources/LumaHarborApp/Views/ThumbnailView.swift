@@ -1,4 +1,5 @@
 import AppKit
+import Localization
 import PhotoLibraryCore
 import SwiftUI
 
@@ -93,7 +94,7 @@ struct PhotoGridCell: View {
                         .padding(4)
                         .background(.thinMaterial, in: Circle())
                         .padding(4)
-                        .help("This photo has saved adjustments")
+                        .help(L10n.t("This photo has saved adjustments"))
                 }
             }
             .overlay {
@@ -120,7 +121,7 @@ struct PhotoGridCell: View {
     private var subtitle: String {
         if let message = photo.statusMessage { return message }
         guard let date = photo.metadata.captureDate else {
-            return String(localized: "No capture time")
+            return L10n.t("No capture time")
         }
         return Self.dateFormatter.string(from: date)
     }

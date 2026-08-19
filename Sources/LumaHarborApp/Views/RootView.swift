@@ -1,4 +1,5 @@
 import SwiftUI
+import Localization
 
 /// Spec §6.2's three regions: library status on the left, preview and filmstrip
 /// in the middle, adjustments on the right.
@@ -30,7 +31,7 @@ struct RootView: View {
                 message: Text([alert.message, alert.nextStep]
                     .compactMap { $0 }
                     .joined(separator: "\n\n")),
-                dismissButton: .default(Text("OK"))
+                dismissButton: .default(Text(L10n.t("OK")))
             )
         }
         .sheet(isPresented: $model.isShowingExportSheet) {
@@ -69,19 +70,18 @@ struct WelcomeView: View {
                 .font(.system(size: 52, weight: .light))
                 .foregroundStyle(.secondary)
 
-            Text("Add a photo folder")
+            Text(L10n.t("Add a photo folder"))
                 .font(.title2.weight(.semibold))
 
-            Text("""
-                 Choose a folder on your drive. LumaHarbor reads your RAW files \
-                 where they are and never moves or changes them.
-                 """)
+            Text(L10n.t(
+                "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them."
+            ))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
 
-            Button("Add Photo Folder…") {
+            Button(L10n.t("Add Photo Folder…")) {
                 model.presentAddFolderPanel()
             }
             .keyboardShortcut("o", modifiers: .command)

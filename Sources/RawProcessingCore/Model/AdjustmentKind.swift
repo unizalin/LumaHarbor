@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 /// Every adjustment the Mac-first MVP exposes.
 ///
@@ -18,22 +19,21 @@ public enum AdjustmentKind: String, CaseIterable, Codable, Sendable {
 }
 
 extension AdjustmentKind {
-    /// Localised label. `String(localized:)`'s default bundle resolves against
-    /// the running app regardless of which module the call sits in, so this
-    /// stays here rather than in the UI layer -- ordering and naming stay in
-    /// one place.
+    /// Localised label, via `L10n.t` (see `Localization/L10n.swift` for why
+    /// not plain `String(localized:)`). Kept here rather than in the UI layer
+    /// so ordering and naming stay in one place.
     public var displayName: String {
         switch self {
-        case .exposure: return String(localized: "Exposure")
-        case .temperature: return String(localized: "Temperature")
-        case .tint: return String(localized: "Tint")
-        case .contrast: return String(localized: "Contrast")
-        case .highlights: return String(localized: "Highlights")
-        case .shadows: return String(localized: "Shadows")
-        case .whites: return String(localized: "Whites")
-        case .blacks: return String(localized: "Blacks")
-        case .vibrance: return String(localized: "Vibrance")
-        case .saturation: return String(localized: "Saturation")
+        case .exposure: return L10n.t("Exposure")
+        case .temperature: return L10n.t("Temperature")
+        case .tint: return L10n.t("Tint")
+        case .contrast: return L10n.t("Contrast")
+        case .highlights: return L10n.t("Highlights")
+        case .shadows: return L10n.t("Shadows")
+        case .whites: return L10n.t("Whites")
+        case .blacks: return L10n.t("Blacks")
+        case .vibrance: return L10n.t("Vibrance")
+        case .saturation: return L10n.t("Saturation")
         }
     }
 
@@ -54,9 +54,9 @@ public enum AdjustmentGroup: String, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .whiteBalance: return String(localized: "White Balance")
-        case .tone: return String(localized: "Tone")
-        case .color: return String(localized: "Color")
+        case .whiteBalance: return L10n.t("White Balance")
+        case .tone: return L10n.t("Tone")
+        case .color: return L10n.t("Color")
         }
     }
 }

@@ -1,4 +1,5 @@
 import CoreImage
+import Localization
 import Foundation
 import ImageIO
 
@@ -71,7 +72,7 @@ public struct CoreImageRawDecoder: RawDecoding {
         guard let output = filter.outputImage else {
             throw RawDecodingError.decodeFailed(
                 path: url.path,
-                reason: String(localized: "The system RAW decoder returned no image.")
+                reason: L10n.t("The system RAW decoder returned no image.")
             )
         }
 
