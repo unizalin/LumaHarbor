@@ -12,9 +12,11 @@ public enum HSLKernelWeights {
     public static let bandCenters: [Double] = [0, 30, 60, 120, 180, 240, 275, 315]
 
     /// Half-width, in degrees, of one band's falloff before it reaches zero.
-    /// Chosen so adjacent bands' triangles cross near their midpoint rather
-    /// than leaving a dead zone or overlapping too heavily.
-    public static let halfWidthDegrees = 45.0
+    /// Set to match the minimum 30° spacing between the closest band centers
+    /// (e.g. red@0 and orange@30), so two bands at that closest spacing sum
+    /// to exactly 1.0 at their shared midpoint -- not a dead zone, not
+    /// amplified overlap.
+    public static let halfWidthDegrees = 30.0
 
     /// 1.0 at `centerDegrees`, falling linearly to 0.0 at `halfWidthDegrees`
     /// away, wrapping correctly across the 0/360 seam.
