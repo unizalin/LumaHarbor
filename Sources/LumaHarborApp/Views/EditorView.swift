@@ -125,11 +125,32 @@ struct EditorView: View {
 /// Hold to peek at the original, click to pin it (spec §6.2).
 private struct CompareButton: View {
     @EnvironmentObject private var model: LibraryViewModel
-    @State private var isHolding = false
+    /// The persistent "pinned" state a click toggles. Kept separate from
+    /// `model.editor.isShowingOriginal`, which also gets driven transiently
+    /// while a hold is in progress.
+    @State private var isPinned = false
+    @State private var pressBeganAt: Date?
+    /// Below this, a press+release is a click; at or above it, a hold-to-peek.
+    private static let holdThreshold: TimeInterval = 0.25
 
     var body: some View {
         Button {
-            model.editor.isShowingOriginal.toggle()
+            // Intentionally empty. A first attempt kept the toggle here
+            // alongside the gesture below, but `minimumDistance: 0` means the
+            // gesture also fires for a plain click, not just a drag -- so a
+            // click ran both this action *and* the gesture, and the two
+            // fought over `isShowingOriginal` (found manually 2026-08-18:
+            // clicking always ended up pinned to the original, never toggling
+            // back). A second attempt moved the toggle into the gesture but
+            // deferred "peek" through an async `Task.sleep`; that made both
+            // click *and* hold stop working (found manually 2026-08-19) --
+            // an active drag gesture runs the run loop in event-tracking
+            // mode, which can starve a Task-based timer until the mouse is
+            // released, i.e. after the decision was already needed. This
+            // version has exactly one thing deciding `isShowingOriginal`,
+            // computed synchronously from real press/release timestamps, so
+            // there is nothing left to race and nothing waiting on a timer
+            // that a live drag can starve.
         } label: {
             Label("Original", systemImage: "rectangle.righthalf.inset.filled.arrow.right")
         }
@@ -138,14 +159,27 @@ private struct CompareButton: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
-                    guard !isHolding, model.editor.canCompareWithOriginal else { return }
-                    isHolding = true
+                    guard model.editor.canCompareWithOriginal else { return }
+                    if pressBeganAt == nil {
+                        pressBeganAt = Date()
+                    }
+                    // Immediate feedback for the whole press, tap or hold
+                    // alike -- onEnded below decides what happens on release.
                     model.editor.isShowingOriginal = true
                 }
                 .onEnded { _ in
-                    guard isHolding else { return }
-                    isHolding = false
-                    model.editor.isShowingOriginal = false
+                    defer { pressBeganAt = nil }
+                    let heldLongEnough = pressBeganAt.map {
+                        Date().timeIntervalSince($0) >= Self.holdThreshold
+                    } ?? false
+                    if heldLongEnough {
+                        // Hold-to-peek ends: back to whatever was pinned.
+                        model.editor.isShowingOriginal = isPinned
+                    } else {
+                        // A quick tap: toggle the pin.
+                        isPinned.toggle()
+                        model.editor.isShowingOriginal = isPinned
+                    }
                 }
         )
     }
