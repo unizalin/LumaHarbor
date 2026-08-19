@@ -355,3 +355,15 @@ hdiutil attach Fixtures/Private/DiskFull-Test.dmg
 **人工重測結果（2026-08-19，同一天）**：使用者對 `LumaHarbor-DiskFull-Test` 按 Rescan Folder 重新觸發，截圖確認 alert 顯示「已掃描，但無法更新相片庫檔案／空間不足，無法儲存你的編輯。／你的照片仍然可以瀏覽。騰出磁碟空間，然後重試。」——`nextStep` 正確變成空間不足專屬的建議，不再是「解鎖磁碟」。**通過，disk-full 這一項的 Gate E 精神（不能顯示偽成功、要有正確的下一步指引）確認達成。**
 
 **Gate D/E/F 全部項目狀態小結（2026-08-19 這天結束時）**：APFS／exFAT／改名 relink／刪除 SQLite 重建／SSD 拔插／唯讀資料夾／損壞 RAW／損壞 sidecar／disk-full 全部通過；Undo/Redo 快捷鍵維持已知問題（滑鼠可用，不擋簽收）；unsupported 格式實測確認在這個平台上無法觸發，不是缺素材；Gate F 效能量測完成（interactive 解碼穩定 137–138ms，壓線在 150ms 目標內）。Gate F UI 矩陣裡還沒系統性走過的細項（例如個別調整項目的 Reset、原圖比較以外的其他細節）如果有沒提到的，下次接續時可以逐項對照 `docs/superpowers/specs/2026-08-15-mac-first-mvp-acceptance-plan.md` §Gate F 再檢查一次是否有漏項。
+
+## 2026-08-19（續十）：Gate F UI 矩陣人工走一輪
+
+對照 spec §Gate F 人工功能矩陣逐項列給使用者測，目前結果：
+
+1. **十個調整項目即時預覽 + 個別 Reset**——**通過**。
+2. 原圖比較（此前已測過通過）／Undo／Redo／整張 Reset All——**尚未回報**。
+3. **拉滑桿後立刻切換照片，先存檔才切走**——**通過**（這條本來就有自動化測試覆蓋，這次是人工雙重確認）。
+4. 匯出流水號／取消清暫存檔——**尚未回報**（Show in Finder 已測過通過，這次要測的是同名流水號跟取消行為）。
+5. 錯誤情境下一步指引——offline／read-only／corrupt／disk-full 都已通過，unsupported 已確認這平台測不到，**這條視為完成，不用再測**。
+
+**還沒做**：第 2、4 項人工結果，下次接續時繼續問。
