@@ -38,6 +38,7 @@ public struct AdjustmentPipeline: Sendable {
             || !parameters.isContrastIdentity
             || !parameters.isSaturationIdentity
             || !parameters.isVibranceIdentity
+            || !parameters.isAdvancedToneCurveIdentity
             || !parameters.isSplitToningIdentity
 
         if needsPerceptualStage {
@@ -71,8 +72,11 @@ public struct AdjustmentPipeline: Sendable {
                 working = vibrance.outputImage ?? working
             }
 
-            // MARK: - Insertion seam for Task 6 (advanced curve, step 5.5) and
-            // Task 7 (HSL, step 6) — both belong here, before split toning.
+            // 5.5. Advanced tone curve (spec §4.2 step 5.5) — a second,
+            // independent curve layered on top of the four-slider one.
+            if !parameters.isAdvancedToneCurveIdentity {
+                working = Self.applyAdvancedToneCurve(parameters.advancedToneCurve, to: working)
+            }
 
             // 7. Split toning (spec §4.2 step 7): tint shadows and highlights
             // independently using a luminance mask to blend two flat colour
@@ -219,6 +223,56 @@ public struct AdjustmentPipeline: Sendable {
         composite.inputImage = mask.cropped(to: extent)
         composite.backgroundImage = image
         return composite.outputImage ?? image
+    }
+
+    /// Per-pixel 1D LUT lookup, run once per RGB channel with the same table
+    /// (spec §4.3: colour is not touched, only tone). Core Image Kernel
+    /// Language rather than a `.metal` file, so no Package.swift build-target
+    /// changes are needed for one small kernel.
+    private static let advancedToneCurveKernel: CIColorKernel? = {
+        let source = """
+        kernel vec4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
+            vec4 pixel = sample(image, samplerCoord(image));
+            float lastIndex = lutWidth - 1.0;
+            vec2 lutSize = samplerSize(lut);
+            float r = sample(lut, samplerTransform(lut, vec2(pixel.r * lastIndex + 0.5, lutSize.y * 0.5))).r;
+            float g = sample(lut, samplerTransform(lut, vec2(pixel.g * lastIndex + 0.5, lutSize.y * 0.5))).r;
+            float b = sample(lut, samplerTransform(lut, vec2(pixel.b * lastIndex + 0.5, lutSize.y * 0.5))).r;
+            return vec4(r, g, b, pixel.a);
+        }
+        """
+        return CIColorKernel(source: source)
+    }()
+
+    private static func applyAdvancedToneCurve(_ curve: AdvancedToneCurve, to image: CIImage) -> CIImage {
+        guard let kernel = advancedToneCurveKernel else { return image }
+        let table = AdvancedToneCurveLUT.build(from: curve.points, resolution: 256)
+        guard let lutImage = Self.makeLUTImage(table) else { return image }
+        let extent = image.extent
+        let arguments: [Any] = [image, lutImage, Double(table.count)]
+        return kernel.apply(extent: extent, roiCallback: { _, rect in rect }, arguments: arguments) ?? image
+    }
+
+    /// Packs a 1D `[Float]` table into a 1-row-high `CIImage` the kernel can
+    /// sample, one red-channel texel per LUT entry.
+    private static func makeLUTImage(_ table: [Float]) -> CIImage? {
+        var pixelData = [UInt8]()
+        pixelData.reserveCapacity(table.count * 4)
+        for value in table {
+            let byte = UInt8(max(0, min(255, value * 255)))
+            pixelData.append(contentsOf: [byte, byte, byte, 255])
+        }
+        return pixelData.withUnsafeBytes { buffer -> CIImage? in
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            let data = Data(bytes: baseAddress, count: pixelData.count)
+            return CIImage(
+                bitmapData: data,
+                bytesPerRow: table.count * 4,
+                size: CGSize(width: table.count, height: 1),
+                format: .RGBA8,
+                colorSpace: nil
+            )
+        }
     }
 
     private static func applySplitToning(_ splitToning: SplitToning, to image: CIImage) -> CIImage {

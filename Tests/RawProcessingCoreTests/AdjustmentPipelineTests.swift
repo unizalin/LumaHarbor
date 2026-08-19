@@ -312,6 +312,24 @@ final class AdjustmentPipelineTests: XCTestCase {
         let tinted = try centrePixel(pipeline.apply(adjustments, to: bright))
         XCTAssertGreaterThan(tinted.red, tinted.blue, "An orange (hue 30) highlight tint should leave red above blue in a bright patch")
     }
+
+    // MARK: - Advanced tone curve
+
+    func testNeutralAdvancedCurveStaysAPassthrough() {
+        let source = makeSourceImage()
+        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
+    }
+
+    func testAdvancedCurveDarkeningPointsDarkenTheImage() throws {
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        let base = try centrePixel(source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = AdvancedToneCurve(points: [
+            ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.5)
+        ])
+        let darkened = try centrePixel(pipeline.apply(adjustments, to: source))
+        XCTAssertLessThan(darkened.red, base.red)
+    }
 }
 
 private func XCTAssertEqual(

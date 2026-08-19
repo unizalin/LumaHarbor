@@ -158,4 +158,16 @@ final class AdjustmentMappingTests: XCTestCase {
     func testNeutralSplitToningIsIdentity() {
         XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isSplitToningIdentity)
     }
+
+    func testAdvancedToneCurveIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = AdvancedToneCurve(points: [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 1)])
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.advancedToneCurve, adjustments.advancedToneCurve)
+        XCTAssertFalse(parameters.isAdvancedToneCurveIdentity)
+    }
+
+    func testNeutralAdvancedToneCurveIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isAdvancedToneCurveIdentity)
+    }
 }

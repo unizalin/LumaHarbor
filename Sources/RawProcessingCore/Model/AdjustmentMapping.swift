@@ -24,6 +24,7 @@ public struct RenderParameters: Equatable, Sendable {
     public let vignette: Vignette
     public let grain: Grain
     public let splitToning: SplitToning
+    public let advancedToneCurve: AdvancedToneCurve
 
     public var whiteBalance: RawWhiteBalance {
         RawWhiteBalance(
@@ -43,6 +44,7 @@ public struct RenderParameters: Equatable, Sendable {
     public var isVignetteIdentity: Bool { vignette.isIdentity }
     public var isGrainIdentity: Bool { grain.isIdentity }
     public var isSplitToningIdentity: Bool { splitToning.isIdentity }
+    public var isAdvancedToneCurveIdentity: Bool { advancedToneCurve.isIdentity }
 }
 
 /// The one place slider units become Core Image units.
@@ -88,7 +90,8 @@ public enum AdjustmentMapping {
             noiseReduction: clamped.noiseReduction,
             vignette: clamped.vignette,
             grain: clamped.grain,
-            splitToning: clamped.splitToning
+            splitToning: clamped.splitToning,
+            advancedToneCurve: clamped.advancedToneCurve
         )
     }
 }
