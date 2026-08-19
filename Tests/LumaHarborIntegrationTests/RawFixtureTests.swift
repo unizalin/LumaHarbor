@@ -231,6 +231,63 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
             }
         }
     }
+
+    // MARK: - Performance (spec §11: interactive preview target ≤150ms)
+
+    /// A single interactive-quality decode+adjust+render, at the exact pixel
+    /// target `EditorViewModel.previewPixelDimension` actually requests
+    /// (1,600px). This isolates the cost the spec's 150ms target is about --
+    /// the dominant, unpreemptable cost identified in the 2026-08-17 P1
+    /// finding (docs/testing/reports/2026-08-16-mvp-acceptance-progress.md):
+    /// a RAW decode can't be interrupted mid-flight, so this is what a single
+    /// slider tick costs regardless of the submit-side throttle that was
+    /// added to fix that P1 (`EditorViewModel.interactiveThrottleInterval`,
+    /// covered separately by
+    /// `EditorViewModelPreviewTests.testRapidSliderDragCoalescesIntoTheThrottleFloorInsteadOfQueueingOnePerTick`
+    /// with a stub renderer). Together: the throttle caps submissions to at
+    /// most one per 80ms, and this test says how long each of those actually
+    /// takes on real hardware.
+    ///
+    /// No hard pass/fail threshold -- hardware varies between machines and
+    /// CI runners, and turning a measurement into a flaky gate would defeat
+    /// the point (this suite is opt-in via an environment variable for
+    /// exactly this kind of reason). The numbers are printed for a human to
+    /// read against the spec's target instead.
+    func testInteractivePreviewLatencyForARealPhoto() async throws {
+        let url = try firstSonyFixture()
+        let renderer = CoreImagePreviewRenderer()
+        let subject = PreviewSubject(UUID())
+        let clock = ContinuousClock()
+
+        func decodeOnce(exposure: Double) async throws -> Duration {
+            let start = clock.now
+            _ = try await renderer.render(PreviewRequest(
+                subject: subject,
+                url: url,
+                adjustments: PhotoAdjustments(exposure: exposure),
+                targetPixelDimension: 1_600,
+                quality: .interactive
+            ))
+            return start.duration(to: clock.now)
+        }
+
+        // First call pays for CoreImage warming up its own internal caches;
+        // report it separately from steady-state so a human can see what a
+        // real drag actually experiences after the first tick.
+        let cold = try await decodeOnce(exposure: 0)
+        let warm = try [
+            await decodeOnce(exposure: 0.5),
+            await decodeOnce(exposure: 1.0),
+            await decodeOnce(exposure: 1.5),
+        ]
+
+        print("""
+            [Gate F performance] interactive preview decode, \(url.lastPathComponent), \
+            1600px target, spec §11 target ≤150ms:
+              cold:  \(cold)
+              warm:  \(warm.map(String.init(describing:)).joined(separator: ", "))
+            """)
+    }
 }
 
 private func XCTAssertEqual(

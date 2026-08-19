@@ -253,7 +253,7 @@ build／337 tests 都過。**這也是手勢層級修法，沒辦法寫自動化
 2. ~~Show in Finder~~ — 通過
 3. unsupported／disk-full 測試素材 — 非阻塞，視需要再做
 4. Undo/Redo 快捷鍵 — 使用者確認「快捷鍵不好驗測」，決定不繼續深究「一直有錯誤」的具體內容；維持已知問題狀態，**滑鼠點選單是唯一目前確認可用的路徑，快捷鍵維持無效**，不擋簽收
-5. Gate F 效能量測（Instruments）— 未開始
+5. Gate F 效能量測（Instruments）— 完成，見下方「續七」（沒用 Instruments.app 本體，用等效的自動化量測，見下方細節）
 
 ## 2026-08-19（續五）：中文化補完（調整名稱、錯誤訊息、系統面板），另外發現一個需要人工驗證的疑點
 
@@ -288,3 +288,21 @@ L10n.t(Exposure)=曝光
 **還沒做**：這是繞開問題，不是解釋問題——沒有進一步深究「`Bundle.preferredLocalizations` instance property 為什麼在這台機器/這個 macOS 版本上本身就是壞的」這個更底層的成因（可能是這個很新的 macOS/Foundation 版本的行為）。不影響修法本身的正確性（就算 Apple 那邊行為之後改回正常，這套手動查表機制不受影響、不會被「修好」後又壞掉），但如果之後有心力想徹底搞懂根因，這是留下來的線索。
 
 **人工驗證結果（2026-08-19）**：使用者實際 `swift run LumaHarbor` 打開 App，確認畫面上真的是中文。**修好了，這條線索關閉。**
+
+## 2026-08-19（續七）：Gate F 效能量測，發現這個環境其實可以跑真實 RAW 硬體測試，加了一個真實量測
+
+**意外發現**：`RawFixtureTests`（8 個測試，一直被記成「需要真實硬體」而跳過）其實只是靠環境變數 `LUMAHARBOR_RAW_FIXTURE_DIR` 決定要不要跑，不是真的缺硬體支援——這個環境本身就是有完整 Xcode 工具鏈的 Apple Silicon Mac，`CIRAWFilter` 完全可用。設 `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW` 之後這 8 個測試全部真的跑起來、全過（用的是本機那 81 張真實 Sony ARW 相機檔案）。之前每次驗收記錄「8 skipped」，都只是沒設這個環境變數，不代表這台機器真的不能測——以後想跑這批測試，記得先設這個變數。
+
+**效能量測**：沒有 Instruments.app 本體可操作（GUI 工具，這個環境沒有畫面），改寫一個等效的自動化量測——`RawFixtureTests.testInteractivePreviewLatencyForARealPhoto`，直接呼叫 `CoreImagePreviewRenderer.render(...)`，用跟 `EditorViewModel.previewPixelDimension` 完全一樣的 1600px 目標、對一張真實 `_DSC1896.ARW` 做 interactive 品質解碼，量真實耗時：
+
+```
+cold:  338ms（第一次呼叫，CoreImage 內部快取還沒熱）
+warm:  138ms, 138ms, 137ms（穩定狀態，重複三次）
+spec §11 目標：≤150ms
+```
+
+**結論**：穩定狀態下單次 interactive 解碼落在 **137–138ms，壓線在 150ms 目標之內**，但沒什麼餘裕。對照今天稍早修好的 80ms 節流（`interactiveThrottleInterval`）：節流只保證「送出請求」的頻率上限是每 80ms 一次，但既然單次解碼本身要 137ms（比 80ms 長），使用者拖曳速度只要略快於一次解碼的時間，後面的請求還是會排隊等前一個解完才輪到——不是節流沒做好，是節流從一開始就沒打算、也不可能讓「解碼」本身變快，只負責不讓排隊無限累積、並確保排隊中永遠丟棄過期結果只顯示最新的（這條路徑本身有 `PreviewSchedulerTests` 覆蓋，這裡不重複驗證）。體感上「基本跟得上、偶爾在快速甩動時感覺到一點延遲」跟這組數字吻合。
+
+沒有設定強制 pass/fail 的門檻（不同機器效能不同，把測量結果變成會炸的 CI 閘門沒有意義，這也是為什麼這整批測試本來就是靠環境變數選擇性啟用），數字用 `print` 印出來給人看，不是斷言。
+
+`swift test`（設環境變數後）340 個測試全過（含新增這 1 個，原本 339 + 1）。**Gate F 效能量測項目視為完成，不再是「未開始」。**
