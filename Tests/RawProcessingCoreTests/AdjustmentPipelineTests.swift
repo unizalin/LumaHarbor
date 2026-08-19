@@ -253,6 +253,38 @@ final class AdjustmentPipelineTests: XCTestCase {
         let centre = try centrePixel(output)
         XCTAssertGreaterThan(cornerRed, centre.red, "A positive-amount vignette should brighten the corner relative to the centre")
     }
+
+    // MARK: - Grain
+
+    func testNeutralGrainStaysAPassthrough() {
+        let source = makeSourceImage()
+        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
+    }
+
+    func testGrainAddsVisibleNoiseAndPreservesExtent() throws {
+        // A flat mid-grey source with grain applied must stop being perfectly
+        // flat -- neighbouring pixels should diverge -- while the canvas size
+        // is untouched.
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.grain = Grain(amount: 100, size: 25, roughness: 50)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertEqual(output.extent, source.extent)
+
+        let renderer = ImageRenderService()
+        let cgImage = try renderer.makeCGImage(output)
+        let width = cgImage.width, height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let firstPixelRed = bytes[0]
+        let anyPixelDiffers = stride(from: 0, to: bytes.count, by: 4).contains { bytes[$0] != firstPixelRed }
+        XCTAssertTrue(anyPixelDiffers, "Grain at full amount on a flat source must not render perfectly flat")
+    }
 }
 
 private func XCTAssertEqual(

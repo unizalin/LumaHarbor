@@ -134,4 +134,16 @@ final class AdjustmentMappingTests: XCTestCase {
         XCTAssertEqual(parameters.vignette, adjustments.vignette)
         XCTAssertFalse(parameters.isVignetteIdentity)
     }
+
+    func testGrainIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.grain = Grain(amount: 25, size: 60, roughness: 40)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.grain, adjustments.grain)
+        XCTAssertFalse(parameters.isGrainIdentity)
+    }
+
+    func testNeutralGrainIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isGrainIdentity)
+    }
 }
