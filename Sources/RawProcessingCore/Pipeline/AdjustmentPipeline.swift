@@ -113,9 +113,8 @@ public struct AdjustmentPipeline: Sendable {
         // 11. Grain (spec §4.2 step 11) — synthetic per-pixel luminance noise,
         // generated once at the image's own extent and blended in proportion
         // to amount. size / roughness shape the noise before blending: size
-        // widens the grain (blur radius scales up), roughness controls how
-        // much of a soft-light vs. straight-overlay blend is used (a rougher
-        // grain reads grittier at high blend contribution).
+        // widens the grain (blur radius scales up), roughness widens
+        // amountScale's magnitude, making the grain read more strongly.
         if !parameters.isGrainIdentity {
             working = Self.applyGrain(parameters.grain, to: working)
         }
@@ -152,7 +151,7 @@ public struct AdjustmentPipeline: Sendable {
         matrix.gVector = vector
         matrix.bVector = vector
         matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
-        matrix.biasVector = CIVector(x: 0.5, y: 0.5, z: 0.5, w: 1)
+        matrix.biasVector = CIVector(x: 0.5 - 0.5 * amountScale, y: 0.5 - 0.5 * amountScale, z: 0.5 - 0.5 * amountScale, w: 1)
         guard let scaledNoise = matrix.outputImage else { return image }
 
         let blend = CIFilter.softLightBlendMode()
