@@ -23,6 +23,7 @@ public struct RenderParameters: Equatable, Sendable {
     public let noiseReduction: NoiseReduction
     public let vignette: Vignette
     public let grain: Grain
+    public let splitToning: SplitToning
 
     public var whiteBalance: RawWhiteBalance {
         RawWhiteBalance(
@@ -41,6 +42,7 @@ public struct RenderParameters: Equatable, Sendable {
     public var isNoiseReductionIdentity: Bool { noiseReduction.isIdentity }
     public var isVignetteIdentity: Bool { vignette.isIdentity }
     public var isGrainIdentity: Bool { grain.isIdentity }
+    public var isSplitToningIdentity: Bool { splitToning.isIdentity }
 }
 
 /// The one place slider units become Core Image units.
@@ -85,7 +87,8 @@ public enum AdjustmentMapping {
             sharpening: clamped.sharpening,
             noiseReduction: clamped.noiseReduction,
             vignette: clamped.vignette,
-            grain: clamped.grain
+            grain: clamped.grain,
+            splitToning: clamped.splitToning
         )
     }
 }
