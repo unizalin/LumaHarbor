@@ -18,20 +18,22 @@ public enum AdjustmentKind: String, CaseIterable, Codable, Sendable {
 }
 
 extension AdjustmentKind {
-    /// Stable, non-localised label. The UI layer may localise it later; keeping
-    /// it here means the ordering and naming stay in one place.
+    /// Localised label. `String(localized:)`'s default bundle resolves against
+    /// the running app regardless of which module the call sits in, so this
+    /// stays here rather than in the UI layer -- ordering and naming stay in
+    /// one place.
     public var displayName: String {
         switch self {
-        case .exposure: return "Exposure"
-        case .temperature: return "Temperature"
-        case .tint: return "Tint"
-        case .contrast: return "Contrast"
-        case .highlights: return "Highlights"
-        case .shadows: return "Shadows"
-        case .whites: return "Whites"
-        case .blacks: return "Blacks"
-        case .vibrance: return "Vibrance"
-        case .saturation: return "Saturation"
+        case .exposure: return String(localized: "Exposure")
+        case .temperature: return String(localized: "Temperature")
+        case .tint: return String(localized: "Tint")
+        case .contrast: return String(localized: "Contrast")
+        case .highlights: return String(localized: "Highlights")
+        case .shadows: return String(localized: "Shadows")
+        case .whites: return String(localized: "Whites")
+        case .blacks: return String(localized: "Blacks")
+        case .vibrance: return String(localized: "Vibrance")
+        case .saturation: return String(localized: "Saturation")
         }
     }
 
@@ -52,9 +54,9 @@ public enum AdjustmentGroup: String, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .whiteBalance: return "White Balance"
-        case .tone: return "Tone"
-        case .color: return "Color"
+        case .whiteBalance: return String(localized: "White Balance")
+        case .tone: return String(localized: "Tone")
+        case .color: return String(localized: "Color")
         }
     }
 }

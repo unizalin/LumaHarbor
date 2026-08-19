@@ -10,14 +10,14 @@ extension FingerprintError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .fileUnavailable(let path):
-            return "Couldn't read \(path)."
+            return "\(String(localized: "Couldn't read")) \(path)."
         case .readFailed(_, let reason):
-            return "Couldn't read the file. \(reason)"
+            return "\(String(localized: "Couldn't read the file.")) \(reason)"
         }
     }
 
     public var recoverySuggestion: String? {
-        "Reconnect the drive holding this photo, then rescan."
+        String(localized: "Reconnect the drive holding this photo, then rescan.")
     }
 }
 

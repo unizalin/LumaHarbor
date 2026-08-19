@@ -71,7 +71,7 @@ public struct CoreImageRawDecoder: RawDecoding {
         guard let output = filter.outputImage else {
             throw RawDecodingError.decodeFailed(
                 path: url.path,
-                reason: "The system RAW decoder returned no image."
+                reason: String(localized: "The system RAW decoder returned no image.")
             )
         }
 

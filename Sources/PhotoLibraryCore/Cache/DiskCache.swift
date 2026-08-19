@@ -9,15 +9,15 @@ extension CacheError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .insufficientDiskSpace:
-            return "There isn't enough free space to cache previews."
+            return String(localized: "There isn't enough free space to cache previews.")
         case .writeFailed(let reason):
-            return "A cached preview couldn't be written. \(reason)"
+            return "\(String(localized: "A cached preview couldn't be written.")) \(reason)"
         }
     }
 
     public var recoverySuggestion: String? {
         // Spec §10: never leave the user with a dead end.
-        "Free up space on your startup disk, or lower the cache limit in Settings."
+        String(localized: "Free up space on your startup disk, or lower the cache limit in Settings.")
     }
 }
 

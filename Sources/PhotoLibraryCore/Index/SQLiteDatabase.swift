@@ -12,16 +12,16 @@ extension SQLiteError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .openFailed:
-            return "LumaHarbor's local index couldn't be opened."
+            return String(localized: "LumaHarbor's local index couldn't be opened.")
         case .prepareFailed, .stepFailed, .bindFailed:
-            return "LumaHarbor's local index reported an error."
+            return String(localized: "LumaHarbor's local index reported an error.")
         }
     }
 
     public var recoverySuggestion: String? {
         // The index is disposable by design (spec §8.3), so the answer is always
         // "throw it away and rescan".
-        "Delete the local index and rescan your folders to rebuild it."
+        String(localized: "Delete the local index and rescan your folders to rebuild it.")
     }
 }
 

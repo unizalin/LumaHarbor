@@ -12,12 +12,15 @@ struct ScanProgress: Equatable {
     var isFinished: Bool
 
     var summary: String {
+        let photosPart = indexedCount == 1
+            ? String(localized: "1 photo")
+            : "\(indexedCount) " + String(localized: "photos")
         if isFinished {
             return failedCount == 0
-                ? "\(indexedCount) photos"
-                : "\(indexedCount) photos, \(failedCount) skipped"
+                ? photosPart
+                : "\(photosPart), \(failedCount) " + String(localized: "skipped")
         }
-        return "Scanning — \(indexedCount) found"
+        return "\(String(localized: "Scanning —")) \(indexedCount) " + String(localized: "found")
     }
 }
 
@@ -239,7 +242,7 @@ public final class LibraryViewModel: ObservableObject {
         } catch {
             startupFailure = (error as? LocalizedError)?.errorDescription
                 ?? (error as NSError).localizedDescription
-            alert = UserAlert(title: "LumaHarbor couldn't start up", error: error)
+            alert = UserAlert(title: String(localized: "LumaHarbor couldn't start up"), error: error)
         }
     }
 
@@ -247,9 +250,9 @@ public final class LibraryViewModel: ObservableObject {
 
     func presentAddFolderPanel() {
         let panel = NSOpenPanel()
-        panel.title = "Choose a photo folder"
-        panel.message = "Pick the folder on your drive that holds your RAW files."
-        panel.prompt = "Add Folder"
+        panel.title = String(localized: "Choose a photo folder")
+        panel.message = String(localized: "Pick the folder on your drive that holds your RAW files.")
+        panel.prompt = String(localized: "Add Folder")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -267,7 +270,7 @@ public final class LibraryViewModel: ObservableObject {
             requestSelectLibrary(folder.id)
             startScan(libraryID: folder.id)
         } catch {
-            alert = UserAlert(title: "Couldn't add that folder", error: error)
+            alert = UserAlert(title: String(localized: "Couldn't add that folder"), error: error)
         }
     }
 
@@ -276,9 +279,9 @@ public final class LibraryViewModel: ObservableObject {
     func presentRelinkPanel(for libraryID: LibraryID) {
         guard let library = libraries.first(where: { $0.id == libraryID }) else { return }
         let panel = NSOpenPanel()
-        panel.title = "Reconnect \(library.displayName)"
-        panel.message = "Choose the folder again to restore access to your photos."
-        panel.prompt = "Reconnect"
+        panel.title = "\(String(localized: "Reconnect")) \(library.displayName)"
+        panel.message = String(localized: "Choose the folder again to restore access to your photos.")
+        panel.prompt = String(localized: "Reconnect")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -298,7 +301,7 @@ public final class LibraryViewModel: ObservableObject {
                 isReadOnly: !(libraries.first { $0.id == libraryID }?.isWritable ?? false)
             )
         } catch {
-            alert = UserAlert(title: "Couldn't reconnect that folder", error: error)
+            alert = UserAlert(title: String(localized: "Couldn't reconnect that folder"), error: error)
         }
     }
 
@@ -323,7 +326,7 @@ public final class LibraryViewModel: ObservableObject {
                 commitLibrarySelection(libraries.first?.id)
             }
         } catch {
-            alert = UserAlert(title: "Couldn't remove that folder", error: error)
+            alert = UserAlert(title: String(localized: "Couldn't remove that folder"), error: error)
         }
     }
 
@@ -395,15 +398,15 @@ public final class LibraryViewModel: ObservableObject {
                     await self.reloadPhotos()
                     if let failure = result.manifestWriteFailure {
                         self.alert = UserAlert(
-                            title: "Scanned, but couldn't update the library file",
+                            title: String(localized: "Scanned, but couldn't update the library file"),
                             message: failure,
-                            nextStep: "Your photos are still browsable. "
-                                + "Unlock the drive to save changes back to it."
+                            nextStep: String(localized: "Your photos are still browsable.")
+                                + " " + String(localized: "Unlock the drive to save changes back to it.")
                         )
                     }
 
                 case .failed(let error):
-                    self.alert = UserAlert(title: "Scan problem", error: error)
+                    self.alert = UserAlert(title: String(localized: "Scan problem"), error: error)
                 }
             }
         }
@@ -434,7 +437,7 @@ public final class LibraryViewModel: ObservableObject {
                 .sorted(by: Self.displayOrder)
         } catch {
             photos = []
-            alert = UserAlert(title: "Couldn't read the local index", error: error)
+            alert = UserAlert(title: String(localized: "Couldn't read the local index"), error: error)
         }
     }
 
@@ -476,9 +479,9 @@ public final class LibraryViewModel: ObservableObject {
             // the original file.
             editor.close()
             alert = UserAlert(
-                title: "This drive isn't connected",
-                message: "LumaHarbor can show cached thumbnails, but editing needs the original file.",
-                nextStep: "Reconnect the drive, then try again."
+                title: String(localized: "This drive isn't connected"),
+                message: String(localized: "LumaHarbor can show cached thumbnails, but editing needs the original file."),
+                nextStep: String(localized: "Reconnect the drive, then try again.")
             )
             return
         }
@@ -520,7 +523,7 @@ public final class LibraryViewModel: ObservableObject {
                     adjustments: .neutral,
                     isReadOnly: !library.isWritable
                 )
-                self.alert = UserAlert(title: "Couldn't read saved edits", error: error)
+                self.alert = UserAlert(title: String(localized: "Couldn't read saved edits"), error: error)
             }
         }
     }
@@ -550,9 +553,9 @@ public final class LibraryViewModel: ObservableObject {
     func presentExportPanel(quality: Double) {
         guard let photo = selectedPhoto else { return }
         let panel = NSOpenPanel()
-        panel.title = "Export JPEG"
-        panel.message = "Choose where to save the exported photo."
-        panel.prompt = "Export Here"
+        panel.title = String(localized: "Export JPEG")
+        panel.message = String(localized: "Choose where to save the exported photo.")
+        panel.prompt = String(localized: "Export Here")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
@@ -596,7 +599,7 @@ public final class LibraryViewModel: ObservableObject {
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.exportState = nil
-                self?.alert = UserAlert(title: "Export failed", error: error)
+                self?.alert = UserAlert(title: String(localized: "Export failed"), error: error)
             }
         }
     }

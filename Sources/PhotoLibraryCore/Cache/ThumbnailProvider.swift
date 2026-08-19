@@ -13,22 +13,22 @@ extension ThumbnailError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unavailableOffline:
-            return "This photo hasn't been cached yet and its drive isn't connected."
+            return String(localized: "This photo hasn't been cached yet and its drive isn't connected.")
         case .decoding(let error):
             return error.errorDescription
         case .renderFailed:
-            return "The thumbnail couldn't be rendered."
+            return String(localized: "The thumbnail couldn't be rendered.")
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .unavailableOffline:
-            return "Reconnect the drive to generate a thumbnail."
+            return String(localized: "Reconnect the drive to generate a thumbnail.")
         case .decoding(let error):
             return error.recoverySuggestion
         case .renderFailed:
-            return "Try again."
+            return String(localized: "Try again.")
         }
     }
 }

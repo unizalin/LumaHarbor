@@ -69,11 +69,11 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         case .ready, .pending:
             return nil
         case .unsupported:
-            return "This camera's RAW isn't supported yet"
+            return String(localized: "This camera's RAW isn't supported yet")
         case .failed:
-            return failureReason ?? "This file couldn't be read"
+            return failureReason ?? String(localized: "This file couldn't be read")
         case .needsConfirmation:
-            return "Several files match — confirm which photo this is"
+            return String(localized: "Several files match — confirm which photo this is")
         }
     }
 }

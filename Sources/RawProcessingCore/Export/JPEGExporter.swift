@@ -52,15 +52,15 @@ extension ExportError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .destinationNotWritable:
-            return "That export location is read-only."
+            return String(localized: "That export location is read-only.")
         case .destinationUnavailable:
-            return "The export location isn't available."
+            return String(localized: "The export location isn't available.")
         case .couldNotFindUniqueName(let baseName):
-            return "Couldn't find an unused filename for \"\(baseName)\"."
+            return "\(String(localized: "Couldn't find an unused filename for")) \"\(baseName)\"."
         case .insufficientDiskSpace:
-            return "There isn't enough free space to finish the export."
+            return String(localized: "There isn't enough free space to finish the export.")
         case .cancelled:
-            return "The export was cancelled."
+            return String(localized: "The export was cancelled.")
         case .decoding(let error):
             return error.errorDescription
         case .rendering(let error):
@@ -71,9 +71,9 @@ extension ExportError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .destinationNotWritable, .destinationUnavailable, .couldNotFindUniqueName:
-            return "Choose a different output location."
+            return String(localized: "Choose a different output location.")
         case .insufficientDiskSpace:
-            return "Free up space or choose a different destination, then export again."
+            return String(localized: "Free up space or choose a different destination, then export again.")
         case .cancelled:
             return nil
         case .decoding(let error):

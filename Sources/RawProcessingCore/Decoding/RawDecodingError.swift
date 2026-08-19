@@ -20,15 +20,15 @@ extension RawDecodingError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .fileUnavailable(let path):
-            return "The original file is not available at \(path)."
+            return "\(String(localized: "The original file is not available at")) \(path)."
         case .unsupportedFormat:
-            return "This camera's RAW format isn't supported yet."
+            return String(localized: "This camera's RAW format isn't supported yet.")
         case .corruptedFile:
-            return "This RAW file appears to be damaged."
+            return String(localized: "This RAW file appears to be damaged.")
         case .decodeFailed(_, let reason):
-            return "The RAW file couldn't be decoded. \(reason)"
+            return "\(String(localized: "The RAW file couldn't be decoded.")) \(reason)"
         case .cancelled:
-            return "The operation was cancelled."
+            return String(localized: "The operation was cancelled.")
         }
     }
 
@@ -36,13 +36,13 @@ extension RawDecodingError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .fileUnavailable:
-            return "Reconnect the drive holding this photo, then try again."
+            return String(localized: "Reconnect the drive holding this photo, then try again.")
         case .unsupportedFormat:
-            return "Keep the file in your library — support may arrive in a future macOS release."
+            return String(localized: "Keep the file in your library — support may arrive in a future macOS release.")
         case .corruptedFile:
-            return "Try re-copying this file from the memory card."
+            return String(localized: "Try re-copying this file from the memory card.")
         case .decodeFailed:
-            return "Try again, or re-copy this file from the memory card."
+            return String(localized: "Try again, or re-copy this file from the memory card.")
         case .cancelled:
             return nil
         }
