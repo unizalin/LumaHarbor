@@ -29,6 +29,11 @@ final class EditorViewModel: ObservableObject {
     /// dozens of full renders, short enough to feel automatic.
     static let settleDelay = Duration.milliseconds(350)
     static let autosaveDelay = Duration.milliseconds(700)
+    /// Floor between interactive preview submissions while dragging. RAW decode
+    /// can't be interrupted mid-call (spec §11), so submitting faster than one
+    /// decode can finish just queues dead work; this caps the submit rate
+    /// instead of relying on cancellation to save time it can't actually save.
+    static let interactiveThrottleInterval = Duration.milliseconds(80)
     /// How many times `flushPendingEdits()` will re-save when the user keeps
     /// editing during the write. Generous enough never to be hit by a human,
     /// small enough that a stuck state can't spin forever.
@@ -55,11 +60,23 @@ final class EditorViewModel: ObservableObject {
     var onSaved: ((PhotoID, Bool) -> Void)?
 
     private var history = EditHistory<PhotoAdjustments>(initial: .neutral)
+    /// What's actually on disk for this photo right now — set on `open()`, kept
+    /// in step by a successful `save()`. `didChangeAdjustments()` compares
+    /// `history.current` against this rather than just reacting to "an edit
+    /// happened", so undoing or resetting back to the saved value clears
+    /// dirtiness. Without that, a single touch on a read-only photo leaves
+    /// `saveState` stuck at `.failed` forever — `flushPendingEdits()` refuses
+    /// to write next-to-nothing, and since `resetAll()`/`undo()` re-mark
+    /// `.pending` unconditionally, there was no way back to a clean state and
+    /// therefore no way to navigate away at all (found manually 2026-08-18).
+    private var lastSavedAdjustments: PhotoAdjustments = .neutral
     private var services: AppServices?
     private var eventTask: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
     private var autosaveTask: Task<Void, Never>?
     private var originalRenderTask: Task<Void, Never>?
+    private var interactiveThrottleTask: Task<Void, Never>?
+    private var lastInteractiveSubmit: ContinuousClock.Instant?
     private var isReadOnlyLibrary = false
     /// Generations increase globally, so this alone rejects any frame that is
     /// older than what's already on screen.
@@ -82,6 +99,7 @@ final class EditorViewModel: ObservableObject {
         settleTask?.cancel()
         autosaveTask?.cancel()
         originalRenderTask?.cancel()
+        interactiveThrottleTask?.cancel()
     }
 
     func attach(services: AppServices) {
@@ -103,6 +121,7 @@ final class EditorViewModel: ObservableObject {
         self.photo = photo
         self.sourceURL = sourceURL
         self.history = EditHistory(initial: adjustments)
+        self.lastSavedAdjustments = adjustments
         self.isReadOnlyLibrary = isReadOnly
         self.previewImage = nil
         self.originalImage = nil
@@ -111,7 +130,7 @@ final class EditorViewModel: ObservableObject {
         self.lastDisplayedGeneration = 0
         refreshUndoState()
 
-        requestPreview(quality: .interactive)
+        submitInteractivePreview()
         scheduleSettledPreview()
         renderOriginalReference()
     }
@@ -164,12 +183,21 @@ final class EditorViewModel: ObservableObject {
 
     private func didChangeAdjustments() {
         refreshUndoState()
-        saveState = .pending
         // Interactive first so the slider keeps up (spec §11), then the good one
-        // once the user stops.
-        requestPreview(quality: .interactive)
+        // once the user stops -- the preview always follows the sliders,
+        // dirty or not.
+        requestInteractivePreview()
         scheduleSettledPreview()
-        scheduleAutosave()
+
+        if history.current == lastSavedAdjustments {
+            // Undid or reset back to what's already on disk: nothing to write.
+            autosaveTask?.cancel()
+            autosaveTask = nil
+            saveState = .unchanged
+        } else {
+            saveState = .pending
+            scheduleAutosave()
+        }
     }
 
     private func refreshUndoState() {
@@ -190,6 +218,31 @@ final class EditorViewModel: ObservableObject {
             quality: quality
         )
         Task { await services.previewScheduler.submit(request) }
+    }
+
+    /// Submits an interactive preview, but never faster than
+    /// `interactiveThrottleInterval` — a rapid drag coalesces into the last
+    /// value instead of queueing one decode per tick (spec §11).
+    private func requestInteractivePreview() {
+        let now = ContinuousClock.now
+        if let last = lastInteractiveSubmit,
+           now - last < Self.interactiveThrottleInterval {
+            interactiveThrottleTask?.cancel()
+            interactiveThrottleTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.interactiveThrottleInterval)
+                guard !Task.isCancelled else { return }
+                self?.submitInteractivePreview()
+            }
+            return
+        }
+        submitInteractivePreview()
+    }
+
+    private func submitInteractivePreview() {
+        interactiveThrottleTask?.cancel()
+        interactiveThrottleTask = nil
+        lastInteractiveSubmit = ContinuousClock.now
+        requestPreview(quality: .interactive)
     }
 
     private func scheduleSettledPreview() {
@@ -253,6 +306,9 @@ final class EditorViewModel: ObservableObject {
         case .failed(let token, let error):
             guard let photo, token.subject.rawValue == photo.id.rawValue else { return }
             isRendering = false
+            // A failed decode must not leave the previous photo's frame on
+            // screen looking like a successful one (Gate E: no fake success).
+            previewImage = nil
             alert = UserAlert(title: "Couldn't show this photo", error: error)
         }
     }
@@ -279,6 +335,7 @@ final class EditorViewModel: ObservableObject {
         saveState = .saving
         do {
             try await services.saveAdjustments(adjustments, photo)
+            lastSavedAdjustments = adjustments
             // Only report success once the atomic write actually returned.
             if history.current == adjustments {
                 saveState = .saved(Date())
@@ -353,8 +410,11 @@ final class EditorViewModel: ObservableObject {
         settleTask?.cancel()
         autosaveTask?.cancel()
         originalRenderTask?.cancel()
+        interactiveThrottleTask?.cancel()
         settleTask = nil
         autosaveTask = nil
         originalRenderTask = nil
+        interactiveThrottleTask = nil
+        lastInteractiveSubmit = nil
     }
 }
