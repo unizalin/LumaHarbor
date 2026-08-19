@@ -266,3 +266,25 @@ build／337 tests 都過。**這也是手勢層級修法，沒辦法寫自動化
 這跟現有的 `LocalizationSmokeTest.swift` 不衝突——那個測試是直接用路徑指到特定 `.lproj` 子目錄讀值（繞過系統語言協商），驗證的是「翻譯檔案內容本身正確」，不是「系統語言切換後真的會顯示中文」。我這次測的是後者，用的是命令列模擬，不是真的改 macOS 系統設定，測試方法本身也可能不夠準確（例如純 command-line 執行的 binary 跟透過 Finder/LaunchServices 啟動的 `.app` 在 bundle 語言協商上可能行為不同，這點我没有進一步驗證的工具，這台環境沒有輔助使用/螢幕錄製權限，沒辦法真的切系統語言後開 App 用眼睛看）。
 
 **建議**：下次人工驗收時，麻煩實際去「系統設定 → 一般 → 語言與地區」把偏好語言切成繁體中文（或至少確認目前就是），然後 `swift run LumaHarbor` 打開 App 看調整面板名稱、Undo/Redo 選單這些**這次新加的**中文有沒有真的出現。如果沒有，代表這是一個獨立於本次字串補完之外、範圍更大的既有 bug（可能連 2026-08-16 那批最早的中文化都沒有真的在 `swift run` 環境下顯示過），需要另開 spec 處理，不是能立刻在這個環境憑空修好的事。
+
+## 2026-08-19（續六）：上面那個疑點是真的——使用者截圖證實整個中文化從沒真的顯示過，已修好並實機驗證
+
+使用者實測 `swift run LumaHarbor`，截圖顯示側邊欄「Photo Folders」「6 photos」「Offline」全部是英文——當下 Mac 系統語言用 `defaults read -g AppleLanguages` 確認過**確實**是 `zh-Hant-TW`。上面那個疑點成立：不只是這次新補的字串，連 2026-08-16 最早那批中文化（`Text("Photo Folders")` 這種字面值）從頭到尾都沒有真的顯示過中文。
+
+**根因**（實機測出來，不是猜的）：`Bundle.preferredLocalizations`（instance property——SwiftUI 的 `Text(LocalizedStringKey)` 跟 `String(localized:)` 的預設 bundle 查詢都靠它做語言協商）在這個 bundle 上完全不反映系統語言，即使 `Locale.preferredLanguages` 正確顯示 `["zh-Hant-TW", "en-TW"]`，它還是回傳 `["en"]`，跟 `.lproj` 資料夾大小寫無關（連刻意用 `.copy()` 保留原始大小寫 `zh-Hant.lproj` 都一樣）。另外 `String(localized:)` 沒指定 `bundle:` 參數時預設用 `Bundle.main`，在 `swift run` 底下那是空的可執行檔目錄，永遠查不到翻譯——兩個問題疊在一起，代表不管新舊，所有走這兩條路徑的字串都只是在 fallback 回英文原文（剛好等於 key 本身），沒人發現是因為結果「看起來」正常。
+
+有一條路徑實測是對的：static 方法 `Bundle.preferredLocalizations(from:forPreferences:)`，明確傳入 bundle 的 `localizations` 跟 `Locale.preferredLanguages`，正確解析出 `zh-Hant`。
+
+**修法**：新增一個 `Localization` target（`Sources/Localization/`），把 `Localizable.strings` 兩份搬過去，提供 `public enum L10n`——`L10n.t(_:)` 走的是上面那條驗證過正確的路徑（static matcher + 直接 `Bundle(path:)` 指到解析出的語言子目錄），完全不碰 `Bundle.preferredLocalizations` instance property 或 `String(localized:)` 的預設行為。`RawProcessingCore`、`PhotoLibraryCore`、`LumaHarborApp` 都依賴這個新 target。全專案所有 `String(localized:)` 呼叫跟 SwiftUI `Text`/`Label`/`Button`/`.help`/`LabeledContent`/`CommandMenu` 字面值都改成 `L10n.t(...)`。
+
+**這次真的做了實機驗證**（不是只看 build/test 綠燈，那個上次已經證明沒用）：在 `LumaHarborMainApp.init()` 暫時塞診斷、`swift build` 後跑起真正編譯出來的 binary，這台機器系統語言本來就是 zh-Hant-TW，輸出：
+```
+L10n.t(Cancel)=取消
+L10n.t(Photo Folders)=照片資料夾
+L10n.t(Exposure)=曝光
+```
+確認真的抓到中文，診斷程式碼已移除。build 乾淨、339 個測試全過（`LocalizationSmokeTest` 從 2 個測試變 4 個，新增一個掃全部調整名稱/分類 key 翻譯完整性的測試）。working tree 乾淨，已 commit。
+
+**還沒做**：這是繞開問題，不是解釋問題——沒有進一步深究「`Bundle.preferredLocalizations` instance property 為什麼在這台機器/這個 macOS 版本上本身就是壞的」這個更底層的成因（可能是這個很新的 macOS/Foundation 版本的行為）。不影響修法本身的正確性（就算 Apple 那邊行為之後改回正常，這套手動查表機制不受影響、不會被「修好」後又壞掉），但如果之後有心力想徹底搞懂根因，這是留下來的線索。
+
+**下一步**：麻煩使用者實際 `swift run LumaHarbor` 打開 App，用眼睛確認畫面上真的是中文（不只是我這邊的文字診斷）——這才是最終權威驗證，我這台環境沒有畫面可以看。
