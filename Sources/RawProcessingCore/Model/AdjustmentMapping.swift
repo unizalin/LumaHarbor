@@ -19,6 +19,9 @@ public struct RenderParameters: Equatable, Sendable {
     public let vibrance: Double
     /// `CIToneCurve` control points, already monotonic.
     public let toneCurve: [ToneCurvePoint]
+    public let sharpening: Sharpening
+    public let noiseReduction: NoiseReduction
+    public let vignette: Vignette
 
     public var whiteBalance: RawWhiteBalance {
         RawWhiteBalance(
@@ -33,6 +36,9 @@ public struct RenderParameters: Equatable, Sendable {
     public var isSaturationIdentity: Bool { saturation == 1 }
     public var isVibranceIdentity: Bool { vibrance == 0 }
     public var isExposureIdentity: Bool { exposureEV == 0 }
+    public var isSharpeningIdentity: Bool { sharpening.isIdentity }
+    public var isNoiseReductionIdentity: Bool { noiseReduction.isIdentity }
+    public var isVignetteIdentity: Bool { vignette.isIdentity }
 }
 
 /// The one place slider units become Core Image units.
@@ -53,6 +59,16 @@ public enum AdjustmentMapping {
     public static let saturationSpan = 1.0
     /// ±100 vibrance maps to the full -1...1 `CIVibrance` range.
     public static let vibranceSpan = 1.0
+    /// `CISharpenLuminance.inputSharpness` span. Amount 0...150 maps to
+    /// sharpness 0...3.0; radius passes straight through (spec's radius range
+    /// 0.5...3.0 already matches the filter's own expected units).
+    public static let sharpenLuminanceSharpnessSpan = 3.0 / 150.0
+    /// `CINoiseReduction` exposes exactly two knobs (`inputNoiseLevel`,
+    /// `inputSharpness`), not independent luminance/colour controls. Amount is
+    /// the average of the two Lightroom-style amounts, mapped to a noise level
+    /// span Apple's own filter treats as strong (its own default is 0.02).
+    public static let noiseReductionNoiseLevelSpan = 0.1 / 100.0
+    public static let noiseReductionSharpnessSpan = 2.0 / 100.0
 
     public static func renderParameters(for adjustments: PhotoAdjustments) -> RenderParameters {
         let clamped = adjustments.clamped()
@@ -63,7 +79,10 @@ public enum AdjustmentMapping {
             contrast: 1 + (clamped.contrast / 100) * contrastSpan,
             saturation: 1 + (clamped.saturation / 100) * saturationSpan,
             vibrance: (clamped.vibrance / 100) * vibranceSpan,
-            toneCurve: ToneCurveMapping.controlPoints(for: clamped)
+            toneCurve: ToneCurveMapping.controlPoints(for: clamped),
+            sharpening: clamped.sharpening,
+            noiseReduction: clamped.noiseReduction,
+            vignette: clamped.vignette
         )
     }
 }

@@ -188,6 +188,71 @@ final class AdjustmentPipelineTests: XCTestCase {
         XCTAssertEqual(first.green, second.green)
         XCTAssertEqual(first.blue, second.blue)
     }
+
+    // MARK: - Sharpening / noise reduction / vignette
+
+    func testNeutralSharpeningNoiseVignetteStaysAPassthrough() {
+        let source = makeSourceImage()
+        let output = pipeline.apply(PhotoAdjustments.neutral, to: source)
+        XCTAssertTrue(output === source)
+    }
+
+    func testSharpeningAddsAFilterToTheChainWhenNonZero() {
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.sharpening = Sharpening(amount: 80)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertFalse(output === source)
+        XCTAssertEqual(output.extent, source.extent)
+    }
+
+    func testNoiseReductionAddsAFilterToTheChainWhenNonZero() {
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.noiseReduction = NoiseReduction(luminanceAmount: 50)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertFalse(output === source)
+        XCTAssertEqual(output.extent, source.extent)
+    }
+
+    func testNegativeVignetteDarkensTheCorner() throws {
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.vignette = Vignette(amount: -100, midpoint: 30, roundness: 0, feather: 50)
+        let output = pipeline.apply(adjustments, to: source)
+        let renderer = ImageRenderService()
+        let cgImage = try renderer.makeCGImage(output)
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        // Sample the top-left corner pixel of the 16x16 fixture.
+        context.draw(cgImage, in: CGRect(x: -Int(size.width) + 1, y: 0, width: Int(size.width), height: Int(size.height)))
+        let cornerRed = Int(bytes[0])
+        let centre = try centrePixel(output)
+        XCTAssertLessThan(cornerRed, centre.red, "A negative-amount vignette should darken the corner relative to the centre")
+    }
+
+    func testPositiveVignetteBrightensTheCorner() throws {
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.vignette = Vignette(amount: 100, midpoint: 30, roundness: 0, feather: 50)
+        let output = pipeline.apply(adjustments, to: source)
+        let renderer = ImageRenderService()
+        let cgImage = try renderer.makeCGImage(output)
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: -Int(size.width) + 1, y: 0, width: Int(size.width), height: Int(size.height)))
+        let cornerRed = Int(bytes[0])
+        let centre = try centrePixel(output)
+        XCTAssertGreaterThan(cornerRed, centre.red, "A positive-amount vignette should brighten the corner relative to the centre")
+    }
 }
 
 private func XCTAssertEqual(

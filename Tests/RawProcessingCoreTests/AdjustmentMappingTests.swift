@@ -103,4 +103,35 @@ final class AdjustmentMappingTests: XCTestCase {
         XCTAssertEqual(parameters.whiteBalance.tintOffset, -15)
         XCTAssertFalse(parameters.whiteBalance.isAsShot)
     }
+
+    func testNeutralIncludesTheNewIdentityFlags() {
+        let parameters = AdjustmentMapping.renderParameters(for: .neutral)
+        XCTAssertTrue(parameters.isSharpeningIdentity)
+        XCTAssertTrue(parameters.isNoiseReductionIdentity)
+        XCTAssertTrue(parameters.isVignetteIdentity)
+    }
+
+    func testSharpeningIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.sharpening = Sharpening(amount: 60, radius: 1.5, detail: 40, masking: 10)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.sharpening, adjustments.sharpening)
+        XCTAssertFalse(parameters.isSharpeningIdentity)
+    }
+
+    func testNoiseReductionIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.noiseReduction = NoiseReduction(luminanceAmount: 30, colorAmount: 20)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.noiseReduction, adjustments.noiseReduction)
+        XCTAssertFalse(parameters.isNoiseReductionIdentity)
+    }
+
+    func testVignetteIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.vignette = Vignette(amount: -40, midpoint: 60, roundness: 10, feather: 70)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.vignette, adjustments.vignette)
+        XCTAssertFalse(parameters.isVignetteIdentity)
+    }
 }
