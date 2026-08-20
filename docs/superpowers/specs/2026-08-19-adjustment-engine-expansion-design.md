@@ -334,3 +334,25 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 **下一步**：Gate A2（HSL 八色帶人工驗證的黃／綠／青／紫／洋紅五色帶）仍是唯一剩餘的合併前阻塞項，見 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md`。
 
 **全分支狀態**：spec §7 全部 8 項子任務（含 Task 8 人工視覺驗證）現在都已完成並有記錄。分支 `worktree-adjustment-engine-expansion` 已推上遠端，領先 `main` 16 個 commit（含這則記錄本身會再 +1），落後 0——可直接 fast-forward 合併，未合併。下一位接手者：如果要合併，先確認使用者要不要順便看一下 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 裡貼出的具體數字，再決定要不要合併進 `main`。
+
+### 2026-08-20（第五則）：Gate B1——HSL 與 Advanced Tone Curve 的 CIKernel 從已棄用 CIKL 遷移到 Metal
+
+**背景**：`docs/superpowers/specs/2026-08-20-post-mvp-follow-up-spec.md` Gate B1 要求把 `AdjustmentPipeline` 裡兩個用 `CIKernel(source:)`／`CIColorKernel(source:)`（已棄用的 Core Image Kernel Language 字串 API）建構的 kernel——`advancedToneCurve`（LUT 查表）與 `hslAdjust`（8 色帶加權混合）——遷移到 Metal-based CIKernel，且要用像素輸出測試確認結果等價，不改演算法。spec 文字提到「HSL 與 Split Toning」，但實際 grep 全 repo 只有這兩個 kernel 用 `CIKernel(source:)`／`CIColorKernel(source:)`；Split Toning 全部用標準 `CIFilter`（colorMatrix／blendWithMask／softLightBlendMode 等），從未用過已棄用 API，不需要遷移。
+
+**遇到的環境問題與解法**：
+1. `swift build`／`swift test`（本專案唯一的建置/測試方式）不會自動編譯 `.metal` 檔——那個自動編譯只在 Xcode IDE 自己的建置系統下才有，純 SwiftPM CLI 會把 `.metal` 當成「未處理資源」跳過。解法：新增一個 SwiftPM build tool plugin `Plugins/CompileMetalKernels`，在建置時呼叫 `xcrun metal`／`xcrun metallib` 把 `Sources/RawProcessingCore/Kernels/AdjustmentKernels.metal` 編譯進 `default.metallib`，掛在 `RawProcessingCore` target 的 `plugins:`。原始碼是唯一真相來源，沒有把編譯產物提交進 Git。
+2. 本機 Xcode 沒裝 Metal Toolchain（新版 Xcode 把 Metal 編譯器拆成獨立可下載元件），`xcrun metal` 一開始完全跑不動；用 `xcodebuild -downloadComponent MetalToolchain` 補裝解決（使用者已確認同意下載）。
+3. 一開始用 `[[ stitchable ]]` 屬性寫 kernel 函式，`xcrun metal`／`metallib` 可以編譯過，但 `CIKernel.kernelNames(fromMetalLibraryData:)` 回傳空陣列——函式被連結器當死碼砍掉了。改成 Apple 較舊、非 stitchable 的機制：編譯時加 `-fcikernel`，連結時加 `-cikernel`（且**不**加 `[[stitchable]]`），`kernelNames` 才正確列出 `hslAdjust`、`advancedToneCurve` 兩個符號，且能成功 `CIKernel(functionName:fromMetalLibraryData:)` 載入。
+4. GLSL 的 `mod()` 是 floored modulo（結果恆與除數同號），Metal 的 `fmod()` 是 truncated modulo（結果可能為負）；`hslAdjust` 裡有一處（`shiftedHue` 的計算）在 hueShift 為負且 hueDeg 較小時，兩者結果不同。新增 `ci_mod()` 自製 floored-mod 輔助函式，全面取代原本呼叫 `mod()` 的六處，避免這個差異造成色相計算錯誤。
+
+**等價性驗證**：先寫一支獨立 Swift 腳本，同時建構「舊 CIKL 字串 kernel」與「新 Metal kernel」，用完全相同的引數對同一組測試像素跑兩次並逐像素比較。覆蓋範圍：
+- `advancedToneCurve`：11 個像素（黑、白、灰、純色、擴展色域 >1.0／負值），一條 S-curve LUT。
+- `hslAdjust`：16 個測試像素（無彩色、8 色相環上的各色、擴展色域、深飽和色）× 15 組參數（8 色帶各自的正／負 hue／sat／lum、多色帶疊加組合、全 8 色帶同時調整），共 240 組。
+
+結果：**maxDiff = 0.0，0 個 mismatch**——新舊實作在測試覆蓋的所有案例下逐位元組完全一致。接著把驗證過的 `.metal` 檔案正式接入套件（改 `AdjustmentPipeline.swift` 從 `Bundle.module` 載入 `default.metallib`，`hslKernel` 型別從 `CIColorKernel?` 改成 `CIKernel?`——呼叫端 `applyHSL` 一直用的是 `CIKernel` 基底類別的 `apply(extent:roiCallback:arguments:)`，型別改變不影響呼叫端），乾淨建置後重跑：
+- `swift test -Xswiftc -strict-concurrency=complete`：421 個測試，0 失敗，9 個略過。
+- `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW swift test --filter RawFixtureTests`：9 個全過，含 Gate F 效能測試（cold 0.152s／warm 約 0.141s，符合 ≤150ms）。
+
+`swift build` 的 `CIKernel(source:)`／`CIColorKernel(source:)` deprecation warning 兩則都消失，只剩既有、已記錄在 P2 待辦裡的 `UndoRedoKeyEquivalentFix.monitor` Swift 6 concurrency warning。**Gate B1 完成。**
+
+**新增檔案**：`Plugins/CompileMetalKernels/CompileMetalKernels.swift`（build plugin）、`Sources/RawProcessingCore/Kernels/AdjustmentKernels.metal`（kernel 原始碼，含逐行對照舊 CIKL 版本的行為說明）。`Package.swift` 新增一個 `.plugin` target 並掛到 `RawProcessingCore`。

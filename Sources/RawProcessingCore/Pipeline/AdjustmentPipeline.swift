@@ -237,40 +237,23 @@ public struct AdjustmentPipeline: Sendable {
         return composite.outputImage ?? image
     }
 
-    /// Per-pixel 1D LUT lookup, run once per RGB channel with the same table
-    /// (spec §4.3: colour is not touched, only tone). Core Image Kernel
-    /// Language rather than a `.metal` file, so no Package.swift build-target
-    /// changes are needed for one small kernel.
-    ///
-    /// Deliberately a plain `CIKernel`, not a `CIColorKernel`: a colour
-    /// kernel's function must take one `__sample` argument per input image and
-    /// is forbidden from calling `sample()`, `samplerCoord()` or
-    /// `samplerTransform()` (see Apple's `CIKernel.h`). This kernel needs all
-    /// three to do a dependent read out of the LUT texture, so declaring it as
-    /// a `CIColorKernel` made `CIColorKernel(source:)` return nil and silently
-    /// turned the whole advanced-curve stage into a no-op.
+    /// Loads both Core Image kernels used by this pipeline from the
+    /// `default.metallib` the `CompileMetalKernels` build plugin compiles
+    /// from `Sources/RawProcessingCore/Kernels/AdjustmentKernels.metal`
+    /// (spec §7 Gate B1). Both are declared `CIKernel`, not `CIColorKernel`:
+    /// each needs a dependent texture read (the LUT lookup, the 8-band
+    /// weighted blend) that only a general kernel's `sampler` argument
+    /// supports -- see the doc comment on `hslAdjust` in the .metal file for
+    /// why the CIKL predecessor got away with this from a `CIColorKernel`
+    /// property despite the same restriction.
+    private static let kernelLibrary: Data? = {
+        guard let url = Bundle.module.url(forResource: "default", withExtension: "metallib") else { return nil }
+        return try? Data(contentsOf: url)
+    }()
+
     private static let advancedToneCurveKernel: CIKernel? = {
-        let source = """
-        kernel vec4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
-            vec4 pixel = sample(image, samplerCoord(image));
-            float lastIndex = lutWidth - 1.0;
-            vec2 lutSize = samplerSize(lut);
-            // Only the table index is clamped -- it has to stay inside the
-            // 256-texel texture -- while any extended-range excess is carried
-            // around the lookup and added back afterwards. The pipeline works
-            // in extended-range linear space (see ImageRenderService), so a
-            // highlight at 1.5 must still read 1.5 after an identity curve
-            // instead of being crushed into the LUT's own 0...1 domain.
-            float rIn = clamp(pixel.r, 0.0, 1.0);
-            float gIn = clamp(pixel.g, 0.0, 1.0);
-            float bIn = clamp(pixel.b, 0.0, 1.0);
-            float r = sample(lut, samplerTransform(lut, vec2(rIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.r - rIn);
-            float g = sample(lut, samplerTransform(lut, vec2(gIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.g - gIn);
-            float b = sample(lut, samplerTransform(lut, vec2(bIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.b - bIn);
-            return vec4(r, g, b, pixel.a);
-        }
-        """
-        return CIKernel(source: source)
+        guard let library = kernelLibrary else { return nil }
+        return try? CIKernel(functionName: "advancedToneCurve", fromMetalLibraryData: library)
     }()
 
     private static func applyAdvancedToneCurve(_ curve: AdvancedToneCurve, to image: CIImage) -> CIImage {
@@ -315,119 +298,15 @@ public struct AdjustmentPipeline: Sendable {
         }
     }
 
-    /// One pass over all 8 bands per pixel, blending each band's hue/sat/lum
-    /// adjustment by `HSLKernelWeights`-equivalent triangular falloff (spec
-    /// §4.3). The falloff math is duplicated here in CIKL rather than calling
-    /// into `HSLKernelWeights` -- the GPU kernel can't call Swift -- so any
+    /// See `AdjustmentKernels.metal`'s `hslAdjust` for the falloff math
+    /// (spec §4.3), duplicated there rather than calling into
+    /// `HSLKernelWeights` -- the GPU kernel can't call Swift -- so any
     /// change to the falloff shape must be made in both places; the unit
     /// tests on `HSLKernelWeights` exist specifically to keep this constant
     /// correct even though the kernel body itself can't be unit tested.
-    private static let hslKernel: CIColorKernel? = {
-        let source = """
-        kernel vec4 hslAdjust(
-            sampler image,
-            float centers0, float centers1, float centers2, float centers3,
-            float centers4, float centers5, float centers6, float centers7,
-            float hues0, float hues1, float hues2, float hues3,
-            float hues4, float hues5, float hues6, float hues7,
-            float sats0, float sats1, float sats2, float sats3,
-            float sats4, float sats5, float sats6, float sats7,
-            float lums0, float lums1, float lums2, float lums3,
-            float lums4, float lums5, float lums6, float lums7,
-            float halfWidth
-        ) {
-            vec4 pixel = sample(image, samplerCoord(image));
-            float maxC = max(pixel.r, max(pixel.g, pixel.b));
-            float minC = min(pixel.r, min(pixel.g, pixel.b));
-            float delta = maxC - minC;
-            float luma = (maxC + minC) * 0.5;
-
-            // Achromatic pixels have no hue, and hue becomes numerically
-            // unstable when chroma is below this same epsilon. Treating that
-            // fallback hue as 0 incorrectly let the red/orange/magenta bands
-            // change neutral greys, especially through the luminance control.
-            if (delta <= 0.0001) { return pixel; }
-
-            float hueDeg = 0.0;
-            if (maxC == pixel.r) {
-                hueDeg = 60.0 * mod((pixel.g - pixel.b) / delta, 6.0);
-            } else if (maxC == pixel.g) {
-                hueDeg = 60.0 * (((pixel.b - pixel.r) / delta) + 2.0);
-            } else {
-                hueDeg = 60.0 * (((pixel.r - pixel.g) / delta) + 4.0);
-            }
-            if (hueDeg < 0.0) { hueDeg = hueDeg + 360.0; }
-
-            float centers[8];
-            centers[0]=centers0; centers[1]=centers1; centers[2]=centers2; centers[3]=centers3;
-            centers[4]=centers4; centers[5]=centers5; centers[6]=centers6; centers[7]=centers7;
-            float hues[8];
-            hues[0]=hues0; hues[1]=hues1; hues[2]=hues2; hues[3]=hues3;
-            hues[4]=hues4; hues[5]=hues5; hues[6]=hues6; hues[7]=hues7;
-            float sats[8];
-            sats[0]=sats0; sats[1]=sats1; sats[2]=sats2; sats[3]=sats3;
-            sats[4]=sats4; sats[5]=sats5; sats[6]=sats6; sats[7]=sats7;
-            float lums[8];
-            lums[0]=lums0; lums[1]=lums1; lums[2]=lums2; lums[3]=lums3;
-            lums[4]=lums4; lums[5]=lums5; lums[6]=lums6; lums[7]=lums7;
-
-            float hueShift = 0.0;
-            float satShift = 0.0;
-            float lumShift = 0.0;
-            float totalWeight = 0.0;
-            for (int i = 0; i < 8; i++) {
-                float rawDistance = abs(mod(hueDeg, 360.0) - mod(centers[i], 360.0));
-                float distance = min(rawDistance, 360.0 - rawDistance);
-                float weight = max(0.0, 1.0 - distance / halfWidth);
-                hueShift += weight * hues[i];
-                satShift += weight * sats[i];
-                lumShift += weight * lums[i];
-                totalWeight += weight;
-            }
-
-            // halfWidth is wide enough that no hue falls in a dead zone
-            // (HSLKernelWeights.halfWidthDegrees), which means the 30-degree-apart
-            // bands now overlap by more than 1.0 near their shared midpoints.
-            // Renormalise there so the blend never amplifies past what a single
-            // band at full strength would do; below 1.0 the weights are left
-            // alone, so a lone band still falls off toward zero at its edge
-            // instead of being stretched back up to full strength.
-            if (totalWeight > 1.0) {
-                hueShift /= totalWeight;
-                satShift /= totalWeight;
-                lumShift /= totalWeight;
-            }
-
-            // hue in degrees/100 keeps the shift in the same -1...1-ish order
-            // of magnitude as sat/lum before they're applied as fractional
-            // adjustments -- a 100-degree slider maps to roughly a 27-degree
-            // hue rotation, consistent with the ±100 UI range meaning "full
-            // strength", not "spin the hue wheel".
-            float shiftedHue = mod(hueDeg + hueShift * 0.27, 360.0);
-            float newSat = clamp(1.0 + satShift / 100.0, 0.0, 2.0);
-            float newLum = luma + (lumShift / 100.0) * 0.25;
-
-            float c = delta * newSat;
-            float x = c * (1.0 - abs(mod(shiftedHue / 60.0, 2.0) - 1.0));
-            float m = newLum - c * 0.5;
-            vec3 rgbPrime;
-            if (shiftedHue < 60.0) { rgbPrime = vec3(c, x, 0.0); }
-            else if (shiftedHue < 120.0) { rgbPrime = vec3(x, c, 0.0); }
-            else if (shiftedHue < 180.0) { rgbPrime = vec3(0.0, c, x); }
-            else if (shiftedHue < 240.0) { rgbPrime = vec3(0.0, x, c); }
-            else if (shiftedHue < 300.0) { rgbPrime = vec3(x, 0.0, c); }
-            else { rgbPrime = vec3(c, 0.0, x); }
-
-            // Deliberately unclamped: the working space is extended-range
-            // linear (see ImageRenderService), and clamping here destroyed
-            // highlight headroom that later stages -- vignette darkening, the
-            // final output transform -- are supposed to be able to pull back.
-            // For a neutral band this reconstruction is an exact round-trip,
-            // so an input channel above 1.0 comes back out above 1.0.
-            return vec4(rgbPrime + m, pixel.a);
-        }
-        """
-        return CIColorKernel(source: source)
+    private static let hslKernel: CIKernel? = {
+        guard let library = kernelLibrary else { return nil }
+        return try? CIKernel(functionName: "hslAdjust", fromMetalLibraryData: library)
     }()
 
     private static func applyHSL(_ hsl: HSLAdjustments, to image: CIImage) -> CIImage {
