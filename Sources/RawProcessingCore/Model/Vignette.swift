@@ -3,10 +3,18 @@ import Foundation
 /// Post-processing vignette (not lens-correction vignetting). Negative
 /// `amount` darkens the corners, positive brightens them (spec §3.6).
 public struct Vignette: Codable, Equatable, Hashable, Sendable {
-    public var amount: Double
-    public var midpoint: Double
-    public var roundness: Double
-    public var feather: Double
+    public var amount: Double {
+        didSet { amount = Self.clamp(amount, -100, 100) }
+    }
+    public var midpoint: Double {
+        didSet { midpoint = Self.clamp(midpoint, 0, 100) }
+    }
+    public var roundness: Double {
+        didSet { roundness = Self.clamp(roundness, -100, 100) }
+    }
+    public var feather: Double {
+        didSet { feather = Self.clamp(feather, 0, 100) }
+    }
 
     public init(amount: Double = 0, midpoint: Double = 50, roundness: Double = 0, feather: Double = 50) {
         self.amount = Self.clamp(amount, -100, 100)

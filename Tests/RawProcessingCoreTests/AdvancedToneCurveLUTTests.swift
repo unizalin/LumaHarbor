@@ -58,4 +58,17 @@ final class AdvancedToneCurveLUTTests: XCTestCase {
     func testResolutionControlsOutputCount() {
         XCTAssertEqual(AdvancedToneCurveLUT.build(from: [], resolution: 64).count, 64)
     }
+
+    func testSingleSampleResolutionNeverProducesNaN() {
+        let identity = AdvancedToneCurveLUT.build(from: [], resolution: 1)
+        XCTAssertEqual(identity, [0])
+        XCTAssertTrue(identity.allSatisfy(\.isFinite))
+
+        let curve = AdvancedToneCurveLUT.build(
+            from: [ToneCurvePoint(x: 0, y: 0.25), ToneCurvePoint(x: 1, y: 0.75)],
+            resolution: 1
+        )
+        XCTAssertEqual(curve, [0.25])
+        XCTAssertTrue(curve.allSatisfy(\.isFinite))
+    }
 }

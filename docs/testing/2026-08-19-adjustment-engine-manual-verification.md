@@ -11,7 +11,7 @@ values directly on a `PhotoAdjustments` in a throwaway debug harness, or via
 temporarily hardcoding a non-neutral value in `AdjustmentMapping.renderParameters`,
 render, inspect, then revert.
 
-- [x] **HSL**: on a real ARW, push each of the 8 hue bands' hue/saturation/luminance
+- [ ] **HSL full-band coverage**: on a real ARW, push each of the 8 hue bands' hue/saturation/luminance
   to their extremes one at a time. Confirm the correct region of the photo visibly
   changes and neighbouring bands' boundaries don't show hard colour-banding
   seams. Note: a single band pushed to an extreme may read weaker than expected
@@ -38,6 +38,15 @@ render, inspect, then revert.
   required per spec §6 — a "does this still feel snappy" judgement call).
 
 ## Result
+
+> **Post-merge review correction (2026-08-20):** the run below established
+> correct visual behaviour for red/orange/blue content, but it did not satisfy
+> the checklist's original requirement to exercise all eight bands one at a
+> time. Yellow, green, aqua, purple and magenta still need a colour-rich fixture
+> before this HSL checkbox can be marked complete. A separate code review also
+> found that an exactly achromatic pixel was treated as hue 0 and could therefore
+> be changed by red-band luminance; that path now has a regression fix/test on
+> `codex/post-merge-review-fixes`, pending Apple Silicon + Xcode execution.
 
 **Date**: 2026-08-20. **Machine**: arm64 (Apple Silicon), Xcode 26.6 — the
 target environment this checklist requires. **Fixture**: a real Sony `.ARW`
@@ -111,8 +120,8 @@ alone can't always separate "diluted" from "not working":
   compound on the same noise, consistent with each effect's individual
   behaviour rather than a new interaction bug.
 
-**Outcome**: all seven effects behave correctly on real Apple Silicon
-hardware with a real Sony ARW. No blocking issues found. No follow-up issues
-filed — the noise-amplification-under-steep-curves observation and the HSL
-lone-band dilution are both expected, already-understood behaviour, not new
-defects.
+**Outcome**: all seven effect stages rendered successfully on real Apple
+Silicon hardware with a real Sony ARW, and the tested colour content behaved
+correctly. Full eight-band HSL visual coverage is still pending as described
+above. The noise-amplification-under-steep-curves observation and HSL lone-band
+dilution remain expected, already-understood behaviour rather than defects.

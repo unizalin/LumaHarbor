@@ -2,10 +2,18 @@ import Foundation
 
 /// Luminance and colour noise reduction (spec §3.5).
 public struct NoiseReduction: Codable, Equatable, Hashable, Sendable {
-    public var luminanceAmount: Double
-    public var luminanceDetail: Double
-    public var colorAmount: Double
-    public var colorDetail: Double
+    public var luminanceAmount: Double {
+        didSet { luminanceAmount = Self.clamp(luminanceAmount) }
+    }
+    public var luminanceDetail: Double {
+        didSet { luminanceDetail = Self.clamp(luminanceDetail) }
+    }
+    public var colorAmount: Double {
+        didSet { colorAmount = Self.clamp(colorAmount) }
+    }
+    public var colorDetail: Double {
+        didSet { colorDetail = Self.clamp(colorDetail) }
+    }
 
     public init(
         luminanceAmount: Double = 0, luminanceDetail: Double = 50,

@@ -16,6 +16,14 @@ public enum AdvancedToneCurveLUT {
     ///   - resolution: Number of samples in the returned table.
     public static func build(from points: [ToneCurvePoint], resolution: Int = 256) -> [Float] {
         guard resolution > 0 else { return [] }
+        // A one-sample LUT cannot represent an interval. Define it as the
+        // curve's black-endpoint sample (or zero for the empty identity curve)
+        // so this degenerate public-API input stays finite and deterministic.
+        if resolution == 1 {
+            guard !points.isEmpty else { return [0] }
+            let sorted = points.sorted { $0.x < $1.x }
+            return [Float(clamp01(interpolate(0, in: sorted)))]
+        }
         guard !points.isEmpty else {
             return (0..<resolution).map { Float($0) / Float(resolution - 1) }
         }

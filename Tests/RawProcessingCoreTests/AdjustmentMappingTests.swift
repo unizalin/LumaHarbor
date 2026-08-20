@@ -93,6 +93,31 @@ final class AdjustmentMappingTests: XCTestCase {
         XCTAssertTrue(parameters.exposureEV.isFinite)
     }
 
+    func testDirectMutationCannotBypassNestedAdjustmentRanges() {
+        var hostile = PhotoAdjustments.neutral
+        hostile.advancedToneCurve.points = [ToneCurvePoint(x: .nan, y: 4)]
+        hostile.hsl.red.hue = .nan
+        hostile.hsl.red.saturation = -500
+        hostile.splitToning.shadowHue = 900
+        hostile.sharpening.amount = 1_000
+        hostile.sharpening.radius = -10
+        hostile.noiseReduction.colorAmount = .infinity
+        hostile.vignette.roundness = -500
+        hostile.grain.amount = 1_000
+
+        let parameters = AdjustmentMapping.renderParameters(for: hostile)
+
+        XCTAssertEqual(parameters.advancedToneCurve.points, [ToneCurvePoint(x: 0, y: 1)])
+        XCTAssertEqual(parameters.hsl.red.hue, 0)
+        XCTAssertEqual(parameters.hsl.red.saturation, -100)
+        XCTAssertEqual(parameters.splitToning.shadowHue, 360)
+        XCTAssertEqual(parameters.sharpening.amount, 150)
+        XCTAssertEqual(parameters.sharpening.radius, 0.5)
+        XCTAssertEqual(parameters.noiseReduction.colorAmount, 0)
+        XCTAssertEqual(parameters.vignette.roundness, -100)
+        XCTAssertEqual(parameters.grain.amount, 100)
+    }
+
     func testWhiteBalanceIsCarriedToTheDecoder() {
         // Spec §9: white balance belongs to demosaicing, so it has to reach the
         // decoder rather than being applied as a post filter.

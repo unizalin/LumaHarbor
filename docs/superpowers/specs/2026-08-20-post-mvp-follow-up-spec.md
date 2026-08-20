@@ -1,0 +1,112 @@
+# LumaHarbor MVP 合併後修正與後續工作規格
+
+日期：2026-08-20
+
+基準版本：`46794bb`
+
+工作分支：`codex/post-merge-review-fixes`
+
+## 目的
+
+本文件記錄 MVP 合併後修正包的完成狀態、合併前仍需完成的驗收，以及不阻擋本次修正的技術債與下一階段功能。各類工作不得混為同一個「尚未完成」清單，以免長期項目阻塞必要修正。
+
+## 本次修正包已完成
+
+- 七組巢狀調整模型在直接修改屬性時會立即套用合法範圍限制。
+- `AdvancedToneCurve` 會清理非有限值，並把控制點的 `x`、`y` 限制在 `0...1`。
+- HSL 對無彩色與近無彩色像素採用中性處理，不再把灰階誤判為紅色色相。
+- Tone Curve LUT 在 `resolution == 1` 時有明確且有限值的輸出行為。
+- 新增上述邊界條件的單元測試。
+- 更新手動驗證紀錄，不再把尚未覆蓋的 HSL 色帶標記為完成。
+- `swift build -Xswiftc -strict-concurrency=complete` 已通過。
+- Claude 複核後沒有 Critical 或 Important 等級的程式阻擋項。
+
+## Gate A：本次修正合併前必須完成
+
+### A1. 完整 XCTest
+
+目前環境只有 x86 Command Line Tools，因缺少可用的 `XCTest` 模組，無法在本機完成完整測試。需在 Apple Silicon 且已選用完整 Xcode 的環境執行：
+
+```bash
+swift test -Xswiftc -strict-concurrency=complete
+```
+
+若有合法的私有 RAW fixture，另執行：
+
+```bash
+LUMAHARBOR_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
+  swift test --filter RawFixtureTests
+```
+
+至少確認下列新增案例通過：
+
+- 巢狀調整參數直接 mutation 後仍會 clamp。
+- HSL 紅色色帶調整不會改變中性灰。
+- Tone Curve LUT 在 resolution 1 時輸出有限值。
+
+### A2. HSL 八色帶人工驗證
+
+現有人工測試只明確涵蓋紅、橙、藍。需用色彩豐富且可重現的測試圖完成以下五個色帶：
+
+- 黃（Yellow）
+- 綠（Green）
+- 青（Aqua）
+- 紫（Purple）
+- 洋紅（Magenta）
+
+每個色帶至少驗證 Hue、Saturation、Luminance 的可見效果與相鄰色帶過渡，並確認調整紅色色帶時中性灰不偏色。結果更新至 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md`。
+
+### A3. 驗收規則
+
+- A1 與 A2 都完成後，才標記本修正包為可合併。
+- 若產品負責人決定接受未完成的人工色帶覆蓋，必須在驗證文件中明確記錄接受者、日期、缺口與風險，不得直接勾選為已通過。
+- 私有 ARW、使用者照片及其他受限制 fixture 不得加入 Git。
+
+## Gate B：調整引擎技術債（不阻擋本次修正）
+
+### B1. Core Image Kernel 遷移
+
+目前 HSL 與 Split Toning 仍使用已棄用的 CIKL source initializer。後續應遷移至 Metal kernel，並用像素輸出測試確認結果等價；本次只抑制 immutable kernel 造成的 Swift 6 Sendable 誤報，不改演算法。
+
+### B2. XMP／Preset 語意定義
+
+在實作 Lightroom XMP 或 preset 匯入匯出前，必須先定義並測試：
+
+- `Sharpening.detail` 與 `Sharpening.masking` 的實際影像語意。
+- Luminance Noise Reduction 與 Color Noise Reduction 是否能獨立控制。
+- 未支援欄位的保留、忽略與 round-trip 策略。
+- LumaHarbor 參數範圍與 Lightroom 參數範圍的映射及版本策略。
+
+### B3. 空間參數一致性
+
+確認 sharpening、noise reduction、grain 等以像素或半徑表示的效果，是否需要依原圖尺寸、縮放比例或輸出尺寸正規化，避免預覽與輸出結果不一致。
+
+## MVP 已接受的 P2 待辦（不阻擋本次修正）
+
+- 選單點擊 Undo／Redo 可用，但 `Cmd+Z`、`Cmd+Shift+Z` 快捷鍵仍需完整修正。
+- 現行 `CIRAWFilter` 環境尚無法穩定觸發 unsupported RAW 的錯誤路徑。
+- 唯讀位置儲存失敗目前只顯示 tooltip，需改善可見性與復原指引。
+- 三項 Instruments 效能指標尚未取得正式量測結果。
+- APFS 與 exFAT 的完整驗證覆蓋仍不對稱。
+- 曾出現但尚未重現的 `NSCocoaErrorDomain 4097` 需持續觀察。
+- `UndoRedoKeyEquivalentFix.monitor` 仍有 Swift 6 concurrency warning，應獨立修正並加上鍵盤回歸測試。
+
+## 下一階段產品功能
+
+以下項目應各自建立獨立 spec、驗收條件與 commit，不併入本次修正包：
+
+1. Preset 與 Lightroom XMP 相容層。
+2. Crop、Rotate 與局部調整工具。
+3. 批次套用調整與批次匯出。
+4. 匯出格式、品質、色彩空間與 metadata 選項。
+
+## 執行與交接規則
+
+- Claude Code 與 Codex 不得同時修改相同檔案；一方實作時，另一方只做 review 或等待交接。
+- 每個獨立後續項目使用獨立 commit；不要把 Gate A 驗收紀錄與新功能混在同一個 commit。
+- 代理切換或可用 token 接近下限前，更新共用 `HANDOFF.md`，記錄完成項、未完成項、測試結果、分支與 commit。
+- 合併前再次執行 `git diff --check`、完整 build、完整 test，並確認沒有加入私有 fixture 或無關檔案。
+
+## 完成定義
+
+本文件中的「本次修正包完成」只代表程式修正與靜態／build 驗證完成；只有 Gate A 的自動測試及人工 HSL 驗證都留下可追蹤結果後，才達到可合併狀態。Gate B、P2 與下一階段產品功能應持續保留在 backlog，但不回頭阻擋已驗收的修正包。

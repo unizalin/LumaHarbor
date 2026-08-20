@@ -3,10 +3,18 @@ import Foundation
 /// Lightroom-style sharpening (spec §3.4). Only `amount` gates identity;
 /// `radius`/`detail`/`masking` matter only once sharpening is switched on.
 public struct Sharpening: Codable, Equatable, Hashable, Sendable {
-    public var amount: Double
-    public var radius: Double
-    public var detail: Double
-    public var masking: Double
+    public var amount: Double {
+        didSet { amount = Self.clamp(amount, 0, 150) }
+    }
+    public var radius: Double {
+        didSet { radius = Self.clamp(radius, 0.5, 3.0) }
+    }
+    public var detail: Double {
+        didSet { detail = Self.clamp(detail, 0, 100) }
+    }
+    public var masking: Double {
+        didSet { masking = Self.clamp(masking, 0, 100) }
+    }
 
     public init(amount: Double = 0, radius: Double = 1.0, detail: Double = 25, masking: Double = 0) {
         self.amount = Self.clamp(amount, 0, 150)
