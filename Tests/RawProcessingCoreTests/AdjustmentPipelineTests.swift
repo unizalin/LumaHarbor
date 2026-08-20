@@ -57,6 +57,44 @@ final class AdjustmentPipelineTests: XCTestCase {
         return (Int(bytes[0]), Int(bytes[1]), Int(bytes[2]))
     }
 
+    /// Renders and samples one specific pixel, in image coordinates with
+    /// (0, 0) at the top-left, as 8-bit sRGB.
+    ///
+    /// `centrePixel` draws the whole image into a 1x1 context, which averages
+    /// every pixel together rather than point-sampling one. That is fine for a
+    /// flat fixture, but it hides a render that is correct in one region and
+    /// black in another -- exactly the failure mode the advanced-curve LUT's
+    /// region-of-interest bug produced. This reads a single location instead.
+    private func pixel(
+        at point: CGPoint,
+        in image: CIImage,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> (red: Int, green: Int, blue: Int) {
+        let renderer = ImageRenderService()
+        let cgImage = try renderer.makeCGImage(image)
+
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), file: file, line: line)
+        // CGContext's origin is bottom-left, so flip the requested row and
+        // offset the full-size draw so the wanted pixel lands on the 1x1 canvas.
+        context.draw(cgImage, in: CGRect(
+            x: -point.x,
+            y: -(CGFloat(cgImage.height) - 1 - point.y),
+            width: CGFloat(cgImage.width),
+            height: CGFloat(cgImage.height)
+        ))
+        return (Int(bytes[0]), Int(bytes[1]), Int(bytes[2]))
+    }
+
     // MARK: - Identity
 
     func testNeutralAdjustmentsAreAPassthrough() {
@@ -191,10 +229,21 @@ final class AdjustmentPipelineTests: XCTestCase {
 
     // MARK: - Sharpening / noise reduction / vignette
 
-    func testNeutralSharpeningNoiseVignetteStaysAPassthrough() {
+    func testNonDefaultButStillIdentitySharpeningNoiseVignetteStayAPassthrough() {
+        // Spec 3: each of these three types gates identity on `amount` alone,
+        // so every *other* field can be far from its default and the stage must
+        // still be skipped entirely. `PhotoAdjustments.neutral` already proves
+        // the all-defaults case (testNeutralAdjustmentsAreAPassthrough); this
+        // covers the case that gate actually has to decide.
         let source = makeSourceImage()
-        let output = pipeline.apply(PhotoAdjustments.neutral, to: source)
-        XCTAssertTrue(output === source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.sharpening = Sharpening(amount: 0, radius: 3.0, detail: 100, masking: 100)
+        adjustments.noiseReduction = NoiseReduction(
+            luminanceAmount: 0, luminanceDetail: 100, colorAmount: 0, colorDetail: 0
+        )
+        adjustments.vignette = Vignette(amount: 0, midpoint: 10, roundness: -80, feather: 95)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertTrue(output === source, "Only `amount` may gate these three stages")
     }
 
     func testSharpeningAddsAFilterToTheChainWhenNonZero() {
@@ -256,9 +305,13 @@ final class AdjustmentPipelineTests: XCTestCase {
 
     // MARK: - Grain
 
-    func testNeutralGrainStaysAPassthrough() {
+    func testNonDefaultButStillIdentityGrainStaysAPassthrough() {
+        // Grain gates on `amount` alone (spec 3.7): size and roughness shape
+        // the noise but cannot switch it on.
         let source = makeSourceImage()
-        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.grain = Grain(amount: 0, size: 100, roughness: 0)
+        XCTAssertTrue(pipeline.apply(adjustments, to: source) === source)
     }
 
     func testGrainAddsVisibleNoiseAndPreservesExtent() throws {
@@ -288,9 +341,17 @@ final class AdjustmentPipelineTests: XCTestCase {
 
     // MARK: - Split toning
 
-    func testNeutralSplitToningStaysAPassthrough() {
+    func testZeroSaturationSplitToningStaysAPassthroughWhateverTheHues() {
+        // Spec 3.3: hue and balance are meaningless at zero saturation, so a
+        // fully-specified-but-colourless split tone must still cost nothing.
         let source = makeSourceImage()
-        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.splitToning = SplitToning(
+            shadowHue: 180, shadowSaturation: 0,
+            highlightHue: 90, highlightSaturation: 0,
+            balance: 50
+        )
+        XCTAssertTrue(pipeline.apply(adjustments, to: source) === source)
     }
 
     func testShadowTintShiftsADarkPixelTowardTheShadowHue() throws {
@@ -315,28 +376,46 @@ final class AdjustmentPipelineTests: XCTestCase {
 
     // MARK: - Advanced tone curve
 
-    func testNeutralAdvancedCurveStaysAPassthrough() {
-        let source = makeSourceImage()
-        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
-    }
-
     func testAdvancedCurveDarkeningPointsDarkenTheImage() throws {
-        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
-        let base = try centrePixel(source)
+        // The fixture is deliberately 512x512 -- larger than the 256-entry LUT
+        // texture -- and every probe is deliberately far from the origin.
+        //
+        // The kernel's region-of-interest callback has to ask for the LUT's
+        // *whole* extent for input index 1 on every destination tile, not the
+        // tile's own rect. When it returned the tile rect, only the sliver of
+        // the image overlapping the LUT's own 256x1 extent rendered and the
+        // rest came back pure black. A 16x16 fixture read through
+        // `centrePixel` could not catch that: the whole image fitted inside
+        // the overlapping region, and averaging the image down to 1x1 would
+        // have masked a partly-black render anyway.
+        let side = 512
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
         var adjustments = PhotoAdjustments.neutral
         adjustments.advancedToneCurve = AdvancedToneCurve(points: [
             ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.5)
         ])
-        let darkened = try centrePixel(pipeline.apply(adjustments, to: source))
-        XCTAssertLessThan(darkened.red, base.red)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertFalse(output === source, "A non-empty curve must actually reach the kernel")
+        XCTAssertEqual(output.extent, source.extent)
+
+        for probe in [
+            CGPoint(x: 4, y: 4),
+            CGPoint(x: 256, y: 256),
+            CGPoint(x: 400, y: 400),
+            CGPoint(x: CGFloat(side - 1), y: CGFloat(side - 1))
+        ] {
+            let base = try pixel(at: probe, in: source)
+            let darkened = try pixel(at: probe, in: output)
+            XCTAssertLessThan(darkened.red, base.red, "Curve should darken at \(probe)")
+            XCTAssertGreaterThan(
+                darkened.red, 0,
+                "Pixel at \(probe) rendered black -- the LUT's region of interest is wrong again"
+            )
+        }
     }
 
     // MARK: - HSL
-
-    func testNeutralHSLStaysAPassthrough() {
-        let source = makeSourceImage()
-        XCTAssertTrue(pipeline.apply(PhotoAdjustments.neutral, to: source) === source)
-    }
 
     func testReducingRedSaturationDesaturatesARedPatch() throws {
         let red = makeSourceImage(red: 0.7, green: 0.2, blue: 0.2)

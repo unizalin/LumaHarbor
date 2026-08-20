@@ -31,14 +31,36 @@ final class HSLKernelWeightsTests: XCTestCase {
         XCTAssertGreaterThan(justBelow, 0.5)
     }
 
-    func testWeightsAcrossAllBandsSumToAtMostOnePlusOverlap() {
-        // Neighbouring bands should overlap smoothly (no hard seams) but a
-        // hue exactly between two centers shouldn't get more than ~1 total
-        // weight, or the blended adjustment amplifies instead of blending.
+    func testWeightsAcrossAllBandsOverlapWithoutGaps() {
+        // halfWidthDegrees is 60, sized by the *widest* gap between adjacent
+        // band centers, so the 30-degrees-apart bands now deliberately overlap
+        // to more than 1.0. At hue 15 that is red@0 (1 - 15/60 = 0.75) plus
+        // orange@30 (0.75) plus yellow@60 (1 - 45/60 = 0.25) = 1.75 exactly;
+        // magenta@315 sits 60 degrees away and contributes nothing.
+        //
+        // The old assertion capped this at 1.2, which only held while
+        // halfWidthDegrees was 30 -- and 30 left hard dead zones at 90/150/210
+        // degrees. Over-1.0 overlap is now the intended shape; the kernel
+        // divides by the summed weight when it exceeds 1.0 so the blend still
+        // cannot amplify past a single band at full strength (see
+        // AdjustmentPipeline.hslKernel).
         let totalAtBoundary = HSLKernelWeights.bandCenters.reduce(0.0) { total, center in
             total + HSLKernelWeights.weight(forHueDegrees: 15, centerDegrees: center)
         }
-        XCTAssertLessThanOrEqual(totalAtBoundary, 1.2)
-        XCTAssertGreaterThan(totalAtBoundary, 0.9)
+        XCTAssertEqual(totalAtBoundary, 1.75, accuracy: 1e-9)
+    }
+
+    func testNoHueOnTheWheelFallsInADeadZone() {
+        // Spec 4.3 requires smooth coverage everywhere. With halfWidthDegrees
+        // at 30 the midpoints of the 60-degrees-apart pairs -- 90 between
+        // yellow@60 and green@120, 150 between green and aqua, 210 between aqua
+        // and blue -- summed to exactly zero, so an HSL edit on a pixel at one
+        // of those hues silently did nothing at all.
+        for hue in stride(from: 0.0, to: 360.0, by: 0.5) {
+            let total = HSLKernelWeights.bandCenters.reduce(0.0) { running, center in
+                running + HSLKernelWeights.weight(forHueDegrees: hue, centerDegrees: center)
+            }
+            XCTAssertGreaterThan(total, 0, "Hue \(hue) has no band coverage at all")
+        }
     }
 }

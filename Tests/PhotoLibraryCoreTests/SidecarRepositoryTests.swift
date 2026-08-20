@@ -73,7 +73,7 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         ] {
             XCTAssertNotNil(object[key], "Missing \(key)")
         }
-        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["schemaVersion"] as? Int, PhotoSidecar.currentSchemaVersion)
         XCTAssertEqual(object["photoID"] as? String, sidecar.photoID.rawValue.uuidString)
 
         let fingerprint = try XCTUnwrap(object["sourceFingerprint"] as? [String: Any])

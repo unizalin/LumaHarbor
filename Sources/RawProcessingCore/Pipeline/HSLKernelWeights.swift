@@ -12,11 +12,20 @@ public enum HSLKernelWeights {
     public static let bandCenters: [Double] = [0, 30, 60, 120, 180, 240, 275, 315]
 
     /// Half-width, in degrees, of one band's falloff before it reaches zero.
-    /// Set to match the minimum 30° spacing between the closest band centers
-    /// (e.g. red@0 and orange@30), so two bands at that closest spacing sum
-    /// to exactly 1.0 at their shared midpoint -- not a dead zone, not
-    /// amplified overlap.
-    public static let halfWidthDegrees = 30.0
+    ///
+    /// Sized by the *widest* gap on the wheel, not the narrowest. Each centre's
+    /// nearest neighbour sits 30, 30, 30, 60, 60, 35, 35 and 40 degrees away
+    /// respectively, so the largest of those minimums is 60 — and at 30 (the
+    /// smallest of them) every hue at the midpoint of a 60°-apart pair, i.e.
+    /// 90°, 150° and 210°, got a combined weight of exactly zero from all eight
+    /// bands. Those were hard dead zones where an HSL edit did nothing at all,
+    /// which spec §4.3 explicitly rules out（避免區塊交界處色調斷層）.
+    ///
+    /// At 60 the closely-spaced pairs now overlap to more than 1.0 near their
+    /// shared midpoint; the kernel renormalises by the summed weight whenever
+    /// that total exceeds 1.0 (see `AdjustmentPipeline.hslKernel`), so the blend
+    /// never amplifies beyond one band at full strength.
+    public static let halfWidthDegrees = 60.0
 
     /// 1.0 at `centerDegrees`, falling linearly to 0.0 at `halfWidthDegrees`
     /// away, wrapping correctly across the 0/360 seam.
