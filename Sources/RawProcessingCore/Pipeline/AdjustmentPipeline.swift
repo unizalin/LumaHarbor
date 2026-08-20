@@ -18,11 +18,22 @@ public struct AdjustmentPipeline: Sendable {
     /// Every stage is skipped when its parameter is at identity — a neutral
     /// photo renders as a straight passthrough, which is what makes the
     /// before/after comparison exact rather than approximately equal.
-    public func apply(_ adjustments: PhotoAdjustments, to image: CIImage) -> CIImage {
-        apply(AdjustmentMapping.renderParameters(for: adjustments), to: image)
+    ///
+    /// - Parameter scaleFactor: how far `image` has already been downscaled
+    ///   from the source RAW's native pixel size (1 for a full-resolution
+    ///   export decode, `<1` for a downsampled interactive/preview decode —
+    ///   see `CoreImageRawDecoder.scaleFactor`). Spec §7 Gate B3: sharpening
+    ///   and grain are defined against `1`, so a downsampled preview scales
+    ///   their pixel-radius knobs down by the same factor rather than
+    ///   applying the same absolute radius the full-resolution export would,
+    ///   which would otherwise read as visibly tighter/finer in preview than
+    ///   in the exported file. Export always passes `1`, so exported output
+    ///   is unaffected by this parameter's existence.
+    public func apply(_ adjustments: PhotoAdjustments, to image: CIImage, scaleFactor: Double = 1) -> CIImage {
+        apply(AdjustmentMapping.renderParameters(for: adjustments), to: image, scaleFactor: scaleFactor)
     }
 
-    public func apply(_ parameters: RenderParameters, to image: CIImage) -> CIImage {
+    public func apply(_ parameters: RenderParameters, to image: CIImage, scaleFactor: Double = 1) -> CIImage {
         var working = image
 
         // 1. Exposure, in linear light, where an EV step is a clean multiply.
@@ -111,7 +122,7 @@ public struct AdjustmentPipeline: Sendable {
             let filter = CIFilter.sharpenLuminance()
             filter.inputImage = working
             filter.sharpness = Float(parameters.sharpening.amount * AdjustmentMapping.sharpenLuminanceSharpnessSpan)
-            filter.radius = Float(parameters.sharpening.radius)
+            filter.radius = Float(parameters.sharpening.radius * scaleFactor)
             working = filter.outputImage ?? working
         }
 
@@ -144,22 +155,31 @@ public struct AdjustmentPipeline: Sendable {
         // widens the grain (blur radius scales up), roughness widens
         // amountScale's magnitude, making the grain read more strongly.
         if !parameters.isGrainIdentity {
-            working = Self.applyGrain(parameters.grain, to: working)
+            working = Self.applyGrain(parameters.grain, to: working, scaleFactor: scaleFactor)
         }
 
         return working
     }
 
-    private static func applyGrain(_ grain: Grain, to image: CIImage) -> CIImage {
+    private static func applyGrain(_ grain: Grain, to image: CIImage, scaleFactor: Double) -> CIImage {
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return image }
 
         let noise = CIFilter.randomGenerator()
         guard var noiseImage = noise.outputImage else { return image }
 
-        // size 0...100 -> blur radius 0...4; identical noise blurred more
-        // reads as larger grain clumps.
-        let blurRadius = (grain.size / 100) * 4
+        // size 0...100 -> blur radius 0...4 at scaleFactor 1 (spec §7 Gate
+        // B3); identical noise blurred more reads as larger grain clumps.
+        // Scaling the radius down with the image keeps a downsampled preview
+        // from showing visibly coarser clumps than the full-resolution
+        // export will actually have. This does not fully solve
+        // resolution-dependence for grain: the *unblurred* random noise
+        // texture underneath is generated at one sample per decoded pixel,
+        // so its base frequency is still tied to decode resolution the same
+        // way a sensor's own pixel-level noise is -- fixing that would mean
+        // generating grain at a fixed physical frequency independent of
+        // decode size, which is a larger change than this radius fix covers.
+        let blurRadius = (grain.size / 100) * 4 * scaleFactor
         if blurRadius > 0 {
             let blur = CIFilter.gaussianBlur()
             blur.inputImage = noiseImage

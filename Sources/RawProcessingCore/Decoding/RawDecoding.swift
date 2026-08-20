@@ -108,6 +108,18 @@ public struct DecodedRawImage: @unchecked Sendable {
         self.baselineTint = baselineTint
         self.metadata = metadata
     }
+
+    /// How far `image` has been downscaled from native, by longest edge —
+    /// `1` for a full-resolution decode, `<1` for a downsampled
+    /// interactive/preview decode. Feeds `AdjustmentPipeline.apply(...
+    /// scaleFactor:)` (spec §7 Gate B3) so pixel-radius adjustments (sharpen,
+    /// grain) read consistently between preview and export.
+    public var scaleFactor: Double {
+        let nativeLongestEdge = Double(max(nativePixelSize.width, nativePixelSize.height))
+        guard nativeLongestEdge > 0 else { return 1 }
+        let decodedLongestEdge = Double(max(decodedPixelSize.width, decodedPixelSize.height))
+        return decodedLongestEdge / nativeLongestEdge
+    }
 }
 
 /// The seam that keeps Core Image swappable.

@@ -5,6 +5,12 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
     public var amount: Double {
         didSet { amount = Self.clamp(amount) }
     }
+    /// 0...100, mapped to a blur radius in pixels defined against a
+    /// full-resolution decode; `AdjustmentPipeline` scales that radius down
+    /// by `scaleFactor` for a downsampled preview decode (spec §7 Gate B3).
+    /// This only normalises clump *size* — the underlying noise texture is
+    /// still generated at one sample per decoded pixel, so its base
+    /// frequency stays tied to decode resolution regardless of this value.
     public var size: Double {
         didSet { size = Self.clamp(size) }
     }

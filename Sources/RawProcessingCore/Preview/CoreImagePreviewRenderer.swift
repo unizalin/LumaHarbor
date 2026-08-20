@@ -44,7 +44,7 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
             let decoded = try decoder.decode(decodeRequest)
 
             try Task.checkCancellation()
-            let adjusted = pipeline.apply(parameters, to: decoded.image)
+            let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
 
             try Task.checkCancellation()
             let cgImage = try renderService.makeCGImage(adjusted)

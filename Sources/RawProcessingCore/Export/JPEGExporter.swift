@@ -180,7 +180,7 @@ public actor JPEGExporter {
             let decoded = try decoder.decode(decodeRequest)
 
             try Task.checkCancellation()
-            let adjusted = pipeline.apply(parameters, to: decoded.image)
+            let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
 
             try Task.checkCancellation()
             try renderService.writeJPEG(adjusted, to: temporaryURL, quality: quality)

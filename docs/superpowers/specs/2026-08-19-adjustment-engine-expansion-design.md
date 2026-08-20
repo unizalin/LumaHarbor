@@ -356,3 +356,21 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 `swift build` 的 `CIKernel(source:)`／`CIColorKernel(source:)` deprecation warning 兩則都消失，只剩既有、已記錄在 P2 待辦裡的 `UndoRedoKeyEquivalentFix.monitor` Swift 6 concurrency warning。**Gate B1 完成。**
 
 **新增檔案**：`Plugins/CompileMetalKernels/CompileMetalKernels.swift`（build plugin）、`Sources/RawProcessingCore/Kernels/AdjustmentKernels.metal`（kernel 原始碼，含逐行對照舊 CIKL 版本的行為說明）。`Package.swift` 新增一個 `.plugin` target 並掛到 `RawProcessingCore`。
+
+### 2026-08-20（第六則）：Gate B3——Sharpening／Grain 的像素半徑依 scaleFactor 正規化，避免預覽／匯出不一致
+
+**背景**：`docs/superpowers/specs/2026-08-20-post-mvp-follow-up-spec.md` Gate B3 要求確認 sharpening、noise reduction、grain 這類以像素或半徑表示的效果，是否需要依原圖尺寸／縮放比例正規化。派 Explore agent 調查 `AdjustmentPipeline.apply` 的呼叫路徑後確認：
+
+- 互動預覽（`CoreImagePreviewRenderer`）用 `EditorViewModel.previewPixelDimension`（1600px）限制最長邊，`CoreImageRawDecoder.scaleFactor(nativeSize:maximumPixelDimension:)` 算出的縮放比例 <1；匯出（`JPEGExporter`）用 `.full`（`maximumPixelDimension` 為 `nil`），縮放比例恆為 1。
+- 兩邊呼叫 `pipeline.apply(parameters, to: decoded.image)` 時，`RenderParameters` 完全相同，`AdjustmentPipeline` 內部也從未讀過 `image.extent` 去反推、修正任何滑桿數值。
+- **Vignette** 的 `midpoint`／`feather` 本來就換算成「佔對角線的比例」，天生解析度無關，不用改。
+- **Sharpening.radius**（0.5...3.0）直接餵進 `CISharpenLuminance.inputRadius`；**Grain.size**（0...100）換算成 `CIGaussianBlur` 半徑（0...4px）——這兩個都是絕對像素值，沒有依解析度縮放，所以同一組滑桿數值，在 ~1600px 預覽跟原生解析度匯出（Sony ARW 通常 6000+px）看起來的相對強度不一致：預覽會顯得比匯出銳利／顆粒粗。
+- **NoiseReduction** 沒有我們能控制的顯式半徑參數（`noiseLevel`／`sharpness` 直接餵給 `CINoiseReduction`），無法從 pipeline 這層修正。
+
+**修法**（使用者核准的範圍：修 Sharpening + 部分修 Grain）：
+- `DecodedRawImage` 新增 `scaleFactor` computed property（`Sources/RawProcessingCore/Decoding/RawDecoding.swift`），用 `decodedPixelSize`／`nativePixelSize` 最長邊比例算出，跟 `CoreImageRawDecoder.scaleFactor` 用同一套「最長邊 fit」邏輯，兩邊呼叫端共用同一個計算，不會各自算出不一致的值。
+- `AdjustmentPipeline.apply(_:to:scaleFactor:)` 新增 `scaleFactor: Double = 1` 參數（兩個 overload 都加，預設值保證舊呼叫端／既有測試行為完全不變）。`Sharpening.radius` 和 `Grain` 的 blur radius 都乘上這個係數。
+- `CoreImagePreviewRenderer`／`JPEGExporter` 呼叫 `pipeline.apply` 時都傳入 `decoded.scaleFactor`。匯出因為 `scaleFactor` 恆為 1，這次修改**不改變任何既有匯出檔案的輸出**，只讓預覽的銳化／顆粒相對強度變得跟匯出一致（變得比修改前的預覽更淡，因為預覽現在正確反映了縮小後的相對效果）。
+- **已知未解的限制**（寫進 `Grain.size`、`Sharpening.radius` 的 doc comment 裡）：Grain 的模糊半徑正規化只處理了「顆粒團塊大小」，底層隨機雜訊紋理本身仍是「每個解碼後像素一個取樣點」生成的，基礎頻率還是跟解碼解析度綁定，要徹底解決需要換成跟解析度無關的雜訊生成方式，這次沒做。NoiseReduction 完全沒動，因為沒有可控制的半徑參數可以正規化。
+
+**驗證**：新增 5 個測試（`DecodedRawImage.scaleFactor` 3 個：滿解析度回傳 1、縮小解碼回傳正確比例、原生尺寸退化為 0 時回退到 1；`AdjustmentPipelineTests` 2 個：Sharpening 半徑隨 scaleFactor 縮小時，硬邊緣附近像素確實不同，且 `scaleFactor: 1` 與省略參數的舊呼叫方式輸出逐位元組相同；Grain 的模糊半徑隨 scaleFactor 縮小時，整張渲染輸出的位元組陣列確實不同）。`swift test -Xswiftc -strict-concurrency=complete`：426 個測試，0 失敗，9 個略過；`LUMAHARBOR_RAW_FIXTURE_DIR=... --filter RawFixtureTests`：9 個全過，含 Gate F 效能測試。**Gate B3（Sharpening／Grain 部分）完成；NoiseReduction 的解析度相依性記錄為已知限制，不修。**
