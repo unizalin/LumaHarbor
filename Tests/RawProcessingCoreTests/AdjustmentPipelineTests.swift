@@ -255,6 +255,42 @@ final class AdjustmentPipelineTests: XCTestCase {
         XCTAssertEqual(output.extent, source.extent)
     }
 
+    func testSharpeningRadiusScalesDownWithScaleFactor() throws {
+        // Spec §7 Gate B3: a downsampled preview decode should apply a
+        // proportionally smaller sharpening radius than a full-resolution
+        // export decode, so the two read consistently. A hard vertical edge
+        // is needed -- sharpening has nothing to act on in a flat fixture --
+        // and a wider radius pulls a visibly bigger halo across it.
+        let dark = CIImage(color: CIColor(red: 0.2, green: 0.2, blue: 0.2))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 16))
+        let light = CIImage(color: CIColor(red: 0.9, green: 0.9, blue: 0.9))
+            .cropped(to: CGRect(x: 8, y: 0, width: 8, height: 16))
+        let source = light.composited(over: dark).cropped(to: CGRect(origin: .zero, size: size))
+
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.sharpening = Sharpening(amount: 150, radius: 3.0)
+
+        let fullScale = pipeline.apply(adjustments, to: source, scaleFactor: 1)
+        let downsampledScale = pipeline.apply(adjustments, to: source, scaleFactor: 0.2)
+
+        let fullPixel = try pixel(at: CGPoint(x: 6, y: 8), in: fullScale)
+        let downsampledPixel = try pixel(at: CGPoint(x: 6, y: 8), in: downsampledScale)
+        XCTAssertTrue(
+            fullPixel.red != downsampledPixel.red
+                || fullPixel.green != downsampledPixel.green
+                || fullPixel.blue != downsampledPixel.blue
+        )
+
+        // scaleFactor: 1 (as export always passes) must still match calling
+        // apply(_:to:) with no scaleFactor at all -- the default preserves
+        // existing export output exactly.
+        let defaultScale = pipeline.apply(adjustments, to: source)
+        let defaultPixel = try pixel(at: CGPoint(x: 6, y: 8), in: defaultScale)
+        XCTAssertEqual(fullPixel.red, defaultPixel.red)
+        XCTAssertEqual(fullPixel.green, defaultPixel.green)
+        XCTAssertEqual(fullPixel.blue, defaultPixel.blue)
+    }
+
     func testNoiseReductionAddsAFilterToTheChainWhenNonZero() {
         let source = makeSourceImage()
         var adjustments = PhotoAdjustments.neutral
@@ -337,6 +373,37 @@ final class AdjustmentPipelineTests: XCTestCase {
         let firstPixelRed = bytes[0]
         let anyPixelDiffers = stride(from: 0, to: bytes.count, by: 4).contains { bytes[$0] != firstPixelRed }
         XCTAssertTrue(anyPixelDiffers, "Grain at full amount on a flat source must not render perfectly flat")
+    }
+
+    func testGrainBlurRadiusScalesDownWithScaleFactor() throws {
+        // Spec §7 Gate B3: a downsampled preview decode should blur the
+        // underlying grain noise by a proportionally smaller radius than a
+        // full-resolution export decode, so grain clumps read as roughly the
+        // same relative size in both. CIRandomGenerator is deterministic (a
+        // fixed recipe, not wall-clock-seeded), so the same source/adjustment
+        // pair rendered at two scaleFactors is a fair, non-flaky comparison.
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.grain = Grain(amount: 100, size: 25, roughness: 50)
+
+        func renderBytes(scaleFactor: Double) throws -> [UInt8] {
+            let output = pipeline.apply(adjustments, to: source, scaleFactor: scaleFactor)
+            let renderer = ImageRenderService()
+            let cgImage = try renderer.makeCGImage(output)
+            let width = cgImage.width, height = cgImage.height
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            let context = try XCTUnwrap(CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return bytes
+        }
+
+        let fullScaleBytes = try renderBytes(scaleFactor: 1)
+        let downsampledBytes = try renderBytes(scaleFactor: 0.1)
+        XCTAssertNotEqual(fullScaleBytes, downsampledBytes)
     }
 
     // MARK: - Split toning

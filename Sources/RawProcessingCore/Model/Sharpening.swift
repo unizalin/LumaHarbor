@@ -6,6 +6,11 @@ public struct Sharpening: Codable, Equatable, Hashable, Sendable {
     public var amount: Double {
         didSet { amount = Self.clamp(amount, 0, 150) }
     }
+    /// Pixels, defined against a full-resolution decode. `AdjustmentPipeline`
+    /// scales this down by `scaleFactor` for a downsampled preview decode
+    /// (spec §7 Gate B3), so this value alone doesn't say how wide the
+    /// visible sharpening halo is without knowing what resolution it's
+    /// rendered at.
     public var radius: Double {
         didSet { radius = Self.clamp(radius, 0.5, 3.0) }
     }

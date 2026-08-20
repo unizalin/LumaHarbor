@@ -66,6 +66,40 @@ final class RawDecodingTests: XCTestCase {
         )
     }
 
+    // MARK: - DecodedRawImage.scaleFactor (spec §7 Gate B3)
+
+    private func makeDecodedImage(nativePixelSize: CGSize, decodedPixelSize: CGSize) -> DecodedRawImage {
+        DecodedRawImage(
+            image: CIImage.empty(),
+            nativePixelSize: nativePixelSize,
+            decodedPixelSize: decodedPixelSize,
+            baselineTemperature: 5_500,
+            baselineTint: 0,
+            metadata: RawMetadata()
+        )
+    }
+
+    func testFullResolutionDecodeReportsScaleFactorOfOne() {
+        let decoded = makeDecodedImage(
+            nativePixelSize: CGSize(width: 6_000, height: 4_000),
+            decodedPixelSize: CGSize(width: 6_000, height: 4_000)
+        )
+        XCTAssertEqual(decoded.scaleFactor, 1)
+    }
+
+    func testDownsampledDecodeReportsAFractionalScaleFactor() {
+        let decoded = makeDecodedImage(
+            nativePixelSize: CGSize(width: 6_000, height: 4_000),
+            decodedPixelSize: CGSize(width: 1_600, height: 1_067)
+        )
+        XCTAssertEqual(decoded.scaleFactor, 1_600.0 / 6_000.0, accuracy: 1e-9)
+    }
+
+    func testDegenerateNativeSizeFallsBackToOneForScaleFactor() {
+        let decoded = makeDecodedImage(nativePixelSize: .zero, decodedPixelSize: CGSize(width: 100, height: 100))
+        XCTAssertEqual(decoded.scaleFactor, 1)
+    }
+
     // MARK: - Decode quality
 
     func testDraftModeIsOnlyForInteractiveWork() {

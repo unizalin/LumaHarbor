@@ -90,6 +90,8 @@ LUMAHARBOR_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
 
 ### B3. 空間參數一致性
 
+> **狀態（2026-08-20）：Sharpening／Grain 已完成，NoiseReduction 記錄為已知限制不修。** Vignette 本來就用「佔對角線比例」表示，無需處理。`DecodedRawImage.scaleFactor` 與 `AdjustmentPipeline.apply(...scaleFactor:)` 讓 Sharpening 的像素半徑、Grain 的模糊半徑依預覽／匯出的實際解碼縮放比例正規化，匯出（`scaleFactor` 恆為 1）行為不變，只修正預覽的相對強度。Grain 底層雜訊紋理本身的取樣頻率仍與解碼解析度綁定，NoiseReduction 沒有可控制的半徑參數，兩者都記錄為已知限制。細節與測試紀錄見 `docs/superpowers/specs/2026-08-19-adjustment-engine-expansion-design.md` 進度日誌第六則。以下內容保留作為原始要求記錄。
+
 確認 sharpening、noise reduction、grain 等以像素或半徑表示的效果，是否需要依原圖尺寸、縮放比例或輸出尺寸正規化，避免預覽與輸出結果不一致。
 
 ## MVP 已接受的 P2 待辦（不阻擋本次修正）
