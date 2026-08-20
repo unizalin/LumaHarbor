@@ -277,3 +277,29 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 **人工視覺驗證清單**：已於 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 建立。此清單未執行——須真實 Sony `.ARW` fixture + Apple Silicon + Xcode，本機皆無。
 
 **下一步**：於 Apple Silicon 機器上執行 `swift test`（優先 CIKL kernel 那兩個 test），確認綠燈後始進行 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 的人工視覺驗證。如有 CIKL 編譯問題，參考計畫文檔 Task 7 Step 9 的替代方案。
+
+### 2026-08-20（稍晚）：全分支最終 review 發現並修復 10 項問題——上一則的兩個「未驗證風險」已被取代，請改看這則
+
+**重要更正上一則條目**：上面「兩個關鍵未驗證風險」的說法已過時。全分支最終 review（跨任務視角，單一任務的 review 看不到）發現：**Task 6 的風險其實是一個真的 bug，不是「未驗證」而已**；**Task 7 的風險則已用真機渲染實測排除**。細節如下。
+
+**關鍵發現：這台機器其實可以編譯並實際渲染 CIKernel／CIColorKernel／CIContext——不需要 Xcode，只有 `XCTest` 需要 Xcode。** Core Image framework 本身隨系統內建。全分支 review 與後續修復都用獨立 `swiftc` scratch 腳本真的把兩個 kernel 編譯、渲染、讀出像素值來驗證，不是靠肉眼推理——這是本次 session 第一次對這兩個 kernel 有真正的執行期證據。
+
+**Critical（3 項，全部已修復，commit `c644aa8`）**：
+
+1. `advancedToneCurveKernel` 宣告型別是 `CIColorKernel`，但它的 CIKL 用了 `sample()`／`samplerCoord()`／`samplerTransform()`——這三個函式 `CIColorKernel` 明文禁止使用（只有一般 `CIKernel` 可以）。實測 `CIColorKernel(source:)` 對這段 kernel 一律回傳 `nil`。**結論：進階曲線這個功能從 Task 6 完成以來就完全沒有作用過，是靜默的 no-op，兩位逐字比對「與計畫相同」的 reviewer 都沒抓到，因為問題不在轉錄錯誤，而在計畫文件本身把型別選錯了。** 已改為 `CIKernel`。
+2. 型別修好後，LUT 查表用的 `roiCallback` 對兩個輸入（原圖與 256×1 的 LUT 貼圖）都回傳同一個 destRect，導致任何邊長超過約 256px 的真實照片，大部分區域會取樣到 LUT 範圍外、渲染成純黑。實測 512×512：修正前四個取樣點全部 `0.0`，修正後全部落在曲線的正確理論值。已改成依輸入 index 回傳各自正確的 ROI。
+3. `Tests/PhotoLibraryCoreTests/SidecarRepositoryTests.swift` 有一處 hardcode 的 `schemaVersion == 1`，Task 2 把 schema 跳號到 2 時沒改到這個檔案（因為它不在 Task 2 自己的 diff 範圍內）——這條測試只要 `swift test` 真的能跑，保證紅燈。已改為引用 `PhotoSidecar.currentSchemaVersion`。
+
+**Important（7 項，全部已修復，同一 commit）**：進階曲線的哨兵測試改用 512×512 fixture＋單點取樣（原本 16×16＋整圖平均取樣，即使 kernel 全黑也測不出來）；HSL 8 色帶的 `halfWidthDegrees` 30→60 並在 kernel 內對總權重 >1.0 做正規化（原本 30 會讓 60 度間隔的色帶中點權重恰好為零，見上則條目；**已知取捨**：正規化會讓單一色帶推到滿格時實際強度只剩約 57%，已寫進 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 的 HSL 檢查項，留待真機目視判斷是否需要重新校準）；HSL 與進階曲線 kernel 原本都把輸出硬 clamp 到 [0,1]，會吃掉 `ImageRenderService.swift` 自己文件宣稱「應該保留到最終輸出才裁切」的 extended-range 高光餘裕，已改成只 clamp 查表用的索引、不 clamp 最終數值；分離色調的平色調層原本經過 `NSColor`／`CIColor(color:)` 會被色彩管理成約 0.214（不是預期的 0.5 中性灰），導致任何分離色調編輯都會讓整張照片變暗——**修復過程中發現原本 finding 建議的寫法（不帶 colorSpace 的 `CIColor(red:green:blue:)`）實測仍然是錯的 0.214**，最終改用明確帶 `colorSpace: ImageRenderService.workingColorSpace` 的建構子，實測精確落在 0.5；銳化的 `detail`／`masking` 補上「無對應濾鏡參數」的說明註解；`AdjustmentMapping` 補上「銳化／降噪／顆粒是絕對像素單位、不隨渲染解析度縮放」的說明註解；五個重複的「neutral passthrough」管線測試，四個改寫成「欄位偏離預設值但仍屬該型別自己 identity 判定」的真正案例，另外兩個（進階曲線、HSL）因為兩者的 `isIdentity` 定義本來就沒有「非預設但仍是 identity」的中間狀態，直接刪除而非硬湊。
+
+**全分支 review 與其修復都各自經過一輪獨立審查**，兩輪都用真的 `swiftc` 腳本重新渲染、逐一核對數字，全部吻合，沒有殘留 Critical／Important 問題。
+
+**這輪修復留下的 3 個 Minor（不阻礙，留給真機測試時順便留意）**：
+
+- 拿掉 HSL kernel 的 clamp 後，深陰影區域現在會出現負值（例如某色帶大幅降低亮度時）。追蹤過下游（分離色調遮罩有另外 clamp、最終輸出格式會自然吃掉負值），判斷是良性的，但顆粒的 soft-light 混合與提亮暈影目前還沒在負值輸入下驗證過，值得真機測試時留意深陰影區塊。
+- `HSLKernelWeights.swift` 現在是 `Sources/` 底下唯一含中文字元的檔案（一句從 spec 引用的中文註解片段），跟其他檔案的英文註解風格不一致，純粹風格問題。
+- 進階曲線哨兵測試的說明註解把「舊測試為何測不出 bug」歸因於「16×16 太小、剛好落在 LUT 重疊區」，但獨立驗證發現：不管影像多大，舊的 ROI bug都會讓整張圖渲染成純黑——真正的原因是舊測試的斷言太弱（只檢查「有變暗」，全黑也符合這個條件），不是尺寸問題。測試本身修得是對的，只有註解的因果推論不準。
+
+**額外提醒（範圍外觀察，不影響本分支但值得知道）**：分離色調的 colorSpace 修法之所以正確，是因為目前整個 codebase 只有 `ImageRenderService.swift` 一處建立 `CIContext`，兩者用的是同一個色彩空間常數；這個耦合目前成立但沒有明文寫下——未來如果加了第二個 `CIContext` 用不同色彩空間，同樣的變暗 bug 可能會用不同面貌回來。
+
+**再次強調給下一位接手者**：這整個 session（8 個任務 + 最終 review + 修復）**沒有任何一個測試檔案在任何一台機器上真正執行過**——所有驗證要嘛是本機 `swift build`（只驗證 Sources/ 能編譯）、要嘛是本次額外發現的獨立 `swiftc` scratch 腳本渲染像素（驗證了 Critical #1／#2 與 Important 的 5 項邏輯，但不是跑測試框架本身）。明天在 Apple Silicon 上的 `swift test` 是這三個測試檔案（`SidecarRepositoryTests.swift` 的修改、`AdjustmentPipelineTests.swift` 的多處修改、`HSLKernelWeightsTests.swift` 的邊界更新）第一次真正被執行。
