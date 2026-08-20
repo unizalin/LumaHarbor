@@ -323,4 +323,14 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 **測試環境覆蓋率的已知落差**：這次用的照片以橘／紅／藍為主，缺乏黃／綠／紫／洋紅色內容，所以那四個 HSL 色帶沒有實際視覺驗證到——不是程式碼路徑沒驗證（`HSLKernelWeightsTests` 已涵蓋 8 色帶邊界的單元測試），純粹是這張照片剛好沒有這些顏色可看。之後如果要更完整地人工複驗，換一張色彩更豐富的照片即可。
 
+### 2026-08-20（第四則）：`codex/post-merge-review-fixes` 分支上重跑完整測試，含 `a26ac3c` 新增的邊界情況修正與測試，全綠
+
+**背景**：`docs/superpowers/specs/2026-08-20-post-mvp-follow-up-spec.md` 的 Gate A 要求本次修正包（`a26ac3c`，七組巢狀調整模型 mutation-then-clamp、`AdvancedToneCurve` 非有限值清理、HSL 無彩色中性處理、Tone Curve LUT resolution==1 邊界）合併前必須有完整 `swift test` 綠燈紀錄，之前的紀錄（本節第三則）是在這些修正之前跑的。
+
+**環境**：同上，arm64 + Xcode 26.6。
+
+**結果**：`swift test -Xswiftc -strict-concurrency=complete`（不含 fixture 環境變數）：**421 個測試，0 失敗，9 個 `RawFixtureTests` 略過**（未設 `LUMAHARBOR_RAW_FIXTURE_DIR`）。接著補跑 `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW swift test --filter RawFixtureTests`：**9 個全過，0 失敗**，含 Gate F 效能測試（互動預覽解碼 1600px，cold 0.149s／warm 約 0.140s，符合 spec §11 ≤150ms 目標）。兩次合計 421 個測試全數執行且全綠，包含 `a26ac3c` 新增的 `AdjustmentMappingTests`、`AdjustmentPipelineTests`、`AdvancedToneCurveLUTTests` 邊界案例。**Gate A1 完成。**
+
+**下一步**：Gate A2（HSL 八色帶人工驗證的黃／綠／青／紫／洋紅五色帶）仍是唯一剩餘的合併前阻塞項，見 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md`。
+
 **全分支狀態**：spec §7 全部 8 項子任務（含 Task 8 人工視覺驗證）現在都已完成並有記錄。分支 `worktree-adjustment-engine-expansion` 已推上遠端，領先 `main` 16 個 commit（含這則記錄本身會再 +1），落後 0——可直接 fast-forward 合併，未合併。下一位接手者：如果要合併，先確認使用者要不要順便看一下 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 裡貼出的具體數字，再決定要不要合併進 `main`。

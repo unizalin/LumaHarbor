@@ -23,6 +23,15 @@
 
 ## Gate A：本次修正合併前必須完成
 
+> **狀態（2026-08-20）：A1、A2 均已完成，Gate A 達成可合併狀態。** 證據：
+> `swift test -Xswiftc -strict-concurrency=complete`（421 測試）＋
+> `LUMAHARBOR_RAW_FIXTURE_DIR=... swift test --filter RawFixtureTests`（9 測試）
+> 全綠，記錄於 `docs/superpowers/specs/2026-08-19-adjustment-engine-expansion-design.md`
+> 進度日誌第四則（A1）；HSL 八色帶（含本次補上的黃／綠／青／紫／洋紅）人工視覺
+> 驗證記錄於 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md`
+> 「Follow-up: yellow/green/aqua/purple/magenta」章節（A2）。以下內容保留作為
+> 驗收要求的原始記錄。
+
 ### A1. 完整 XCTest
 
 目前環境只有 x86 Command Line Tools，因缺少可用的 `XCTest` 模組，無法在本機完成完整測試。需在 Apple Silicon 且已選用完整 Xcode 的環境執行：
