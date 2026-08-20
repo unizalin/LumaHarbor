@@ -311,3 +311,16 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 **結果**：`swift build` 乾淨（僅兩則預期中的 CIKL `init(source:)` deprecation 警告，來自 Task 6/Task 7 的兩個 kernel，非錯誤）。`swift test`（不含 fixture）：**418 個測試全過，0 失敗**，其中最優先要看的兩項——`testAdvancedCurveDarkeningPointsDarkenTheImage`、`testReducingRedSaturationDesaturatesARedPatch`／`testAdjustingBlueDoesNotVisiblyMoveARedPatch`——全部通過，確認 Task 6／Task 7 的兩個 CIKL kernel 在真機上能正常編譯與運作，之前兩則條目的擔憂可以正式排除。另有 9 個 `RawFixtureTests` 因未設定 `LUMAHARBOR_RAW_FIXTURE_DIR` 而略過；本機 `Fixtures/Private/Sony-ARW/` 剛好有 82 張真實 Sony ARW，補上環境變數後這 9 個也全過，含 Gate F 效能測試（互動預覽解碼 1600px，spec §11 目標 ≤150ms，實測 cold 0.157s／warm 約 0.139s，在容許範圍內是暖機後達標、冷啟動些微超標但屬預期的首次 JIT／快取成本，非本分支範圍的迴歸）。
 
 **下一步**：自動化測試已完整跑過，接下來要做的是 Task 8 的人工視覺驗證清單（`docs/testing/2026-08-19-adjustment-engine-manual-verification.md`），七項效果目前都不能從 Inspector UI 觸發，需要用臨時 debug harness 直接對 `PhotoAdjustments` 塞值、渲染、輸出圖片人工比對。這一步尚未開始。
+
+### 2026-08-20（第三則）：Task 8 人工視覺驗證清單已完成，全分支 8 項子任務至此全部收尾
+
+**做法**：寫了一個臨時 XCTest harness（`ManualVisualHarnessTests.swift`，用完即刪、未 commit），對本機 `Fixtures/Private/Sony-ARW/` 裡一張真實 Sony ARW（藤椅＋小貓照片）解碼到 1600px，逐一把七項效果推到極端值渲染成 PNG，人工比對 + 兩項用 Pillow/numpy 做像素採樣做定量確認（HSL 稀釋程度、暈影明暗方向）。細節與逐項結果已寫入 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 的「## Result」章節，勾選全部七項。
+
+**結論：七項效果在真機上視覺表現全部正確，沒有發現新的阻礙性問題。** 兩個值得記錄但非缺陷的觀察：
+
+1. 進階曲線在接近純白處斜率很陡（範例用的 5 點 S-curve，x=0.75→1.0 斜率 3.2）時，會把感測器本身的顏色雜訊放大成貓毛亮部的藍／青色小斑點——這是陡峭色調曲線放大真實像素雜訊的正常物理行為，不是 pipeline 的 bug，但使用者真的把曲線推這麼極端時會看到。
+2. 用像素採樣直接驗證了先前 progress log 記錄的「HSL 單一色帶在權重正規化下會被稀釋」是真的會發生（孤立橘色色帶飽和度 -100，wood chair 色塊平均 HSV 飽和度 0.477→0.327，明顯但非到零）——確認**不需要重新校準**，維持現狀即可，這正是最終 review 修復時就已經接受的已知取捨。
+
+**測試環境覆蓋率的已知落差**：這次用的照片以橘／紅／藍為主，缺乏黃／綠／紫／洋紅色內容，所以那四個 HSL 色帶沒有實際視覺驗證到——不是程式碼路徑沒驗證（`HSLKernelWeightsTests` 已涵蓋 8 色帶邊界的單元測試），純粹是這張照片剛好沒有這些顏色可看。之後如果要更完整地人工複驗，換一張色彩更豐富的照片即可。
+
+**全分支狀態**：spec §7 全部 8 項子任務（含 Task 8 人工視覺驗證）現在都已完成並有記錄。分支 `worktree-adjustment-engine-expansion` 已推上遠端，領先 `main` 16 個 commit（含這則記錄本身會再 +1），落後 0——可直接 fast-forward 合併，未合併。下一位接手者：如果要合併，先確認使用者要不要順便看一下 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 裡貼出的具體數字，再決定要不要合併進 `main`。
