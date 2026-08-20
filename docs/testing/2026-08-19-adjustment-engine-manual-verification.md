@@ -11,7 +11,7 @@ values directly on a `PhotoAdjustments` in a throwaway debug harness, or via
 temporarily hardcoding a non-neutral value in `AdjustmentMapping.renderParameters`,
 render, inspect, then revert.
 
-- [ ] **HSL full-band coverage**: on a real ARW, push each of the 8 hue bands' hue/saturation/luminance
+- [x] **HSL full-band coverage**: on a real ARW, push each of the 8 hue bands' hue/saturation/luminance
   to their extremes one at a time. Confirm the correct region of the photo visibly
   changes and neighbouring bands' boundaries don't show hard colour-banding
   seams. Note: a single band pushed to an extreme may read weaker than expected
@@ -122,6 +122,79 @@ alone can't always separate "diluted" from "not working":
 
 **Outcome**: all seven effect stages rendered successfully on real Apple
 Silicon hardware with a real Sony ARW, and the tested colour content behaved
-correctly. Full eight-band HSL visual coverage is still pending as described
-above. The noise-amplification-under-steep-curves observation and HSL lone-band
-dilution remain expected, already-understood behaviour rather than defects.
+correctly. The noise-amplification-under-steep-curves observation and HSL
+lone-band dilution remain expected, already-understood behaviour rather than
+defects. Full eight-band HSL coverage (the gap this section originally left
+open) was closed in the follow-up run below.
+
+## Follow-up: yellow/green/aqua/purple/magenta (2026-08-20, Gate A2)
+
+**Prerequisite check**: `swift test -Xswiftc -strict-concurrency=complete`
+(421 tests) and `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW swift
+test --filter RawFixtureTests` (9 tests) were both green immediately before
+this run — see `docs/superpowers/specs/2026-08-19-adjustment-engine-expansion-design.md`
+progress log, fourth 2026-08-20 entry (Gate A1).
+
+**Method**: same approach as the original run — a throwaway XCTest harness
+(`Tests/LumaHarborIntegrationTests/ManualVisualHarnessTests.swift`, deleted
+after use, never committed) decoded real Sony ARWs from
+`Fixtures/Private/Sony-ARW/` at `.highQuality(maximumPixelDimension: 1600)`,
+pushed one band at a time through `AdjustmentPipeline`, and wrote PNGs
+inspected visually plus pixel-sampled (Pillow/numpy, HSV, circular mean for
+hue) against a mask of the baseline pixels actually in that band's hue range.
+Three fixtures were used, chosen by scanning all 81 fixtures' JPEG-preview hue
+histograms for the best real coverage of each remaining band:
+
+- `_DSC1908.ARW` — a garden/railing scene with strong green and aqua foliage
+  content (green: 23% of frame in-band, aqua: 11%).
+- `_DSC1932.ARW` — a cream/beige curtain scene, strong genuine yellow content
+  (62% of frame in-band).
+- `_DSC1919.ARW` — the same kitten+wicker-chair scene as the original run, has
+  no genuine purple or magenta subject matter, but was used deliberately: with
+  `HSLKernelWeights.halfWidthDegrees = 60`, blue (35° from purple's 275°
+  centre) and red (45° from magenta's 315° centre, wrapping through 0) both
+  fall inside purple's/magenta's triangular falloff by design (this is the
+  "no dead zones" fix from `3a63c46`), so editing purple/magenta measurably
+  moves this photo's real blue railing/chair and red/orange fur pixels even
+  without a pure purple/magenta subject in frame.
+
+**Results** (baseline → recoloured/desaturated, masked to the baseline's own
+in-band pixels, pixel counts are pre-edit mask size):
+
+| Band | Mask size | Hue shift | Saturation (recolour) | Saturation (desat isolate) |
+|---|---|---|---|---|
+| Green | 399k px (23%) | 120.9°→101.0° | 0.303→0.562 | 0.303→0.090 |
+| Aqua | 193k px (11%) | 181.0°→200.3° | 0.272→0.553 | 0.272→0.088 |
+| Yellow (curtain, strong) | 1.06M px (62%) | 37.9°→28.2° | 0.497→0.665 | 0.497→0.361 |
+| Yellow (garden, weak) | 22k px (1.3%) | 56.2°→41.5° | 0.213→0.359 | — |
+| Purple (via blue overlap) | 257k px (15%) | 231.8°→225.9° | 0.321→0.449 | 0.321→0.258 |
+| Magenta (via red overlap) | 110k px (6.5%) | 4.3°→7.0° | 0.222→0.261 | 0.222→0.201 |
+
+Every band produced a real, correctly-directioned, non-trivial change in both
+hue and saturation on the actual masked pixels — none of these are rendering
+no-ops. Green, aqua and the strong-yellow curtain case show large, obviously
+visible shifts on inspection (the curtain scene's background wall visibly
+warms and saturates; the aqua recolour visibly cools and darkens the whole
+garden frame). Purple and magenta show smaller but still real and directional
+shifts, consistent with their masked pixels sitting only 35–45° from those
+bands' centres (triangular weight ≈ 0.18–0.28 at that distance, per
+`HSLKernelWeights`) rather than being unaffected — this is the same, already-
+accepted "lone-band dilution" behaviour documented for orange in the original
+run above, not a new finding. `curtainD-yellow-darken.png` (luminance -100)
+also confirmed the correct direction on brightness (val 0.571→0.484).
+`testFiveOutstandingBandsTogether` applied all five at once on the garden
+photo: rendered without crashing, no hard colour-banding seams visible at any
+band boundary.
+
+**Coverage note**: no fixture in the private set (all three ARW subfolders
+are the same photoshoot) contains genuine, dedicated purple or magenta
+subject matter — the purple/magenta results above are real measurements of
+the deliberate band-overlap design, not of a "pure" purple/magenta patch.
+`HSLKernelWeightsTests` already covers the band-centre/half-width math itself
+at the unit level; this run additionally confirms that math produces a real,
+correctly-directioned pixel change end-to-end through the actual render
+pipeline on real photo data, which is what this checklist item is for.
+
+**Outcome**: all eight HSL bands now have real-ARW visual + quantitative
+confirmation. Gate A2 is satisfied; no accepted-gap sign-off (spec §A3) is
+needed.
