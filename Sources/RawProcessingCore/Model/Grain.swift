@@ -2,9 +2,15 @@ import Foundation
 
 /// Simulated film grain (spec §3.7).
 public struct Grain: Codable, Equatable, Hashable, Sendable {
-    public var amount: Double
-    public var size: Double
-    public var roughness: Double
+    public var amount: Double {
+        didSet { amount = Self.clamp(amount) }
+    }
+    public var size: Double {
+        didSet { size = Self.clamp(size) }
+    }
+    public var roughness: Double {
+        didSet { roughness = Self.clamp(roughness) }
+    }
 
     public init(amount: Double = 0, size: Double = 25, roughness: Double = 50) {
         self.amount = Self.clamp(amount)

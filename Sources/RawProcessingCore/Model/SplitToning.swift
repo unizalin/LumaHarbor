@@ -2,12 +2,22 @@ import Foundation
 
 /// Independent shadow/highlight colour tinting (spec §3.3).
 public struct SplitToning: Codable, Equatable, Hashable, Sendable {
-    public var shadowHue: Double
-    public var shadowSaturation: Double
-    public var highlightHue: Double
-    public var highlightSaturation: Double
+    public var shadowHue: Double {
+        didSet { shadowHue = Self.clamp(shadowHue, 0, 360) }
+    }
+    public var shadowSaturation: Double {
+        didSet { shadowSaturation = Self.clamp(shadowSaturation, 0, 100) }
+    }
+    public var highlightHue: Double {
+        didSet { highlightHue = Self.clamp(highlightHue, 0, 360) }
+    }
+    public var highlightSaturation: Double {
+        didSet { highlightSaturation = Self.clamp(highlightSaturation, 0, 100) }
+    }
     /// Negative biases toward shadows, positive toward highlights.
-    public var balance: Double
+    public var balance: Double {
+        didSet { balance = Self.clamp(balance, -100, 100) }
+    }
 
     public init(
         shadowHue: Double = 0, shadowSaturation: Double = 0,

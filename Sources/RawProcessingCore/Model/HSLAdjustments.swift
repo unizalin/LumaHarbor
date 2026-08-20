@@ -2,9 +2,15 @@ import Foundation
 
 /// One of the eight Lightroom-style hue bands (spec §3.2).
 public struct HSLBand: Codable, Equatable, Hashable, Sendable {
-    public var hue: Double
-    public var saturation: Double
-    public var luminance: Double
+    public var hue: Double {
+        didSet { hue = Self.clamp(hue) }
+    }
+    public var saturation: Double {
+        didSet { saturation = Self.clamp(saturation) }
+    }
+    public var luminance: Double {
+        didSet { luminance = Self.clamp(luminance) }
+    }
 
     public init(hue: Double = 0, saturation: Double = 0, luminance: Double = 0) {
         self.hue = Self.clamp(hue)

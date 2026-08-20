@@ -437,6 +437,20 @@ final class AdjustmentPipelineTests: XCTestCase {
         let stillRed = try centrePixel(pipeline.apply(adjustments, to: red))
         XCTAssertEqual(stillRed.red, base.red, accuracy: 3)
     }
+
+    func testRedLuminanceDoesNotChangeAnAchromaticPatch() throws {
+        // Hue is undefined when all three channels are equal. The HSL kernel
+        // must not treat that default hue as red and alter neutral greys.
+        let grey = makeSourceImage(red: 0.4, green: 0.4, blue: 0.4)
+        let base = try centrePixel(grey)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.hsl.red = HSLBand(hue: 0, saturation: 0, luminance: 100)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: grey))
+
+        XCTAssertEqual(edited.red, base.red, accuracy: 1)
+        XCTAssertEqual(edited.green, base.green, accuracy: 1)
+        XCTAssertEqual(edited.blue, base.blue, accuracy: 1)
+    }
 }
 
 private func XCTAssertEqual(

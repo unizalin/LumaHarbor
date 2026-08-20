@@ -1,4 +1,4 @@
-import CoreImage
+@preconcurrency import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
 
@@ -342,15 +342,19 @@ public struct AdjustmentPipeline: Sendable {
             float delta = maxC - minC;
             float luma = (maxC + minC) * 0.5;
 
+            // Achromatic pixels have no hue, and hue becomes numerically
+            // unstable when chroma is below this same epsilon. Treating that
+            // fallback hue as 0 incorrectly let the red/orange/magenta bands
+            // change neutral greys, especially through the luminance control.
+            if (delta <= 0.0001) { return pixel; }
+
             float hueDeg = 0.0;
-            if (delta > 0.0001) {
-                if (maxC == pixel.r) {
-                    hueDeg = 60.0 * mod((pixel.g - pixel.b) / delta, 6.0);
-                } else if (maxC == pixel.g) {
-                    hueDeg = 60.0 * (((pixel.b - pixel.r) / delta) + 2.0);
-                } else {
-                    hueDeg = 60.0 * (((pixel.r - pixel.g) / delta) + 4.0);
-                }
+            if (maxC == pixel.r) {
+                hueDeg = 60.0 * mod((pixel.g - pixel.b) / delta, 6.0);
+            } else if (maxC == pixel.g) {
+                hueDeg = 60.0 * (((pixel.b - pixel.r) / delta) + 2.0);
+            } else {
+                hueDeg = 60.0 * (((pixel.r - pixel.g) / delta) + 4.0);
             }
             if (hueDeg < 0.0) { hueDeg = hueDeg + 360.0; }
 
