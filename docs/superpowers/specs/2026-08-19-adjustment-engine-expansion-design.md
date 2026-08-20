@@ -303,3 +303,11 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 **額外提醒（範圍外觀察，不影響本分支但值得知道）**：分離色調的 colorSpace 修法之所以正確，是因為目前整個 codebase 只有 `ImageRenderService.swift` 一處建立 `CIContext`，兩者用的是同一個色彩空間常數；這個耦合目前成立但沒有明文寫下——未來如果加了第二個 `CIContext` 用不同色彩空間，同樣的變暗 bug 可能會用不同面貌回來。
 
 **再次強調給下一位接手者**：這整個 session（8 個任務 + 最終 review + 修復）**沒有任何一個測試檔案在任何一台機器上真正執行過**——所有驗證要嘛是本機 `swift build`（只驗證 Sources/ 能編譯）、要嘛是本次額外發現的獨立 `swiftc` scratch 腳本渲染像素（驗證了 Critical #1／#2 與 Important 的 5 項邏輯，但不是跑測試框架本身）。明天在 Apple Silicon 上的 `swift test` 是這三個測試檔案（`SidecarRepositoryTests.swift` 的修改、`AdjustmentPipelineTests.swift` 的多處修改、`HSLKernelWeightsTests.swift` 的邊界更新）第一次真正被執行。
+
+### 2026-08-20（再稍晚）：Apple Silicon + Xcode 機器上首次真正跑 `swift test`，全綠，含真實 ARW fixture
+
+**環境**：`worktree-adjustment-engine-expansion` 分支已 fast-forward 領先 `main` 16 個 commit（落後 0），確認已推上遠端。本機為 arm64 + Xcode 26.6，符合上一則條目要求的驗證環境。
+
+**結果**：`swift build` 乾淨（僅兩則預期中的 CIKL `init(source:)` deprecation 警告，來自 Task 6/Task 7 的兩個 kernel，非錯誤）。`swift test`（不含 fixture）：**418 個測試全過，0 失敗**，其中最優先要看的兩項——`testAdvancedCurveDarkeningPointsDarkenTheImage`、`testReducingRedSaturationDesaturatesARedPatch`／`testAdjustingBlueDoesNotVisiblyMoveARedPatch`——全部通過，確認 Task 6／Task 7 的兩個 CIKL kernel 在真機上能正常編譯與運作，之前兩則條目的擔憂可以正式排除。另有 9 個 `RawFixtureTests` 因未設定 `LUMAHARBOR_RAW_FIXTURE_DIR` 而略過；本機 `Fixtures/Private/Sony-ARW/` 剛好有 82 張真實 Sony ARW，補上環境變數後這 9 個也全過，含 Gate F 效能測試（互動預覽解碼 1600px，spec §11 目標 ≤150ms，實測 cold 0.157s／warm 約 0.139s，在容許範圍內是暖機後達標、冷啟動些微超標但屬預期的首次 JIT／快取成本，非本分支範圍的迴歸）。
+
+**下一步**：自動化測試已完整跑過，接下來要做的是 Task 8 的人工視覺驗證清單（`docs/testing/2026-08-19-adjustment-engine-manual-verification.md`），七項效果目前都不能從 Inspector UI 觸發，需要用臨時 debug harness 直接對 `PhotoAdjustments` 塞值、渲染、輸出圖片人工比對。這一步尚未開始。
