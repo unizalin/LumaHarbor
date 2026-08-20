@@ -26,7 +26,19 @@ let package = Package(
 
         // Decoding, adjustment pipeline, preview scheduling and export.
         // Knows nothing about folders, bookmarks or screen state.
-        .target(name: "RawProcessingCore", dependencies: ["Localization"]),
+        .target(
+            name: "RawProcessingCore",
+            dependencies: ["Localization"],
+            plugins: ["CompileMetalKernels"]
+        ),
+
+        // Compiles Sources/RawProcessingCore/Kernels/*.metal into a
+        // default.metallib resource at build time -- `swift build`'s own
+        // build system, unlike Xcode's, does not do this automatically.
+        .plugin(
+            name: "CompileMetalKernels",
+            capability: .buildTool()
+        ),
 
         // Folder access, scanning, index, sidecars and caches.
         // Depends on RawProcessingCore only for the pure `PhotoAdjustments`

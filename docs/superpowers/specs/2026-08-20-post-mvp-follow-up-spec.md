@@ -75,6 +75,8 @@ LUMAHARBOR_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
 
 ### B1. Core Image Kernel 遷移
 
+> **狀態（2026-08-20）：已完成。** `advancedToneCurve` 與 `hslAdjust`（repo 內實際唯二使用已棄用 `CIKernel(source:)`/`CIColorKernel(source:)` 的 kernel；Split Toning 全程用標準 `CIFilter`，無需遷移）已改為 Metal-based `CIKernel`，原始碼在 `Sources/RawProcessingCore/Kernels/AdjustmentKernels.metal`，由新增的 SwiftPM build plugin `Plugins/CompileMetalKernels` 於建置時編譯進 `default.metallib`。像素等價驗證（maxDiff=0.0，涵蓋兩個 kernel 共 251 組測試像素/參數組合）與完整 `swift test`（421+9 全綠）紀錄於 `docs/superpowers/specs/2026-08-19-adjustment-engine-expansion-design.md` 進度日誌第五則。以下內容保留作為原始要求記錄。
+
 目前 HSL 與 Split Toning 仍使用已棄用的 CIKL source initializer。後續應遷移至 Metal kernel，並用像素輸出測試確認結果等價；本次只抑制 immutable kernel 造成的 Swift 6 Sendable 誤報，不改演算法。
 
 ### B2. XMP／Preset 語意定義
