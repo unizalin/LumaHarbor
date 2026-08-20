@@ -1,4 +1,3 @@
-import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
@@ -100,7 +99,14 @@ public struct AdjustmentPipeline: Sendable {
 
         // 8. Sharpening (spec §4.2 step 8) — a post-colour detail effect, so it
         // runs after the perceptual stage and its own linear round-trip, not
-        // inside it.
+        // inside it. CISharpenLuminance exposes exactly two knobs
+        // (`inputSharpness`, `inputRadius`), so only `amount` and `radius` are
+        // read here: `Sharpening.detail` and `Sharpening.masking` have no
+        // corresponding filter parameter in this implementation. They are still
+        // decoded, clamped and round-tripped so a Lightroom-authored sidecar or
+        // (next spec) an imported `.xmp` keeps them intact for a future
+        // implementation that can honour them, rather than silently dropping
+        // them on the first save.
         if !parameters.isSharpeningIdentity {
             let filter = CIFilter.sharpenLuminance()
             filter.inputImage = working
@@ -235,19 +241,36 @@ public struct AdjustmentPipeline: Sendable {
     /// (spec §4.3: colour is not touched, only tone). Core Image Kernel
     /// Language rather than a `.metal` file, so no Package.swift build-target
     /// changes are needed for one small kernel.
-    private static let advancedToneCurveKernel: CIColorKernel? = {
+    ///
+    /// Deliberately a plain `CIKernel`, not a `CIColorKernel`: a colour
+    /// kernel's function must take one `__sample` argument per input image and
+    /// is forbidden from calling `sample()`, `samplerCoord()` or
+    /// `samplerTransform()` (see Apple's `CIKernel.h`). This kernel needs all
+    /// three to do a dependent read out of the LUT texture, so declaring it as
+    /// a `CIColorKernel` made `CIColorKernel(source:)` return nil and silently
+    /// turned the whole advanced-curve stage into a no-op.
+    private static let advancedToneCurveKernel: CIKernel? = {
         let source = """
         kernel vec4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
             vec4 pixel = sample(image, samplerCoord(image));
             float lastIndex = lutWidth - 1.0;
             vec2 lutSize = samplerSize(lut);
-            float r = sample(lut, samplerTransform(lut, vec2(pixel.r * lastIndex + 0.5, lutSize.y * 0.5))).r;
-            float g = sample(lut, samplerTransform(lut, vec2(pixel.g * lastIndex + 0.5, lutSize.y * 0.5))).r;
-            float b = sample(lut, samplerTransform(lut, vec2(pixel.b * lastIndex + 0.5, lutSize.y * 0.5))).r;
+            // Only the table index is clamped -- it has to stay inside the
+            // 256-texel texture -- while any extended-range excess is carried
+            // around the lookup and added back afterwards. The pipeline works
+            // in extended-range linear space (see ImageRenderService), so a
+            // highlight at 1.5 must still read 1.5 after an identity curve
+            // instead of being crushed into the LUT's own 0...1 domain.
+            float rIn = clamp(pixel.r, 0.0, 1.0);
+            float gIn = clamp(pixel.g, 0.0, 1.0);
+            float bIn = clamp(pixel.b, 0.0, 1.0);
+            float r = sample(lut, samplerTransform(lut, vec2(rIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.r - rIn);
+            float g = sample(lut, samplerTransform(lut, vec2(gIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.g - gIn);
+            float b = sample(lut, samplerTransform(lut, vec2(bIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.b - bIn);
             return vec4(r, g, b, pixel.a);
         }
         """
-        return CIColorKernel(source: source)
+        return CIKernel(source: source)
     }()
 
     private static func applyAdvancedToneCurve(_ curve: AdvancedToneCurve, to image: CIImage) -> CIImage {
@@ -256,7 +279,18 @@ public struct AdjustmentPipeline: Sendable {
         guard let lutImage = Self.makeLUTImage(table) else { return image }
         let extent = image.extent
         let arguments: [Any] = [image, lutImage, Double(table.count)]
-        return kernel.apply(extent: extent, roiCallback: { _, rect in rect }, arguments: arguments) ?? image
+        // Input 0 is the source image, which is read 1:1, so its region of
+        // interest is the destination rect. Input 1 is the 256x1 LUT, which
+        // every destination pixel may read anywhere in -- returning the
+        // destination rect for it means Core Image only guarantees the sliver
+        // of LUT that happens to overlap the tile, and everything outside that
+        // sliver samples undefined data (in practice: pure black past the
+        // first ~256px of any real-sized image).
+        return kernel.apply(
+            extent: extent,
+            roiCallback: { index, rect in index == 0 ? rect : lutImage.extent },
+            arguments: arguments
+        ) ?? image
     }
 
     /// Packs a 1D `[Float]` table into a 1-row-high `CIImage` the kernel can
@@ -336,6 +370,7 @@ public struct AdjustmentPipeline: Sendable {
             float hueShift = 0.0;
             float satShift = 0.0;
             float lumShift = 0.0;
+            float totalWeight = 0.0;
             for (int i = 0; i < 8; i++) {
                 float rawDistance = abs(mod(hueDeg, 360.0) - mod(centers[i], 360.0));
                 float distance = min(rawDistance, 360.0 - rawDistance);
@@ -343,6 +378,20 @@ public struct AdjustmentPipeline: Sendable {
                 hueShift += weight * hues[i];
                 satShift += weight * sats[i];
                 lumShift += weight * lums[i];
+                totalWeight += weight;
+            }
+
+            // halfWidth is wide enough that no hue falls in a dead zone
+            // (HSLKernelWeights.halfWidthDegrees), which means the 30-degree-apart
+            // bands now overlap by more than 1.0 near their shared midpoints.
+            // Renormalise there so the blend never amplifies past what a single
+            // band at full strength would do; below 1.0 the weights are left
+            // alone, so a lone band still falls off toward zero at its edge
+            // instead of being stretched back up to full strength.
+            if (totalWeight > 1.0) {
+                hueShift /= totalWeight;
+                satShift /= totalWeight;
+                lumShift /= totalWeight;
             }
 
             // hue in degrees/100 keeps the shift in the same -1...1-ish order
@@ -365,7 +414,13 @@ public struct AdjustmentPipeline: Sendable {
             else if (shiftedHue < 300.0) { rgbPrime = vec3(x, 0.0, c); }
             else { rgbPrime = vec3(c, 0.0, x); }
 
-            return vec4(clamp(rgbPrime + m, 0.0, 1.0), pixel.a);
+            // Deliberately unclamped: the working space is extended-range
+            // linear (see ImageRenderService), and clamping here destroyed
+            // highlight headroom that later stages -- vignette darkening, the
+            // final output transform -- are supposed to be able to pull back.
+            // For a neutral band this reconstruction is an exact round-trip,
+            // so an input channel above 1.0 comes back out above 1.0.
+            return vec4(rgbPrime + m, pixel.a);
         }
         """
         return CIColorKernel(source: source)
@@ -388,12 +443,52 @@ public struct AdjustmentPipeline: Sendable {
     private static func applySplitToning(_ splitToning: SplitToning, to image: CIImage) -> CIImage {
         let extent = image.extent
 
+        /// HSB -> RGB done here in plain Swift, then tagged with the pipeline's
+        /// own working colour space so no colour matching happens at all.
+        ///
+        /// The previous `NSColor(brightness: 0.5)` + `CIColor(color:)` build
+        /// carried a calibrated/sRGB space, so `CIImage(color:)` colour-matched
+        /// it into the linear working space and a nominal 0.5 grey arrived as
+        /// 0.2140 — measured, not assumed. The soft-light blend below assumes
+        /// this flat layer is neutral at exactly 0.5 in the *same* space the
+        /// image is in, so every split-toning edit dimmed the whole frame
+        /// instead of only tinting it.
+        ///
+        /// `CIColor(red:green:blue:alpha:)` with no colour space does **not**
+        /// fix that: it is sRGB-tagged too and measures the same 0.2140. Only
+        /// the explicit `colorSpace:` overload lands on 0.5. That is the right
+        /// target: split toning runs inside the gamma-encoded stage, after
+        /// `CILinearToSRGBToneCurve`, where a mid-grey image pixel also reads
+        /// 0.5 numerically (verified by render). The flat colours in
+        /// `applyVignette` sidestep the whole question by only ever using 0 and
+        /// 1, which are fixed points of the transfer function.
+        ///
+        /// Standard HSB algorithm: hue in degrees 0...360, saturation and value
+        /// in 0...1.
         func flatColor(hue: Double, saturation: Double) -> CIImage {
+            let value = 0.5
+            let s = min(max(saturation / 100, 0), 1)
+            let wrapped = hue.truncatingRemainder(dividingBy: 360)
+            let sector = (wrapped < 0 ? wrapped + 360 : wrapped) / 60
+            let c = value * s
+            let x = c * (1 - abs(sector.truncatingRemainder(dividingBy: 2) - 1))
+            let m = value - c
+            let primed: (r: Double, g: Double, b: Double)
+            switch sector {
+            case ..<1.0: primed = (c, x, 0)
+            case ..<2.0: primed = (x, c, 0)
+            case ..<3.0: primed = (0, c, x)
+            case ..<4.0: primed = (0, x, c)
+            case ..<5.0: primed = (x, 0, c)
+            default: primed = (c, 0, x)
+            }
+            let red = CGFloat(primed.r + m)
+            let green = CGFloat(primed.g + m)
+            let blue = CGFloat(primed.b + m)
             let color = CIColor(
-                color: NSColor(
-                    hue: hue / 360, saturation: saturation / 100, brightness: 0.5, alpha: 1
-                )
-            ) ?? CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+                red: red, green: green, blue: blue, alpha: 1,
+                colorSpace: ImageRenderService.workingColorSpace
+            ) ?? CIColor(red: red, green: green, blue: blue, alpha: 1)
             return CIImage(color: color).cropped(to: extent)
         }
 

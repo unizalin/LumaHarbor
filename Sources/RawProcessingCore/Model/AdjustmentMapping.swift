@@ -54,6 +54,18 @@ public struct RenderParameters: Equatable, Sendable {
 /// Spec §8.2 requires this to be centralised and pinned by tests; the constants
 /// below are therefore part of the observable behaviour, not implementation
 /// detail. Changing one changes everyone's renders.
+/// Known limitation, flagged for a future task: the spatial parameters here —
+/// `Sharpening.radius`, the pixel scale `CINoiseReduction` works at, and the
+/// blur radius grain derives from `Grain.size` — are all in absolute pixels and
+/// do not scale with the image's decoded resolution. `RawDecoding` decodes at
+/// different sizes for thumbnails, the interactive preview and a high-quality
+/// export, so the same stored adjustment renders a visibly different amount of
+/// sharpening, noise reduction and grain at each of them. Vignette is the
+/// exception: it derives its radii from the image's own `extent`, so it is
+/// already resolution-independent. Lightroom has the same class of mismatch, so
+/// this is accepted for now rather than papered over with a guessed scale
+/// factor; a real fix means threading the decode's native pixel size through
+/// `RenderParameters` and scaling those three against it.
 public enum AdjustmentMapping {
     /// ±100 on the temperature slider spans ±4500 K around the as-shot neutral,
     /// which covers tungsten-to-shade without letting the slider reach values

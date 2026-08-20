@@ -14,7 +14,11 @@ render, inspect, then revert.
 - [ ] **HSL**: on a real ARW, push each of the 8 hue bands' hue/saturation/luminance
   to their extremes one at a time. Confirm the correct region of the photo visibly
   changes and neighbouring bands' boundaries don't show hard colour-banding
-  seams.
+  seams. Note: a single band pushed to an extreme may read weaker than expected
+  due to overlap normalization (`halfWidthDegrees` is 60 so no hue is a dead
+  zone, and the kernel divides by the summed band weight once it exceeds 1.0,
+  which dilutes a lone band even at its own centre) — confirm by eye whether
+  this needs recalibrating.
 - [ ] **Advanced tone curve**: apply a curve with several control points and a
   non-trivial shape (at least one point that pulls a midtone away from the
   4-slider curve's effect). Confirm the image's brightness distribution
