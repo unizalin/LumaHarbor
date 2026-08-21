@@ -9,11 +9,13 @@
 | 驗收日期 | 2026-08-19（彙整 2026-08-16 至 2026-08-19 累積的人工驗收過程） |
 | 驗收人員 | 使用者（真機操作／畫面判斷）＋ Claude（程式修法、自動化測試、環境層級量測） |
 | 對應 spec | `docs/superpowers/specs/2026-08-15-mac-first-mvp-acceptance-plan.md` |
-| 基準 commit | `b9741b84ab21baca31819480dbfa5f802b91ed72` |
+| 基準 commit | `0d89cc3dc38677bf53833a1b28bda45c58ba5cc5`（2026-08-21，本報告最後一次更新時的 `main` HEAD；原始驗收於 2026-08-19 完成，基準 commit 已隨後續修正推進，見下方更新記錄與 §9） |
 | 整體結論 | ☑ MVP 完成（見 §9 已知限制，均為 P2，不擋簽收） |
 
 過程中發現並修好的 P1/P2 bug（詳細根因與修法見 `docs/testing/reports/2026-08-16-mvp-acceptance-progress.md`）：
-interactive 預覽節流／decode 失敗偽成功殘影／Inspector 面板延遲一拍／唯讀磁碟編輯後永久卡死切換／Original 比較鍵雙機制搶狀態／Undo-Redo 快捷鍵路由（未解，降為 P2）／繁體中文化整體查表機制失效（根因為 `Bundle.preferredLocalizations` 在本機不反映系統語言）／掃描失敗 alert 的 `nextStep` 誤用唯讀情境的固定文字。全部有各自的 regression test 與獨立 commit。
+interactive 預覽節流／decode 失敗偽成功殘影／Inspector 面板延遲一拍／唯讀磁碟編輯後永久卡死切換／Original 比較鍵雙機制搶狀態／Undo-Redo 快捷鍵路由（驗收當下未解、降為 P2；**已於 2026-08-21 修復並完成真機驗證，見 §9**）／繁體中文化整體查表機制失效（根因為 `Bundle.preferredLocalizations` 在本機不反映系統語言）／掃描失敗 alert 的 `nextStep` 誤用唯讀情境的固定文字。全部有各自的 regression test 與獨立 commit。
+
+> **更新記錄（2026-08-21）**：本報告在 MVP 簽收（2026-08-19）後，隨 Undo/Redo 鍵盤快捷鍵 P2 的修復與真機驗證同步更新了 §0、§5、§8.1、§9、§10；其餘章節（§1–§4、§6、§7、§8.2）維持原始驗收當下的記錄，未重新執行。
 
 ## 1. 硬體與作業系統
 
@@ -55,22 +57,24 @@ interactive 預覽節流／decode 失敗偽成功殘影／Inspector 面板延遲
 
 ## 5. 自動化測試執行（Gate B：完整 XCTest baseline）
 
-執行（含真實 RAW fixture，非 preflight-skip 版本）：
+> **2026-08-21 更新**：以下數字取自兩次分開的執行，對應同一個 commit（`0d89cc3`），刻意不合併成單一欄位——原始版本（2026-08-19）把「設定 fixture 變數後跑完整套件」的單次結果（341 executed／0 skipped）當成唯一數字；隨 Gate B1／B3／Undo-Redo P2 等後續修正，測試案例總數已增加，此處改成下方兩段式呈現，讀者可以清楚分辨「一般開發環境（未設定 fixture）能看到什麼」與「設定 fixture 後額外多驗證了什麼」。
+
+### 5.1 完整套件、未設定 `LUMAHARBOR_RAW_FIXTURE_DIR`（一般開發環境預設跑法）
 
 ```sh
-LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test -Xswiftc -strict-concurrency=complete
+swift test -Xswiftc -strict-concurrency=complete
 ```
 
 | 項目 | 數量 |
 |---|---|
-| Executed | 341 |
-| Passed | 341 |
+| Executed | 433 |
+| Passed | 433 |
 | Failed | 0 |
-| Skipped — bookmark 相關 | 0 |
-| Skipped — read-only 相關 | 0 |
-| Skipped — RAW fixture 相關 | 0（設了 `LUMAHARBOR_RAW_FIXTURE_DIR` 後全部真的執行，不再是「8 skipped」） |
-| Skipped — 其他 | 0 |
+| Skipped — RAW fixture 相關（未設定 `LUMAHARBOR_RAW_FIXTURE_DIR`，即 `RawFixtureTests` 全數） | 9 |
+| Skipped — bookmark／read-only／其他 | 0 |
+| 套件總測試數（Executed + Skipped） | 442 |
 | Crash / hang / data race / sanitizer 訊息 | ☑ 無 |
+| 執行日期 | 2026-08-21 |
 
 失敗案例：
 
@@ -78,9 +82,27 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test -Xswiftc -strict-co
 無失敗。
 ```
 
-Log：本次執行輸出約 340 行，未落地為 repo-ignored 檔案；上方數字取自 `swift test` 完整輸出的 XCTest summary 行（`Executed 341 tests, with 0 failures (0 unexpected)`）。
+### 5.2 設定 `LUMAHARBOR_RAW_FIXTURE_DIR` 後，單獨執行 `RawFixtureTests`（即 5.1 中被跳過的那 9 個）
 
-補充：此前每次驗收記錄「8 skipped」，事後查明只是沒設定 `LUMAHARBOR_RAW_FIXTURE_DIR` 環境變數，不是這台機器缺硬體支援——本機是完整 Xcode + Apple Silicon，`RawFixtureTests` 一直都能真的執行。
+```sh
+LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixtureTests
+```
+
+| 項目 | 數量 |
+|---|---|
+| Executed | 9 |
+| Passed | 9 |
+| Failed | 0 |
+| Crash / hang / data race / sanitizer 訊息 | ☑ 無 |
+| 執行日期 | 2026-08-21 |
+
+失敗案例：
+
+```
+無失敗。
+```
+
+個別測試名稱與各自結果見 §6（本次重跑與 §6 原表一致，測試案例集合無新增或移除）。
 
 ## 6. Sony `.ARW`／Metal／匯出（Gate D：`RawFixtureTests`）
 
@@ -139,7 +161,7 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 | 項目 | 結果 |
 |---|---|
 | 十個調整項目即時預覽與各自重設 | ☑ 通過 |
-| 原圖比較、Undo、Redo、整張重設正確 | ☑ 通過（Undo/Redo 走選單滑鼠點擊；鍵盤快捷鍵 ⌘Z/⌘⇧Z 本身無效，見 §9 P2） |
+| 原圖比較、Undo、Redo、整張重設正確 | ☑ 通過（選單滑鼠點擊與鍵盤快捷鍵 ⌘Z/⌘⇧Z 皆已驗證有效，2026-08-21 真機補驗，見 §9 已完成的 P2 項目） |
 | 滑桿後立即切換照片：edit 先保存；保存失敗停留原照片 | ☑ 通過（另有 `testDirtyEditIsWrittenBeforeTheNextPhotoOpens`／`testASaveFailureKeepsTheSelectionAndTheDirtyState` 自動化覆蓋） |
 | 單張 JPEG 匯出、同名流水號、取消清除暫存檔、Finder 顯示正確 | ☑ 通過 |
 | offline／read-only／unsupported／corrupt／disk-full 錯誤都有下一步 | ☑ 通過（unsupported 見 §9 P2：這個平台上無法用本地檔案觸發該分支，不是缺測試） |
@@ -161,7 +183,7 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 |---|---|---|---|
 | P0 | （無） | — | — |
 | P1 | （無，過程中發現的 P1 皆已修復，見 §0 摘要與 `2026-08-16-mvp-acceptance-progress.md`） | — | 已清空 |
-| P2 | Undo/Redo 鍵盤快捷鍵（⌘Z／⌘⇧Z）無效，滑鼠點選單正常。兩次修法嘗試均未解決根因，決定擱置 | Gate F | 接受，不擋簽收 |
+| P2（已完成 2026-08-21） | ~~Undo/Redo 鍵盤快捷鍵（⌘Z／⌘⇧Z）無效，滑鼠點選單正常。~~ 已修復：`UndoRedoKeyEquivalentFix` 原本只檢查 `modifierFlags.contains(.command)`，導致 ⌥⌘Z／⌃⌘Z 會誤判成一般 Undo；改用 `modifierFlags.intersection(.deviceIndependentFlagsMask)` 精確比對，並拆出可單元測試的 `match(charactersIgnoringModifiers:modifierFlags:)`（新增 7 個測試案例）。真機驗證：用 `Scripts/build-app-bundle.sh debug` 打包成正式 `.app`（裸執行檔的 `NSApplicationActivationPolicy` 是 `.prohibited`，無法成為前景 app，必須打包才能測）後，由使用者本人在鍵盤上實際按下 —— `⌘Z` 使曝光 +3.94→0.00、`⌘⇧Z` 使 0.00→+3.94，皆確認有效；過程中排除了本機作用中的中文（注音）輸入法對「合成鍵盤事件」的干擾，改以真人按鍵驗證。詳見 `docs/superpowers/specs/2026-08-20-post-mvp-follow-up-spec.md` 交接狀態章節，commit `f95d064` | Gate F | ☑ 已完成，不再是待辦 |
 | P2 | Unsupported RAW 格式錯誤路徑（`RawDecodingError.unsupportedFormat`）在本機這個 macOS/CIRAWFilter 版本上，用任何本地可存取的檔案都無法觸發（`CIRAWFilter` 對任何本地檔案要嘛當成有效圖片解碼、要嘛落入 `corruptedFile`，從未回傳 `nil`）——錯誤訊息與下一步文案本身未經真實觸發驗證 | Gate D／F | 接受，架構上與其他已驗證錯誤路徑一致 |
 | P2 | 唯讀磁碟情境下，`saveState == .failed` 的說明只靠原生 macOS tooltip（`.help(...)`），需要滑鼠靜止才會出現，使用者反映不夠明顯 | Gate E | 接受，屬次要 UX，未來可考慮改成更明顯的一次性提示 |
 | P2 | Gate F 的 4 項 Instruments 指標中 3 項（cached thumbnail 延遲、100 次切換記憶體、掃描 high-water）未執行，原因是本環境無 GUI／Instruments 存取權限 | Gate F | 接受，需要下次有真機互動能力的 session 補測 |
@@ -177,13 +199,13 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 | 1 | 可選擇外接 SSD 目錄並在 App 重啟後恢復授權 | §7 第 1、4、7、8 項（exFAT 隨身碟拔插/重接/重新授權皆通過） | ☑ 通過 |
 | 2 | 可增量掃描並顯示 Sony `.ARW` 縮圖 | §6、§7 第 2 項；81 張真實 ARW 全過 | ☑ 通過 |
 | 3 | 第 6.2 節所有調整都能即時預覽 | §8.1 第 1 項；§8.2 interactive 延遲 137–148ms | ☑ 通過 |
-| 4 | 原圖比較、Undo、Redo 與重設皆有測試 | §8.1 第 2 項；Original 比較鍵手勢層級 bug 已修並人工驗證；Undo/Redo 選單可用（快捷鍵見 §9 P2） | ☑ 通過 |
+| 4 | 原圖比較、Undo、Redo 與重設皆有測試 | §8.1 第 2 項；Original 比較鍵手勢層級 bug 已修並人工驗證；Undo/Redo 選單與鍵盤快捷鍵（⌘Z／⌘⇧Z）皆已驗證可用，見 §9 已完成的 P2 項目 | ☑ 通過 |
 | 5 | 調整自動保存至 `.lumaharbor`，重啟後結果一致 | §7 第 3、4 項（APFS／exFAT 皆確認關閉重開後調整值保留） | ☑ 通過 |
 | 6 | 原始 `.ARW` 的內容與修改時間不被 App 改變 | §3、§6：`testExportingNeverModifiesTheOriginal`；整個驗收過程結束後 fixture mtime 仍為 `Mar 28 11:59:12 2019`，與最初一致 | ☑ 通過 |
 | 7 | 可從完整解析度 RAW 匯出帶 sRGB profile 的 JPEG | §6 `testFullResolutionExportMatchesTheSourceDimensions`；§8.1 第 4 項人工匯出／流水號／取消測試 | ☑ 通過 |
 | 8 | SSD 拔除、不支援 RAW、損壞 RAW 或唯讀磁碟不會導致 App 崩潰 | §7 第 7、9、10 項；全程無 crash。「不支援 RAW」見 §9 P2（無法本地觸發，非阻塞） | ☑ 通過 |
 | 9 | 本機 SQLite 與快取刪除後可以重建 | §7 第 5 項 | ☑ 通過 |
-| 10 | 核心單元與整合測試通過，且沒有已知資料損毀問題 | §5：341/341，0 failures，0 skipped；全程無資料損毀，發現的 bug 均為顯示/狀態層級且已修復 | ☑ 通過 |
+| 10 | 核心單元與整合測試通過，且沒有已知資料損毀問題 | §5.1：433/433，0 failures，9 skipped（未設 fixture）；§5.2：設定 fixture 後該 9 個 `RawFixtureTests` 額外執行、9/9 pass；全程無資料損毀，發現的 bug 均為顯示/狀態層級且已修復 | ☑ 通過 |
 
 **十項全部通過，§9 沒有未清空的 P0/P1，MVP 標記為完成。**
 
