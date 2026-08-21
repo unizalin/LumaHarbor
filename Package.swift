@@ -62,7 +62,11 @@ let package = Package(
         .executableTarget(name: "LumaHarbor", dependencies: ["LumaHarborApp"]),
 
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
-        .testTarget(name: "PresetCoreTests", dependencies: ["PresetCore", "RawProcessingCore"]),
+        .testTarget(
+            name: "PresetCoreTests",
+            dependencies: ["PresetCore", "RawProcessingCore"],
+            resources: [.copy("Fixtures/XMP")]
+        ),
         .testTarget(
             name: "LumaHarborAppTests",
             dependencies: ["LumaHarborApp", "PhotoLibraryCore", "RawProcessingCore", "PresetCore", "Localization"]

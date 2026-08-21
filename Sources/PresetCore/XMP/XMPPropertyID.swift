@@ -18,6 +18,14 @@ extension XMPPropertyID: CustomStringConvertible {
     public var description: String { "{\(namespaceURI)}\(localName)" }
 }
 
+extension XMPPropertyID {
+    /// Convenience for building a `crs:` (Camera Raw settings) property ID
+    /// without spelling the URI at every call site.
+    public static func cameraRaw(_ localName: String) -> XMPPropertyID {
+        XMPPropertyID(namespaceURI: XMPNamespace.cameraRaw, localName: localName)
+    }
+}
+
 /// Well-known namespace URIs this codebase maps against.
 public enum XMPNamespace {
     public static let cameraRaw = "http://ns.adobe.com/camera-raw-settings/1.0/"
@@ -26,10 +34,4 @@ public enum XMPNamespace {
     public static let rdf = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
     public static let tiff = "http://ns.adobe.com/tiff/1.0/"
     public static let exif = "http://ns.adobe.com/exif/1.0/"
-
-    /// Convenience for building a `crs:` (Camera Raw settings) property ID
-    /// without spelling the URI at every call site.
-    public static func cameraRaw(_ localName: String) -> XMPPropertyID {
-        XMPPropertyID(namespaceURI: cameraRaw, localName: localName)
-    }
 }

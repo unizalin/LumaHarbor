@@ -1,0 +1,36 @@
+{
+  "notes": "Every fixture below is synthetic: hand-authored to match Adobe's documented Camera Raw/XMP RDF shape, not exported from a real photo or a real Adobe account. None contain private paths, serials or account data. sha256 covers the exact bytes committed.",
+  "fixtures": [
+    {
+      "file": "subset-basic.xmp",
+      "sha256": "d9e71177ac6196cd45d66f0cf92c05f9afe70354a03d60bb56c574738526e9d1",
+      "documentKind": "developPreset",
+      "generatedBy": "hand-authored, synthetic",
+      "processVersion": "15.4",
+      "expectedNativeFieldCount": 3,
+      "expectedApproximateFieldCount": 1,
+      "expectedPreservedPropertyCount": 3,
+      "committable": true
+    },
+    {
+      "file": "unknown-nested-rdf.xmp",
+      "sha256": "49957c3d645c66b79d8cc0ee3cf1c82a3927990aa006da48b3ddc3ea3c0faed1",
+      "documentKind": "developPreset",
+      "generatedBy": "hand-authored, synthetic",
+      "processVersion": "15.4",
+      "expectedNativeFieldCount": 1,
+      "expectedApproximateFieldCount": 0,
+      "expectedPreservedPropertyCount": 2,
+      "note": "Exercises an unrecognised namespace (urn:test:future) with nested rdf:Description, rdf:Seq and rdf:Bag to prove unknown-structure round-trip.",
+      "committable": true
+    },
+    {
+      "file": "corrupt.xmp",
+      "sha256": "594bdc8a6cd7edf22925cda5353797a31bc5120b6bafbce5148786120d181f0c",
+      "documentKind": "unknown",
+      "generatedBy": "hand-authored, synthetic",
+      "note": "Deliberately malformed (unclosed element) to exercise the malformed-XML error path.",
+      "committable": true
+    }
+  ]
+}
