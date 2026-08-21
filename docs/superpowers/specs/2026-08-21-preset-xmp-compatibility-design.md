@@ -2,9 +2,13 @@
 
 日期：2026-08-21
 
-狀態：已確認，待實作
+狀態：Phase 1（第 5–14 節涵蓋的原生 Preset 與開發預設 XMP）已實作，證據見
+`docs/testing/reports/2026-08-21-preset-xmp-phase1.md`；Gate B 的真實 Adobe
+smoke test 與 Gate D 的 APFS／exFAT 人工項目仍待補（同報告 §4、§5）。第 10 節
+（照片 XMP sidecar 搬家）為 Phase 2，尚未開始。
 
-基準版本：`c70ecc3`
+基準版本：`c70ecc3`（Phase 1 實作於分支 `claude/preset-xmp-compatibility`，commits
+`88c729c`..`6df3e1f`）
 
 ## 1. 目的
 
