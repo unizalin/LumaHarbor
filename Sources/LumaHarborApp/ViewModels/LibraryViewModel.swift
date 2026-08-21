@@ -55,6 +55,7 @@ public final class LibraryViewModel: ObservableObject {
     @Published var isShowingExportSheet = false
 
     let editor = EditorViewModel()
+    let presetLibrary = PresetLibraryViewModel()
 
     /// Views only ever hold `@EnvironmentObject var model: LibraryViewModel`
     /// and read `model.editor.*` through it — `editor` is never injected as its
@@ -64,6 +65,8 @@ public final class LibraryViewModel: ObservableObject {
     /// inspector and preview pane show whatever editor state existed at the
     /// last unrelated `LibraryViewModel` publish, one selection behind.
     private var editorForwarding: AnyCancellable?
+    /// Same reasoning as `editorForwarding`, for `presetLibrary`.
+    private var presetLibraryForwarding: AnyCancellable?
 
     private var services: AppServices?
     private var scanTask: Task<Void, Never>?
@@ -90,6 +93,9 @@ public final class LibraryViewModel: ObservableObject {
         editorForwarding = editor.objectWillChange.sink { [weak self] in
             self?.objectWillChange.send()
         }
+        presetLibraryForwarding = presetLibrary.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+        }
     }
 
     private func install(services: AppServices) {
@@ -98,6 +104,7 @@ public final class LibraryViewModel: ObservableObject {
         editor.onSaved = { [weak self] photoID, hasEdits in
             self?.updateEditBadge(photoID: photoID, hasEdits: hasEdits)
         }
+        presetLibrary.attach(myRepository: services.myPresetsRepository)
     }
 
     /// Test seam: wires already-built services and reads current state from
@@ -116,6 +123,9 @@ public final class LibraryViewModel: ObservableObject {
     /// selection transition, so a test can set up state before exercising one.
     func selectForTesting(libraryID: LibraryID?) async {
         selectedLibraryID = libraryID
+        presetLibrary.updateLibraryRepository(
+            selectedLibrary.map { FilePresetRepository(scope: .libraryPresets(libraryRootURL: $0.rootURL)) }
+        )
         selectedPhotoID = nil
         await reloadPhotos()
     }
@@ -351,6 +361,9 @@ public final class LibraryViewModel: ObservableObject {
         editor.close()
         scanTask?.cancel()
         scanProgress = nil
+        presetLibrary.updateLibraryRepository(
+            selectedLibrary.map { FilePresetRepository(scope: .libraryPresets(libraryRootURL: $0.rootURL)) }
+        )
         Task {
             await reloadPhotos()
             if let selectedLibraryID,

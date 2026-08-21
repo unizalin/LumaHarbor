@@ -18,6 +18,8 @@ struct InspectorView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        PresetBrowserView()
+                        Divider()
                         ForEach(AdjustmentGroup.allCases, id: \.self) { group in
                             AdjustmentSection(group: group)
                         }
