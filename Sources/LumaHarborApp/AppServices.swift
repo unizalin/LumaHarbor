@@ -10,6 +10,9 @@ import RawProcessingCore
 struct AppServices {
     let locations: ApplicationSupportLocations
     let libraryService: PhotoLibraryService
+    /// "My Presets" (spec §8.1): available regardless of which library is
+    /// open, rooted at `locations.presetsDirectoryURL`.
+    let myPresetsRepository: any PresetRepository
     let thumbnailProvider: ThumbnailProvider
     let previewScheduler: PreviewScheduler
     let exporter: JPEGExporter
@@ -53,6 +56,7 @@ struct AppServices {
         return AppServices(
             locations: locations,
             libraryService: libraryService,
+            myPresetsRepository: FilePresetRepository(scope: .myPresets(rootURL: locations.presetsDirectoryURL)),
             // Grid thumbnails are the neutral source render (addendum §3.2), so
             // the provider has no adjustment pipeline of its own.
             thumbnailProvider: ThumbnailProvider(
