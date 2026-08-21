@@ -58,6 +58,8 @@ interactive 預覽節流／decode 失敗偽成功殘影／Inspector 面板延遲
 ## 5. 自動化測試執行（Gate B：完整 XCTest baseline）
 
 > **2026-08-21 更新**：以下數字取自兩次分開的執行，對應同一個 commit（`0d89cc3`），刻意不合併成單一欄位——原始版本（2026-08-19）把「設定 fixture 變數後跑完整套件」的單次結果（341 executed／0 skipped）當成唯一數字；隨 Gate B1／B3／Undo-Redo P2 等後續修正，測試案例總數已增加，此處改成下方兩段式呈現，讀者可以清楚分辨「一般開發環境（未設定 fixture）能看到什麼」與「設定 fixture 後額外多驗證了什麼」。
+>
+> **口徑修正（2026-08-21，Codex 複查發現）**：XCTest summary 行 `Executed 433 tests, with 9 tests skipped and 0 failures` 的 `Executed` 是**總測試數**，9 個 skipped 已經包含在這 433 裡面，不是額外多出來的；本表先前誤把它們相加寫成「套件總測試數 442」，已訂正為下面正確的口徑：433 個測試案例，其中 424 個實際執行且通過、9 個被跳過、0 個失敗。
 
 ### 5.1 完整套件、未設定 `LUMAHARBOR_RAW_FIXTURE_DIR`（一般開發環境預設跑法）
 
@@ -65,14 +67,14 @@ interactive 預覽節流／decode 失敗偽成功殘影／Inspector 面板延遲
 swift test -Xswiftc -strict-concurrency=complete
 ```
 
+原始 summary：`Executed 433 tests, with 9 tests skipped and 0 failures (0 unexpected)`
+
 | 項目 | 數量 |
 |---|---|
-| Executed | 433 |
-| Passed | 433 |
-| Failed | 0 |
+| Executed（總測試數，含下方 skipped） | 433 |
+| Passed（433 − 9 skipped − 0 failed） | 424 |
 | Skipped — RAW fixture 相關（未設定 `LUMAHARBOR_RAW_FIXTURE_DIR`，即 `RawFixtureTests` 全數） | 9 |
-| Skipped — bookmark／read-only／其他 | 0 |
-| 套件總測試數（Executed + Skipped） | 442 |
+| Failed | 0 |
 | Crash / hang / data race / sanitizer 訊息 | ☑ 無 |
 | 執行日期 | 2026-08-21 |
 
@@ -103,6 +105,8 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 ```
 
 個別測試名稱與各自結果見 §6（本次重跑與 §6 原表一致，測試案例集合無新增或移除）。
+
+**結論**：5.1 的 433 個測試案例中，424 個實際執行並通過、9 個因未設定 fixture 而跳過；5.2 在設定 fixture 後單獨把這 9 個跑完，9 個全過。兩次執行合併起來，提供的是全部 **433** 個獨立測試案例的通過證據，不是 442 個測試。
 
 ## 6. Sony `.ARW`／Metal／匯出（Gate D：`RawFixtureTests`）
 
@@ -205,7 +209,7 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 | 7 | 可從完整解析度 RAW 匯出帶 sRGB profile 的 JPEG | §6 `testFullResolutionExportMatchesTheSourceDimensions`；§8.1 第 4 項人工匯出／流水號／取消測試 | ☑ 通過 |
 | 8 | SSD 拔除、不支援 RAW、損壞 RAW 或唯讀磁碟不會導致 App 崩潰 | §7 第 7、9、10 項；全程無 crash。「不支援 RAW」見 §9 P2（無法本地觸發，非阻塞） | ☑ 通過 |
 | 9 | 本機 SQLite 與快取刪除後可以重建 | §7 第 5 項 | ☑ 通過 |
-| 10 | 核心單元與整合測試通過，且沒有已知資料損毀問題 | §5.1：433/433，0 failures，9 skipped（未設 fixture）；§5.2：設定 fixture 後該 9 個 `RawFixtureTests` 額外執行、9/9 pass；全程無資料損毀，發現的 bug 均為顯示/狀態層級且已修復 | ☑ 通過 |
+| 10 | 核心單元與整合測試通過，且沒有已知資料損毀問題 | §5.1：433 個測試案例，424 個執行且通過、9 個跳過（未設 fixture）、0 failed；§5.2：設定 fixture 後把這 9 個 `RawFixtureTests` 單獨跑完，9/9 pass；合併起來即全部 433 個案例皆有通過證據，全程無資料損毀，發現的 bug 均為顯示/狀態層級且已修復 | ☑ 通過 |
 
 **十項全部通過，§9 沒有未清空的 P0/P1，MVP 標記為完成。**
 
