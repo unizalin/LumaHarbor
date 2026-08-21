@@ -33,24 +33,49 @@ public struct LumaHarborMainApp: App {
 /// implementing `undo:`/`redo:`. A local key-down monitor -- which AppKit
 /// consults ahead of ordinary key-equivalent dispatch -- is the standard
 /// workaround.
-private enum UndoRedoKeyEquivalentFix {
+@MainActor
+enum UndoRedoKeyEquivalentFix {
+    /// Which action a key-down event maps to, if any. Kept separate from
+    /// `install`'s `NSEvent` handling so the matching rules themselves are
+    /// unit-testable without a real window or key event delivery -- neither
+    /// of which XCTest can drive in this environment.
+    enum Action: Equatable {
+        case undo
+        case redo
+    }
+
     private static var monitor: Any?
 
-    @MainActor
+    /// `modifierFlags` is masked to `.deviceIndependentFlagsMask` before
+    /// comparison so a stray device-dependent bit in the raw event (the low
+    /// 16 bits, unrelated to any named modifier) can't spuriously break the
+    /// match, while still requiring an *exact* semantic modifier set -- ⌥⌘Z
+    /// or ⌃⌘Z must not trigger undo, only plain ⌘Z (redo additionally
+    /// requires ⇧).
+    static func match(charactersIgnoringModifiers: String?, modifierFlags: NSEvent.ModifierFlags) -> Action? {
+        guard charactersIgnoringModifiers?.lowercased() == "z" else { return nil }
+        switch modifierFlags.intersection(.deviceIndependentFlagsMask) {
+        case [.command]: return .undo
+        case [.command, .shift]: return .redo
+        default: return nil
+        }
+    }
+
     static func install(model: LibraryViewModel) {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { @MainActor event in
-            guard event.charactersIgnoringModifiers?.lowercased() == "z",
-                  event.modifierFlags.contains(.command) else { return event }
-
-            if event.modifierFlags.contains(.shift) {
-                guard model.editor.canRedo else { return event }
-                model.editor.redo()
-            } else {
+            switch match(charactersIgnoringModifiers: event.charactersIgnoringModifiers, modifierFlags: event.modifierFlags) {
+            case .undo:
                 guard model.editor.canUndo else { return event }
                 model.editor.undo()
+                return nil
+            case .redo:
+                guard model.editor.canRedo else { return event }
+                model.editor.redo()
+                return nil
+            case nil:
+                return event
             }
-            return nil
         }
     }
 }

@@ -96,13 +96,21 @@ LUMAHARBOR_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
 
 ## MVP 已接受的 P2 待辦（不阻擋本次修正）
 
-- 選單點擊 Undo／Redo 可用，但 `Cmd+Z`、`Cmd+Shift+Z` 快捷鍵仍需完整修正。
+- ~~選單點擊 Undo／Redo 可用，`Cmd+Z`、`Cmd+Shift+Z` 快捷鍵本身仍未在真機上完成人工鍵盤驗證。~~ **已完成（2026-08-21）。**
 - 現行 `CIRAWFilter` 環境尚無法穩定觸發 unsupported RAW 的錯誤路徑。
 - 唯讀位置儲存失敗目前只顯示 tooltip，需改善可見性與復原指引。
 - 三項 Instruments 效能指標尚未取得正式量測結果。
 - APFS 與 exFAT 的完整驗證覆蓋仍不對稱。
 - 曾出現但尚未重現的 `NSCocoaErrorDomain 4097` 需持續觀察。
-- `UndoRedoKeyEquivalentFix.monitor` 仍有 Swift 6 concurrency warning，應獨立修正並加上鍵盤回歸測試。
+- ~~`UndoRedoKeyEquivalentFix.monitor` 仍有 Swift 6 concurrency warning，應獨立修正並加上鍵盤回歸測試。~~ **已完成（2026-08-21）。**
+
+> **狀態（2026-08-21）**：`UndoRedoKeyEquivalentFix.monitor` 的 Swift 6 concurrency warning 已修（整個 enum 標記 `@MainActor`，`swift build -Xswiftc -strict-concurrency=complete` 乾淨無警告）。比對／判斷邏輯已拆成獨立可測的 `UndoRedoKeyEquivalentFix.match(charactersIgnoringModifiers:modifierFlags:)`，新增 `Tests/LumaHarborAppTests/UndoRedoKeyEquivalentFixTests.swift`（7 個案例）。過程中順便修掉一個真的邏輯瑕疵：原本只檢查 `modifierFlags.contains(.command)`，代表 ⌥⌘Z、⌃⌘Z 會被誤判成一般 Undo；改用 `modifierFlags.intersection(.deviceIndependentFlagsMask)` 做**精確**比對（`[.command]` → undo，`[.command, .shift]` → redo，其餘一律不匹配）。`swift test`（含 `RawFixtureTests`）442 個測試全過。
+>
+> **真機鍵盤驗證（2026-08-21，同日稍後完成）**：用 `Scripts/build-app-bundle.sh debug` 打包成正式 `.app`（未打包的裸執行檔 `NSApplicationActivationPolicy` 是 `.prohibited`，無法成為前景 app，這是先決條件，之前沒打包過所以卡住）。載入本機 fixture `Fixtures/Private/Sony-ARW`（線上磁碟，非離線的 `APFS-Test`），選取 `_DSC1896.ARW`，把「曝光」滑桿拖到 +3.94（明顯過曝、肉眼可辨）。過程中先嘗試用 `CGEvent` 合成鍵盤事件與 AppleScript `System Events keystroke` 兩種方式自動模擬 Cmd+Z／Cmd+Shift+Z，但發現這台機器目前作用中的中文（注音）輸入法會攔截／轉換合成的 key code（同樣手法對 TextEdit 送 A/B/C 的 key code，出來的是注音符號「ㄏ」而非英文字母），代表合成按鍵已被輸入法污染，測出來的結果沒有參考價值，因此放棄自動化模擬，改為請使用者本人在鍵盤上實際按下：
+> - `Cmd+Z`：曝光由 +3.94 → 0.00，畫面由過曝變回原圖，**確認有效**。
+> - `Cmd+Shift+Z`：曝光由 0.00 → +3.94，**確認有效**。
+>
+> 每次截圖都用 `screencapture -l<CGWindowID>` 鎖定 LumaHarbor 單一視窗（`CGWindowID` 由一支小型 Swift 腳本經 `CGWindowListCopyWindowInfo` 取得，不是靠螢幕座標框選），過程未拍到使用者其他視窗內容。測試結束已 `kill` 掉打包出來的 app process，確認 `Fixtures/` 底下沒有留下追蹤中的變更（`.lumaharbor`、`.DS_Store` 皆在 `.gitignore` 範圍內），也沒有把任何調整存檔到 fixture 的 sidecar。至此 `Cmd+Z`／`Cmd+Shift+Z` 在真機上確認會正確觸發，不再是「未驗證」項目。
 
 ## 下一階段產品功能
 
