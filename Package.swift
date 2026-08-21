@@ -14,7 +14,8 @@ let package = Package(
     products: [
         .executable(name: "LumaHarbor", targets: ["LumaHarbor"]),
         .library(name: "PhotoLibraryCore", targets: ["PhotoLibraryCore"]),
-        .library(name: "RawProcessingCore", targets: ["RawProcessingCore"])
+        .library(name: "RawProcessingCore", targets: ["RawProcessingCore"]),
+        .library(name: "PresetCore", targets: ["PresetCore"])
     ],
     targets: [
         // Holds Localizable.strings and the L10n lookup that every other
@@ -40,26 +41,33 @@ let package = Package(
             capability: .buildTool()
         ),
 
+        // Preset schema, partial adjustment patches, XMP property graph, codec
+        // and mapping registry. Knows RawProcessingCore's `PhotoAdjustments`
+        // and nested value types, but nothing about SwiftUI, file paths,
+        // security-scoped bookmarks or Core Image.
+        .target(name: "PresetCore", dependencies: ["RawProcessingCore", "Localization"]),
+
         // Folder access, scanning, index, sidecars and caches.
         // Depends on RawProcessingCore only for the pure `PhotoAdjustments`
         // value type that the sidecar serialises. Never imports SwiftUI.
-        .target(name: "PhotoLibraryCore", dependencies: ["RawProcessingCore", "Localization"]),
+        .target(name: "PhotoLibraryCore", dependencies: ["RawProcessingCore", "PresetCore", "Localization"]),
 
         // SwiftUI + AppKit layer. Never touches CIRAWFilter directly.
         .target(
             name: "LumaHarborApp",
-            dependencies: ["PhotoLibraryCore", "RawProcessingCore", "Localization"]
+            dependencies: ["PhotoLibraryCore", "RawProcessingCore", "PresetCore", "Localization"]
         ),
 
         // Thin launcher so the SwiftUI App type stays in a testable library target.
         .executableTarget(name: "LumaHarbor", dependencies: ["LumaHarborApp"]),
 
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
+        .testTarget(name: "PresetCoreTests", dependencies: ["PresetCore", "RawProcessingCore"]),
         .testTarget(
             name: "LumaHarborAppTests",
-            dependencies: ["LumaHarborApp", "PhotoLibraryCore", "RawProcessingCore", "Localization"]
+            dependencies: ["LumaHarborApp", "PhotoLibraryCore", "RawProcessingCore", "PresetCore", "Localization"]
         ),
-        .testTarget(name: "PhotoLibraryCoreTests", dependencies: ["PhotoLibraryCore"]),
+        .testTarget(name: "PhotoLibraryCoreTests", dependencies: ["PhotoLibraryCore", "PresetCore"]),
         .testTarget(
             name: "LumaHarborIntegrationTests",
             dependencies: ["PhotoLibraryCore", "RawProcessingCore"]
