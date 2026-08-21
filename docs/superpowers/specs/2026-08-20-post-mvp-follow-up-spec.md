@@ -4,7 +4,7 @@
 
 基準版本：`46794bb`
 
-工作分支：`codex/post-merge-review-fixes`
+工作分支：`codex/post-merge-review-fixes`（**狀態更新 2026-08-21**：本文件記錄的修正已陸續直接進到 `main` 並推送到 `origin/main`，這個分支本身已無未合併的獨有變更，僅保留作為歷史記錄）
 
 ## 目的
 
@@ -131,3 +131,17 @@ LUMAHARBOR_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
 ## 完成定義
 
 本文件中的「本次修正包完成」只代表程式修正與靜態／build 驗證完成；只有 Gate A 的自動測試及人工 HSL 驗證都留下可追蹤結果後，才達到可合併狀態。Gate B、P2 與下一階段產品功能應持續保留在 backlog，但不回頭阻擋已驗收的修正包。
+
+## 交接狀態（2026-08-21，Claude Code session）
+
+- **分支／commit**：工作直接在 `main` 上進行，目前 HEAD 為 `f95d064`（`fix: harden Undo/Redo key-equivalent matching and verify on device`），已 `git push` 到 `origin/main`，working tree 乾淨、無未 commit 變更。
+- **本次 session 完成項**：
+  - `UndoRedoKeyEquivalentFix` 修掉真的邏輯瑕疵（⌥⌘Z／⌃⌘Z 誤判成一般 Undo）、消除 Swift 6 concurrency warning、拆出可單元測試的 `match(...)`，新增 7 個測試案例（見 P2 待辦區塊內 2026-08-21 狀態說明的完整細節）。
+  - `Cmd+Z`／`Cmd+Shift+Z` 已在真機打包的 `.app`（`Scripts/build-app-bundle.sh debug`）上由使用者本人實際按鍵驗證通過，不再是「未驗證」項目。
+  - 驗證過程中順帶清掉本機環境的建置產物：scratchpad 內的截圖／測試腳本、`build/LumaHarbor.app`、`.build/`（543MB）皆已用 `trash` 移除；`.build` 清空後重新執行 `swift build`／`swift test -Xswiftc -strict-concurrency=complete` 確認能從零乾淨重建，433 個測試執行、9 個 `RawFixtureTests`（需要 `LUMAHARBOR_RAW_FIXTURE_DIR`）skip、0 failure。
+  - 確認 `Fixtures/` 底下沒有殘留任何進 git 追蹤的變更（`.lumaharbor`、`.DS_Store` 皆在 `.gitignore` 範圍內），沒有私有 fixture 被加入版本控制。
+- **仍未完成、留在 backlog（不阻擋目前狀態）**：
+  - Gate B2（XMP／Preset 語意定義）—— 尚未開始，需要獨立 spec。
+  - P2 待辦區塊中除 Undo/Redo 快捷鍵外的其餘五項（unsupported RAW 錯誤路徑、唯讀位置儲存失敗的可見性、Instruments 效能量測、APFS／exFAT 覆蓋不對稱、`NSCocoaErrorDomain 4097` 未重現案例）—— 均未變動，狀態與 2026-08-20 相同。
+  - 「下一階段產品功能」四項（Preset/XMP、Crop/Rotate/局部調整、批次處理、匯出選項）—— 均未開始。
+- **下一位接手者需要知道的環境細節**：這台機器上有作用中的中文（注音）輸入法，會讓「合成鍵盤事件」（不論是 `CGEvent` 底層 key code 還是 AppleScript `System Events keystroke`）的結果失真——同樣的合成 key code 送到別的 app 會被輸入法轉換成注音符號而非預期的英文字元。因此任何需要驗證真實鍵盤快捷鍵行為的測試，在這台機器上都必須請人親自按鍵，不能單靠程式化模擬下結論。
