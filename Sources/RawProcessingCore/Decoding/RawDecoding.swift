@@ -66,6 +66,20 @@ public struct RawDecodeRequest: Equatable, Sendable {
     }
 }
 
+/// A decoded photo's as-shot neutral white balance, carried through to the
+/// preview so a Preset's contextual white-balance leaves (spec §5.3, Adobe's
+/// absolute Kelvin/tint) can be converted against *this* photo without
+/// `PresetCore` reaching back into `RawProcessingCore`'s decode types itself.
+public struct RawWhiteBalanceBaseline: Equatable, Sendable {
+    public var temperatureKelvin: Double
+    public var tint: Double
+
+    public init(temperatureKelvin: Double, tint: Double) {
+        self.temperatureKelvin = temperatureKelvin
+        self.tint = tint
+    }
+}
+
 /// Identifies which decoder produced an edit, recorded in the sidecar so a
 /// future decoder swap is visible rather than silent.
 public struct DecoderIdentifier: Codable, Equatable, Sendable {

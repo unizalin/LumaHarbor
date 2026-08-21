@@ -12,8 +12,10 @@ public enum XMPDocumentKind: String, Codable, Equatable, Sendable {
     case unknown
 }
 
-/// Severity of one parse/mapping diagnostic.
-public enum XMPDiagnosticSeverity: String, Codable, Equatable, Sendable {
+/// Severity of one parse/mapping/application diagnostic. Shared by XMP-parse
+/// diagnostics and by `PresetApplicator`'s white-balance diagnostics so both
+/// layers report through one vocabulary.
+public enum PresetDiagnosticSeverity: String, Codable, Equatable, Sendable {
     case info
     case warning
     case error
@@ -23,7 +25,7 @@ public enum XMPDiagnosticSeverity: String, Codable, Equatable, Sendable {
 /// an unknown process version, a value that had to be clamped, a property
 /// with no reverse mapping, etc. (spec §7, §9.3).
 public struct XMPDiagnostic: Codable, Equatable, Sendable {
-    public var severity: XMPDiagnosticSeverity
+    public var severity: PresetDiagnosticSeverity
     /// Stable, non-localized identifier for tests and telemetry -- never the
     /// user-facing string itself (spec §6.2: debug data must stay safe to log).
     public var code: String
@@ -34,7 +36,7 @@ public struct XMPDiagnostic: Codable, Equatable, Sendable {
     public var detail: String?
 
     public init(
-        severity: XMPDiagnosticSeverity,
+        severity: PresetDiagnosticSeverity,
         code: String,
         propertyID: XMPPropertyID? = nil,
         detail: String? = nil

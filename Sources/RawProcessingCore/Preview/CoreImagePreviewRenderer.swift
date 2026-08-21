@@ -51,7 +51,11 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
 
             return PreviewImage(
                 cgImage: cgImage,
-                pixelSize: CGSize(width: cgImage.width, height: cgImage.height)
+                pixelSize: CGSize(width: cgImage.width, height: cgImage.height),
+                whiteBalanceBaseline: RawWhiteBalanceBaseline(
+                    temperatureKelvin: decoded.baselineTemperature,
+                    tint: decoded.baselineTint
+                )
             )
         }
     }
