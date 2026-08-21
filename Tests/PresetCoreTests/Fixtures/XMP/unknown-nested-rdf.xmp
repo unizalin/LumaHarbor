@@ -1,0 +1,33 @@
+<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Synthetic fixture, not from Adobe">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    xmlns:future="urn:test:future"
+    crs:Version="17.0"
+    crs:ProcessVersion="15.4"
+    crs:Exposure2012="+0.25">
+   <future:MaskTree>
+    <rdf:Description future:kind="radial" future:enabled="True">
+     <future:Layers>
+      <rdf:Seq>
+       <rdf:li>
+        <rdf:Description future:layerName="Layer 1" future:amount="0.5"/>
+       </rdf:li>
+       <rdf:li>
+        <rdf:Description future:layerName="Layer 2" future:amount="0.75"/>
+       </rdf:li>
+      </rdf:Seq>
+     </future:Layers>
+    </rdf:Description>
+   </future:MaskTree>
+   <future:Tags>
+    <rdf:Bag>
+     <rdf:li>portrait</rdf:li>
+     <rdf:li>studio</rdf:li>
+    </rdf:Bag>
+   </future:Tags>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>
