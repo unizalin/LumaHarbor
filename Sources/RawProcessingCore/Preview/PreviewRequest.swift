@@ -75,10 +75,16 @@ public struct PreviewRequest: Sendable {
 public struct PreviewImage: @unchecked Sendable {
     public let cgImage: CGImage
     public let pixelSize: CGSize
+    /// The decoded photo's as-shot neutral, when the renderer's decoder
+    /// reports one. `nil` for callers (tests, fakes) that don't need it —
+    /// keeping this optional with a default is what lets every existing
+    /// `PreviewImage(cgImage:pixelSize:)` call site stay source-compatible.
+    public let whiteBalanceBaseline: RawWhiteBalanceBaseline?
 
-    public init(cgImage: CGImage, pixelSize: CGSize) {
+    public init(cgImage: CGImage, pixelSize: CGSize, whiteBalanceBaseline: RawWhiteBalanceBaseline? = nil) {
         self.cgImage = cgImage
         self.pixelSize = pixelSize
+        self.whiteBalanceBaseline = whiteBalanceBaseline
     }
 }
 
