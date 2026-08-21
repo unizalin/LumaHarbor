@@ -2,6 +2,7 @@ import CoreGraphics
 import Localization
 import Foundation
 import PhotoLibraryCore
+import PresetCore
 import RawProcessingCore
 import SwiftUI
 
@@ -83,7 +84,23 @@ final class EditorViewModel: ObservableObject {
     /// older than what's already on screen.
     private var lastDisplayedGeneration: UInt64 = 0
 
+    /// The as-shot neutral for the currently open photo, captured from the
+    /// first preview that reports one. Needed to turn a preset's absolute
+    /// Kelvin/tint into LumaHarbor's relative offsets (spec §5.3); cleared on
+    /// every `open()`/`close()` so a preset previewed for one photo can never
+    /// be resolved against another's baseline.
+    private var whiteBalanceBaseline: RawWhiteBalanceBaseline?
+
+    /// A preset applied via `previewPreset(_:mode:)`, not yet committed.
+    /// Transient by construction: nothing here ever reaches `history`,
+    /// `saveState` or autosave (spec §5.3/§9.1) -- only what's drawn changes.
+    private var previewedPresetAdjustments: PhotoAdjustments?
+
     var adjustments: PhotoAdjustments { history.current }
+
+    /// What the preview pipeline should actually render: a live preset
+    /// preview if one is active, otherwise the committed edit.
+    var displayedAdjustments: PhotoAdjustments { previewedPresetAdjustments ?? history.current }
 
     var hasEdits: Bool { !history.current.isNeutral }
 
@@ -129,6 +146,8 @@ final class EditorViewModel: ObservableObject {
         self.isShowingOriginal = false
         self.saveState = .unchanged
         self.lastDisplayedGeneration = 0
+        self.whiteBalanceBaseline = nil
+        self.previewedPresetAdjustments = nil
         refreshUndoState()
 
         submitInteractivePreview()
@@ -148,6 +167,8 @@ final class EditorViewModel: ObservableObject {
         originalImage = nil
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
+        whiteBalanceBaseline = nil
+        previewedPresetAdjustments = nil
         refreshUndoState()
         if let scheduler = services?.previewScheduler {
             Task { await scheduler.cancelAll() }
@@ -182,6 +203,56 @@ final class EditorViewModel: ObservableObject {
         didChangeAdjustments()
     }
 
+    // MARK: - Presets
+
+    /// Shows what a preset would look like, without touching history, dirty
+    /// state or autosave (spec §5.3, §9.1: hover/keyboard preview is purely
+    /// visual). Applied on top of the *committed* edit, not any preview
+    /// already in progress, so repeated hovering over a list never compounds.
+    func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
+        guard photo != nil, let result = applying(preset, mode: mode) else { return }
+        previewedPresetAdjustments = result.adjustments
+        submitInteractivePreview()
+    }
+
+    /// Restores the render to the committed edit. Safe to call even if no
+    /// preview is active.
+    func cancelPresetPreview() {
+        guard previewedPresetAdjustments != nil else { return }
+        previewedPresetAdjustments = nil
+        submitInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// Applies a preset as one undoable step, regardless of how many leaves
+    /// it touches (spec §5.3: one click, one Undo entry). Never calls
+    /// `history.record` more than once.
+    func commitPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
+        guard photo != nil, let result = applying(preset, mode: mode) else { return }
+        previewedPresetAdjustments = nil
+        guard history.record(result.adjustments) else { return }
+        didChangeAdjustments()
+    }
+
+    private func applying(_ preset: PresetDocument, mode: PresetApplicationMode) -> PresetApplicationResult? {
+        let temperatureIsAbsoluteKelvin: Bool
+        switch preset.source {
+        case .native: temperatureIsAbsoluteKelvin = false
+        case .adobeXMP: temperatureIsAbsoluteKelvin = true
+        }
+        let context = PresetApplicationContext(
+            baselineTemperatureKelvin: whiteBalanceBaseline?.temperatureKelvin,
+            baselineTint: whiteBalanceBaseline?.tint
+        )
+        return try? PresetApplicator().apply(
+            preset.patch,
+            to: history.current,
+            mode: mode,
+            context: context,
+            temperatureIsAbsoluteKelvin: temperatureIsAbsoluteKelvin
+        )
+    }
+
     private func didChangeAdjustments() {
         refreshUndoState()
         // Interactive first so the slider keeps up (spec §11), then the good one
@@ -214,7 +285,7 @@ final class EditorViewModel: ObservableObject {
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),
             url: sourceURL,
-            adjustments: history.current,
+            adjustments: displayedAdjustments,
             targetPixelDimension: previewPixelDimension,
             quality: quality
         )
@@ -301,6 +372,9 @@ final class EditorViewModel: ObservableObject {
             lastDisplayedGeneration = result.token.generation
             previewImage = result.image.cgImage
             previewQuality = result.quality
+            if let baseline = result.image.whiteBalanceBaseline {
+                whiteBalanceBaseline = baseline
+            }
             // An interactive frame means the settled render is still to come.
             isRendering = result.quality == .interactive
 
