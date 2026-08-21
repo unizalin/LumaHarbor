@@ -195,6 +195,7 @@ class AppViewModelTestCase: XCTestCase {
         return AppServices(
             locations: locations,
             libraryService: libraryService,
+            myPresetsRepository: FilePresetRepository(scope: .myPresets(rootURL: locations.presetsDirectoryURL)),
             thumbnailProvider: ThumbnailProvider(
                 cache: cache, decoder: decoder, renderService: renderService
             ),

@@ -30,6 +30,12 @@ public struct ApplicationSupportLocations: Sendable, Equatable {
     public var previewCacheURL: URL {
         cacheDirectoryURL.appendingPathComponent("previews", isDirectory: true)
     }
+    /// "My Presets" (spec §8.1) -- user-authored data, not rebuildable from
+    /// the drive, so it is created up front like `bookmarksDirectoryURL` and
+    /// deliberately excluded from `removeRebuildableData`.
+    public var presetsDirectoryURL: URL {
+        baseURL.appendingPathComponent("Presets", isDirectory: true)
+    }
     /// WAL-mode sidecars, named `library.sqlite-wal` / `library.sqlite-shm`
     /// alongside the database file itself. Only present while (or just after)
     /// a connection is open, but a reset must not leave them behind for a
@@ -59,7 +65,7 @@ public struct ApplicationSupportLocations: Sendable, Equatable {
     }
 
     public func createDirectories(using fileManager: FileManager = .default) throws {
-        for url in [baseURL, bookmarksDirectoryURL, thumbnailCacheURL, previewCacheURL] {
+        for url in [baseURL, bookmarksDirectoryURL, thumbnailCacheURL, previewCacheURL, presetsDirectoryURL] {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
