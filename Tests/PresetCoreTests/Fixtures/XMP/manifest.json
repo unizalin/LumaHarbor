@@ -9,7 +9,8 @@
       "processVersion": "15.4",
       "expectedNativeFieldCount": 3,
       "expectedApproximateFieldCount": 1,
-      "expectedPreservedPropertyCount": 3,
+      "expectedPreservedPropertyCount": 0,
+      "note": "crs:WhiteBalance/HasSettings/PresetType/Version/ProcessVersion/Name are administrative preset metadata, not adjustment data -- XMPImporter excludes them from the preserved count so it only reflects unmapped adjustment-like properties.",
       "committable": true
     },
     {
@@ -30,6 +31,30 @@
       "documentKind": "unknown",
       "generatedBy": "hand-authored, synthetic",
       "note": "Deliberately malformed (unclosed element) to exercise the malformed-XML error path.",
+      "committable": true
+    },
+    {
+      "file": "basic-hsl-curve.xmp",
+      "sha256": "95f3181a436a8e63917c2db66b683e0d1043e89989700ba88bb6f3608cdcf80d",
+      "documentKind": "developPreset",
+      "generatedBy": "hand-authored, synthetic",
+      "processVersion": "15.4",
+      "expectedNativeFieldCount": 35,
+      "expectedApproximateFieldCount": 14,
+      "expectedPreservedPropertyCount": 5,
+      "note": "Full basic/HSL/split-toning/tone-curve coverage: every native and approximate mapping in XMPMappingRegistry.default at least once, plus crs:SharpenDetail, SharpenEdgeMasking, LuminanceSmoothing, ColorNoiseReduction and CameraProfile as preserved-only adjustment-like properties (spec §7's own preserved examples).",
+      "committable": true
+    },
+    {
+      "file": "unsupported-process-version.xmp",
+      "sha256": "0ab25380842143278314832a91fbbf345e438b669142e3f689e828be2514841c",
+      "documentKind": "developPreset",
+      "generatedBy": "hand-authored, synthetic",
+      "processVersion": "5.0",
+      "expectedNativeFieldCount": 0,
+      "expectedApproximateFieldCount": 0,
+      "expectedPreservedPropertyCount": 2,
+      "note": "crs:ProcessVersion below XMPMappingRegistry.minimumRecognizedProcessVersion (6.7): every otherwise-recognised property (crs:Exposure2012, crs:Contrast2012) must fall back to preserved rather than being guessed at, with an unknownProcessVersion diagnostic.",
       "committable": true
     }
   ]
