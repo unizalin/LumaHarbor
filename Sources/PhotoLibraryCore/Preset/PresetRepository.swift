@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 import PresetCore
 
 /// Which storage scope a `PresetRepository` instance manages (spec §5.1: "我的
@@ -125,14 +126,26 @@ public func transferPreset(
         try await source.delete(id: id)
         return .moved
     } catch {
-        let reason: String
-        if let localized = error as? LocalizedError, let description = localized.errorDescription {
-            reason = description
-        } else {
-            reason = String(describing: error)
-        }
-        return .copiedSourceRetained(reason: reason)
+        return .copiedSourceRetained(reason: safeCopiedSourceRetainedReason(for: error))
     }
+}
+
+/// Never echoes an arbitrary caught `Error`'s description into this
+/// user-facing result. A plain `NSError` -- e.g. from `FileManager.removeItem`
+/// racing with a permission change after the writability check -- commonly
+/// carries the full absolute path, and therefore the account username, in
+/// `userInfo` (`NSFilePath`); `String(describing:)` prints that verbatim, and
+/// even `(error as? LocalizedError)?.errorDescription` isn't a guarantee an
+/// arbitrary `NSError` won't include it. Every `PresetError` case is
+/// deliberately written so its own `errorDescription` never binds a path
+/// into the message (see `PresetError+LocalizedError`), so those are safe to
+/// surface as-is; anything else -- a type this function doesn't recognise --
+/// gets one fixed, generic reason instead of whatever it happens to say.
+private func safeCopiedSourceRetainedReason(for error: Error) -> String {
+    if let presetError = error as? PresetError, let description = presetError.errorDescription {
+        return description
+    }
+    return L10n.t("The copy at the new location is safe, but the original couldn't be removed from its previous location.")
 }
 
 /// Content equality that ignores identity/timestamps: two documents are the

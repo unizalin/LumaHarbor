@@ -85,7 +85,7 @@ final class AdjustmentPatchExtractionTests: XCTestCase {
 
         let allFields = Set(AdjustmentFieldID.allCases)
         let patch = AdjustmentPatch.extracting(allFields, from: adjustments)
-        let result = try PresetApplicator().apply(patch, to: .neutral, mode: .replace, context: .none)
+        let result = PresetApplicator().apply(patch, to: .neutral, mode: .replace, context: .none)
         XCTAssertEqual(result.adjustments, adjustments)
     }
 }

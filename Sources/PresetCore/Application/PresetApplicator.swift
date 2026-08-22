@@ -68,13 +68,20 @@ public struct PresetApplicator: Sendable {
     ///   offset units and portable across any photo without a baseline.
     ///   Callers derive this from `PresetDocument.source`, not per-call
     ///   guesswork, since it's a property of where the patch came from.
+    ///
+    /// Never throws -- every leaf that can't be resolved (e.g. a contextual
+    /// white-balance leaf with no baseline) is left untouched and reported
+    /// through `PresetApplicationResult.diagnostics` instead, which is the
+    /// only outcome a caller actually needs to look at. A `throws` signature
+    /// here previously invited callers to swallow it with `try?`, discarding
+    /// `diagnostics` along with it -- there is nothing else it needs to fail.
     public func apply(
         _ patch: AdjustmentPatch,
         to current: PhotoAdjustments,
         mode: PresetApplicationMode,
         context: PresetApplicationContext,
         temperatureIsAbsoluteKelvin: Bool = false
-    ) throws -> PresetApplicationResult {
+    ) -> PresetApplicationResult {
         var result = mode == .replace ? PhotoAdjustments.neutral : current
         var diagnostics: [PresetDiagnostic] = []
 

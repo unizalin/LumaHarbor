@@ -229,4 +229,33 @@ final class XMPMappingTests: XCTestCase {
             }
         }
     }
+
+    /// Finding #8: the thrown error must never echo the untrusted XMP value
+    /// it failed to parse -- not in `errorDescription` (already covered by
+    /// `.malformedXML`'s fixed localized string), and not in the raw
+    /// associated value either, since `String(describing:)` on a Swift enum
+    /// prints associated values verbatim and this codebase's error type is
+    /// `Equatable`/`Sendable` with no `CustomStringConvertible` override to
+    /// stop that. Testing `String(describing:)` directly (rather than only
+    /// `errorDescription`) is what actually pins this down.
+    func testMalformedNumericValueErrorNeverEchoesTheRawXMPValue() {
+        let marker = "malicious-xmp-marker-\(UUID().uuidString)"
+        let mapping = try! XCTUnwrap(XMPMappingRegistry.default.mapping(for: .cameraRaw("Exposure2012")))
+        XCTAssertThrowsError(try mapping.importScalar(.text(marker))) { error in
+            XCTAssertFalse(String(describing: error).contains(marker))
+            XCTAssertFalse((error as? LocalizedError)?.errorDescription?.contains(marker) ?? false)
+        }
+    }
+
+    /// Same invariant for the tone-curve point parser, which has its own
+    /// independent malformed-value error path in `XMPImporter.importToneCurve`.
+    func testMalformedToneCurvePointErrorNeverEchoesTheRawXMPValue() {
+        let marker = "malicious-curve-marker-\(UUID().uuidString)"
+        XCTAssertThrowsError(
+            try XMPImporter.importToneCurve(.array(kind: .seq, values: [.text(marker)]))
+        ) { error in
+            XCTAssertFalse(String(describing: error).contains(marker))
+            XCTAssertFalse((error as? LocalizedError)?.errorDescription?.contains(marker) ?? false)
+        }
+    }
 }

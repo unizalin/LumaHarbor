@@ -174,7 +174,17 @@ final class PresetLibraryViewModel: ObservableObject {
         selectedFields: Set<AdjustmentFieldID>,
         from adjustments: PhotoAdjustments
     ) async {
-        guard let destination = repository(for: scope) else { return }
+        guard let destination = repository(for: scope) else {
+            // Never a silent no-op: the UI must not be able to leave
+            // `scope` pointing at a destination that doesn't exist (see
+            // `CreatePresetSheet`), but this is the second, ViewModel-level
+            // line of defense in case it ever does.
+            alert = UserAlert(
+                title: L10n.t("Couldn't create this preset"),
+                message: L10n.t("That destination isn't available right now.")
+            )
+            return
+        }
         let document = PresetDocument(
             name: name,
             groupPath: groupPath,
@@ -197,8 +207,15 @@ final class PresetLibraryViewModel: ObservableObject {
         var updated = item.document
         updated.isFavorite.toggle()
         updated.modifiedAt = Date()
-        _ = try? await repository.save(updated, conflict: .replace)
-        await load()
+        do {
+            _ = try await repository.save(updated, conflict: .replace)
+            await load()
+        } catch {
+            // Consistent with rename/delete/copy/createPreset below -- a
+            // failed save must never be silently swallowed just because it
+            // was triggered from a single-click star rather than a form.
+            alert = UserAlert(title: L10n.t("Couldn't update this favorite"), error: error)
+        }
     }
 
     /// Renames in place: same UUID, same scope, same file -- identity never
@@ -231,7 +248,13 @@ final class PresetLibraryViewModel: ObservableObject {
     /// repository layer's `transferPreset`, which deletes the source (spec
     /// §2: "並可互相複製").
     func copy(_ item: PresetListItem, to scope: PresetScopeKind) async {
-        guard let destination = repository(for: scope) else { return }
+        guard let destination = repository(for: scope) else {
+            alert = UserAlert(
+                title: L10n.t("Couldn't copy this preset"),
+                message: L10n.t("That destination isn't available right now.")
+            )
+            return
+        }
         do {
             _ = try await destination.save(item.document, conflict: .keepBoth)
             await load()
@@ -295,7 +318,15 @@ final class PresetLibraryViewModel: ObservableObject {
     }
 
     func confirmImport(scope: PresetScopeKind) async {
-        guard let destination = repository(for: scope) else { return }
+        guard let destination = repository(for: scope) else {
+            // Never a silent no-op: the UI must not be able to leave `scope`
+            // pointing at a destination that doesn't exist (see
+            // `ImportPresetSheet`), but this is the second, ViewModel-level
+            // line of defense -- reported through the same state machine the
+            // rest of import already uses, rather than a separate `alert`.
+            importState = .failed(L10n.t("That destination isn't available right now."))
+            return
+        }
 
         importState = .saving
         var succeeded = 0

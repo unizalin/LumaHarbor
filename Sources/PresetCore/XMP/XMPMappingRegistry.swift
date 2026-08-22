@@ -224,7 +224,10 @@ public struct XMPMappingRegistry: Sendable {
         }
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard let number = Double(trimmed), number.isFinite else {
-            throw PresetError.malformedXML("not a finite number: \(trimmed.prefix(32))")
+            // A fixed, safe message -- never a fragment of the untrusted XMP
+            // value itself (spec §6.2/§11: diagnostic detail must never
+            // contain raw XMP content).
+            throw PresetError.malformedXML("not a finite number")
         }
         return number
     }

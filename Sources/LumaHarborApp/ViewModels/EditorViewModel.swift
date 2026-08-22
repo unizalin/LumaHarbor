@@ -96,6 +96,13 @@ final class EditorViewModel: ObservableObject {
     /// `saveState` or autosave (spec §5.3/§9.1) -- only what's drawn changes.
     private var previewedPresetAdjustments: PhotoAdjustments?
 
+    /// What `previewPreset(_:mode:)` reported about the *currently previewed*
+    /// preset -- e.g. a contextual leaf skipped for lack of a white-balance
+    /// baseline yet. Published (not thrown away like `applying(_:mode:)`
+    /// used to with `try?`) so the preset browser can show something
+    /// non-blocking while hovering, without a modal firing on every row.
+    @Published private(set) var presetPreviewDiagnostics: [PresetDiagnostic] = []
+
     var adjustments: PhotoAdjustments { history.current }
 
     /// What the preview pipeline should actually render: a live preset
@@ -148,6 +155,7 @@ final class EditorViewModel: ObservableObject {
         self.lastDisplayedGeneration = 0
         self.whiteBalanceBaseline = nil
         self.previewedPresetAdjustments = nil
+        self.presetPreviewDiagnostics = []
         refreshUndoState()
 
         submitInteractivePreview()
@@ -169,6 +177,7 @@ final class EditorViewModel: ObservableObject {
         saveState = .unchanged
         whiteBalanceBaseline = nil
         previewedPresetAdjustments = nil
+        presetPreviewDiagnostics = []
         refreshUndoState()
         if let scheduler = services?.previewScheduler {
             Task { await scheduler.cancelAll() }
@@ -209,10 +218,20 @@ final class EditorViewModel: ObservableObject {
     /// state or autosave (spec §5.3, §9.1: hover/keyboard preview is purely
     /// visual). Applied on top of the *committed* edit, not any preview
     /// already in progress, so repeated hovering over a list never compounds.
+    ///
+    /// Uses `requestInteractivePreview()` (the throttled entry point every
+    /// slider-driven edit goes through), not `submitInteractivePreview()`
+    /// directly -- quickly hovering across several rows must coalesce into
+    /// one decode, not queue one un-interruptible full RAW decode per row.
+    /// The state update below is synchronous and unthrottled, so whichever
+    /// preset was hovered *last* is always what a delayed/coalesced
+    /// submission actually renders.
     func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
-        guard photo != nil, let result = applying(preset, mode: mode) else { return }
+        guard photo != nil else { return }
+        let result = applying(preset, mode: mode)
         previewedPresetAdjustments = result.adjustments
-        submitInteractivePreview()
+        presetPreviewDiagnostics = result.diagnostics
+        requestInteractivePreview()
     }
 
     /// Restores the render to the committed edit. Safe to call even if no
@@ -220,21 +239,53 @@ final class EditorViewModel: ObservableObject {
     func cancelPresetPreview() {
         guard previewedPresetAdjustments != nil else { return }
         previewedPresetAdjustments = nil
-        submitInteractivePreview()
+        presetPreviewDiagnostics = []
+        requestInteractivePreview()
         scheduleSettledPreview()
     }
 
     /// Applies a preset as one undoable step, regardless of how many leaves
     /// it touches (spec §5.3: one click, one Undo entry). Never calls
     /// `history.record` more than once.
+    ///
+    /// Unlike hover preview, a diagnostic here (e.g. white balance skipped
+    /// because no baseline was available yet) surfaces through `alert` --
+    /// this is a deliberate, one-time action the user chose, not something
+    /// that fires continuously while moving the pointer, so a single
+    /// non-blocking-but-visible notice is appropriate where a modal on every
+    /// hover would not be.
     func commitPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
-        guard photo != nil, let result = applying(preset, mode: mode) else { return }
+        guard photo != nil else { return }
+        let result = applying(preset, mode: mode)
         previewedPresetAdjustments = nil
+        presetPreviewDiagnostics = []
         guard history.record(result.adjustments) else { return }
+        if let message = Self.userMessage(for: result.diagnostics) {
+            alert = UserAlert(title: L10n.t("This preset was applied with some limitations"), message: message)
+        }
         didChangeAdjustments()
     }
 
-    private func applying(_ preset: PresetDocument, mode: PresetApplicationMode) -> PresetApplicationResult? {
+    /// Safe, fixed, localizable text per diagnostic code -- never the
+    /// diagnostic's own `detail` (spec §11: user-facing text must not carry
+    /// unvetted internal detail). `nil` when there's nothing worth telling
+    /// the user about.
+    private static func userMessage(for diagnostics: [PresetDiagnostic]) -> String? {
+        guard !diagnostics.isEmpty else { return nil }
+        var messages: [String] = []
+        if diagnostics.contains(where: { $0.code == "missingWhiteBalanceBaseline" }) {
+            messages.append(L10n.t("White balance from this preset couldn't be applied yet because this photo hasn't finished decoding."))
+        }
+        if diagnostics.contains(where: { $0.code == "clampedWhiteBalance" }) {
+            messages.append(L10n.t("White balance from this preset was adjusted to stay within the allowed range."))
+        }
+        if messages.isEmpty {
+            messages.append(L10n.t("Some settings in this preset couldn't be applied exactly as specified."))
+        }
+        return messages.joined(separator: " ")
+    }
+
+    private func applying(_ preset: PresetDocument, mode: PresetApplicationMode) -> PresetApplicationResult {
         let temperatureIsAbsoluteKelvin: Bool
         switch preset.source {
         case .native: temperatureIsAbsoluteKelvin = false
@@ -244,7 +295,7 @@ final class EditorViewModel: ObservableObject {
             baselineTemperatureKelvin: whiteBalanceBaseline?.temperatureKelvin,
             baselineTint: whiteBalanceBaseline?.tint
         )
-        return try? PresetApplicator().apply(
+        return PresetApplicator().apply(
             preset.patch,
             to: history.current,
             mode: mode,

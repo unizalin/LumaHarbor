@@ -353,4 +353,67 @@ final class PresetRepositoryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(atDestination?.patch, preset.patch)
         XCTAssertEqual(atSource?.patch, preset.patch)
     }
+
+    // MARK: - Finding #7: never leak a private path through the transfer reason
+
+    /// Wraps a real repository for `list`/`load`/`save` but makes `delete`
+    /// throw an arbitrary caller-supplied error -- lets a test simulate the
+    /// case a chmod-based read-only test can't: `FileManager.removeItem`
+    /// itself throwing a raw `NSError` (e.g. a permission change racing the
+    /// writability check) rather than `FilePresetRepository`'s own
+    /// pre-checked `PresetError.readOnlyDestination`.
+    private actor ThrowingDeleteRepository: PresetRepository {
+        private let wrapped: FilePresetRepository
+        private let deleteError: Error
+
+        init(wrapping: FilePresetRepository, deleteError: Error) {
+            self.wrapped = wrapping
+            self.deleteError = deleteError
+        }
+
+        func list() async throws -> [PresetDocument] { try await wrapped.list() }
+        func load(id: UUID) async throws -> PresetDocument? { try await wrapped.load(id: id) }
+        func save(_ document: PresetDocument, conflict: PresetConflictResolution) async throws -> PresetStoreResult {
+            try await wrapped.save(document, conflict: conflict)
+        }
+        func delete(id: UUID) async throws { throw deleteError }
+    }
+
+    /// A plain `NSError` from `FileManager.removeItem` commonly carries the
+    /// full absolute path -- and therefore the account username -- in
+    /// `userInfo`. `transferPreset` must never let that reach
+    /// `.copiedSourceRetained(reason:)` verbatim, whether via
+    /// `String(describing:)` or `errorDescription`.
+    func testTransferNeverLeaksAPrivatePathWhenSourceDeleteThrowsAnUnrecognisedError() async throws {
+        let sourceRoot = try makeSubdirectory("Source")
+        let destinationRoot = try makeSubdirectory("Destination")
+        let realSource = FilePresetRepository(scope: .myPresets(rootURL: sourceRoot))
+        let destination = FilePresetRepository(scope: .myPresets(rootURL: destinationRoot))
+        let preset = makePreset()
+        _ = try await realSource.save(preset, conflict: .cancel)
+
+        let marker = "/Users/private-name/Library/Application Support/LumaHarbor/Presets/marker-\(UUID().uuidString).lhpreset"
+        let underlyingError = NSError(
+            domain: NSCocoaErrorDomain,
+            code: 513, // NSFileWriteNoPermissionError -- matches a real `removeItem` failure shape.
+            userInfo: [
+                NSFilePathErrorKey: marker,
+                NSLocalizedDescriptionKey: "The file \u{201c}\(marker)\u{201d} couldn\u{2019}t be removed."
+            ]
+        )
+        let source = ThrowingDeleteRepository(wrapping: realSource, deleteError: underlyingError)
+
+        let result = try await transferPreset(id: preset.id, from: source, to: destination, conflict: .cancel)
+        guard case .copiedSourceRetained(let reason) = result else {
+            return XCTFail("Expected .copiedSourceRetained, got \(result)")
+        }
+        XCTAssertFalse(reason.contains(marker))
+        XCTAssertFalse(reason.contains("private-name"))
+        XCTAssertFalse(reason.isEmpty)
+
+        // The destination still has the verified copy -- this is purely
+        // about what the *reason string* says, not about losing the data.
+        let atDestination = try await destination.load(id: preset.id)
+        XCTAssertEqual(atDestination?.patch, preset.patch)
+    }
 }

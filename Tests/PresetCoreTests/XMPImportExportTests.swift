@@ -325,4 +325,74 @@ final class XMPImportExportTests: XCTestCase {
         XCTAssertEqual(reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.3"))
         XCTAssertEqual(reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Saturation"), .text("10"))
     }
+
+    // MARK: - Non-UTF-8 source XMP round-trips without losing data (finding #3)
+    //
+    // A hardcoded `.utf8` decode of the source bytes used to turn any
+    // legitimately non-UTF-8-encoded `.xmp` (real Adobe tooling can emit
+    // UTF-16) into an empty `originalPacketUTF8`, and `XMPExporter`'s
+    // `baseDocument(for:)` falls back to a blank document when it can't
+    // reparse that -- silently losing every unmapped/preserved property on
+    // export. These lock in the fix: import must retain the *full* packet
+    // regardless of source encoding, and export from that preset must still
+    // carry unmapped data through.
+
+    private func utf16Data(_ xml: String, bigEndian: Bool) -> Data {
+        let bom: [UInt8] = bigEndian ? [0xFE, 0xFF] : [0xFF, 0xFE]
+        let body = xml.data(using: bigEndian ? .utf16BigEndian : .utf16LittleEndian)!
+        return Data(bom) + body
+    }
+
+    private func utf16FixtureXML() -> String {
+        """
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about=""
+          xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+          xmlns:future="urn:test:future"
+          crs:ProcessVersion="15.4"
+          crs:Exposure2012="+0.25">
+         <future:Tags>
+          <rdf:Bag>
+           <rdf:li>portrait</rdf:li>
+           <rdf:li>studio</rdf:li>
+          </rdf:Bag>
+         </future:Tags>
+        </rdf:Description>
+        </rdf:RDF>
+        </x:xmpmeta>
+        """
+    }
+
+    func testImportOfUTF16DocumentRetainsFullOriginalPacketNotAnEmptyString() throws {
+        let data = utf16Data(utf16FixtureXML(), bigEndian: true)
+        let preview = try XMPImporter().preview(data: data, suggestedName: "Fallback")
+        let packet = try XCTUnwrap(preview.proposedPreset.xmpEnvelope?.originalPacketUTF8)
+        XCTAssertFalse(packet.isEmpty)
+        XCTAssertTrue(packet.contains("crs:Exposure2012"))
+        XCTAssertTrue(packet.contains("future:Tags"))
+    }
+
+    func testExportOfUTF16ImportedPresetPreservesUnknownPropertyAndMappedField() throws {
+        for bigEndian in [false, true] {
+            let data = utf16Data(utf16FixtureXML(), bigEndian: bigEndian)
+            let preview = try XMPImporter().preview(data: data, suggestedName: "Fallback")
+            XCTAssertEqual(preview.proposedPreset.patch.basic?.exposure, 0.25)
+
+            let result = try XMPExporter().export(preview.proposedPreset)
+            let reparsed = try XMPCodec().parse(result.data)
+
+            XCTAssertEqual(
+                reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.25")
+            )
+            guard case .array(let kind, let values)? = reparsed.property(namespaceURI: "urn:test:future", localName: "Tags") else {
+                XCTFail("Expected future:Tags to survive export from a UTF-16 (bigEndian: \(bigEndian))-sourced XMP")
+                continue
+            }
+            XCTAssertEqual(kind, .bag)
+            XCTAssertEqual(values.count, 2)
+            XCTAssertTrue(values.contains(.text("portrait")))
+            XCTAssertTrue(values.contains(.text("studio")))
+        }
+    }
 }

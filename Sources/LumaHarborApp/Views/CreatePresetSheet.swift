@@ -112,12 +112,19 @@ struct CreatePresetSheet: View {
             HStack {
                 Toggle(L10n.t("Favorite"), isOn: $isFavorite)
                 Spacer()
+                // The "This Library" segment only exists when there's a
+                // library scope to save into -- rather than disabling the
+                // whole picker after the fact (which used to trap `scope`
+                // on `.library` with no way back to `.mine` once
+                // `hasLibraryScope` was false), the invalid option is simply
+                // never selectable in the first place.
                 Picker(L10n.t("Save to"), selection: $scope) {
                     Text(PresetScopeKind.mine.title).tag(PresetScopeKind.mine)
-                    Text(PresetScopeKind.library.title).tag(PresetScopeKind.library)
+                    if model.presetLibrary.hasLibraryScope {
+                        Text(PresetScopeKind.library.title).tag(PresetScopeKind.library)
+                    }
                 }
                 .pickerStyle(.segmented)
-                .disabled(!model.presetLibrary.hasLibraryScope && scope == .library)
                 .frame(width: 260)
             }
 
@@ -165,13 +172,27 @@ struct CreatePresetSheet: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                // Second line of defense alongside the picker above and
+                // `createPreset`'s own guard: this must never be tappable
+                // while pointed at a scope that doesn't actually exist.
+                .disabled(
+                    name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving
+                        || (scope == .library && !model.presetLibrary.hasLibraryScope)
+                )
             }
         }
         .padding(20)
         .frame(width: 440)
         .onAppear {
             selectedFields = AdjustmentPatch.modifiedFields(in: adjustments)
+        }
+        .onChange(of: model.presetLibrary.hasLibraryScope) { _, hasLibraryScope in
+            // The library can close while this sheet is still open -- fall
+            // back to a scope that's actually available rather than leaving
+            // `scope` pointed at one that just disappeared.
+            if !hasLibraryScope, scope == .library {
+                scope = .mine
+            }
         }
     }
 
