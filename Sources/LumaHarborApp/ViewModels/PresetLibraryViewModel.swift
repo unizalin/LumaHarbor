@@ -79,6 +79,14 @@ final class PresetLibraryViewModel: ObservableObject {
     @Published var scopeFilter: ScopeFilter = .all
     @Published private(set) var importState: ImportState = .idle
     @Published private(set) var importItems: [PresetImportItem] = []
+    /// Set by rename/delete/copy/create/toggleFavorite on failure. Bound to
+    /// `.alert(item:)` on `PresetBrowserView` (the stable container all of
+    /// those actions run from) and, separately, on `CreatePresetSheet`
+    /// itself -- a sheet showing over `PresetBrowserView` needs its own
+    /// binding to the same property to actually present while it's up
+    /// (round 2, finding #4: this property existed and was set correctly,
+    /// but no View read it at all, so every one of those failures was
+    /// invisible).
     @Published var alert: UserAlert?
 
     /// Optional, like `EditorViewModel.services`: this view model is
@@ -166,6 +174,15 @@ final class PresetLibraryViewModel: ObservableObject {
 
     /// Spec §9.2: create only writes the preset; it never touches the
     /// photo's own adjustments or Undo history.
+    /// Returns whether the preset was actually saved. `CreatePresetSheet`
+    /// used to call `dismiss()` unconditionally right after awaiting this,
+    /// regardless of outcome -- so a failure set `alert` (which nothing
+    /// read either -- see the type-level doc comment on `alert`) and then
+    /// the sheet closed anyway, hiding the one place that error could still
+    /// have been shown before this fix (round 2, finding #4). The caller is
+    /// now expected to keep the sheet open on `false` so its own `.alert`
+    /// binding to this same `alert` property can actually present.
+    @discardableResult
     func createPreset(
         name: String,
         groupPath: [String],
@@ -173,7 +190,7 @@ final class PresetLibraryViewModel: ObservableObject {
         scope: PresetScopeKind,
         selectedFields: Set<AdjustmentFieldID>,
         from adjustments: PhotoAdjustments
-    ) async {
+    ) async -> Bool {
         guard let destination = repository(for: scope) else {
             // Never a silent no-op: the UI must not be able to leave
             // `scope` pointing at a destination that doesn't exist (see
@@ -183,7 +200,7 @@ final class PresetLibraryViewModel: ObservableObject {
                 title: L10n.t("Couldn't create this preset"),
                 message: L10n.t("That destination isn't available right now.")
             )
-            return
+            return false
         }
         let document = PresetDocument(
             name: name,
@@ -195,8 +212,10 @@ final class PresetLibraryViewModel: ObservableObject {
             let validated = try document.validated()
             _ = try await destination.save(validated, conflict: .keepBoth)
             await load()
+            return true
         } catch {
             alert = UserAlert(title: L10n.t("Couldn't create this preset"), error: error)
+            return false
         }
     }
 
