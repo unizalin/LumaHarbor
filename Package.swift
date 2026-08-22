@@ -13,8 +13,22 @@ let package = Package(
     ],
     products: [
         .executable(name: "LumaHarbor", targets: ["LumaHarbor"]),
-        .library(name: "PhotoLibraryCore", targets: ["PhotoLibraryCore"]),
-        .library(name: "RawProcessingCore", targets: ["RawProcessingCore"])
+        .library(name: "PhotoLibraryCore", targets: ["PhotoLibraryCore"])
+        // RawProcessingCore is deliberately not its own top-level product.
+        // It carries the CompileMetalKernels build-tool plugin (produces a
+        // resource bundle); when the same plugin-bearing target is both a
+        // standalone product *and* a transitive dependency of the LumaHarbor
+        // executable, Xcode's own build system (opening Package.swift
+        // directly, not through an .xcodeproj) schedules the plugin twice --
+        // once per product entry point -- and both invocations race to write
+        // the same LumaHarbor_RawProcessingCore.bundle, producing "Multiple
+        // commands produce" even with a single scheme selected and a clean
+        // DerivedData. `swift build`/`swift test` from the command line never
+        // hit this (single build graph, no separate index build), and no
+        // external consumer imports RawProcessingCore as its own product --
+        // internal targets (PhotoLibraryCore, LumaHarborApp, the test
+        // targets) reach it via their own `dependencies:`, which needs a
+        // `.target`, not a `.library` product.
     ],
     targets: [
         // Holds Localizable.strings and the L10n lookup that every other
