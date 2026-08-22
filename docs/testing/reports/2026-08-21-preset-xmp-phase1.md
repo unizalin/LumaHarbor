@@ -188,3 +188,48 @@ nothing to commit, working tree clean（本報告 commit 前）
 ```
 
 `git diff --check`：無輸出。`docs/reference/` 全程未被 add／commit／stash／修改／刪除。未 push、未 force push、未修改主 worktree。
+
+## 11. Round 2 review-fix 之後的人工 Smoke Test（2026-08-22）
+
+對應 commit `975896d`（round 1 review-fix）與 `cfe9b54`（round 2 review-fix）之後、合併 main 前的四項人工 smoke test（見交接時提出的 checklist）。分兩段進行：先由 Claude 用 GUI 自動化（CGEvent 合成滑鼠事件＋`screencapture -l<CGWindowID>` 鎖定單一視窗截圖）跑過一輪，再由使用者本人在真機上覆核。
+
+### 11.1 結果總覽
+
+| # | 情境 | 結果 | 備註 |
+|---|---|---|---|
+| 1 | Hover 缺 baseline 的 preset，非 modal 診斷可見且移開消失 | ☐ **測不出來——發現真正的產品 bug，見 11.2** | 自動化與真人操作結果一致：合成事件與真實滑鼠都測不到，但根因不是操作方式，是下面這個 bug |
+| 2 | 套用只有 temperature 的 preset 是 no-op，但 alert 仍出現 | ☑ 通過 | Alert 標題 `This preset was applied with some limitations`，內容 `White balance from this preset couldn't be applied yet because this photo hasn't finished decoding.`；Undo 圖示維持停用、色溫維持 0，確認無 Undo entry、無 dirty state |
+| 3 | favorite／rename／delete 儲存失敗都要顯示 alert | ☑ 部分通過 | Favorite 失敗：標題 `Couldn't update this favorite` + 唯讀說明 + nextStep，通過。Delete 失敗：標題「無法刪除這個 Preset」（已在地化）+ 相同說明 + nextStep，preset 未被刪除，通過。Rename：對話框正確跳出，但這個開發環境裡兩種文字輸入模擬手法（AppleScript keystroke、CGEvent Unicode 字串注入）對此 TextField 都無效，無法真的改名後存檔觸發失敗路徑；底層錯誤處理機制已由 Favorite／Delete 兩項證實正常，Rename 走同一套 `PresetLibraryViewModel` 錯誤處理，但沒有直接證據。Copy 完全沒有 UI 進入點（見 8. 已知限制新增一列），測不了 |
+| 4 | Create Preset 儲存失敗時 sheet 留著、成功才關 | ☐ 未完成 | 自動化在系統「加入照片資料夾」檔案選擇器上多次意外選錯資料夾（把使用者個人資料夾誤加為照片庫，每次都立即發現並清除，掃描只認 RAW 檔案，沒有任何個人內容被讀取或顯示），為避免風險而中止；改交給使用者人工操作，但使用者尚未回報這一項的結果 |
+
+### 11.2 真正發現：hover-preview 對解碼失敗的照片會造成 alert 洪水，蓋住診斷文字
+
+**這不是測試方法問題，是 `EditorViewModel.previewPreset()` 的真實 bug：**
+
+```swift
+func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
+    guard photo != nil else { return }
+    let result = applying(preset, mode: mode)
+    previewedPresetAdjustments = result.adjustments
+    presetPreviewDiagnostics = result.diagnostics
+    requestInteractivePreview()   // ← 問題所在
+}
+```
+
+每次 hover 一個 preset 都無條件呼叫 `requestInteractivePreview()`，對目前照片重新發起一次 interactive 解碼請求——不論這次 preset 預覽實際上會不會改變畫面內容。對一張解碼會失敗的照片（例如用來製造「缺 baseline」情境的損壞 RAW），這代表**每次 hover 都觸發一次新的解碼失敗**，並經 `EditorViewModel.handle(_:)` 的 `.failed` 分支把 `alert = UserAlert(title: "Couldn't show this photo", ...)` 設成一個 modal alert。
+
+這個 modal alert 會蓋住整個 Inspector 面板，包括 `PresetBrowserView.previewDiagnostic` 顯示的非 modal 診斷文字——`presetPreviewDiagnostics`／`presetPreviewMessage` 很可能有被正確設定（round 1／round 2 的 ViewModel 層級測試都通過，證明資料本身沒被丟棄），但使用者實際上完全看不到，因為畫面被解碼失敗的 alert 整個蓋掉了。同時，只要滑鼠在 preset 清單上移動，就會不斷重新觸發解碼、不斷跳出新的 alert，形成使用者回報的「alert 一直出現」。
+
+**影響範圍**：任何「hover 一個會強制重新解碼的情境（例如照片本身解碼會失敗，或未來若 preview 換了更貴的 quality）」都可能出現同樣的 alert 蓋住診斷文字的問題，不只是這次用來測試的損壞檔案情境。
+
+**建議修法方向**（本次未動任何程式碼，留給下一輪 review-fix）：hover-preview 的 `requestInteractivePreview()` 呼叫，應該跟「這次 preset 預覽是否真的需要新的渲染」脫鉤，或者至少讓 hover 觸發的解碼失敗不要覆蓋掉 `presetPreviewDiagnostics` 想呈現的非 modal 訊息（例如 hover 情境下的解碼失敗改用跟 `presetPreviewMessage` 一樣的非 modal 呈現方式，而不是走會蓋版的 `alert`）。
+
+### 11.3 已知限制新增一項
+
+| 項目 | 說明 | 影響 |
+|---|---|---|
+| Preset 的「複製到另一個 scope」沒有 UI 進入點 | `PresetLibraryViewModel.copy(_:to:)` 存在也有單元測試覆蓋，但 `PresetBrowserView`／`PresetRow` 完全沒有把它接到任何按鈕或選單（目前「⋯」選單只有 Rename…／Export…／Delete） | 功能性缺口，不影響資料正確性；無法透過 UI 人工驗收，需要先補上進入點 |
+
+### 11.4 環境限制記錄
+
+這台機器上有作用中的中文（注音）輸入法，會讓「合成鍵盤事件」（不論是 CGEvent 底層 key code、CGEvent Unicode 字串注入，還是 AppleScript `System Events keystroke`）在這個 App 的 TextField 裡失效或被污染，導致 Rename／Create Preset 等需要打字的路徑無法用程式化方式可靠驗證，必須真人操作。這點與 2026-08-21 post-mvp-follow-up-spec 交接狀態章節記錄的環境限制一致。
