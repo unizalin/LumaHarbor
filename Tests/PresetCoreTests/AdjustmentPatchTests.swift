@@ -34,7 +34,10 @@ final class AdjustmentPatchTests: XCTestCase {
 
     // MARK: - Table-driven coverage of every AdjustmentFieldID
 
-    private func makePatch(settingOnly field: AdjustmentFieldID, to value: Double = 12) -> AdjustmentPatch {
+    /// `static`, not `private`, so `PresetApplicatorTests` can reuse this
+    /// table-driven single-field patch builder for finding #10's coverage
+    /// test instead of writing a fifth copy of the same 46-case enumeration.
+    static func makePatch(settingOnly field: AdjustmentFieldID, to value: Double = 12) -> AdjustmentPatch {
         var patch = AdjustmentPatch()
         switch field {
         case .basicExposure: patch.basic = BasicAdjustmentPatch(exposure: value)
@@ -98,7 +101,7 @@ final class AdjustmentPatchTests: XCTestCase {
 
     func testEveryFieldIDCanBeSetInIsolationAndDetected() {
         for field in AdjustmentFieldID.allCases {
-            let patch = makePatch(settingOnly: field)
+            let patch = Self.makePatch(settingOnly: field)
             XCTAssertTrue(patch.contains(field), "Expected \(field) to be present")
             let others = AdjustmentFieldID.allCases.filter { $0 != field }
             for other in others where !relatedByCurve(field, other) {

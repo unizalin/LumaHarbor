@@ -186,6 +186,83 @@ final class PresetWorkflowTests: AppViewModelTestCase {
         XCTAssertEqual(editor.adjustments.temperature, 0, "No baseline yet: the contextual leaf must be a no-op, not a guess")
     }
 
+    // MARK: - Preset application diagnostics are surfaced, not discarded (finding #4)
+    //
+    // `PresetApplicator.apply` used to be wrapped in `try?`, which threw away
+    // `PresetApplicationResult.diagnostics` along with any thrown error --
+    // even though `apply` never actually throws. These lock down that a
+    // skipped contextual leaf (no white-balance baseline yet) is something
+    // the view model actually surfaces, both during a transient hover
+    // preview and after a real commit.
+
+    func testPreviewingAnAdobePresetWithoutABaselineSurfacesADiagnostic() async throws {
+        let editor = try await openedEditor()
+        XCTAssertTrue(editor.presetPreviewDiagnostics.isEmpty)
+
+        editor.previewPreset(
+            makePreset(exposure: 1.0, temperature: 5500, source: .adobeXMP(tool: nil, version: nil)),
+            mode: .merge
+        )
+
+        XCTAssertTrue(
+            editor.presetPreviewDiagnostics.contains { $0.code == "missingWhiteBalanceBaseline" },
+            "The skipped contextual leaf must be observable, not silently dropped"
+        )
+    }
+
+    func testPreviewingAPresetWithNoIssuesReportsNoDiagnostics() async throws {
+        let editor = try await openedEditor()
+        editor.previewPreset(makePreset(exposure: 1.5), mode: .merge)
+        XCTAssertTrue(editor.presetPreviewDiagnostics.isEmpty)
+    }
+
+    func testCancellingAPresetPreviewClearsItsDiagnostics() async throws {
+        let editor = try await openedEditor()
+        editor.previewPreset(
+            makePreset(exposure: 1.0, temperature: 5500, source: .adobeXMP(tool: nil, version: nil)),
+            mode: .merge
+        )
+        XCTAssertFalse(editor.presetPreviewDiagnostics.isEmpty)
+
+        editor.cancelPresetPreview()
+        XCTAssertTrue(editor.presetPreviewDiagnostics.isEmpty)
+    }
+
+    func testCommittingAnAdobePresetWithoutABaselineShowsANonBlockingButVisibleAlert() async throws {
+        let editor = try await openedEditor()
+        XCTAssertNil(editor.alert)
+
+        editor.commitPreset(
+            makePreset(exposure: 1.0, temperature: 5500, source: .adobeXMP(tool: nil, version: nil)),
+            mode: .merge
+        )
+
+        let alert = try XCTUnwrap(editor.alert, "A skipped contextual field must reach the user somehow, not vanish")
+        XCTAssertFalse(alert.message.isEmpty)
+        // Spec §6.2/§11: user-facing text must never carry unvetted internal
+        // detail -- the diagnostic's raw `detail` (e.g. "requested=5500...")
+        // must not leak into what's shown.
+        XCTAssertFalse(alert.message.contains("requested="))
+    }
+
+    func testCommittingAPresetWithNoDiagnosticsDoesNotShowAnAlert() async throws {
+        let editor = try await openedEditor()
+        editor.commitPreset(makePreset(exposure: 1.5, contrast: 20), mode: .merge)
+        XCTAssertNil(editor.alert, "A preset with nothing to report must not interrupt the user")
+    }
+
+    func testCommittingClearsPresetPreviewDiagnosticsEvenWhenTheCommitItselfHasNone() async throws {
+        let editor = try await openedEditor()
+        editor.previewPreset(
+            makePreset(exposure: 1.0, temperature: 5500, source: .adobeXMP(tool: nil, version: nil)),
+            mode: .merge
+        )
+        XCTAssertFalse(editor.presetPreviewDiagnostics.isEmpty)
+
+        editor.commitPreset(makePreset(exposure: 1.5), mode: .merge)
+        XCTAssertTrue(editor.presetPreviewDiagnostics.isEmpty)
+    }
+
     // MARK: - No open photo
 
     func testPreviewAndCommitAreNoOpsWithNoPhotoOpen() {
@@ -206,15 +283,24 @@ actor RecordingPresetRepository: PresetRepository {
     private(set) var savedDocuments: [PresetDocument] = []
     private(set) var deletedIDs: [UUID] = []
     private var storage: [UUID: PresetDocument]
+    /// When set, `save` throws this instead of recording anything -- lets a
+    /// test simulate a save failure (e.g. finding #6: `toggleFavorite` must
+    /// not silently swallow one) without real file I/O.
+    private var saveError: Error?
 
     init(seed: [PresetDocument] = []) {
         storage = Dictionary(uniqueKeysWithValues: seed.map { ($0.id, $0) })
+    }
+
+    func setSaveError(_ error: Error?) {
+        saveError = error
     }
 
     func list() async throws -> [PresetDocument] { Array(storage.values) }
     func load(id: UUID) async throws -> PresetDocument? { storage[id] }
 
     func save(_ document: PresetDocument, conflict: PresetConflictResolution) async throws -> PresetStoreResult {
+        if let saveError { throw saveError }
         savedDocuments.append(document)
         storage[document.id] = document
         return .created
@@ -339,6 +425,24 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertEqual(saved.last?.isFavorite, true)
     }
 
+    /// Finding #6: `toggleFavorite` used to swallow a failed save with
+    /// `try?`, unlike rename/delete/copy/createPreset in this same class,
+    /// which all populate `alert` on error.
+    func testToggleFavoriteShowsAnAlertWhenSaveFails() async throws {
+        let document = makeDocument(isFavorite: false)
+        let mine = RecordingPresetRepository(seed: [document])
+        await mine.setSaveError(PresetError.readOnlyDestination("test"))
+        let sut = PresetLibraryViewModel(myRepository: mine)
+        await sut.load()
+        XCTAssertNil(sut.alert)
+
+        await sut.toggleFavorite(PresetListItem(document: document, scope: .mine))
+
+        XCTAssertNotNil(sut.alert, "A failed favorite save must not be silently swallowed")
+        let saved = await mine.savedDocuments
+        XCTAssertTrue(saved.isEmpty, "The failed save must not be recorded as if it had succeeded")
+    }
+
     func testDeleteRemovesFromTheOwningRepository() async throws {
         let document = makeDocument()
         let mine = RecordingPresetRepository(seed: [document])
@@ -428,5 +532,55 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
 
         let saved = await mine.savedDocuments
         XCTAssertEqual(saved.first?.patch.basic?.exposure, 0.5, "A native field can't be deselected")
+    }
+
+    // MARK: - Finding #5: choosing an unavailable scope must never be a silent no-op
+    //
+    // `ImportPresetSheet`/`CreatePresetSheet` are fixed separately (the
+    // "This Library" segment no longer exists in the picker at all when
+    // `hasLibraryScope` is false, and an `.onChange` resets a stale
+    // selection back to `.mine`), which SwiftUI view code isn't unit-tested
+    // in this codebase. These pin down the ViewModel's own second line of
+    // defense: even if `scope` somehow still points at a repository that
+    // doesn't exist, none of these silently do nothing.
+
+    func testCreatePresetShowsAnAlertWhenTheChosenScopeHasNoRepository() async throws {
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository()) // no libraryRepository
+        XCTAssertNil(sut.alert)
+
+        await sut.createPreset(
+            name: "New Preset",
+            groupPath: [],
+            isFavorite: false,
+            scope: .library,
+            selectedFields: [.basicExposure],
+            from: .neutral
+        )
+
+        XCTAssertNotNil(sut.alert, "Choosing an unavailable scope must not be a silent no-op")
+    }
+
+    func testCopyShowsAnAlertWhenTheDestinationScopeHasNoRepository() async throws {
+        let document = makeDocument()
+        let mine = RecordingPresetRepository(seed: [document])
+        let sut = PresetLibraryViewModel(myRepository: mine) // no libraryRepository
+        XCTAssertNil(sut.alert)
+
+        await sut.copy(PresetListItem(document: document, scope: .mine), to: .library)
+
+        XCTAssertNotNil(sut.alert, "Choosing an unavailable destination scope must not be a silent no-op")
+    }
+
+    func testConfirmImportEntersAFailedStateWhenTheChosenScopeHasNoRepository() async throws {
+        let fixture = try writeFixtureXMP()
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository()) // no libraryRepository
+        await sut.previewImport([fixture])
+        XCTAssertEqual(sut.importState, .preview)
+
+        await sut.confirmImport(scope: .library)
+
+        guard case .failed = sut.importState else {
+            return XCTFail("Expected .failed, got \(sut.importState) -- choosing an unavailable scope must not silently do nothing")
+        }
     }
 }

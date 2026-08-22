@@ -49,12 +49,19 @@ struct ImportPresetSheet: View {
                 Spacer()
 
                 if presetLibrary.importState == .preview {
+                    // The "This Library" segment only exists when there's a
+                    // library scope to save into -- rather than disabling
+                    // the whole picker after the fact (which used to trap
+                    // `scope` on `.library` with no way back to `.mine` once
+                    // `hasLibraryScope` was false), the invalid option is
+                    // simply never selectable in the first place.
                     Picker(L10n.t("Save to"), selection: $scope) {
                         Text(PresetScopeKind.mine.title).tag(PresetScopeKind.mine)
-                        Text(PresetScopeKind.library.title).tag(PresetScopeKind.library)
+                        if presetLibrary.hasLibraryScope {
+                            Text(PresetScopeKind.library.title).tag(PresetScopeKind.library)
+                        }
                     }
                     .pickerStyle(.segmented)
-                    .disabled(!presetLibrary.hasLibraryScope && scope == .library)
                     .frame(width: 260)
                 }
 
@@ -68,7 +75,10 @@ struct ImportPresetSheet: View {
                     Task { await presetLibrary.confirmImport(scope: scope) }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(presetLibrary.importState != .preview)
+                // Second line of defense alongside the picker above and
+                // `confirmImport`'s own guard: this must never be tappable
+                // while pointed at a scope that doesn't actually exist.
+                .disabled(presetLibrary.importState != .preview || (scope == .library && !presetLibrary.hasLibraryScope))
             }
         }
         .padding(20)
@@ -80,6 +90,15 @@ struct ImportPresetSheet: View {
         ) { result in
             if case .success(let urls) = result {
                 Task { await presetLibrary.previewImport(urls) }
+            }
+        }
+        .onChange(of: presetLibrary.hasLibraryScope) { _, hasLibraryScope in
+            // The library can close while this sheet is still open (e.g. the
+            // user switches libraries mid-import) -- fall back to a scope
+            // that's actually available rather than leaving `scope` pointed
+            // at one that just disappeared.
+            if !hasLibraryScope, scope == .library {
+                scope = .mine
             }
         }
     }

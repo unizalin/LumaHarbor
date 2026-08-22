@@ -24,11 +24,18 @@ public struct XMPCodec: Sendable {
         guard data.count <= Limits.maximumDocumentBytes else {
             throw PresetError.documentTooLarge(limitBytes: Limits.maximumDocumentBytes)
         }
-        // Checked on raw bytes, before any XML parser -- including internal
-        // subset entity declarations means DOCTYPE alone is enough to forbid
-        // every entity-expansion attack, without relying on parser-specific
-        // entity-resolution behaviour.
-        if data.range(of: Data("<!DOCTYPE".utf8)) != nil {
+        // Checked before any XML parser -- including internal subset entity
+        // declarations means DOCTYPE alone is enough to forbid every
+        // entity-expansion attack, without relying on parser-specific
+        // entity-resolution behaviour. A raw UTF-8 byte scan alone misses a
+        // DOCTYPE in any other encoding (e.g. a UTF-16 document with a BOM),
+        // since "<!DOCTYPE" then never appears as that literal byte sequence
+        // -- so this decodes using the encoding the bytes themselves declare
+        // (BOM-sniffed, mirroring how XMLParser itself auto-detects) before
+        // scanning for the construct. If decoding under the sniffed encoding
+        // fails, fall back to the raw-byte scan rather than skipping the
+        // check silently.
+        if XMLEncodingSniffer.decode(data)?.contains("<!DOCTYPE") ?? (data.range(of: Data("<!DOCTYPE".utf8)) != nil) {
             throw PresetError.unsafeXMLConstruct("DOCTYPE")
         }
 
@@ -69,6 +76,31 @@ public struct XMPCodec: Sendable {
     /// not part of "lossless".
     public func semanticallyEquivalent(_ a: XMPDocument, _ b: XMPDocument) -> Bool {
         a == b
+    }
+}
+
+// MARK: - Encoding-aware pre-parse decoding
+
+/// Decodes raw document bytes into text for the pre-parse `DOCTYPE` scan,
+/// sniffing the encoding the same way XML itself defines auto-detection: a
+/// byte-order mark, when present, is authoritative. This intentionally
+/// mirrors only the BOM-based cases -- an encoding declared solely via the
+/// `<?xml ... encoding="..."?>` attribute with no BOM falls through to the
+/// UTF-8 default, which matches every XMP producer this codebase has seen
+/// (they always emit a BOM for a non-UTF-8 document).
+enum XMLEncodingSniffer {
+    static func decode(_ data: Data) -> String? {
+        String(data: data, encoding: sniffedEncoding(data))
+    }
+
+    private static func sniffedEncoding(_ data: Data) -> String.Encoding {
+        let bytes = [UInt8](data.prefix(4))
+        if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { return .utf8 }
+        if bytes.starts(with: [0xFF, 0xFE, 0x00, 0x00]) { return .utf32LittleEndian }
+        if bytes.starts(with: [0x00, 0x00, 0xFE, 0xFF]) { return .utf32BigEndian }
+        if bytes.starts(with: [0xFF, 0xFE]) { return .utf16LittleEndian }
+        if bytes.starts(with: [0xFE, 0xFF]) { return .utf16BigEndian }
+        return .utf8
     }
 }
 
@@ -152,11 +184,21 @@ private final class BoundedXMLTreeBuilder: NSObject, XMLParserDelegate {
         }
 
         for (rawKey, value) in attributeDict {
+            // `xmlns`/`xmlns:*` are namespace declarations, not data, and
+            // never reach `node.attributes` -- excluded from the count for
+            // the same reason. `rdf:about` is the single structural resource
+            // identifier RDF puts on a `Description` (interpreted specially
+            // in `interpretDescription`, never turned into a property), so
+            // it doesn't count either. Every other retained attribute --
+            // including RDF's attribute-shorthand property form (e.g.
+            // `crs:Exposure2012="0.5"` directly on `rdf:Description`) and
+            // qualifier attributes such as `xml:lang` -- becomes a node in
+            // the parsed graph exactly like a child-element property does,
+            // so it must share the same `maximumPropertyCount` budget.
+            // Checked *before* appending to `node.attributes`, so a single
+            // element can't build an unbounded attribute array before the
+            // limit is ever consulted.
             if rawKey == "xmlns" || rawKey.hasPrefix("xmlns:") { continue }
-            guard value.utf8.count <= XMPCodec.Limits.maximumValueBytes else {
-                fail(.valueTooLarge(limitBytes: XMPCodec.Limits.maximumValueBytes), on: parser)
-                return
-            }
             let id: XMPPropertyID
             if let colonIndex = rawKey.firstIndex(of: ":") {
                 let prefix = String(rawKey[rawKey.startIndex..<colonIndex])
@@ -164,6 +206,17 @@ private final class BoundedXMLTreeBuilder: NSObject, XMLParserDelegate {
                 id = XMPPropertyID(namespaceURI: prefixToURI[prefix] ?? "", localName: localName)
             } else {
                 id = XMPPropertyID(namespaceURI: "", localName: rawKey)
+            }
+            if id.namespaceURI != XMPNamespace.rdf || id.localName != "about" {
+                propertyCount += 1
+                guard propertyCount <= XMPCodec.Limits.maximumPropertyCount else {
+                    fail(.tooManyProperties(limit: XMPCodec.Limits.maximumPropertyCount), on: parser)
+                    return
+                }
+            }
+            guard value.utf8.count <= XMPCodec.Limits.maximumValueBytes else {
+                fail(.valueTooLarge(limitBytes: XMPCodec.Limits.maximumValueBytes), on: parser)
+                return
             }
             node.attributes.append((id, value))
         }
@@ -201,6 +254,46 @@ private final class BoundedXMLTreeBuilder: NSObject, XMLParserDelegate {
         // A fixed, safe message -- never the parser's own description, which
         // can echo fragments of the input (spec §6.2: no raw XMP in errors).
         capturedError = .malformedXML("invalid XML")
+    }
+
+    // MARK: - DOCTYPE/DTD defense in depth
+    //
+    // The pre-parse byte scan in `XMPCodec.parse` is the primary guard, but
+    // it depends on correctly sniffing the document's encoding. These four
+    // callbacks only fire while `XMLParser` is itself walking a DTD internal
+    // subset -- which can only exist inside a `DOCTYPE` declaration -- so
+    // they reject the document even in an encoding the sniffer doesn't
+    // recognise, closing the gap rather than trusting the byte scan alone.
+
+    func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName name: String, value: String?) {
+        guard capturedError == nil else { return }
+        fail(.unsafeXMLConstruct("DOCTYPE"), on: parser)
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        foundExternalEntityDeclarationWithName name: String,
+        publicID: String?,
+        systemID: String?
+    ) {
+        guard capturedError == nil else { return }
+        fail(.unsafeXMLConstruct("DOCTYPE"), on: parser)
+    }
+
+    func parser(_ parser: XMLParser, foundNotationDeclarationWithName name: String, publicID: String?, systemID: String?) {
+        guard capturedError == nil else { return }
+        fail(.unsafeXMLConstruct("DOCTYPE"), on: parser)
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        foundUnparsedEntityDeclarationWithName name: String,
+        publicID: String?,
+        systemID: String?,
+        notationName: String?
+    ) {
+        guard capturedError == nil else { return }
+        fail(.unsafeXMLConstruct("DOCTYPE"), on: parser)
     }
 
     private func fail(_ error: PresetError, on parser: XMLParser) {

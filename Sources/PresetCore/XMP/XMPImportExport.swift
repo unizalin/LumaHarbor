@@ -113,8 +113,18 @@ public struct XMPImporter: Sendable {
             }
         }
 
+        // A hardcoded `.utf8` decode here silently turned a legitimate
+        // non-UTF-8 `.xmp` (e.g. UTF-16, which real Adobe tooling can
+        // produce) into an empty string, and `baseDocument(for:)` below
+        // falls back to a blank document when it can't reparse that -- so
+        // every unmapped/preserved property from the original file was
+        // silently dropped on export. `XMLEncodingSniffer` (the same
+        // BOM-aware decode `XMPCodec.parse` itself uses) decodes correctly
+        // regardless of source encoding; the resulting `String` carries no
+        // encoding of its own once decoded, so storing it here is already
+        // the "canonical UTF-8 packet" the round-trip contract calls for.
         let envelope = XMPEnvelope(
-            originalPacketUTF8: String(data: data, encoding: .utf8) ?? "",
+            originalPacketUTF8: XMLEncodingSniffer.decode(data) ?? "",
             documentKind: .developPreset,
             processVersion: processVersion,
             mappedProperties: mappedProperties,
@@ -164,7 +174,9 @@ public struct XMPImporter: Sendable {
             }
             let parts = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             guard parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]), x.isFinite, y.isFinite else {
-                throw PresetError.malformedXML("malformed ToneCurvePV2012 point: \(text.prefix(32))")
+                // A fixed, safe message -- never a fragment of the untrusted
+                // XMP value itself (spec §6.2/§11: no raw XMP in errors).
+                throw PresetError.malformedXML("malformed ToneCurvePV2012 point")
             }
             points.append(ToneCurvePoint(x: x / 255, y: y / 255))
         }
