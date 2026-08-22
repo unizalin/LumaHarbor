@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 import XCTest
 @testable import LumaHarborApp
 @testable import PhotoLibraryCore
@@ -210,6 +211,29 @@ final class PresetWorkflowTests: AppViewModelTestCase {
         )
     }
 
+    /// Round 2, finding #3: `presetPreviewDiagnostics` being non-empty was
+    /// necessary but not sufficient -- nothing in `PresetBrowserView`
+    /// actually read it, so a hovering user never saw anything. This
+    /// asserts on `presetPreviewMessage`, the derived presentation-state
+    /// property `PresetBrowserView.previewDiagnostic` binds to directly:
+    /// the exact safe text that would appear on screen, not just an
+    /// internal fact about the diagnostics array.
+    func testPreviewingAnAdobePresetWithoutABaselinePublishesTheExactMessageTheBrowserWouldDisplay() async throws {
+        let editor = try await openedEditor()
+        XCTAssertNil(editor.presetPreviewMessage)
+
+        editor.previewPreset(
+            makePreset(exposure: 1.0, temperature: 5500, source: .adobeXMP(tool: nil, version: nil)),
+            mode: .merge
+        )
+
+        let message = try XCTUnwrap(editor.presetPreviewMessage)
+        XCTAssertEqual(
+            message,
+            L10n.t("White balance from this preset couldn't be applied yet because this photo hasn't finished decoding.")
+        )
+    }
+
     func testPreviewingAPresetWithNoIssuesReportsNoDiagnostics() async throws {
         let editor = try await openedEditor()
         editor.previewPreset(makePreset(exposure: 1.5), mode: .merge)
@@ -223,9 +247,15 @@ final class PresetWorkflowTests: AppViewModelTestCase {
             mode: .merge
         )
         XCTAssertFalse(editor.presetPreviewDiagnostics.isEmpty)
+        XCTAssertNotNil(editor.presetPreviewMessage)
 
         editor.cancelPresetPreview()
         XCTAssertTrue(editor.presetPreviewDiagnostics.isEmpty)
+        // The displayed presentation-state, not just the underlying array,
+        // must also clear -- otherwise `PresetBrowserView.previewDiagnostic`
+        // would leave a stale message on screen after the pointer moves off
+        // the row (round 2, finding #3).
+        XCTAssertNil(editor.presetPreviewMessage)
     }
 
     func testCommittingAnAdobePresetWithoutABaselineShowsANonBlockingButVisibleAlert() async throws {
@@ -249,6 +279,40 @@ final class PresetWorkflowTests: AppViewModelTestCase {
         let editor = try await openedEditor()
         editor.commitPreset(makePreset(exposure: 1.5, contrast: 20), mode: .merge)
         XCTAssertNil(editor.alert, "A preset with nothing to report must not interrupt the user")
+    }
+
+    /// Round 2, finding #3: the preset here sets *only* `temperature`, so
+    /// with no white-balance baseline yet, the one leaf it has gets
+    /// skipped and nothing else in the patch touches anything -- unlike
+    /// `testCommittingAnAdobePresetWithoutABaselineShowsANonBlockingButVisibleAlert`
+    /// above, whose preset also sets `exposure` and therefore *does*
+    /// change something. `history.record` here must be a genuine no-op
+    /// (`false`): no Undo entry, `adjustments` unchanged, not dirty -- but
+    /// the diagnostic must still reach `alert`, which a `guard
+    /// history.record(...) else { return }` placed before the alert would
+    /// have skipped entirely.
+    func testCommittingAnAdobePresetWithOnlyASkippedTemperatureLeafIsANoOpButStillShowsTheAlert() async throws {
+        let editor = try await openedEditor()
+        XCTAssertNil(editor.alert)
+        let adjustmentsBefore = editor.adjustments
+        let canUndoBefore = editor.canUndo
+        let saveStateBefore = editor.saveState
+
+        editor.commitPreset(
+            makePreset(temperature: 5500, source: .adobeXMP(tool: nil, version: nil)),
+            mode: .merge
+        )
+
+        XCTAssertEqual(editor.adjustments, adjustmentsBefore, "A no-op commit must not change the committed adjustments")
+        XCTAssertEqual(editor.canUndo, canUndoBefore, "A no-op commit must not push an Undo entry")
+        XCTAssertEqual(editor.saveState, saveStateBefore, "A no-op commit must not mark the photo dirty")
+
+        let alert = try XCTUnwrap(
+            editor.alert,
+            "A no-op history.record must not swallow the diagnostic -- the skipped leaf is still real information"
+        )
+        XCTAssertFalse(alert.message.isEmpty)
+        XCTAssertFalse(alert.message.contains("requested="))
     }
 
     func testCommittingClearsPresetPreviewDiagnosticsEvenWhenTheCommitItselfHasNone() async throws {
@@ -409,6 +473,46 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertEqual(saved.count, 1)
         XCTAssertEqual(saved.first?.patch.basic?.exposure, 1.5)
         XCTAssertNil(saved.first?.patch.basic?.contrast, "Only the selected field should be included")
+    }
+
+    /// Round 2, finding #4: `CreatePresetSheet` used to dismiss itself
+    /// unconditionally right after this call, regardless of outcome, which
+    /// is what actually made `alert` unreachable on a failure -- setting
+    /// `alert` alone was never enough. This is the exact `Bool` the sheet
+    /// now branches on to decide whether to stay open, so it's the
+    /// presentation-relevant contract to test, not just "is `alert`
+    /// non-nil".
+    func testCreatePresetReturnsTrueOnSuccessSoTheSheetKnowsItMayDismiss() async throws {
+        let mine = RecordingPresetRepository()
+        let sut = PresetLibraryViewModel(myRepository: mine)
+
+        let saved = await sut.createPreset(
+            name: "New Preset",
+            groupPath: [],
+            isFavorite: false,
+            scope: .mine,
+            selectedFields: [.basicExposure],
+            from: .neutral
+        )
+
+        XCTAssertTrue(saved)
+        XCTAssertNil(sut.alert)
+    }
+
+    func testCreatePresetReturnsFalseOnFailureSoTheSheetKnowsToStayOpen() async throws {
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository()) // no libraryRepository
+
+        let saved = await sut.createPreset(
+            name: "New Preset",
+            groupPath: [],
+            isFavorite: false,
+            scope: .library,
+            selectedFields: [.basicExposure],
+            from: .neutral
+        )
+
+        XCTAssertFalse(saved, "A save failure must tell the caller not to dismiss -- that's the only way `alert` can ever be seen")
+        XCTAssertNotNil(sut.alert)
     }
 
     // MARK: - Favorite / delete / copy

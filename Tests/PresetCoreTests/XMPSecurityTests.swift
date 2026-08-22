@@ -27,6 +27,30 @@ final class XMPSecurityTests: XCTestCase {
         return Data(bom) + body
     }
 
+    /// No byte-order mark at all -- exercises the XML 1.0 Appendix F
+    /// no-BOM autodetection branch of `XMLEncodingSniffer` rather than the
+    /// BOM branch `utf16Data`/`utf32Data` above exercise. An explicit
+    /// `encoding="..."` XML declaration is required here: verified
+    /// empirically against this platform's `Foundation.XMLParser`
+    /// (libxml2) that it only accepts no-BOM UTF-16 (either byte order)
+    /// when that attribute is present -- without it, `XMLParser` itself
+    /// fails to parse the document at all, BOM or not, so there would be
+    /// nothing exploitable to guard against.
+    private func utf16DataNoBOM(_ xml: String, bigEndian: Bool) -> Data {
+        let declared = bigEndian ? "UTF-16BE" : "UTF-16LE"
+        let full = "<?xml version=\"1.0\" encoding=\"\(declared)\"?>" + xml
+        return full.data(using: bigEndian ? .utf16BigEndian : .utf16LittleEndian)!
+    }
+
+    /// UTF-32BE, no BOM. Unlike UTF-16, verified empirically that this
+    /// platform's `XMLParser` accepts no-BOM UTF-32BE with *or* without an
+    /// `encoding="..."` declaration (per XML 1.0 Appendix F, `00 00 00 3C`
+    /// is itself an autodetection signature), so the declaration is
+    /// optional here and this helper omits it to test the harder case.
+    private func utf32BigEndianDataNoBOM(_ xml: String) -> Data {
+        xml.data(using: .utf32BigEndian)!
+    }
+
     // MARK: - DOCTYPE / entity rejection
 
     func testRejectsDoctypeBeforeEntityResolution() {
@@ -140,6 +164,114 @@ final class XMPSecurityTests: XCTestCase {
         let document = try XMPCodec().parse(xml)
         XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.5"))
         XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Note"), .text("hello"))
+    }
+
+    // MARK: - DOCTYPE rejection is encoding-independent even with no BOM (finding #1, round 2)
+    //
+    // A BOM is optional in XML; an `encoding="..."` declaration alone can
+    // (and, per the XML spec, is supposed to) identify a non-UTF-8 no-BOM
+    // document. The original round-2 report reproduced this exact gap: a
+    // no-BOM UTF-16BE document declaring `encoding="UTF-16BE"` parsed
+    // successfully via `XMLParser` while both the old UTF-8-only byte scan
+    // and a naive `String(data:encoding:.utf8)` decode missed the DOCTYPE
+    // entirely (the latter doesn't even fail -- NUL bytes are valid
+    // single-byte UTF-8 code points, so it silently produces a garbled but
+    // non-nil string whose bytes never line up with the ASCII literal).
+
+    func testRejectsDoctypeInUTF16BigEndianNoBOMDocument() {
+        let xml = utf16DataNoBOM("<!DOCTYPE x [<!ENTITY e \"payload\">]><x>&e;</x>", bigEndian: true)
+        XCTAssertThrowsError(try XMPCodec().parse(xml)) {
+            XCTAssertEqual($0 as? PresetError, .unsafeXMLConstruct("DOCTYPE"))
+        }
+    }
+
+    func testRejectsDoctypeInUTF16LittleEndianNoBOMDocument() {
+        let xml = utf16DataNoBOM("<!DOCTYPE x [<!ENTITY e \"payload\">]><x>&e;</x>", bigEndian: false)
+        XCTAssertThrowsError(try XMPCodec().parse(xml)) {
+            XCTAssertEqual($0 as? PresetError, .unsafeXMLConstruct("DOCTYPE"))
+        }
+    }
+
+    func testRejectsEmptyDoctypeInUTF16BigEndianNoBOMDocument() {
+        let xml = utf16DataNoBOM("<!DOCTYPE x><x/>", bigEndian: true)
+        XCTAssertThrowsError(try XMPCodec().parse(xml)) {
+            XCTAssertEqual($0 as? PresetError, .unsafeXMLConstruct("DOCTYPE"))
+        }
+    }
+
+    func testRejectsEmptyDoctypeInUTF16LittleEndianNoBOMDocument() {
+        let xml = utf16DataNoBOM("<!DOCTYPE x><x/>", bigEndian: false)
+        XCTAssertThrowsError(try XMPCodec().parse(xml)) {
+            XCTAssertEqual($0 as? PresetError, .unsafeXMLConstruct("DOCTYPE"))
+        }
+    }
+
+    /// UTF-32BE is the one no-BOM case `XMLParser` accepts even with no
+    /// `encoding="..."` declaration at all (verified empirically), so this
+    /// is the most direct reproduction of the original gap: nothing in the
+    /// document names its own encoding, yet the parser still reads it as
+    /// UTF-32BE and would have processed a real `DOCTYPE`.
+    func testRejectsEmptyDoctypeInUTF32BigEndianNoBOMDocumentWithNoEncodingDeclaration() {
+        let xml = utf32BigEndianDataNoBOM("<!DOCTYPE x><x/>")
+        XCTAssertThrowsError(try XMPCodec().parse(xml)) {
+            XCTAssertEqual($0 as? PresetError, .unsafeXMLConstruct("DOCTYPE"))
+        }
+    }
+
+    func testRejectsDoctypeInUTF32BigEndianNoBOMDocument() {
+        let xml = utf32BigEndianDataNoBOM("<!DOCTYPE x [<!ENTITY e \"payload\">]><x>&e;</x>")
+        XCTAssertThrowsError(try XMPCodec().parse(xml)) {
+            XCTAssertEqual($0 as? PresetError, .unsafeXMLConstruct("DOCTYPE"))
+        }
+    }
+
+    /// The point of encoding-aware sniffing, no-BOM edition: a legitimate
+    /// no-BOM XMP document with no `DOCTYPE` at all must still parse.
+    func testValidUTF16BigEndianNoBOMXMPStillParses() throws {
+        let xml = utf16DataNoBOM(
+            wrapXML("crs:Exposure2012=\"0.5\"", children: "<crs:Note>hello</crs:Note>"), bigEndian: true
+        )
+        let document = try XMPCodec().parse(xml)
+        XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.5"))
+        XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Note"), .text("hello"))
+    }
+
+    func testValidUTF16LittleEndianNoBOMXMPStillParses() throws {
+        let xml = utf16DataNoBOM(
+            wrapXML("crs:Exposure2012=\"0.5\"", children: "<crs:Note>hello</crs:Note>"), bigEndian: false
+        )
+        let document = try XMPCodec().parse(xml)
+        XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.5"))
+        XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Note"), .text("hello"))
+    }
+
+    func testValidUTF32BigEndianNoBOMXMPStillParsesWithNoEncodingDeclaration() throws {
+        let xml = utf32BigEndianDataNoBOM(wrapXML("crs:Exposure2012=\"0.5\"", children: "<crs:Note>hello</crs:Note>"))
+        let document = try XMPCodec().parse(xml)
+        XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.5"))
+        XCTAssertEqual(document.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Note"), .text("hello"))
+    }
+
+    /// `XMLEncodingSniffer` itself, independent of whether `XMLParser` can
+    /// consume the result: this platform's `Foundation.XMLParser`/libxml2
+    /// was verified empirically to never accept no-BOM UTF-32LE at all
+    /// (with or without an `encoding="..."` declaration -- a genuine
+    /// library/platform limitation, not something this codec controls), so
+    /// there is no `XMPCodec().parse` round-trip to assert against for that
+    /// one case. The detector's correctness is still independently
+    /// verifiable: it must decode no-BOM UTF-32LE bytes back to the
+    /// original text rather than silently falling through to UTF-8 (which
+    /// would garble multi-byte code units and never match `"<!DOCTYPE"`).
+    func testEncodingSnifferDecodesNoBOMUTF32LittleEndian() {
+        let xml = "<!DOCTYPE x><x/>"
+        let data = xml.data(using: .utf32LittleEndian)!
+        XCTAssertEqual(XMLEncodingSniffer.decode(data), xml)
+    }
+
+    func testEncodingSnifferDecodesNoBOMUTF32BigEndian() {
+        let xml = "<!DOCTYPE x><x/>"
+        let data = xml.data(using: .utf32BigEndian)!
+        XCTAssertEqual(XMLEncodingSniffer.decode(data), xml)
     }
 
     // MARK: - Size / depth / count / value-length boundaries

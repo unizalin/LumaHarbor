@@ -103,6 +103,15 @@ final class EditorViewModel: ObservableObject {
     /// non-blocking while hovering, without a modal firing on every row.
     @Published private(set) var presetPreviewDiagnostics: [PresetDiagnostic] = []
 
+    /// The exact, safe text `PresetBrowserView` shows for the current hover
+    /// preview -- `nil` when there's nothing to say, so the caller can drop
+    /// the row entirely rather than reserve space for an empty message
+    /// (round 2, finding #3: this was published but never read by any
+    /// View). Recomputed from `presetPreviewDiagnostics` rather than stored
+    /// separately, so there is exactly one source of truth for "is there a
+    /// diagnostic right now" and it can never drift out of sync with it.
+    var presetPreviewMessage: String? { Self.userMessage(for: presetPreviewDiagnostics) }
+
     var adjustments: PhotoAdjustments { history.current }
 
     /// What the preview pipeline should actually render: a live preset
@@ -259,10 +268,21 @@ final class EditorViewModel: ObservableObject {
         let result = applying(preset, mode: mode)
         previewedPresetAdjustments = nil
         presetPreviewDiagnostics = []
-        guard history.record(result.adjustments) else { return }
+        // `history.record` is a no-op (returns `false`, pushes no Undo entry,
+        // leaves `current` untouched) whenever the preset's applicable
+        // leaves resolve to exactly what's already committed -- e.g. a
+        // preset with only an absolute white-balance leaf, previewed before
+        // the first preview frame has reported a baseline, so the leaf is
+        // skipped and nothing else in the preset touches anything (round 2,
+        // finding #3). That's still something the user needs to know about:
+        // the diagnostic must surface either way. Only the dirty/Undo/redraw
+        // side effects in `didChangeAdjustments()` are conditional on
+        // something having actually changed.
+        let recorded = history.record(result.adjustments)
         if let message = Self.userMessage(for: result.diagnostics) {
             alert = UserAlert(title: L10n.t("This preset was applied with some limitations"), message: message)
         }
+        guard recorded else { return }
         didChangeAdjustments()
     }
 

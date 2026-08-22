@@ -26,6 +26,7 @@ struct PresetBrowserView: View {
         DisclosureGroup(isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 10) {
                 controls
+                previewDiagnostic
                 list
             }
             .padding(.top, 8)
@@ -51,6 +52,23 @@ struct PresetBrowserView: View {
         }
         .alert(item: $exportError) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message))
+        }
+        // `PresetLibraryViewModel.alert` -- set on a failed rename, delete,
+        // copy or toggleFavorite (all of which act directly on rows in
+        // `list` below, never behind a sheet) -- was never bound to any
+        // View at all (round 2, finding #4): every one of those failures
+        // was invisible. `CreatePresetSheet` binds this same property
+        // separately, since its own sheet would otherwise cover this alert
+        // and keep it from presenting while open.
+        .alert(item: Binding(
+            get: { presetLibrary.alert },
+            set: { presetLibrary.alert = $0 }
+        )) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text([alert.message, alert.nextStep].compactMap { $0 }.joined(separator: "\n\n")),
+                dismissButton: .default(Text(L10n.t("OK")))
+            )
         }
     }
 
@@ -102,6 +120,27 @@ struct PresetBrowserView: View {
                 .help(L10n.t("Import develop presets"))
                 .accessibilityLabel(L10n.t("Import develop presets"))
             }
+        }
+    }
+
+    /// Non-modal, hover-driven notice for the *currently previewed* preset
+    /// (spec §9.1: "hover or keyboard selection only does transient
+    /// preview"). Round 2, finding #3: `EditorViewModel.presetPreviewMessage`
+    /// was published from Phase 1's original fix but no View ever read it,
+    /// so a skipped contextual leaf (e.g. white balance with no baseline
+    /// yet) was invisible while hovering. Entirely absent -- not an empty
+    /// reserved row -- when there's nothing to say, so it never leaves a
+    /// stale message on screen after the pointer moves off a row (the
+    /// message is recomputed from live diagnostics on every hover change,
+    /// per `EditorViewModel.presetPreviewMessage`'s doc comment).
+    @ViewBuilder
+    private var previewDiagnostic: some View {
+        if let message = model.editor.presetPreviewMessage {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(message)
         }
     }
 

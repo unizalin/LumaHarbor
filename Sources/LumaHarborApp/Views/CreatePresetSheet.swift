@@ -156,7 +156,14 @@ struct CreatePresetSheet: View {
                 Button(L10n.t("Save")) {
                     Task {
                         isSaving = true
-                        await model.presetLibrary.createPreset(
+                        // Only dismiss on success. This used to dismiss
+                        // unconditionally -- a save failure set `alert`
+                        // (spec-correct) but the sheet was already gone by
+                        // the time anything could have shown it, and
+                        // `alert` wasn't bound to any View in the first
+                        // place (round 2, finding #4). Staying open lets
+                        // the `.alert` binding below actually present.
+                        let saved = await model.presetLibrary.createPreset(
                             name: name,
                             groupPath: groupPathText
                                 .split(separator: "/")
@@ -168,7 +175,7 @@ struct CreatePresetSheet: View {
                             from: adjustments
                         )
                         isSaving = false
-                        dismiss()
+                        if saved { dismiss() }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -193,6 +200,20 @@ struct CreatePresetSheet: View {
             if !hasLibraryScope, scope == .library {
                 scope = .mine
             }
+        }
+        // A save failure keeps this sheet open (see the Save button above)
+        // specifically so this can present -- an `.alert` bound to the same
+        // `presetLibrary.alert` on `PresetBrowserView` underneath would be
+        // covered by this sheet and unable to show while it's up.
+        .alert(item: Binding(
+            get: { model.presetLibrary.alert },
+            set: { model.presetLibrary.alert = $0 }
+        )) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text([alert.message, alert.nextStep].compactMap { $0 }.joined(separator: "\n\n")),
+                dismissButton: .default(Text(L10n.t("OK")))
+            )
         }
     }
 

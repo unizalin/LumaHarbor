@@ -370,7 +370,14 @@ final class XMPImportExportTests: XCTestCase {
         let packet = try XCTUnwrap(preview.proposedPreset.xmpEnvelope?.originalPacketUTF8)
         XCTAssertFalse(packet.isEmpty)
         XCTAssertTrue(packet.contains("crs:Exposure2012"))
-        XCTAssertTrue(packet.contains("future:Tags"))
+        // `future:` is *not* a well-known prefix, so the round-2 fix's
+        // re-serialized canonical packet is free to rename it (spec §6.1:
+        // namespace prefix literal values aren't part of "lossless") --
+        // the property (namespace URI `urn:test:future` + local name
+        // `Tags`) must still be present, just checked semantically rather
+        // than via a literal prefix string.
+        let reparsed = try XMPCodec().parse(Data(packet.utf8))
+        XCTAssertNotNil(reparsed.property(namespaceURI: "urn:test:future", localName: "Tags"))
     }
 
     func testExportOfUTF16ImportedPresetPreservesUnknownPropertyAndMappedField() throws {
@@ -393,6 +400,83 @@ final class XMPImportExportTests: XCTestCase {
             XCTAssertEqual(values.count, 2)
             XCTAssertTrue(values.contains(.text("portrait")))
             XCTAssertTrue(values.contains(.text("studio")))
+        }
+    }
+
+    // MARK: - A source XML declaration must not survive into the stored
+    // envelope and later contradict it (finding #2, round 2)
+    //
+    // Round 1's fix decoded non-UTF-8 source bytes into a `String` and
+    // stored that `String` (re-encoded `.utf8`) verbatim as
+    // `originalPacketUTF8`. That's correct when the source has no `<?xml
+    // ... encoding="..."?>` declaration (the fixture above), but when it
+    // does, the decoded `String` still contains that declaration as
+    // literal text -- so the *stored* bytes are genuinely UTF-8 while the
+    // text embedded in them still claims e.g. `encoding="UTF-16LE"`.
+    // `XMPExporter.baseDocument(for:)` re-parses that mismatched pair,
+    // `XMLParser` fails on it, and every unmapped/preserved property is
+    // lost on export exactly as round 1 was written to prevent -- just via
+    // a different mismatch this time. These fixtures include the
+    // declaration `utf16FixtureXML()` above omits, so they reproduce
+    // *this* gap specifically.
+
+    private func utf16FixtureXMLWithDeclaration(encodingName: String) -> String {
+        "<?xml version=\"1.0\" encoding=\"\(encodingName)\"?>\n" + utf16FixtureXML()
+    }
+
+    func testImportOfUTF16DocumentWithXMLDeclarationRetainsFullOriginalPacketNotAnEmptyString() throws {
+        let data = utf16Data(utf16FixtureXMLWithDeclaration(encodingName: "UTF-16BE"), bigEndian: true)
+        let preview = try XMPImporter().preview(data: data, suggestedName: "Fallback")
+        let packet = try XCTUnwrap(preview.proposedPreset.xmpEnvelope?.originalPacketUTF8)
+        XCTAssertFalse(packet.isEmpty)
+        XCTAssertTrue(packet.contains("crs:Exposure2012"))
+        // See the comment on the no-declaration variant above: `future:`
+        // isn't a well-known prefix, so it's checked semantically.
+        let reparsed = try XMPCodec().parse(Data(packet.utf8))
+        XCTAssertNotNil(reparsed.property(namespaceURI: "urn:test:future", localName: "Tags"))
+    }
+
+    func testExportOfUTF16WithXMLDeclarationImportedPresetPreservesMappedFieldAndUnknownNestedRDF() throws {
+        for bigEndian in [false, true] {
+            let encodingName = bigEndian ? "UTF-16BE" : "UTF-16LE"
+            let data = utf16Data(utf16FixtureXMLWithDeclaration(encodingName: encodingName), bigEndian: bigEndian)
+            let preview = try XMPImporter().preview(data: data, suggestedName: "Fallback")
+            XCTAssertEqual(preview.proposedPreset.patch.basic?.exposure, 0.25, "encodingName: \(encodingName)")
+
+            let result = try XMPExporter().export(preview.proposedPreset)
+            let reparsed = try XMPCodec().parse(result.data)
+
+            XCTAssertEqual(
+                reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "Exposure2012"), .text("0.25"),
+                "encodingName: \(encodingName)"
+            )
+            guard case .array(let kind, let values)? = reparsed.property(namespaceURI: "urn:test:future", localName: "Tags") else {
+                XCTFail("Expected future:Tags (unknown nested RDF) to survive export from a declared-\(encodingName) XMP")
+                continue
+            }
+            XCTAssertEqual(kind, .bag, "encodingName: \(encodingName)")
+            XCTAssertEqual(values.count, 2, "encodingName: \(encodingName)")
+            XCTAssertTrue(values.contains(.text("portrait")))
+            XCTAssertTrue(values.contains(.text("studio")))
+        }
+    }
+
+    /// The fix stores a re-serialized canonical packet rather than the
+    /// source text verbatim, and `XMPSerializer` never emits an `<?xml
+    /// ... encoding="..."?>` declaration at all -- so the stored envelope
+    /// can never disagree with its own (always-UTF-8) bytes, regardless of
+    /// what the source document declared.
+    func testStoredEnvelopePacketNeverContainsAnEncodingDeclarationThatCouldContradictItsUTF8Bytes() throws {
+        for bigEndian in [false, true] {
+            let encodingName = bigEndian ? "UTF-16BE" : "UTF-16LE"
+            let data = utf16Data(utf16FixtureXMLWithDeclaration(encodingName: encodingName), bigEndian: bigEndian)
+            let preview = try XMPImporter().preview(data: data, suggestedName: "Fallback")
+            let packet = try XCTUnwrap(preview.proposedPreset.xmpEnvelope?.originalPacketUTF8)
+            XCTAssertFalse(packet.contains("encoding="), "encodingName: \(encodingName), packet: \(packet.prefix(80))")
+            // And it must still be genuinely re-parseable as the UTF-8 it's
+            // stored as -- not just "doesn't mention an encoding", but
+            // actually round-trips.
+            XCTAssertNoThrow(try XMPCodec().parse(Data(packet.utf8)), "encodingName: \(encodingName)")
         }
     }
 }

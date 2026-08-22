@@ -28,13 +28,15 @@ public struct XMPCodec: Sendable {
         // declarations means DOCTYPE alone is enough to forbid every
         // entity-expansion attack, without relying on parser-specific
         // entity-resolution behaviour. A raw UTF-8 byte scan alone misses a
-        // DOCTYPE in any other encoding (e.g. a UTF-16 document with a BOM),
-        // since "<!DOCTYPE" then never appears as that literal byte sequence
-        // -- so this decodes using the encoding the bytes themselves declare
-        // (BOM-sniffed, mirroring how XMLParser itself auto-detects) before
-        // scanning for the construct. If decoding under the sniffed encoding
-        // fails, fall back to the raw-byte scan rather than skipping the
-        // check silently.
+        // DOCTYPE in any other encoding (e.g. a UTF-16 document, with or
+        // without a BOM), since "<!DOCTYPE" then never appears as that
+        // literal byte sequence -- so this decodes using the encoding the
+        // bytes themselves identify (BOM when present, otherwise the XML
+        // 1.0 Appendix F no-BOM byte-signature heuristic in
+        // `XMLEncodingSniffer`, mirroring how XMLParser itself auto-detects)
+        // before scanning for the construct. If decoding under the sniffed
+        // encoding fails, fall back to the raw-byte scan rather than
+        // skipping the check silently.
         if XMLEncodingSniffer.decode(data)?.contains("<!DOCTYPE") ?? (data.range(of: Data("<!DOCTYPE".utf8)) != nil) {
             throw PresetError.unsafeXMLConstruct("DOCTYPE")
         }
@@ -82,24 +84,48 @@ public struct XMPCodec: Sendable {
 // MARK: - Encoding-aware pre-parse decoding
 
 /// Decodes raw document bytes into text for the pre-parse `DOCTYPE` scan,
-/// sniffing the encoding the same way XML itself defines auto-detection: a
-/// byte-order mark, when present, is authoritative. This intentionally
-/// mirrors only the BOM-based cases -- an encoding declared solely via the
-/// `<?xml ... encoding="..."?>` attribute with no BOM falls through to the
-/// UTF-8 default, which matches every XMP producer this codebase has seen
-/// (they always emit a BOM for a non-UTF-8 document).
+/// sniffing the encoding the same way XML itself defines auto-detection
+/// (XML 1.0 Appendix F, "Autodetection of Character Encodings"): a
+/// byte-order mark, when present, is authoritative; failing that, a
+/// well-formed XML document's very first character is always `<` (0x3C) --
+/// whether that begins an XML declaration, a `DOCTYPE`, or the root element
+/// -- so the raw byte layout of that one character, with no BOM, still
+/// identifies UTF-16/UTF-32 unambiguously. Foundation's `XMLParser` accepts
+/// exactly these no-BOM forms when an `encoding="..."` attribute names them
+/// (verified empirically against this platform's libxml2: UTF-16BE/LE parse
+/// only with that attribute present, UTF-32BE parses with or without it) --
+/// so skipping this detection would let a `DOCTYPE`/entity declaration in
+/// any of those forms reach the parser undetected, exactly as finding #1
+/// (second-round review) demonstrated for UTF-16BE.
 enum XMLEncodingSniffer {
     static func decode(_ data: Data) -> String? {
         String(data: data, encoding: sniffedEncoding(data))
     }
 
-    private static func sniffedEncoding(_ data: Data) -> String.Encoding {
+    static func sniffedEncoding(_ data: Data) -> String.Encoding {
         let bytes = [UInt8](data.prefix(4))
         if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { return .utf8 }
         if bytes.starts(with: [0xFF, 0xFE, 0x00, 0x00]) { return .utf32LittleEndian }
         if bytes.starts(with: [0x00, 0x00, 0xFE, 0xFF]) { return .utf32BigEndian }
         if bytes.starts(with: [0xFF, 0xFE]) { return .utf16LittleEndian }
         if bytes.starts(with: [0xFE, 0xFF]) { return .utf16BigEndian }
+        // No BOM: the 4-byte patterns below are the byte layout of the
+        // mandatory leading `<` alone in UTF-32, so they hold regardless of
+        // what follows it (an XML declaration or not) -- checked before the
+        // 2-byte UTF-16 patterns since a UTF-32LE `<` (3C 00 00 00) would
+        // otherwise also match the UTF-16LE 2-byte prefix (3C 00).
+        if bytes.count >= 4, bytes[0] == 0x00, bytes[1] == 0x00, bytes[2] == 0x00, bytes[3] == 0x3C {
+            return .utf32BigEndian
+        }
+        if bytes.count >= 4, bytes[0] == 0x3C, bytes[1] == 0x00, bytes[2] == 0x00, bytes[3] == 0x00 {
+            return .utf32LittleEndian
+        }
+        if bytes.count >= 2, bytes[0] == 0x00, bytes[1] == 0x3C {
+            return .utf16BigEndian
+        }
+        if bytes.count >= 2, bytes[0] == 0x3C, bytes[1] == 0x00 {
+            return .utf16LittleEndian
+        }
         return .utf8
     }
 }

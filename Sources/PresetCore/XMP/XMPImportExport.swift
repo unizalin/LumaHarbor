@@ -113,18 +113,31 @@ public struct XMPImporter: Sendable {
             }
         }
 
-        // A hardcoded `.utf8` decode here silently turned a legitimate
-        // non-UTF-8 `.xmp` (e.g. UTF-16, which real Adobe tooling can
-        // produce) into an empty string, and `baseDocument(for:)` below
-        // falls back to a blank document when it can't reparse that -- so
-        // every unmapped/preserved property from the original file was
-        // silently dropped on export. `XMLEncodingSniffer` (the same
-        // BOM-aware decode `XMPCodec.parse` itself uses) decodes correctly
-        // regardless of source encoding; the resulting `String` carries no
-        // encoding of its own once decoded, so storing it here is already
-        // the "canonical UTF-8 packet" the round-trip contract calls for.
+        // Round 1 fixed a hardcoded `.utf8` decode that silently turned a
+        // legitimate non-UTF-8 `.xmp` into an empty `originalPacketUTF8`.
+        // That fix (decoding with the sniffed source encoding) introduced a
+        // *different* loss: the decoded `String` still contains the
+        // original document's own `<?xml ... encoding="UTF-16"?>`
+        // declaration as literal text, so re-encoding it `.utf8` for
+        // storage produces bytes that are genuinely UTF-8 while the
+        // embedded declaration still claims UTF-16 -- `baseDocument(for:)`
+        // below re-parses that mismatched pair, `XMLParser` fails on it,
+        // and every unmapped/preserved property is lost exactly as before,
+        // just via a different mismatch. Serializing the document graph
+        // *already parsed above* back through the same codec sidesteps
+        // this entirely: `XMPSerializer.serialize` never emits an
+        // `encoding` declaration at all, so what's stored here is
+        // self-consistent UTF-8 with nothing left to disagree about, and
+        // is exactly the "canonical UTF-8 packet" the round-trip contract
+        // calls for (spec §6.1: semantically lossless, not byte-for-byte).
+        // A failure here throws rather than silently degrading to an empty
+        // envelope, since `document` is already known-valid at this point.
+        let originalPacketData = try codec.serialize(document)
+        guard let originalPacketUTF8 = String(data: originalPacketData, encoding: .utf8) else {
+            throw PresetError.malformedXML("could not encode the canonical packet as UTF-8")
+        }
         let envelope = XMPEnvelope(
-            originalPacketUTF8: XMLEncodingSniffer.decode(data) ?? "",
+            originalPacketUTF8: originalPacketUTF8,
             documentKind: .developPreset,
             processVersion: processVersion,
             mappedProperties: mappedProperties,
