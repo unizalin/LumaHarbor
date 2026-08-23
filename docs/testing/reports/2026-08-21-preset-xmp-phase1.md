@@ -195,12 +195,14 @@ nothing to commit, working tree clean（本報告 commit 前）
 
 ### 11.1 結果總覽
 
+四項最終全部完成驗證（情境 3、4 起初卡在自動化限制，後續由 Claude 用真機真實文字輸入補完，過程見各列備註）。
+
 | # | 情境 | 結果 | 備註 |
 |---|---|---|---|
 | 1 | Hover 缺 baseline 的 preset，非 modal 診斷可見且移開消失 | ☐ **測不出來——發現真正的產品 bug，見 11.2** | 自動化與真人操作結果一致：合成事件與真實滑鼠都測不到，但根因不是操作方式，是下面這個 bug |
 | 2 | 套用只有 temperature 的 preset 是 no-op，但 alert 仍出現 | ☑ 通過 | Alert 標題 `This preset was applied with some limitations`，內容 `White balance from this preset couldn't be applied yet because this photo hasn't finished decoding.`；Undo 圖示維持停用、色溫維持 0，確認無 Undo entry、無 dirty state |
-| 3 | favorite／rename／delete 儲存失敗都要顯示 alert | ☑ 部分通過 | Favorite 失敗：標題 `Couldn't update this favorite` + 唯讀說明 + nextStep，通過。Delete 失敗：標題「無法刪除這個 Preset」（已在地化）+ 相同說明 + nextStep，preset 未被刪除，通過。Rename：對話框正確跳出，但這個開發環境裡兩種文字輸入模擬手法（AppleScript keystroke、CGEvent Unicode 字串注入）對此 TextField 都無效，無法真的改名後存檔觸發失敗路徑；底層錯誤處理機制已由 Favorite／Delete 兩項證實正常，Rename 走同一套 `PresetLibraryViewModel` 錯誤處理，但沒有直接證據。Copy 完全沒有 UI 進入點（見 8. 已知限制新增一列），測不了 |
-| 4 | Create Preset 儲存失敗時 sheet 留著、成功才關 | ☐ 未完成 | 自動化在系統「加入照片資料夾」檔案選擇器上多次意外選錯資料夾（把使用者個人資料夾誤加為照片庫，每次都立即發現並清除，掃描只認 RAW 檔案，沒有任何個人內容被讀取或顯示），為避免風險而中止；改交給使用者人工操作，但使用者尚未回報這一項的結果 |
+| 3 | favorite／rename／delete 儲存失敗都要顯示 alert | ☑ 通過（三項全過） | Favorite 失敗：標題 `Couldn't update this favorite` + 唯讀說明 + nextStep，通過，星星未真的變成已收藏。Delete 失敗：標題「無法刪除這個 Preset」（已在地化）+ 相同說明 + nextStep，preset 未被刪除，通過。Rename 失敗：標題「無法重新命名這個 Preset」（已在地化）+ 相同說明 + nextStep，preset 名稱維持「ScopeTest」未被真的改成「ScopeTestRenamed」，通過——先前回報的「文字輸入模擬對此 TextField 無效」是這次環境的間歇性問題，不是恆定限制：同一支 CGEvent Unicode 字串注入腳本，在建立 preset（情境 4）與這次 rename 都成功正確輸入了文字，只是偶爾不穩定，需要重試。Copy 完全沒有 UI 進入點（見 8. 已知限制新增一列），測不了，跟輸入法/自動化無關 |
+| 4 | Create Preset 儲存失敗時 sheet 留著、成功才關 | ☑ 通過（兩階段皆過） | 「Save to」選「此照片庫」（指向唯讀磁碟 ReadOnly-Test）按 Save：sheet 未關閉，Alert 標題「無法建立這個 Preset」+「This drive is read-only, so LumaHarbor can't save the preset there.」+ nextStep，欄位資料（名稱、勾選、scope）全部保留。改選「我的 Preset」再按 Save：成功寫入、sheet 自動關閉，preset 正確出現在清單。此前回報的「自動化多次誤觸使用者個人資料夾」是準備 ReadOnly-Test 照片庫時，系統「加入照片資料夾」／「重新連接」檔案選擇器對合成滑鼠點擊不穩定所致（改用鍵盤方向鍵移動清單選取後穩定成功），跟 Create Preset 本身的行為無關；過程中沒有任何個人資料被掃描或顯示 |
 
 ### 11.2 真正發現：hover-preview 對解碼失敗的照片會造成 alert 洪水，蓋住診斷文字
 
@@ -232,4 +234,4 @@ func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
 
 ### 11.4 環境限制記錄
 
-這台機器上有作用中的中文（注音）輸入法，會讓「合成鍵盤事件」（不論是 CGEvent 底層 key code、CGEvent Unicode 字串注入，還是 AppleScript `System Events keystroke`）在這個 App 的 TextField 裡失效或被污染，導致 Rename／Create Preset 等需要打字的路徑無法用程式化方式可靠驗證，必須真人操作。這點與 2026-08-21 post-mvp-follow-up-spec 交接狀態章節記錄的環境限制一致。
+這台機器上有作用中的中文（注音）輸入法：AppleScript `System Events keystroke` 對這個 App 的 TextField 完全無效或會被污染成注音符號，仍然不可用。但 CGEvent 的 `keyboardSetUnicodeString`（Unicode 字串直接注入單一 key event，不經過實體鍵盤佈局／輸入法轉換）**證實可行**，只是這台機器上偶爾（原因未查清，推測與畫面/焦點狀態競爭有關）第一次嘗試會沒有反應，重試一次通常就成功——最終在情境 3（rename）與情境 4（create preset）都用同一支腳本成功打出正確文字並存檔。系統原生的「加入照片資料夾」／「重新連接」檔案選擇器對 CGEvent 合成滑鼠點擊／雙擊也同樣不穩定，改用鍵盤方向鍵（`Down`／`Up`）移動清單選取後可穩定運作。這些都記錄為這台機器 GUI 自動化的已知間歇性摩擦，不是這個 Preset／XMP 功能本身的缺陷；與 2026-08-21 post-mvp-follow-up-spec 交接狀態章節記錄的環境限制一致，本節在原記錄基礎上補充「並非恆定失敗、有可行重試手段」這一點。
