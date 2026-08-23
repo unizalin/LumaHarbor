@@ -62,6 +62,42 @@ actor SelectivelyFailingPreviewRenderer: PreviewRendering {
     }
 }
 
+/// Lets a test hold one specific exposure's render open until it explicitly
+/// releases it, and choose success or failure per exposure -- for proving
+/// that a slow, in-flight preview decode can never land *after* a newer
+/// preview intent (even a no-op one that submits nothing at all) has already
+/// superseded it (round 3, `EditorViewModel.previewIntentVersion`).
+actor GatedPreviewRenderer: PreviewRendering {
+    private var gates: [Double: AsyncGate] = [:]
+    private let shouldFail: @Sendable (Double) -> Bool
+
+    init(shouldFail: @escaping @Sendable (Double) -> Bool = { _ in false }) {
+        self.shouldFail = shouldFail
+    }
+
+    private func gate(for exposure: Double) -> AsyncGate {
+        if let existing = gates[exposure] { return existing }
+        let created = AsyncGate()
+        gates[exposure] = created
+        return created
+    }
+
+    /// Lets the render for `exposure` proceed to completion (or failure).
+    func release(_ exposure: Double) async {
+        await gate(for: exposure).open()
+    }
+
+    func render(_ request: PreviewRequest) async throws -> PreviewImage {
+        let exposure = request.adjustments.exposure
+        await gate(for: exposure).enter()
+        if shouldFail(exposure) {
+            throw RawDecodingError.unsupportedFormat(path: request.url.path)
+        }
+        let image = try AppTestImage.make()
+        return PreviewImage(cgImage: image, pixelSize: CGSize(width: 4, height: 4))
+    }
+}
+
 /// A preview renderer that never produces anything.
 ///
 /// The app-level tests are about state transitions, not pixels. A real renderer
