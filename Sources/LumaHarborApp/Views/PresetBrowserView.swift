@@ -4,6 +4,56 @@ import PresetCore
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Which scope a preset in `scope` can be copied *to*, factored out of the
+/// view so it's independently testable (Codex re-review, finding #3: copy
+/// existed only in the ViewModel/repository, with nothing testing which
+/// scope the UI should even offer). Mirrors the existing rule `CreatePresetSheet`/
+/// `ImportPresetSheet` already use for their own scope pickers: "This
+/// Library" is only ever offered when a library is actually open, never
+/// shown and then left to fail.
+enum PresetCopyDestination {
+    static func destination(for scope: PresetScopeKind, hasLibraryScope: Bool) -> PresetScopeKind? {
+        switch scope {
+        case .mine: return hasLibraryScope ? .library : nil
+        case .library: return .mine
+        }
+    }
+}
+
+/// Who most recently asked to preview a preset: a real mouse hover, or
+/// keyboard focus moving through the list. Whichever fired most recently
+/// owns the current preview -- a stale hover-exit or focus-loss event from a
+/// row that is no longer the owner must be a no-op, or it would cancel a
+/// newer owner's still-active preview (spec: hover and keyboard focus must
+/// not incorrectly cancel each other). Factored out as a pure, `Equatable`
+/// value so the arbitration rules are unit-testable without driving actual
+/// SwiftUI hover/focus events.
+enum PresetPreviewOwner: Equatable {
+    case none
+    case hover(UUID)
+    case keyboard(UUID)
+
+    func shouldCancel(onHoverExit id: UUID) -> Bool { self == .hover(id) }
+    func shouldCancel(onKeyboardExit id: UUID) -> Bool { self == .keyboard(id) }
+}
+
+/// Pure arrow-key index arithmetic behind `PresetBrowserView`'s `.onMoveCommand`
+/// handler, factored out for the same reason as `PresetPreviewOwner` above.
+enum PresetFocusNavigation {
+    static func nextIndex(current: Int?, direction: MoveCommandDirection, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let base = current ?? -1
+        let candidate: Int
+        switch direction {
+        case .up: candidate = base - 1
+        case .down: candidate = base + 1
+        default: return nil
+        }
+        guard candidate >= 0, candidate < count else { return nil }
+        return candidate
+    }
+}
+
 /// Spec §9.1: a collapsible Preset section in the editor inspector, with
 /// search, scope/favorite filtering, hover/keyboard preview, click-to-apply,
 /// and entry points for create/import/export.
@@ -16,6 +66,10 @@ struct PresetBrowserView: View {
     @State private var renamingItem: PresetListItem?
     @State private var renameText = ""
     @State private var exportError: UserAlert?
+    /// Round 3: which of hover or keyboard focus currently owns the transient
+    /// preview -- see `PresetPreviewOwner`.
+    @State private var previewOwner: PresetPreviewOwner = .none
+    @FocusState private var focusedPresetID: UUID?
 
     private var presetLibrary: PresetLibraryViewModel { model.presetLibrary }
     private var applicationMode: PresetApplicationMode {
@@ -135,12 +189,29 @@ struct PresetBrowserView: View {
     /// per `EditorViewModel.presetPreviewMessage`'s doc comment).
     @ViewBuilder
     private var previewDiagnostic: some View {
-        if let message = model.editor.presetPreviewMessage {
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(message)
+        // Round 3: a preview that genuinely changes the picture can also
+        // fail to render (e.g. hovering it over a photo whose decode fails
+        // outright). That failure is published separately from
+        // `presetPreviewMessage` -- see `EditorViewModel.previewRenderFailureMessage`
+        // -- specifically so it can sit *beside* the diagnostic instead of
+        // the modal `alert` covering this whole section.
+        if model.editor.presetPreviewMessage != nil || model.editor.previewRenderFailureMessage != nil {
+            VStack(alignment: .leading, spacing: 2) {
+                if let message = model.editor.presetPreviewMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(message)
+                }
+                if let failure = model.editor.previewRenderFailureMessage {
+                    Text(failure)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(failure)
+                }
+            }
         }
     }
 
@@ -156,13 +227,58 @@ struct PresetBrowserView: View {
                 PresetRow(
                     item: item,
                     applicationMode: applicationMode,
+                    copyDestination: PresetCopyDestination.destination(
+                        for: item.scope, hasLibraryScope: presetLibrary.hasLibraryScope
+                    ),
                     onRename: {
                         renameText = item.document.name
                         renamingItem = item
                     },
-                    onExport: { exportPreset(item) }
+                    onExport: { exportPreset(item) },
+                    onCopy: { destination in Task { await presetLibrary.copy(item, to: destination) } },
+                    onHoverChanged: { isHovering in handleHover(item, isHovering: isHovering) }
                 )
+                .focusable()
+                .focused($focusedPresetID, equals: item.id)
             }
+        }
+        // Round 3: arrow-key row-to-row navigation, so a preset's preview is
+        // reachable without a mouse at all (spec §9.1: "hover *or* keyboard
+        // selection"). `List`'s own selection would give this for free, but
+        // `list` lives inside `InspectorView`'s own outer `ScrollView` --
+        // nesting a second, independently-scrolling `List` in there is its
+        // own can of layout problems, so this is a deliberately small,
+        // local substitute: move `focusedPresetID` by one row per press.
+        .onMoveCommand { direction in
+            let items = presetLibrary.filteredItems
+            let currentIndex = focusedPresetID.flatMap { id in items.firstIndex { $0.id == id } }
+            guard let newIndex = PresetFocusNavigation.nextIndex(
+                current: currentIndex, direction: direction, count: items.count
+            ) else { return }
+            focusedPresetID = items[newIndex].id
+        }
+        .onChange(of: focusedPresetID) { oldValue, newValue in
+            if let id = newValue, let item = presetLibrary.filteredItems.first(where: { $0.id == id }) {
+                previewOwner = .keyboard(id)
+                model.editor.previewPreset(item.document, mode: applicationMode)
+            } else if let old = oldValue, previewOwner.shouldCancel(onKeyboardExit: old) {
+                previewOwner = .none
+                model.editor.cancelPresetPreview()
+            }
+        }
+    }
+
+    /// Shared by every row's `.onHover`, so it can arbitrate against keyboard
+    /// focus via `previewOwner` instead of each row deciding on its own
+    /// (round 3: hover and keyboard focus must not cancel each other out).
+    private func handleHover(_ item: PresetListItem, isHovering: Bool) {
+        guard model.editor.photo != nil else { return }
+        if isHovering {
+            previewOwner = .hover(item.id)
+            model.editor.previewPreset(item.document, mode: applicationMode)
+        } else if previewOwner.shouldCancel(onHoverExit: item.id) {
+            previewOwner = .none
+            model.editor.cancelPresetPreview()
         }
     }
 
@@ -192,10 +308,24 @@ private struct PresetRow: View {
     @EnvironmentObject private var model: LibraryViewModel
     let item: PresetListItem
     let applicationMode: PresetApplicationMode
+    /// `nil` when there's no sensible destination to copy this item to right
+    /// now (spec: only offer the *other* scope, and only when it actually
+    /// exists) -- mirrors `CreatePresetSheet`/`ImportPresetSheet`'s own rule
+    /// for their "This Library" segment.
+    let copyDestination: PresetScopeKind?
     let onRename: () -> Void
     let onExport: () -> Void
+    let onCopy: (PresetScopeKind) -> Void
+    let onHoverChanged: (Bool) -> Void
 
     private var presetLibrary: PresetLibraryViewModel { model.presetLibrary }
+
+    private func copyMenuTitle(for destination: PresetScopeKind) -> String {
+        switch destination {
+        case .mine: return L10n.t("Copy to My Presets")
+        case .library: return L10n.t("Copy to This Library")
+        }
+    }
 
     var body: some View {
         HStack {
@@ -231,6 +361,18 @@ private struct PresetRow: View {
             Menu {
                 Button(L10n.t("Rename…"), action: onRename)
                 Button(L10n.t("Export…"), action: onExport)
+                // Round 3 (Codex re-review, finding #3): `PresetLibraryViewModel.copy(_:to:)`
+                // existed and was tested end to end, but nothing in this view
+                // ever called it -- there was no way to reach it without a
+                // mouse, keyboard, or VoiceOver, from this menu or anywhere
+                // else. This is that entry point; only the scope that isn't
+                // already `item.scope` is ever offered, and only when it
+                // exists at all (`copyDestination` is `nil` otherwise).
+                if let destination = copyDestination {
+                    Button(copyMenuTitle(for: destination)) { onCopy(destination) }
+                        .help(copyMenuTitle(for: destination))
+                        .accessibilityLabel(copyMenuTitle(for: destination))
+                }
                 Divider()
                 Button(L10n.t("Delete"), role: .destructive) {
                     Task { await presetLibrary.delete(item) }
@@ -244,13 +386,8 @@ private struct PresetRow: View {
             .accessibilityLabel(L10n.t("More preset actions"))
         }
         .contentShape(Rectangle())
-        .onHover { isHovering in
-            if isHovering, model.editor.photo != nil {
-                model.editor.previewPreset(item.document, mode: applicationMode)
-            } else if !isHovering {
-                model.editor.cancelPresetPreview()
-            }
-        }
+        .onHover(perform: onHoverChanged)
         .padding(.vertical, 2)
+        .accessibilityHint(L10n.t("Use the up and down arrow keys to preview presets in this list"))
     }
 }

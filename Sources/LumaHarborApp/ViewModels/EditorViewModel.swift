@@ -112,6 +112,58 @@ final class EditorViewModel: ObservableObject {
     /// diagnostic right now" and it can never drift out of sync with it.
     var presetPreviewMessage: String? { Self.userMessage(for: presetPreviewDiagnostics) }
 
+    /// Round 3 (Codex re-review): a hover/keyboard preset preview used to
+    /// call `requestInteractivePreview()` unconditionally on every hover,
+    /// even when the preset resolved to exactly the committed adjustments
+    /// (nothing to render, only a diagnostic to show) or when the render it
+    /// triggered failed -- against a photo whose decode fails outright, that
+    /// meant every hover kicked off a fresh doomed decode and popped the
+    /// modal `alert` used for "the photo itself can't be shown", burying the
+    /// non-modal `presetPreviewMessage` underneath it and flooding the
+    /// screen with alerts as the pointer moved. The four properties below
+    /// are what let `previewPreset`/`cancelPresetPreview`/`handle(_:)` tell
+    /// "this decode was submitted while previewing, and is still the most
+    /// recent preview intent" apart from every other kind of render request,
+    /// so a preview-originated failure can be shown safely instead.
+
+    /// Bumped by every call that changes what the *current* preview intent
+    /// is -- a new hover (whether or not it actually submits a decode), or a
+    /// cancel -- independently of whether a decode was submitted. A
+    /// preview-context frame or failure tagged with an older intent must
+    /// never be applied, even if the scheduler itself still considers it
+    /// current: a no-op hover deliberately skips submitting a replacement
+    /// decode (see `previewPreset` below), so the scheduler never learns the
+    /// prior in-flight one is now stale. This is what makes "the
+    /// most-recently-hovered preset always wins" hold even across that case.
+    private var previewIntentVersion: UInt64 = 0
+
+    /// Which (scheduler generation, intent version) pair the most recently
+    /// *submitted* preview-context decode belongs to. `nil` whenever nothing
+    /// preview-related is in flight or expected.
+    private var previewRequestGeneration: (schedulerGeneration: UInt64, intentVersion: UInt64)?
+
+    /// True once a preview-context decode has actually landed and changed
+    /// what `previewImage` shows since the current preview started -- i.e.
+    /// the screen no longer matches the committed render. Only then does
+    /// `cancelPresetPreview()` need to submit a fresh decode to put the
+    /// committed render back; if the preview never produced a frame (still
+    /// in flight, a no-op, or itself failed and therefore never touched
+    /// `previewImage`), there is nothing on screen to restore, and
+    /// re-decoding anyway would just risk failing a second time for exactly
+    /// the photo that made the first attempt fail -- reproducing the same
+    /// alert flood one step later, on hover-*out* instead of hover-in.
+    private var previewImageReflectsAPreview = false
+
+    /// The exact, safe text for a preview-context render failure -- e.g. a
+    /// preset that genuinely changes the picture, hovered over a photo whose
+    /// decode fails. Never the modal `alert` (spec: a general/committed
+    /// render failure keeps using that; only a *preview's* failure moves
+    /// here), and never the underlying error's own detail (same rule as
+    /// `userMessage(for:)` below). A single overwritable value, not a list,
+    /// so repeated failures for the same or different hovered presets
+    /// de-duplicate onto one line instead of accumulating.
+    @Published private(set) var previewRenderFailureMessage: String?
+
     var adjustments: PhotoAdjustments { history.current }
 
     /// What the preview pipeline should actually render: a live preset
@@ -165,6 +217,10 @@ final class EditorViewModel: ObservableObject {
         self.whiteBalanceBaseline = nil
         self.previewedPresetAdjustments = nil
         self.presetPreviewDiagnostics = []
+        self.previewRenderFailureMessage = nil
+        self.previewIntentVersion += 1
+        self.previewRequestGeneration = nil
+        self.previewImageReflectsAPreview = false
         refreshUndoState()
 
         submitInteractivePreview()
@@ -187,6 +243,10 @@ final class EditorViewModel: ObservableObject {
         whiteBalanceBaseline = nil
         previewedPresetAdjustments = nil
         presetPreviewDiagnostics = []
+        previewRenderFailureMessage = nil
+        previewIntentVersion += 1
+        previewRequestGeneration = nil
+        previewImageReflectsAPreview = false
         refreshUndoState()
         if let scheduler = services?.previewScheduler {
             Task { await scheduler.cancelAll() }
@@ -237,9 +297,19 @@ final class EditorViewModel: ObservableObject {
     /// submission actually renders.
     func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
         guard photo != nil else { return }
+        previewIntentVersion += 1
         let result = applying(preset, mode: mode)
         previewedPresetAdjustments = result.adjustments
         presetPreviewDiagnostics = result.diagnostics
+        previewRenderFailureMessage = nil
+        // Round 3: nothing to render -- e.g. the only leaf this preset has
+        // was skipped for lack of a white-balance baseline, so the result is
+        // pixel-for-pixel the committed edit. Submitting a decode here would
+        // just be a second attempt at rendering something already on
+        // screen (or, against a photo whose decode fails outright, a second
+        // doomed attempt that pops another alert every time the pointer
+        // crosses this row).
+        guard result.adjustments != history.current else { return }
         requestInteractivePreview()
     }
 
@@ -249,6 +319,19 @@ final class EditorViewModel: ObservableObject {
         guard previewedPresetAdjustments != nil else { return }
         previewedPresetAdjustments = nil
         presetPreviewDiagnostics = []
+        previewRenderFailureMessage = nil
+        previewIntentVersion += 1
+        // Round 3: only submit a restoring decode if the preview actually
+        // got as far as changing what's on screen. If it never did --
+        // still in flight, itself a no-op, or the preview's own decode
+        // failed (never applied to `previewImage`, see `handle(_:)`) --
+        // `previewImage` already shows the committed render (or the same
+        // nothing it always showed), and re-decoding here would risk
+        // failing a second time against exactly the photo that made the
+        // preview fail in the first place, just shifted from hover-in to
+        // hover-out.
+        guard previewImageReflectsAPreview else { return }
+        previewImageReflectsAPreview = false
         requestInteractivePreview()
         scheduleSettledPreview()
     }
@@ -268,6 +351,9 @@ final class EditorViewModel: ObservableObject {
         let result = applying(preset, mode: mode)
         previewedPresetAdjustments = nil
         presetPreviewDiagnostics = []
+        previewRenderFailureMessage = nil
+        previewIntentVersion += 1
+        previewImageReflectsAPreview = false
         // `history.record` is a no-op (returns `false`, pushes no Undo entry,
         // leaves `current` untouched) whenever the preset's applicable
         // leaves resolve to exactly what's already committed -- e.g. a
@@ -353,6 +439,16 @@ final class EditorViewModel: ObservableObject {
     private func requestPreview(quality: PreviewQuality) {
         guard let photo, let sourceURL, let services else { return }
         isRendering = true
+        // Captured synchronously, before the `await` below -- this is
+        // exactly what distinguishes "a decode requested while a preset
+        // preview is active" from a normal/committed one, regardless of how
+        // this call was reached (directly, or via the interactive-preview
+        // throttle's delayed `Task`, by which point a hover may have already
+        // been cancelled or replaced -- either way, whatever
+        // `previewedPresetAdjustments`/`previewIntentVersion` are *right
+        // now* is the truth for this submission).
+        let isPreviewContext = previewedPresetAdjustments != nil
+        let intentVersion = previewIntentVersion
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),
             url: sourceURL,
@@ -360,7 +456,12 @@ final class EditorViewModel: ObservableObject {
             targetPixelDimension: previewPixelDimension,
             quality: quality
         )
-        Task { await services.previewScheduler.submit(request) }
+        Task {
+            let token = await services.previewScheduler.submit(request)
+            if isPreviewContext {
+                previewRequestGeneration = (schedulerGeneration: token.generation, intentVersion: intentVersion)
+            }
+        }
     }
 
     /// Submits an interactive preview, but never faster than
@@ -432,6 +533,19 @@ final class EditorViewModel: ObservableObject {
         }
     }
 
+    /// Whether `token` belongs to the decode most recently submitted while a
+    /// preset preview was active, *and* no newer preview intent (another
+    /// hover, a no-op hover, or a cancel) has superseded it since -- see the
+    /// doc comment on `previewIntentVersion`. `nil` means "not preview
+    /// context at all" (a normal/committed request); `false` means "was
+    /// preview context, but it's stale now and must be silently ignored".
+    private func previewContextRelevance(for generation: UInt64) -> Bool? {
+        guard let pending = previewRequestGeneration, pending.schedulerGeneration == generation else {
+            return nil
+        }
+        return pending.intentVersion == previewIntentVersion
+    }
+
     private func handle(_ event: PreviewEvent) {
         switch event {
         case .produced(let result):
@@ -440,6 +554,16 @@ final class EditorViewModel: ObservableObject {
             // photo currently open (spec §9).
             guard let photo, result.token.subject.rawValue == photo.id.rawValue else { return }
             guard result.token.generation > lastDisplayedGeneration else { return }
+            switch previewContextRelevance(for: result.token.generation) {
+            case .some(false):
+                // A newer preview intent (possibly a no-op with nothing to
+                // render) has since superseded this frame -- applying it now
+                // would show a stale preset preview instead of whatever the
+                // user is actually hovering/focusing right now.
+                return
+            case .some(true), .none:
+                break
+            }
             lastDisplayedGeneration = result.token.generation
             previewImage = result.image.cgImage
             previewQuality = result.quality
@@ -448,15 +572,48 @@ final class EditorViewModel: ObservableObject {
             }
             // An interactive frame means the settled render is still to come.
             isRendering = result.quality == .interactive
+            // Recomputed from this specific frame's own origin every time,
+            // rather than only ever set `true` -- a *non*-preview frame
+            // landing (e.g. `cancelPresetPreview`'s restore, or a real edit)
+            // correctly means the screen no longer reflects a preview.
+            previewImageReflectsAPreview = previewContextRelevance(for: result.token.generation) == true
 
         case .failed(let token, let error):
             guard let photo, token.subject.rawValue == photo.id.rawValue else { return }
             isRendering = false
+            switch previewContextRelevance(for: token.generation) {
+            case .some(true):
+                // Round 3: a preset preview that genuinely changes the
+                // picture, but the RAW decode it needed failed -- shown
+                // non-modally, right next to `presetPreviewMessage`, instead
+                // of the modal `alert` that would otherwise cover it and
+                // fire again on every hover.
+                previewRenderFailureMessage = Self.previewFailureMessage(for: error)
+                return
+            case .some(false):
+                // Stale: a newer preview intent already replaced this one:
+                // nothing to show, the newer intent's own outcome (or lack
+                // of one yet) is what's relevant now.
+                return
+            case .none:
+                break
+            }
             // A failed decode must not leave the previous photo's frame on
             // screen looking like a successful one (Gate E: no fake success).
+            // This is the *general* path -- opening a photo, an actual edit,
+            // or restoring the committed render after a preview -- so it
+            // keeps the modal alert: spec requires a real error stay visible
+            // here, not just the preview-only path above.
             previewImage = nil
             alert = UserAlert(title: L10n.t("Couldn't show this photo"), error: error)
         }
+    }
+
+    /// Safe, fixed text for a preview-context render failure -- never the
+    /// underlying error's own detail (same rule `userMessage(for:)` follows
+    /// for preset-application diagnostics).
+    private static func previewFailureMessage(for error: Error) -> String {
+        L10n.t("This preset's preview couldn't be rendered right now.")
     }
 
     // MARK: - Saving

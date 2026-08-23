@@ -264,3 +264,216 @@ final class EditorViewModelPreviewTests: AppViewModelTestCase {
         XCTAssertTrue(flushed, "Reset back to the saved value must not stay stuck behind a read-only save failure")
     }
 }
+
+// MARK: - Round 3: hover-preview must not flood modal alerts (Codex re-review)
+//
+// `previewPreset`/`cancelPresetPreview` used to call `requestInteractivePreview()`
+// unconditionally, even when the preset resolved to exactly the committed
+// adjustments (nothing to render) or when the decode it triggered failed --
+// against a photo whose decode always fails, every hover kicked off a fresh
+// doomed decode and popped the modal `alert` reserved for "the photo itself
+// can't be shown", burying `presetPreviewMessage` and flooding the screen
+// with alerts as the pointer moved across the preset list.
+
+extension EditorViewModelPreviewTests {
+    private func makeNoOpPreset() -> PresetDocument {
+        // Absolute Kelvin from an Adobe source, with no white-balance
+        // baseline available yet (this test suite's fake renderers never
+        // supply one) -- `PresetApplicator` skips the leaf entirely, so the
+        // result is pixel-for-pixel the committed edit: a diagnostic with
+        // nothing to render.
+        PresetDocument(
+            name: "No-Op Preset",
+            source: .adobeXMP(tool: nil, version: nil),
+            patch: AdjustmentPatch(basic: BasicAdjustmentPatch(temperature: 5500))
+        )
+    }
+
+    // 1. diagnostic-only no-op preview must not submit a decode.
+    func testDiagnosticOnlyNoOpPreviewSubmitsNoDecode() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let renderer = RecordingPreviewRenderer()
+        let services = try makeServices(previewRenderer: renderer)
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+        // Let open()'s own submissions (interactive + original reference)
+        // land before measuring, so they're not mistaken for the preview's.
+        try await Task.sleep(for: .milliseconds(150))
+        let callsBeforeHover = await renderer.calls.count
+
+        model.editor.previewPreset(makeNoOpPreset(), mode: .merge)
+        XCTAssertTrue(
+            model.editor.presetPreviewDiagnostics.contains { $0.code == "missingWhiteBalanceBaseline" },
+            "The skipped leaf must still be reported as a diagnostic"
+        )
+
+        try await Task.sleep(for: .milliseconds(150))
+        let callsAfterHover = await renderer.calls.count
+        XCTAssertEqual(
+            callsAfterHover, callsBeforeHover,
+            "A preview with nothing to render must not submit a new decode"
+        )
+    }
+
+    // 2. a hover that genuinely changes the picture, but fails to render,
+    // must never produce a modal alert -- and must not accumulate a second
+    // one on a second failing hover.
+    func testRapidFailingHoversNeverProduceAModalAlert() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let renderer = SelectivelyFailingPreviewRenderer(failingExposures: [2.0, 3.5])
+        let services = try makeServices(previewRenderer: renderer)
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+        await waitUntilAppCondition("open()'s own preview to land") {
+            await MainActor.run { model.editor.previewImage != nil }
+        }
+
+        model.editor.previewPreset(makePreset(exposure: 2.0), mode: .merge)
+        await waitUntilAppCondition("the first failing hover to be reported") {
+            await MainActor.run { model.editor.previewRenderFailureMessage != nil }
+        }
+        XCTAssertNil(model.editor.alert, "A preview render failure must never use the modal alert")
+
+        model.editor.cancelPresetPreview()
+        model.editor.previewPreset(makePreset(exposure: 3.5), mode: .merge)
+        await waitUntilAppCondition("the second failing hover to be reported") {
+            await MainActor.run { model.editor.previewRenderFailureMessage != nil }
+        }
+        XCTAssertNil(model.editor.alert, "A second failing hover must still never produce a modal alert")
+    }
+
+    // 3. the most-recently-hovered preset always wins, even when it's a
+    // no-op that submits nothing and an earlier real decode is still
+    // in-flight when it eventually (and irrelevantly) resolves.
+    func testTheLastHoveredPresetWinsEvenOverALateArrivingEarlierFailure() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let renderer = GatedPreviewRenderer(shouldFail: { $0 == 2.0 })
+        let services = try makeServices(previewRenderer: renderer)
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+
+        // open()'s own neutral submissions must not be blocked by the gate
+        // for exposure 0 -- release it up front.
+        await renderer.release(0.0)
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+        await waitUntilAppCondition("open()'s own preview to land") {
+            await MainActor.run { model.editor.previewImage != nil }
+        }
+
+        // Hover A: a real change, whose decode will hang until released.
+        model.editor.previewPreset(makePreset(exposure: 2.0), mode: .merge)
+        // Clear the 80ms throttle floor so B's hover submits (or, being a
+        // no-op, doesn't need to) independently rather than coalescing with A.
+        try await Task.sleep(for: .milliseconds(120))
+
+        // Hover B: a no-op -- submits nothing at all (test 1's guarantee),
+        // so the scheduler is never told A's in-flight decode is stale.
+        model.editor.previewPreset(makeNoOpPreset(), mode: .merge)
+        let messageAfterB = model.editor.presetPreviewMessage
+        XCTAssertNotNil(messageAfterB, "B's own diagnostic must be showing")
+        XCTAssertNil(model.editor.previewRenderFailureMessage, "Nothing has failed for B yet")
+
+        // Now let A's long-delayed decode finally resolve (as a failure).
+        await renderer.release(2.0)
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertNil(
+            model.editor.previewRenderFailureMessage,
+            "A's late failure must be discarded -- B is the current preview intent, not A"
+        )
+        XCTAssertEqual(
+            model.editor.presetPreviewMessage, messageAfterB,
+            "B's diagnostic must still be what's showing, undisturbed by A's late arrival"
+        )
+    }
+
+    // 4. cancelling a preview restores the committed render state and clears
+    // both kinds of transient message -- and, for a preview that never
+    // rendered anything (a no-op), must not submit a wasted decode either.
+    func testCancellingANoOpPreviewClearsStateWithoutSubmittingARestoreDecode() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let renderer = RecordingPreviewRenderer()
+        let services = try makeServices(previewRenderer: renderer)
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+        try await Task.sleep(for: .milliseconds(150))
+        let callsBeforeHover = await renderer.calls.count
+
+        model.editor.previewPreset(makeNoOpPreset(), mode: .merge)
+        XCTAssertNotNil(model.editor.presetPreviewMessage)
+
+        model.editor.cancelPresetPreview()
+        XCTAssertNil(model.editor.presetPreviewDiagnostics.first)
+        XCTAssertNil(model.editor.presetPreviewMessage, "Cancel must clear the diagnostic")
+        XCTAssertNil(model.editor.previewRenderFailureMessage, "Cancel must clear any preview failure too")
+
+        try await Task.sleep(for: .milliseconds(150))
+        let callsAfterCancel = await renderer.calls.count
+        XCTAssertEqual(
+            callsAfterCancel, callsBeforeHover,
+            "Cancelling a preview that never changed the screen must not submit a restoring decode"
+        )
+    }
+
+    // 5. a general (non-preview) render failure -- opening a photo whose
+    // decode fails outright -- must still surface through the modal alert,
+    // not be silently absorbed by the preview-failure path.
+    func testAGeneralOpenFailureStillShowsTheModalAlert() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let renderer = SelectivelyFailingPreviewRenderer(failingExposures: [0.0])
+        let services = try makeServices(previewRenderer: renderer)
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+
+        await waitUntilAppCondition("the general open failure to be reported") {
+            await MainActor.run { model.editor.alert != nil }
+        }
+        XCTAssertNil(
+            model.editor.previewRenderFailureMessage,
+            "A general open failure is not a preview failure and must not use that channel"
+        )
+    }
+}
