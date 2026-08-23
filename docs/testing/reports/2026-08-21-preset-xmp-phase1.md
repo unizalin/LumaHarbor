@@ -235,3 +235,47 @@ func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
 ### 11.4 環境限制記錄
 
 這台機器上有作用中的中文（注音）輸入法：AppleScript `System Events keystroke` 對這個 App 的 TextField 完全無效或會被污染成注音符號，仍然不可用。但 CGEvent 的 `keyboardSetUnicodeString`（Unicode 字串直接注入單一 key event，不經過實體鍵盤佈局／輸入法轉換）**證實可行**，只是這台機器上偶爾（原因未查清，推測與畫面/焦點狀態競爭有關）第一次嘗試會沒有反應，重試一次通常就成功——最終在情境 3（rename）與情境 4（create preset）都用同一支腳本成功打出正確文字並存檔。系統原生的「加入照片資料夾」／「重新連接」檔案選擇器對 CGEvent 合成滑鼠點擊／雙擊也同樣不穩定，改用鍵盤方向鍵（`Down`／`Up`）移動清單選取後可穩定運作。這些都記錄為這台機器 GUI 自動化的已知間歇性摩擦，不是這個 Preset／XMP 功能本身的缺陷；與 2026-08-21 post-mvp-follow-up-spec 交接狀態章節記錄的環境限制一致，本節在原記錄基礎上補充「並非恆定失敗、有可行重試手段」這一點。
+
+## 12. 交接狀態（2026-08-24，Codex 第三輪 re-review 進行中）
+
+> ⚠️ 這節是**中繼進度紀錄**，不是 Codex 交辦的「D. 修正驗收報告」最終產出——D 項要求的 §11 改寫（摘要、commit 列表、測試數、已知限制增刪、情境 1 狀態更新）必須等下面列的人工 smoke test 真的跑完、有截圖證據後才能動筆，現在還不能寫，寫了就是在編造未驗證的結果。這節只負責讓下一個接手的 session（不論是不是同一個工具）知道現在卡在哪、下一步做什麼。
+
+### 已完成、可信賴
+
+Codex 這輪 re-review 提出的 A／B／C 三項產品缺口，程式碼與單元測試**已經全部完成並 commit**：
+
+- commit `a161c6e`（`fix: hover-preview alert flood, preset scope copy UI, keyboard preview`）：
+  - **A**：`EditorViewModel` 新增 `previewIntentVersion`／`previewRequestGeneration`／`previewImageReflectsAPreview`／`previewRenderFailureMessage` 四個狀態，no-op preview 不再送 decode；preview-context 的 render 失敗改用非 modal、跟 `presetPreviewMessage` 並排的 `previewRenderFailureMessage`，不再用會蓋版的 modal `alert`；一般開啟照片／committed render 失敗仍保留 modal `alert`，沒被靜默化。
+  - **B**：`PresetRow` 的「⋯」選單新增「Copy to My Presets」／「Copy to This Library」，接上既有的 `PresetLibraryViewModel.copy(_:to:)`，失敗時走既有的 `presetLibrary.alert`（title/message/nextStep 齊全，這個方法本身沒改，只是這次接上了 UI）。
+  - **C**：`PresetRow` 加 `.focusable()`／`.focused(...)`，`PresetBrowserView` 加 `.onMoveCommand` 驅動跟 hover 相同的 `previewPreset`／`cancelPresetPreview`，新增 `PresetPreviewOwner` 仲裁 hover 與鍵盤 focus 互不誤取消。
+- 新增測試：`EditorViewModelPreviewTests`（5 個新案例，對應 Codex A 項列的 5 個 regression 要求，用新的 `GatedPreviewRenderer` fake 精確控制競態）、新檔案 `Tests/LumaHarborAppTests/PresetBrowserPresentationTests.swift`（14 個案例，測 `PresetCopyDestination`／`PresetPreviewOwner`／`PresetFocusNavigation` 抽出來的純邏輯）。
+- 驗證：`swift build -Xswiftc -strict-concurrency=complete` 乾淨編譯；`swift test -Xswiftc -strict-concurrency=complete` → **657 executed, 9 skipped, 0 failures**（比 round 2 的 638 多 19 個，全新增、全通過，沒有既有測試被改動）。這個數字是實際重跑出來的，不是延用舊資料。
+
+### 尚未完成——需要真人在真機上操作
+
+Codex 明確要求「產品修正與 smoke test 完成前，不得寫『四項全部通過』」，以下 5 項人工 smoke test **一項都還沒真的在畫面上驗證過**，只是程式碼邏輯上應該會這樣運作：
+
+1. diagnostic-only hover（例如 hover「Baseline Test」在 `_DSC1898-corrupt.ARW` 上）：非 modal 診斷文字要出現、移開要消失、**完全不能跳出 decode 失敗的 modal alert**。
+2. 會實際改變畫面的 preset hover 在解碼會失敗的照片上：非 modal 的 `previewRenderFailureMessage` 要出現，快速多次 hover 進出不能疊出一長串 modal alert。
+3. 鍵盤方向鍵在 Preset 清單上移動 focus 要觸發跟 hover 一樣的 preview，移出清單要取消、畫面恢復。
+4. Preset 的「Copy to This Library」／「Copy to My Presets」在可寫入目的地要成功。
+5. Copy 到唯讀 scope 要顯示 title/message/nextStep 齊全的 alert，且來源那份沒被刪除。
+
+現成可用、不用重建的素材：Corrupt-Test 照片庫（`_DSC1896-good.ARW`／`_DSC1897-good.ARW` 正常、`_DSC1898-corrupt.ARW` 刻意做壞）、ReadOnly-Test 照片庫（永久唯讀，不要對它 chmod）、既有 preset「Baseline Test」「ReadOnlyTest」「ScopeTest」。GUI 自動化的具體技巧（截圖要用 `screencapture -l<CGWindowID>` 鎖定單一視窗、點擊要把 activate 跟 CGEvent 點擊包在同一支腳本、文字輸入用 `keyboardSetUnicodeString`、系統檔案選擇器面板要用方向鍵而非滑鼠點擊）在前幾輪已經反覆驗證過，見 §11.4。
+
+### 為什麼現在停在這裡
+
+這一輪修正過程中連續遇到多次 session/週額度中斷（先是產品修正做到一半中斷過一次，已安全 commit 保住進度；接著要跑 smoke test 的 fork 才剛開始就打到每週額度上限）。額度重置後，重新啟動 App 打算繼續跑 smoke test 時，前景視窗已經是使用者的 Chrome（代表使用者當下在用電腦做別的事），連續多次 `screencapture` 對 LumaHarbor 視窗失敗。為了不繼續霸占使用者螢幕、干擾其他工作，主動停下 GUI 自動化，先把狀態寫回這份文件，等使用者確認方便繼續的時間點再接續。
+
+### Git 狀態（2026-08-24 寫下這節當下）
+
+```
+On branch claude/preset-xmp-compatibility
+## claude/preset-xmp-compatibility...origin/claude/preset-xmp-compatibility [ahead 3]
+```
+
+（本節 commit 前；commit 後會變成 ahead 4。）HEAD 為 `a161c6e`。已 push 到 origin 的最後一個 commit 仍是 `cfe9b54`；`8518dbc`／`6df75a7`／`a161c6e`／本節這則 docs commit 都還在本機，**尚未 push**。main 完全沒被觸碰。未開始 Phase 2。未 amend 任何既有 commit。Corrupt-Test 目前是 `drwxr-xr-x`（正常可寫，沒有殘留唯讀狀態）；ReadOnly-Test 維持原本的 `dr-xr-xr-x`。照片庫清單裡沒有任何使用者個人資料夾殘留。
+
+### 下一步
+
+真人確認方便的時間點後，直接照上面「尚未完成」列的 5 項跑一遍（可以真人手動操作，也可以請 Claude 用已經驗證過的 GUI 自動化技巧代跑），全部通過後才能動筆改寫 §11（也就是 Codex 交辦的「D」項），並建立那則獨立的 docs commit。在那之前，§11.1 的摘要維持現狀（不寫「全部完成」），不要因為這節記錄了「程式碼已修好」就誤判成驗收已經過關。
