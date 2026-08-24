@@ -11,7 +11,7 @@
 | 對應 plan | `docs/superpowers/plans/2026-08-21-preset-xmp-phase1.md` |
 | 分支 | `claude/preset-xmp-compatibility` |
 | Phase 1 起點 | `18b8307`（分支起點，緊接 `c70ecc3` 之後） |
-| 整體結論 | Gate A、D（自動化部分）通過；Gate B 的真實 Adobe 匯入／匯出 smoke test **未完成**（環境限制，見 §4）；Gate D 的 APFS／exFAT 人工項目因本機沒有對應測試目錄／已掛載 exFAT 磁碟而**未執行**（見 §5）。核心模型、codec、mapping、repository、editor 整合與 UI 狀態機皆有自動化測試覆蓋且全數通過。 |
+| 整體結論 | Gate A、D（自動化部分）通過；Gate B 的真實 Adobe 匯入／匯出 smoke test **未完成**（環境限制，見 §4）；Gate D 的 APFS／exFAT 人工項目因本機沒有對應測試目錄／已掛載 exFAT 磁碟而**未執行**（見 §5）。核心模型、codec、mapping、repository、editor 整合與 UI 狀態機皆有自動化測試覆蓋且全數通過。Codex 第三輪 re-review（commit `a161c6e`）的人工 smoke test 已於 2026-08-24 執行完畢：Copy-to-scope 的兩個情境（§11.5 情境 4／5）通過；鍵盤 focus 導覽機制驗證通過但視覺 parity 無法完全確認（情境 3）；hover-preview 的兩個情境（情境 1／2）因 §11.6 新發現的「解碼失敗 alert 關閉後畫面永久卡在載入中」bug 而**未能驗證**，Phase 2 開始前必須先修這個新 bug 並重測。 |
 
 ## 1. Commits
 
@@ -167,6 +167,7 @@ Scripts/run-mvp-acceptance.zsh
 | 建立 Preset 的欄位勾選 UI 以「群組」而非逐一 leaf 呈現 | 例如 HSL 一個色版的 hue/saturation/luminance 三個 leaf 共用一個核取方塊；spec §9.2 沒有規定必須逐 leaf，但若日後需要更細粒度的勾選，需要擴充 `PresetFieldGroup` | 產品決策空間，非 bug |
 | Preset 群組路徑輸入為單一文字欄位（以 `/` 分隔） | 尚未做拖曳排序或樹狀選擇 UI | UX 精簡化，功能完整 |
 | 一般開發環境沒有 GUI／Instruments 存取權限 | 沿用既有 MVP 報告已記錄的限制，與本 Phase 無關 | 沿用既有已知限制 |
+| 解碼失敗的初次 alert 關閉後，畫面卡在「正在解碼 RAW...」永遠不恢復 | 2026-08-24 人工 smoke test 新發現，見 §11.6；懷疑與 `a161c6e` 引入的 preview 世代計數機制有關，未確認根因、未動程式碼 | 阻塞：Phase 2 前必須修復並重測情境 1／2（§11.5） |
 
 ## 9. Gate 結論
 
@@ -177,8 +178,11 @@ Scripts/run-mvp-acceptance.zsh
 | B（Adobe smoke test） | 真實 Lightroom/ACR 匯入／匯出驗證 | ☐ 未完成（見 §4） |
 | D（自動化回歸） | strict build／完整測試／`RawFixtureTests` | ☑ 通過（見 §3） |
 | D（APFS／exFAT 人工項目） | library preset 建立／讀取／改名／搬移／唯讀／拔除 | ☐ 未執行（見 §5） |
+| Codex 第三輪 re-review（A／B／C，見 §12） | Copy-to-scope 人工驗證（§11.5 情境 4／5） | ☑ 通過 |
+| Codex 第三輪 re-review（A／B／C，見 §12） | 鍵盤 focus 導覽人工驗證（§11.5 情境 3） | ☑ 機制通過，視覺 parity 未能完全確認 |
+| Codex 第三輪 re-review（A／B／C，見 §12） | hover-preview 不再洪水式跳 alert 人工驗證（§11.5 情境 1／2） | ☐ **未能驗證**（被 §11.6 新發現的卡住 bug 擋住） |
 
-**本階段完成後，依交接規則先交給 Codex review；Gate B 的 Adobe smoke test 與 Gate D 的 APFS／exFAT 人工項目待補，Critical／Important 問題（若有）清空、且上述兩項至少其一有明確結論後，才開始 Phase 2。**
+**本階段完成後，依交接規則先交給 Codex review；Gate B 的 Adobe smoke test 與 Gate D 的 APFS／exFAT 人工項目待補，§11.6 記錄的新 bug 必須修復並重新驗證情境 1／2，Critical／Important 問題（若有）清空、且上述項目有明確結論後，才開始 Phase 2。**
 
 ## 10. Git 狀態
 
@@ -236,46 +240,54 @@ func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
 
 這台機器上有作用中的中文（注音）輸入法：AppleScript `System Events keystroke` 對這個 App 的 TextField 完全無效或會被污染成注音符號，仍然不可用。但 CGEvent 的 `keyboardSetUnicodeString`（Unicode 字串直接注入單一 key event，不經過實體鍵盤佈局／輸入法轉換）**證實可行**，只是這台機器上偶爾（原因未查清，推測與畫面/焦點狀態競爭有關）第一次嘗試會沒有反應，重試一次通常就成功——最終在情境 3（rename）與情境 4（create preset）都用同一支腳本成功打出正確文字並存檔。系統原生的「加入照片資料夾」／「重新連接」檔案選擇器對 CGEvent 合成滑鼠點擊／雙擊也同樣不穩定，改用鍵盤方向鍵（`Down`／`Up`）移動清單選取後可穩定運作。這些都記錄為這台機器 GUI 自動化的已知間歇性摩擦，不是這個 Preset／XMP 功能本身的缺陷；與 2026-08-21 post-mvp-follow-up-spec 交接狀態章節記錄的環境限制一致，本節在原記錄基礎上補充「並非恆定失敗、有可行重試手段」這一點。
 
-## 12. 交接狀態（2026-08-24，Codex 第三輪 re-review 進行中）
+### 11.5 Round 3（commit `a161c6e` 修正後）人工 Smoke Test（2026-08-24）
 
-> ⚠️ 這節是**中繼進度紀錄**，不是 Codex 交辦的「D. 修正驗收報告」最終產出——D 項要求的 §11 改寫（摘要、commit 列表、測試數、已知限制增刪、情境 1 狀態更新）必須等下面列的人工 smoke test 真的跑完、有截圖證據後才能動筆，現在還不能寫，寫了就是在編造未驗證的結果。這節只負責讓下一個接手的 session（不論是不是同一個工具）知道現在卡在哪、下一步做什麼。
+對應 §12 記錄的 Codex 第三輪 re-review A／B／C 三項修正，交接時列出的 5 項人工 smoke test 結果如下。工具鏈與機器同 §2；受測 build 為本輪重新組裝的 debug `.app`（`Scripts/build-app-bundle.sh debug`）。GUI 自動化沿用 §11.4 記錄的技巧，並新增一項教訓：`NSRunningApplication.activate()` 連續呼叫幾次後會不穩定、前景視窗可能被搶回終端機，改成每次操作前用 `open <bundle>` 重新提升前景視窗，穩定許多。
 
-### 已完成、可信賴
+| # | 情境 | 結果 | 備註 |
+|---|---|---|---|
+| 1 | diagnostic-only hover（Baseline Test on 損毀的 `_DSC1898-corrupt.ARW`） | ☐ **測不出來——被 §11.6 記錄的新 bug 擋住** | 選取該照片一定先跳出「無法顯示這張照片」的 modal alert（既有、預期行為，不是本輪修正的範圍，見 §12 對「一般開啟照片仍保留 modal」的說明）。按下該 alert 的「好」關閉後，畫面卡在「正在解碼 RAW...」永遠不恢復（見 §11.6），無法進入「非 modal 診斷文字出現／移開消失」要驗證的穩定狀態。過程中沒有觀察到新的 alert 重複洪水跳出，這點與 round 2 修正前的行為不同，但因為卡在載入畫面，不能反過來當作「情境 1 已通過」的證據 |
+| 2 | 會改變畫面的 preset hover 在解碼失敗的照片上 | ☐ **同上，被同一個新 bug 擋住** | 需要先達到情境 1 描述的穩定失敗狀態才能測試，未能達成 |
+| 3 | 鍵盤方向鍵在 Preset 清單移動 focus | ☑ 導覽機制驗證通過；跟 hover 的 preview 是否為同一路徑**未能完全確認** | 在 Sony-ARW 一張正常解碼的照片上：點擊「搜尋 Preset」欄位後按 Tab，focus 移到清單第一列（Baseline Test，出現藍色 focus 外框）；按方向鍵向下，focus 正確移到下一列（ReadOnlyTest）；點擊畫布把 focus 移出清單後，focus 外框消失，畫面無殘留。導覽機制本身正常。但這個環境唯一可用的兩個全域 preset（`Baseline Test` 溫度設為 5500K、`ReadOnlyTest` 的 tint=0）對這張測試照片剛好都是視覺上的 no-op（tint 本來就是 0；5500K 疑似等於這張照片的原生基準值），調整面板的滑桿依設計只反映已提交狀態、不反映 preview，因此無法從畫面上分辨「方向鍵是否真的跟 hover 一樣觸發了 `previewPreset()`」，只能確認導覽本身沒有壞、也沒有誤觸發任何 alert |
+| 4 | Copy to This Library（可寫入目的地） | ☑ 通過 | 在 Sony-ARW 照片庫、對 `Baseline Test` 按「⋯」→「Copy to This Library」：清單立即多出一筆同名 `Baseline Test`（library-scope 複本），沒有跳出任何 alert，操作過程沒有卡頓 |
+| 5 | Copy 到唯讀 scope | ☑ 通過 | 切到 `ReadOnly-Test`（唯讀磁碟）、開一張正常照片、對 `Baseline Test` 按「⋯」→「Copy to This Library」：跳出 alert，標題「無法複製這個 Preset」、內容「This drive is read-only, so LumaHarbor can't save the preset there.」、nextStep「Unlock the drive or choose a different scope, then retry.」，title/message/nextStep 齊全；來源清單裡 `Baseline Test`／`ReadOnlyTest` 兩筆都還在，沒有被刪除 |
 
-Codex 這輪 re-review 提出的 A／B／C 三項產品缺口，程式碼與單元測試**已經全部完成並 commit**：
+結論：B 項（Copy UI）在可寫入與唯讀兩種情境都驗證通過（情境 4／5）；C 項（鍵盤導覽）機制驗證通過，但視覺 parity 因這個環境可用的 preset 素材剛好都是 no-op 而無法百分之百確認；A 項（hover-preview 不再洪水式跳 alert）**無法驗證**，因為情境 1／2 依賴的損毀照片在關閉初次失敗 alert 後會卡進 §11.6 記錄的新 bug，根本到不了要測試的穩定狀態。**Phase 2 開始前必須先修好 §11.6 的新 bug，再重新完整跑一次情境 1／2，不能用「這次沒看到 alert 洪水」當作情境 1／2 已經通過的證據。**
+
+### 11.6 新發現：解碼失敗的初次 alert 關閉後，畫面卡在「正在解碼 RAW...」永遠不恢復
+
+**這不是自動化操作問題，是可重現的產品 bug：**
+
+在 Corrupt-Test 照片庫選取 `_DSC1898-corrupt.ARW`（一張刻意做壞的 RAW）：
+
+1. 選取當下必定觸發一次解碼，失敗後跳出 modal alert：標題「無法顯示這張照片」、內容「這個 RAW 檔案似乎已經損壞。」／「試著從記憶卡重新複製這個檔案。」——這是既有、預期的行為，不屬於本輪修正範圍。
+2. 按下 alert 的「好」關閉後，畫面**立即**（不到 1 秒）顯示「正在解碼 RAW...」的載入動畫。
+3. 這個載入動畫**不會結束**：實測靜置 30 秒以上（多次重現，含完全不移動滑鼠的對照組），CPU 使用率維持在 0%（`ps aux` 確認 App 進程沒有在忙），既不會再跳出第二次 alert、也不會回到縮圖列已經顯示的「⚠️ 這個 RAW 檔案似乎已經損壞」靜態失敗狀態，就是卡住。
+4. 這個狀態下滑鼠 hover 該照片的 preset 列表沒有任何可觀察的反應（無診斷文字、無 alert）——但因為畫面本身就卡在載入中，這個「沒反應」無法用來證明 hover-preview 修正本身有效或無效，只能證明使用者會看到一個一直轉圈、永遠好不了的畫面。
+5. 唯一能脫離這個卡住狀態的方法是切換到別的照片庫（或別張照片）再切回來；重新選取同一張損毀照片會乾淨重現整個流程（步驟 1-3 每次都一樣），不是偶發。
+
+**影響範圍**：任何選取後會先解碼失敗、使用者按下「好」關閉 alert 的照片，之後都會卡在永久載入畫面，直到手動切換照片／照片庫。懷疑跟 `a161c6e` 引入的 `previewIntentVersion`／`previewRequestGeneration` 世代計數機制有關——推測關閉 alert 的動作觸發了一次新的世代／重新解碼請求，但這次失敗的結果被某個世代比對邏輯判定為「過期」而被丟棄，UI 因此永遠停在載入中，沒有任何路徑把載入狀態設回失敗。這是**推測的根因**，本次沒有動任何程式碼，需要下一輪由能讀程式碼的 session 進去確認 `EditorViewModel` 與其 preview-render 世代比對邏輯。
+
+**建議**：Phase 1 合入前必須修好這個問題，且修完後要重新完整跑一次 §11.5 的情境 1／2，因為目前完全無法排除「hover-preview alert 洪水」的舊 bug 只是被這個新的「卡住」蓋住、沒有真的解決；也不能排除兩者是同一個世代計數機制下的兩種症狀。
+
+## 12. Codex 第三輪 re-review 修正（commit `a161c6e`）
+
+Codex 這輪 re-review 提出的 A／B／C 三項產品缺口，程式碼與單元測試已經全部完成並 commit：
 
 - commit `a161c6e`（`fix: hover-preview alert flood, preset scope copy UI, keyboard preview`）：
   - **A**：`EditorViewModel` 新增 `previewIntentVersion`／`previewRequestGeneration`／`previewImageReflectsAPreview`／`previewRenderFailureMessage` 四個狀態，no-op preview 不再送 decode；preview-context 的 render 失敗改用非 modal、跟 `presetPreviewMessage` 並排的 `previewRenderFailureMessage`，不再用會蓋版的 modal `alert`；一般開啟照片／committed render 失敗仍保留 modal `alert`，沒被靜默化。
   - **B**：`PresetRow` 的「⋯」選單新增「Copy to My Presets」／「Copy to This Library」，接上既有的 `PresetLibraryViewModel.copy(_:to:)`，失敗時走既有的 `presetLibrary.alert`（title/message/nextStep 齊全，這個方法本身沒改，只是這次接上了 UI）。
   - **C**：`PresetRow` 加 `.focusable()`／`.focused(...)`，`PresetBrowserView` 加 `.onMoveCommand` 驅動跟 hover 相同的 `previewPreset`／`cancelPresetPreview`，新增 `PresetPreviewOwner` 仲裁 hover 與鍵盤 focus 互不誤取消。
 - 新增測試：`EditorViewModelPreviewTests`（5 個新案例，對應 Codex A 項列的 5 個 regression 要求，用新的 `GatedPreviewRenderer` fake 精確控制競態）、新檔案 `Tests/LumaHarborAppTests/PresetBrowserPresentationTests.swift`（14 個案例，測 `PresetCopyDestination`／`PresetPreviewOwner`／`PresetFocusNavigation` 抽出來的純邏輯）。
-- 驗證：`swift build -Xswiftc -strict-concurrency=complete` 乾淨編譯；`swift test -Xswiftc -strict-concurrency=complete` → **657 executed, 9 skipped, 0 failures**（比 round 2 的 638 多 19 個，全新增、全通過，沒有既有測試被改動）。這個數字是實際重跑出來的，不是延用舊資料。
+- 驗證：`swift build -Xswiftc -strict-concurrency=complete` 乾淨編譯；`swift test -Xswiftc -strict-concurrency=complete` → **657 executed, 9 skipped, 0 failures**（比 round 2 的 638 多 19 個，全新增、全通過，沒有既有測試被改動）。
 
-### 尚未完成——需要真人在真機上操作
+以下 5 項人工 smoke test 的結果記錄在 §11.5／§11.6。
 
-Codex 明確要求「產品修正與 smoke test 完成前，不得寫『四項全部通過』」，以下 5 項人工 smoke test **一項都還沒真的在畫面上驗證過**，只是程式碼邏輯上應該會這樣運作：
-
-1. diagnostic-only hover（例如 hover「Baseline Test」在 `_DSC1898-corrupt.ARW` 上）：非 modal 診斷文字要出現、移開要消失、**完全不能跳出 decode 失敗的 modal alert**。
-2. 會實際改變畫面的 preset hover 在解碼會失敗的照片上：非 modal 的 `previewRenderFailureMessage` 要出現，快速多次 hover 進出不能疊出一長串 modal alert。
-3. 鍵盤方向鍵在 Preset 清單上移動 focus 要觸發跟 hover 一樣的 preview，移出清單要取消、畫面恢復。
-4. Preset 的「Copy to This Library」／「Copy to My Presets」在可寫入目的地要成功。
-5. Copy 到唯讀 scope 要顯示 title/message/nextStep 齊全的 alert，且來源那份沒被刪除。
-
-現成可用、不用重建的素材：Corrupt-Test 照片庫（`_DSC1896-good.ARW`／`_DSC1897-good.ARW` 正常、`_DSC1898-corrupt.ARW` 刻意做壞）、ReadOnly-Test 照片庫（永久唯讀，不要對它 chmod）、既有 preset「Baseline Test」「ReadOnlyTest」「ScopeTest」。GUI 自動化的具體技巧（截圖要用 `screencapture -l<CGWindowID>` 鎖定單一視窗、點擊要把 activate 跟 CGEvent 點擊包在同一支腳本、文字輸入用 `keyboardSetUnicodeString`、系統檔案選擇器面板要用方向鍵而非滑鼠點擊）在前幾輪已經反覆驗證過，見 §11.4。
-
-### 為什麼現在停在這裡
-
-這一輪修正過程中連續遇到多次 session/週額度中斷（先是產品修正做到一半中斷過一次，已安全 commit 保住進度；接著要跑 smoke test 的 fork 才剛開始就打到每週額度上限）。額度重置後，重新啟動 App 打算繼續跑 smoke test 時，前景視窗已經是使用者的 Chrome（代表使用者當下在用電腦做別的事），連續多次 `screencapture` 對 LumaHarbor 視窗失敗。為了不繼續霸占使用者螢幕、干擾其他工作，主動停下 GUI 自動化，先把狀態寫回這份文件，等使用者確認方便繼續的時間點再接續。
-
-### Git 狀態（2026-08-24 寫下這節當下）
+### Git 狀態（2026-08-24，本節與 §11.5／§11.6 commit 前）
 
 ```
 On branch claude/preset-xmp-compatibility
-## claude/preset-xmp-compatibility...origin/claude/preset-xmp-compatibility [ahead 3]
+## claude/preset-xmp-compatibility...origin/claude/preset-xmp-compatibility [ahead 4]
 ```
 
-（本節 commit 前；commit 後會變成 ahead 4。）HEAD 為 `a161c6e`。已 push 到 origin 的最後一個 commit 仍是 `cfe9b54`；`8518dbc`／`6df75a7`／`a161c6e`／本節這則 docs commit 都還在本機，**尚未 push**。main 完全沒被觸碰。未開始 Phase 2。未 amend 任何既有 commit。Corrupt-Test 目前是 `drwxr-xr-x`（正常可寫，沒有殘留唯讀狀態）；ReadOnly-Test 維持原本的 `dr-xr-xr-x`。照片庫清單裡沒有任何使用者個人資料夾殘留。
-
-### 下一步
-
-真人確認方便的時間點後，直接照上面「尚未完成」列的 5 項跑一遍（可以真人手動操作，也可以請 Claude 用已經驗證過的 GUI 自動化技巧代跑），全部通過後才能動筆改寫 §11（也就是 Codex 交辦的「D」項），並建立那則獨立的 docs commit。在那之前，§11.1 的摘要維持現狀（不寫「全部完成」），不要因為這節記錄了「程式碼已修好」就誤判成驗收已經過關。
+已 push 到 origin 的最後一個 commit 仍是 `cfe9b54`；`8518dbc`／`6df75a7`／`a161c6e`／`5c4d91f`／本次這則 docs commit 都還在本機，**尚未 push**。main 完全沒被觸碰。未開始 Phase 2。未 amend 任何既有 commit。Corrupt-Test 目前是 `drwxr-xr-x`（正常可寫，沒有殘留唯讀狀態）；ReadOnly-Test 維持原本的 `dr-xr-xr-x`。照片庫清單裡沒有任何使用者個人資料夾殘留。
