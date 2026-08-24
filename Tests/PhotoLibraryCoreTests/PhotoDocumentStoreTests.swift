@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import PhotoLibraryCore
@@ -21,7 +22,6 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
     private func makeStore(
         subdirectory: String = "Store",
         copyFile: (@Sendable (URL, URL) throws -> Void)? = nil,
-        now: (@Sendable () -> Date)? = nil,
         checkCancellation: (@Sendable () throws -> Void)? = nil,
         writeRecordData: (@Sendable (Data, URL, FileManager) throws -> Void)? = nil
     ) -> (store: PhotoDocumentStore, rootURL: URL) {
@@ -29,11 +29,41 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let store = PhotoDocumentStore(
             rootURL: rootURL,
             copyFile: copyFile,
-            now: now ?? { Date() },
             checkCancellation: checkCancellation ?? { try Task.checkCancellation() },
             writeRecordData: writeRecordData
         )
         return (store, rootURL)
+    }
+
+    /// Directly acquires the same root-level `flock` `PhotoDocumentStore`
+    /// uses, bypassing the store entirely. The lock is a kernel object keyed
+    /// by path, so a second `open()` of the same path genuinely contends
+    /// with whatever `PhotoDocumentStore.importCopy` or
+    /// `reconcileOrphanedImports` holds — this is how these tests simulate
+    /// "another store instance/process is mid-import" deterministically,
+    /// without any real concurrency, sleeping, or thread blocking: since
+    /// acquisition is non-blocking on both sides, holding this from the test
+    /// and then calling the store synchronously is enough to observe real
+    /// lock contention.
+    private final class RawImportLockHandle {
+        private let fileDescriptor: Int32
+
+        init?(rootURL: URL) {
+            try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+            let lockURL = rootURL.appendingPathComponent(PhotoDocumentStore.importLockFilename)
+            let fileDescriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+            guard fileDescriptor >= 0 else { return nil }
+            guard flock(fileDescriptor, LOCK_EX | LOCK_NB) == 0 else {
+                close(fileDescriptor)
+                return nil
+            }
+            self.fileDescriptor = fileDescriptor
+        }
+
+        func release() {
+            flock(fileDescriptor, LOCK_UN)
+            close(fileDescriptor)
+        }
     }
 
     // MARK: - Assertions
@@ -195,16 +225,14 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         }
     }
 
-    func testImportCopyRejectsASourceModifiedAfterVerification() async throws {
+    func testImportCopyRejectsASourceModifiedWithDifferentSizeAfterVerification() async throws {
         let sourceURL = try makeSourceFile(byteCount: 4_096)
         // For a file under the chunk size the fixed call sequence is: #1
         // pre-copyFile, #2 post-copyFile, #3/#4 comparison chunks, #5 right
-        // after the comparison passes (see importCopy's documentation) —
-        // exactly the window the review's TOCTOU report describes.
+        // after the comparison passes and strictly before `finalSnapshot` is
+        // captured (see importCopy's documentation) — exactly the window
+        // the review's TOCTOU report describes.
         let trigger = MutateSourceOnCallTrigger(mutateAtCall: 5) {
-            // A different size guarantees the size-based TOCTOU check
-            // catches it regardless of filesystem modification-date
-            // granularity.
             try Data(repeating: 0x99, count: 5_000).write(to: sourceURL)
         }
         let (store, rootURL) = makeStore(checkCancellation: { try trigger.checkCancellation() })
@@ -218,6 +246,59 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
 
         assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents"))
         assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+    }
+
+    /// E (rejection half): the size-changing variant above alone wouldn't
+    /// prove the check inspects more than file size. Same size, different
+    /// bytes, with the modification date forced to a clearly different
+    /// value so this doesn't depend on filesystem timestamp-write
+    /// granularity.
+    func testImportCopyRejectsASourceModifiedWithTheSameSizeAfterVerification() async throws {
+        let sourceURL = try makeSourceFile(byteCount: 4_096, pattern: 0x5A)
+        let trigger = MutateSourceOnCallTrigger(mutateAtCall: 5) {
+            try Data(repeating: 0x99, count: 4_096).write(to: sourceURL)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(3_600)],
+                ofItemAtPath: sourceURL.path
+            )
+        }
+        let (store, rootURL) = makeStore(checkCancellation: { try trigger.checkCancellation() })
+
+        do {
+            _ = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+            XCTFail("Expected a same-size, different-content source modification to be rejected")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .sourceModifiedDuringImport)
+        }
+
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents"))
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+    }
+
+    /// E (the actual fix): mutates the source strictly *after* the point
+    /// where this design stops reading it — `finalSnapshot` has already
+    /// been captured and compared, and both fingerprints below are derived
+    /// from the staging copy alone from here on, never re-read from the
+    /// source. A same-size, different-content mutation here (so this isn't
+    /// a no-op size check passing by coincidence) must have no effect at
+    /// all on the committed document: this is precisely the window the
+    /// previous fix closed only partially by still re-reading the source
+    /// for `sourceFingerprint` after this point.
+    func testImportCopyIsUnaffectedBySourceMutationAfterFinalVerification() async throws {
+        let sourceURL = try makeSourceFile(byteCount: 4_096, pattern: 0x5A)
+        // Call #6 is right before the move — after `finalSnapshot` has
+        // already been captured, compared, and both fingerprints computed
+        // from staging (see importCopy's documentation).
+        let trigger = MutateSourceOnCallTrigger(mutateAtCall: 6) {
+            try Data(repeating: 0x99, count: 4_096).write(to: sourceURL)
+        }
+        let (store, _) = makeStore(checkCancellation: { try trigger.checkCancellation() })
+
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+
+        XCTAssertEqual(document.sourceFingerprint, document.workingFingerprint)
+        let recomputed = try FingerprintCalculator.fingerprint(forFileAt: document.workingURL)
+        XCTAssertEqual(recomputed, document.workingFingerprint)
     }
 
     func testImportCopyWorkingFingerprintMatchesTheWorkingURLItself() async throws {
@@ -407,50 +488,124 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try Data(contentsOf: reloaded.workingURL), try Data(contentsOf: sourceURL))
     }
 
-    /// The reconciliation contract is defined entirely by what's on disk — a
-    /// transaction marker and, separately, a record — never by any in-memory
-    /// actor state. A store instance that fabricates a marker directly is
-    /// therefore behaviorally indistinguishable, for this purpose, from a
-    /// second, genuinely concurrent `PhotoDocumentStore` instance that wrote
-    /// it while importing against the same root: either way,
-    /// `reconcileOrphanedImports()` reasons about it purely from the marker
-    /// and record it finds, never from any shared memory with whatever
-    /// process produced them.
-    func testReconcileOrphanedImportsProtectsAnImportStillActiveFromAnotherStoreInstance() async throws {
-        let rootURL = temporaryDirectory.appendingPathComponent("Store", isDirectory: true)
-        let importStartedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let id = UUID()
-        let directory = rootURL.appendingPathComponent("Documents/\(id.uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try SidecarCoding.encode(ImportTransactionMarker(startedAt: importStartedAt))
-            .write(to: directory.appendingPathComponent(PhotoDocumentStore.transactionMarkerFilename))
-        try Data(repeating: 0x44, count: 64).write(to: directory.appendingPathComponent(".importing"))
+    // MARK: - 3b. Root import lock: real cross-instance contention
 
-        // A second, independent instance checking in shortly after the
-        // transaction began — well inside the "still active" window.
-        let (reconciler, _) = makeStore(now: { importStartedAt.addingTimeInterval(5) })
-        let report = try await reconciler.reconcileOrphanedImports()
+    /// A: lock contention. `reconcileOrphanedImports` cannot even start
+    /// scanning while another holder — another store instance, another
+    /// process, or (simulated here) this raw handle — has the root import
+    /// lock: it must report `.importInProgress` and touch nothing, then
+    /// succeed normally once the lock is released. `RawImportLockHandle`
+    /// holds the exact same kernel `flock` `importCopy` would hold for its
+    /// entire duration, so this is real OS-level contention, not a stand-in.
+    func testReconciliationReturnsBusyWhileTheImportLockIsHeldAndRecoversAfterRelease() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
 
-        XCTAssertTrue(report.removedOrphanIDs.isEmpty)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.path))
+        guard let externalLock = RawImportLockHandle(rootURL: rootURL) else {
+            XCTFail("Expected to acquire the raw import lock directly")
+            return
+        }
+
+        do {
+            _ = try await store.reconcileOrphanedImports()
+            XCTFail("Expected reconciliation to report the lock as busy rather than proceed")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
+        }
+        // Nothing was scanned or deleted — reconciliation never got past
+        // acquiring the lock, so Documents/ was never even listed.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rootURL.appendingPathComponent("Documents").path))
+
+        externalLock.release()
+
+        // Once the lock is free, a real import completes normally.
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let reloaded = try await store.loadDocument(id: document.id)
+        XCTAssertEqual(try Data(contentsOf: reloaded.workingURL), try Data(contentsOf: sourceURL))
     }
 
-    func testReconcileOrphanedImportsRemovesATransactionAbandonedByAnotherStoreInstance() async throws {
-        let rootURL = temporaryDirectory.appendingPathComponent("Store", isDirectory: true)
-        let importStartedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let id = UUID()
-        let directory = rootURL.appendingPathComponent("Documents/\(id.uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try SidecarCoding.encode(ImportTransactionMarker(startedAt: importStartedAt))
-            .write(to: directory.appendingPathComponent(PhotoDocumentStore.transactionMarkerFilename))
-        try Data(repeating: 0x44, count: 64).write(to: directory.appendingPathComponent(".importing"))
+    /// A (other direction): `importCopy` itself must equally defer to
+    /// whoever already holds the lock, making no changes at all.
+    func testImportCopyReturnsBusyWhileAnotherHolderHasTheImportLock() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
 
-        // Long past any reasonable "still running" window.
-        let (reconciler, _) = makeStore(now: { importStartedAt.addingTimeInterval(3_600) })
-        let report = try await reconciler.reconcileOrphanedImports()
+        guard let externalLock = RawImportLockHandle(rootURL: rootURL) else {
+            XCTFail("Expected to acquire the raw import lock directly")
+            return
+        }
+        defer { externalLock.release() }
 
-        XCTAssertEqual(report.removedOrphanIDs, [id])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        do {
+            _ = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+            XCTFail("Expected importCopy to report the lock as busy rather than proceed")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
+        }
+
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents"))
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+    }
+
+    /// B: check-record/delete race. The exclusive lock makes the originally
+    /// reported interleaving (reconciler checks a record is absent, an
+    /// importer commits one, reconciler deletes the directory anyway)
+    /// structurally impossible: an importer cannot even begin creating a
+    /// `Documents/<id>` directory, let alone commit a record, without first
+    /// acquiring the same lock a reconciliation pass holds for its whole
+    /// scan. Since the interleaving can't be constructed, this proves the
+    /// stronger property the review asked for instead: an importer cannot
+    /// commit *at all* while that lock is held — not merely that the
+    /// end state happens to look fine.
+    func testImportCopyCannotCommitWhileReconciliationHoldsTheLock() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+
+        // Standing in for a reconciliation pass mid-scan: this holds the
+        // exact lock `reconcileOrphanedImports` holds for its entire
+        // duration.
+        guard let reconcilerLock = RawImportLockHandle(rootURL: rootURL) else {
+            XCTFail("Expected to acquire the raw import lock directly")
+            return
+        }
+
+        do {
+            _ = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+            XCTFail("Expected importCopy to be unable to commit while reconciliation holds the lock")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
+        }
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents"))
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+
+        reconcilerLock.release()
+
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        XCTAssertEqual(try Data(contentsOf: document.workingURL), try Data(contentsOf: sourceURL))
+    }
+
+    /// C: no timeout. There is nothing left in this design that measures
+    /// elapsed time — reconciliation's only question is "can the lock be
+    /// acquired right now." Holding the raw lock here stands in for an
+    /// import that has been running far longer than the review's originally
+    /// reported 300-second marker-age threshold ever protected against; the
+    /// outcome must be identical regardless of how long that would have
+    /// been, because nothing here is measuring it.
+    func testReconciliationNeverTreatsAHeldLockAsAbandonedRegardlessOfElapsedTime() async throws {
+        let (store, rootURL) = makeStore()
+
+        guard let externalLock = RawImportLockHandle(rootURL: rootURL) else {
+            XCTFail("Expected to acquire the raw import lock directly")
+            return
+        }
+        defer { externalLock.release() }
+
+        do {
+            _ = try await store.reconcileOrphanedImports()
+            XCTFail("Expected reconciliation to defer while the lock is held, no matter how long")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
+        }
     }
 
     func testReconcileOrphanedImportsReportsFailuresWithoutSilentlyDiscardingThem() async throws {
