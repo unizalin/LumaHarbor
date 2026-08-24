@@ -12,12 +12,8 @@ public struct BasicAdjustmentPanel: View {
     }
 
     public var body: some View {
-        ForEach(AdjustmentGroup.allCases, id: \.self) { group in
-            Section(group.displayName) {
-                ForEach(AdjustmentCatalog.definitions(in: group), id: \.kind) { definition in
-                    row(definition)
-                }
-            }
+        ForEach(BasicAdjustmentPanelModel.rows, id: \.kind) { definition in
+            row(definition)
         }
     }
 

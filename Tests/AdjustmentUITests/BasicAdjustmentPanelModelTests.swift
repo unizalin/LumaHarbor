@@ -19,17 +19,29 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
     }
 
     func testMacResetGestureAndHelpRemainPlatformGuarded() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let panelSource = try String(
-            contentsOf: repositoryRoot.appendingPathComponent("Sources/AdjustmentUI/BasicAdjustmentPanel.swift"),
-            encoding: .utf8
-        )
+        let panelSource = try panelSource()
 
         XCTAssertTrue(panelSource.contains("#if os(macOS)"))
         XCTAssertTrue(panelSource.contains(".onTapGesture(count: 2)"))
         XCTAssertTrue(panelSource.contains(".help(L10n.t(\"Double-click the row to reset\"))"))
+    }
+
+    func testViewUsesCanonicalRowsWithoutGroupReordering() throws {
+        let panelSource = try panelSource()
+
+        XCTAssertTrue(panelSource.contains("ForEach(BasicAdjustmentPanelModel.rows, id: \\.kind)"))
+        XCTAssertFalse(panelSource.contains("AdjustmentGroup.allCases"))
+        XCTAssertFalse(panelSource.contains("AdjustmentCatalog.definitions(in:"))
+    }
+
+    private func panelSource() throws -> String {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/AdjustmentUI/BasicAdjustmentPanel.swift"),
+            encoding: .utf8
+        )
     }
 }
