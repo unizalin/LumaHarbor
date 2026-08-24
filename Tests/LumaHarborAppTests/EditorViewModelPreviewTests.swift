@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import EditorCore
 @testable import LumaHarborApp
 @testable import PhotoLibraryCore
 @testable import PresetCore

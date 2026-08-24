@@ -1,3 +1,4 @@
+import EditorCore
 import PhotoLibraryCore
 import Localization
 import SwiftUI

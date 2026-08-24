@@ -1,6 +1,7 @@
 import Foundation
 import Localization
 import XCTest
+@testable import EditorCore
 @testable import LumaHarborApp
 @testable import PhotoLibraryCore
 @testable import PresetCore
@@ -30,7 +31,7 @@ final class PresetWorkflowTests: AppViewModelTestCase {
     private func openedEditor(
         adjustments: PhotoAdjustments = .neutral,
         isReadOnly: Bool = false
-    ) async throws -> EditorViewModel {
+    ) async throws -> EditorSession {
         try seedPhotos(["DSC0001.ARW"])
         let services = try makeServices()
         let library = try await addLibrary(services)
@@ -330,7 +331,7 @@ final class PresetWorkflowTests: AppViewModelTestCase {
     // MARK: - No open photo
 
     func testPreviewAndCommitAreNoOpsWithNoPhotoOpen() {
-        let editor = EditorViewModel()
+        let editor = EditorSession()
         editor.previewPreset(makePreset(exposure: 1.0), mode: .merge)
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
         editor.commitPreset(makePreset(exposure: 1.0), mode: .merge)
