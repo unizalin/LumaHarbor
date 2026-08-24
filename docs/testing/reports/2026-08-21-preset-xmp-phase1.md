@@ -11,7 +11,7 @@
 | 對應 plan | `docs/superpowers/plans/2026-08-21-preset-xmp-phase1.md` |
 | 分支 | `claude/preset-xmp-compatibility` |
 | Phase 1 起點 | `18b8307`（分支起點，緊接 `c70ecc3` 之後） |
-| 整體結論 | Gate A、D（自動化部分）通過；Gate B 的真實 Adobe 匯入／匯出 smoke test **未完成**（環境限制，見 §4）；Gate D 的 APFS／exFAT 人工項目因本機沒有對應測試目錄／已掛載 exFAT 磁碟而**未執行**（見 §5）。核心模型、codec、mapping、repository、editor 整合與 UI 狀態機皆有自動化測試覆蓋且全數通過（657 個測試、9 個 skip、0 個失敗）。Codex 第三輪 re-review（commit `a161c6e`）交辦的 5 項人工 smoke test（§11.5，情境 1～5）**全部已於 2026-08-24 跑完、全部有明確結論**：情境 2／4／5 完全通過；情境 1 通過；情境 3 機制通過但視覺 parity 因測試素材限制無法百分之百確認（詳見 §11.5 表格與其後結論段）。情境 1／2 過程中發現一個會讓畫面卡在「正在解碼 RAW…」永遠不恢復的舊 bug（§11.6），已當日以 commit `e262b7e` 修復並重新驗證通過（§11.7）。Codex 第三輪 re-review 的 A／B／C 三項需求至此全部完成人工驗證，Phase 2 前僅剩 Gate B 的 Adobe smoke test 與 Gate D 的 APFS／exFAT 人工項目待補（均為既有、非本輪新增的待辦）。 |
+| 整體結論 | Gate A、D（自動化部分）通過；Gate B 的真實 Adobe 匯入／匯出 smoke test **BLOCKED**——2026-08-24 這輪環境已裝妥並登入 Adobe Lightroom Classic 15.5／Lightroom 雲端版 9.5，但 Test A 第一步「LumaHarbor 匯出 XMP」就發現一個 100% 可重現的產品 bug（Export 面板的 `allowedContentTypes` 沒宣告 `xmp`，NSSavePanel 把使用者輸入的副檔名覆寫掉，`exportAsXMP` 這條路徑透過 UI 完全無法被觸發，靜默寫出 JSON 而非 XMP），整個 Gate B 因此被擋住，尚未真正用到 Lightroom（詳見 §4，已取代 2026-08-22 記錄的「環境沒有 Adobe 軟體」舊狀態）；Gate D 的 APFS／exFAT 人工項目因本機沒有對應測試目錄／已掛載 exFAT 磁碟而**未執行**（見 §5）。核心模型、codec、mapping、repository、editor 整合與 UI 狀態機皆有自動化測試覆蓋且全數通過（657 個測試、9 個 skip、0 個失敗）。Codex 第三輪 re-review（commit `a161c6e`）交辦的 5 項人工 smoke test（§11.5，情境 1～5）**全部已於 2026-08-24 跑完、全部有明確結論**：情境 2／4／5 完全通過；情境 1 通過；情境 3 機制通過但視覺 parity 因測試素材限制無法百分之百確認（詳見 §11.5 表格與其後結論段）。情境 1／2 過程中發現一個會讓畫面卡在「正在解碼 RAW…」永遠不恢復的舊 bug（§11.6），已當日以 commit `e262b7e` 修復並重新驗證通過（§11.7）。Codex 第三輪 re-review 的 A／B／C 三項需求至此全部完成人工驗證，**Phase 2 前仍有 Gate B 的匯出 bug（阻擋合併）與 Gate D 的 APFS／exFAT 人工項目（既有待辦）待補**。 |
 
 ## 1. Commits
 
@@ -87,20 +87,51 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 
 9 個案例與既有 MVP 驗收報告記錄的集合一致（`testEveryFixtureDecodes` 等），Phase 1 未修改 `RawProcessingCore` 的渲染行為，只新增了 `PreviewImage.whiteBalanceBaseline`／`RawWhiteBalanceBaseline`（皆為向後相容的新增欄位，預設 `nil`，不影響既有測試）。
 
-## 4. Gate B：Adobe 相容性 smoke test — 未完成
+## 4. Gate B：Adobe 相容性 smoke test — BLOCKED（產品 bug，非環境限制，2026-08-24 更新）
 
 計畫要求「在可用的 Lightroom Classic／Camera Raw 做 smoke test：驗證 Adobe 可匯入 LumaHarbor 輸出的開發預設，並把 Adobe 再輸出的 XMP 交回 semantic comparator」。
 
-**本次驗收環境沒有已安裝、可互動操作的 Lightroom Classic 或 Adobe Camera Raw**（此環境為無 GUI 互動、無 Adobe 帳號授權的自動化 agent 環境）。因此：
+> **歷史記錄（2026-08-22，已由下方 2026-08-24 記錄取代）**：當時的驗收環境沒有安裝、也沒有可互動操作的 Lightroom Classic 或 Adobe Camera Raw（無 GUI、無 Adobe 帳號授權的自動化 agent 環境），因此完全沒有執行過真實 Adobe 匯入／匯出 smoke test。已完成的替代驗證：mapping table 的屬性名稱、namespace URI、單位換算（如 Sharpness ×1.5、Kelvin/tint 換算常數）均對照 Adobe 已發表的 `crs:` namespace 文件與 exiv2 參考實作核對，非憑欄位名稱猜測（見 `XMPMappingRegistry.swift` 內逐項註解）。這些替代驗證依然有效、不因下方發現而失效，但**不得**用來取代真實 Adobe smoke test 本身。
 
-- 未執行真實 Adobe 匯入／匯出 smoke test。
-- 這一項**明確標示為未完成**，不得以單元測試（`XMPMappingTests`／`XMPImportExportTests`）替代——那些測試驗證的是「LumaHarbor 自己對 Adobe 文件發表格式的理解」，不是「真實 Adobe 軟體真的能讀懂 LumaHarbor 匯出的東西」。
-- 已完成的替代驗證：mapping table 的屬性名稱、namespace URI、單位換算（如 Sharpness ×1.5、Kelvin/tint 換算常數）均對照 Adobe 已發表的 `crs:` namespace 文件與 exiv2 參考實作核對，非憑欄位名稱猜測（見 `XMPMappingRegistry.swift` 內逐項註解）。
+### 2026-08-24：環境已就緒，但 Test A 第一步即發現阻擋性產品 bug
 
-**建議**：Phase 1 合入前，需要一名可操作 Lightroom Classic 或 Camera Raw 的人員，完成以下最小 smoke test 並補上此章節：
-1. 用 LumaHarbor 建立一個含 Exposure／Contrast／HSL 的原生 Preset，匯出成 `.xmp`。
-2. 在 Lightroom Classic／Camera Raw 匯入該 `.xmp`，確認可辨識為開發預設且數值合理。
-3. 在 Adobe 端調整後重新匯出 `.xmp`，用 LumaHarbor 的 `XMPCodec.parse`／`semanticallyEquivalent` 或手動比對，確認往返沒有遺失已知欄位。
+**這一輪環境已具備真實 Adobe 軟體**：本機已安裝並登入授權 Adobe Lightroom Classic 15.5（build 15.5，`/Applications/Adobe Lightroom Classic/`）與 Adobe Lightroom 雲端版 9.5（build 9.5，`/Applications/Adobe Lightroom CC/`），兩者皆可正常啟動。因此本輪已經不是「缺少 Adobe 軟體」的環境限制。
+
+**Test A（LumaHarbor 原生 Preset → Lightroom Classic）在「LumaHarbor 匯出 XMP」這一步就卡住，發現一個可重現、擋住整個 Gate B 的 Phase 1 產品 bug，尚未進到 Lightroom 端**：
+
+**根因**（讀程式碼確認）：`PresetBrowserView.exportPreset(_:)`（`Sources/LumaHarborApp/Views/PresetBrowserView.swift:285-304`）用 `NSSavePanel` 讓使用者選檔名與位置：
+
+```swift
+let panel = NSSavePanel()
+panel.title = L10n.t("Export Preset")
+panel.nameFieldStringValue = item.document.name
+panel.allowedContentTypes = [.init(filenameExtension: "lhpreset") ?? .data, .xml]
+panel.canCreateDirectories = true
+
+guard panel.runModal() == .OK, let url = panel.url else { return }
+...
+if url.pathExtension.lowercased() == "xmp" {
+    data = try presetLibrary.exportAsXMP(item.document, context: .none).data
+} else {
+    data = try presetLibrary.exportAsNativePreset(item.document)
+}
+```
+
+`allowedContentTypes` 只宣告了 `lhpreset` 與 `xml` 兩種類型，**沒有宣告 `xmp`**，也沒有設定 `panel.allowsOtherFileTypes = true`。NSSavePanel 對使用者輸入、但不屬於 `allowedContentTypes` 的副檔名，會強制附加第一個允許類型（`lhpreset`）的副檔名，而不是尊重使用者輸入——所以不論在「Save As」欄位打 `LH-GateB-Native.xmp` 還是任何其他名字，`panel.url` 最終拿到的路徑副檔名永遠是 `lhpreset`（實測中，使用者輸入的 `.xmp` 沒有被丟棄，而是被整段吞進檔名本體，變成 `LH-GateB-Native.xmp.lhpreset`）。下面的 `url.pathExtension.lowercased() == "xmp"` 因此永遠是 `false`，**`exportAsXMP` 這條路徑透過這個 UI 完全無法被觸發**——不論使用者怎麼命名，「匯出…」這個選單動作永遠只會寫出 LumaHarbor 自己的原生 JSON 格式，檔名尾巴看起來像 `.xmp` 也一樣。
+
+**重現步驟**（100% 可重現，本輪重現兩次結果一致）：
+1. 開啟一張照片，對 Exposure／Contrast／Vibrance／Saturation 做調整（例如 +1.00／+20／+25／-10），建立一個原生 Preset（自動只勾選這四個實際調整過的欄位）。
+2. 對該 Preset 按「⋯」→「匯出…」。
+3. 在跳出的 NSSavePanel「Save As」欄位輸入任何以 `.xmp` 結尾的檔名（例如 `LH-GateB-Native.xmp`），按 Save。
+4. 打開實際寫出的檔案（檔名變成 `LH-GateB-Native.xmp.lhpreset`）：內容是 JSON（`{"createdAt":...,"patch":{"basic":{"contrast":19.96...,"exposure":0.997...,"saturation":-9.99...,"vibrance":25.13...}},...}`），`file` 指令回報為 `ASCII text`，開頭是 `{`，沒有 `<?xpacket`／`<x:xmpmeta>` 等 XMP 標頭，不是合法 XMP／XML。
+
+**影響範圍**：這不是 Lightroom 端的問題，是 LumaHarbor 自己的匯出 UI 從未真正產生過 XMP 檔案——`XMPExporter`／`exportAsXMP` 底層邏輯本身可能是對的（已有 `XMPImportExportTests` 單元測試覆蓋），但完全沒有 UI 入口能觸發它，使用者也無從得知（不會跳出任何錯誤或警告，靜默寫出錯誤格式的檔案，只是副檔名恰好看起來對）。Gate B 要求的「LumaHarbor 匯出 → Adobe 匯入」整條路徑因此在 Test A 第一步就被擋住；Test B（完整 HSL／Tone Curve round-trip）與 Test C（Lightroom → LumaHarbor → Lightroom）雖然不直接依賴這個匯出按鈕，但 Test A／B 的「匯出後給 Lightroom Classic 檢查」步驟與 Test C 的最後一步「LumaHarbor 再匯出給 Lightroom 驗證」全部連帶受阻，一個真正合法的 `.xmp` 都拿不到手上。
+
+**本輪未修正**：依照本輪交辦規則（產品程式碼修改必須先有可重現的失敗證據且不擴大範圍），這裡只記錄根因與重現證據，不動程式碼。修法方向留給下一輪：`allowedContentTypes` 需要加入代表 XMP 的 UTType（或至少不讓 `.xmp` 副檔名被覆寫），且判斷匯出格式的邏輯不應該事後從 `url.pathExtension` 反推——NSSavePanel 在 `allowedContentTypes` 之外的副檔名本來就不可靠，應該在使用者「選擇匯出格式」的當下就記錄意圖（例如用 accessory view 提供明確的格式選擇，而不是靠檔名猜測）。
+
+**測試素材與隱私**：使用 `Fixtures/Private/Sony-ARW/_DSC1896.ARW` 的隔離副本（`mktemp -d` 建立的私人暫存目錄，未進 Git），原始 fixture 全程未被觸碰——匯出測試前後 SHA-256 一致：`50e2afadcfc2598342576ac716a37113397d40c824729d6d43376705a83d8487`。過程中建立的暫存測試 Preset（`LH GateB Native`）與兩個因這個 bug 而產生的錯誤格式檔案已於驗證完成後清除，未進入 Git，未殘留在系統上，未寫入任何 Adobe 帳號資訊。
+
+**Gate B 結論：BLOCKED**（產品 bug，非環境或授權限制；Adobe Lightroom Classic／雲端版本身完全未被實際使用到，因為 LumaHarbor 端連一個合法的 `.xmp` 都生不出來）——不可視為 SKIPPED，不可視為 PASS。下一輪修好這個匯出 bug 之後，需要**重新從 Test A 開始**完整跑一次 §3(A)（本節開頭列的三步驟），因為目前連第一步都沒有真正跑到 Adobe 那一端。
 
 ## 5. Gate D（人工項目）：APFS／exFAT — 未執行
 
@@ -175,7 +206,7 @@ Scripts/run-mvp-acceptance.zsh
 |---|---|---|
 | A | `.lhpreset` schema、repository、兩種 scope、建立／管理、merge／replace 與單筆 Undo 全部有測試；transient preview 不寫檔、不污染 history | ☑ 通過 |
 | B | fixture corpus 匯入、unknown 保存、語意 round-trip、相容性摘要與匯出全部通過；惡意／損壞 XML 不 crash | ☑ 自動化部分通過 |
-| B（Adobe smoke test） | 真實 Lightroom/ACR 匯入／匯出驗證 | ☐ 未完成（見 §4） |
+| B（Adobe smoke test） | 真實 Lightroom Classic 匯入／匯出驗證 | ☒ **BLOCKED**（見 §4：Export 面板 `allowedContentTypes` 未宣告 `xmp`，UI 無法產生合法 XMP 檔案，可重現的產品 bug，非環境限制——Lightroom 已裝妥且授權，但根本沒用到） |
 | D（自動化回歸） | strict build／完整測試／`RawFixtureTests` | ☑ 通過（見 §3） |
 | D（APFS／exFAT 人工項目） | library preset 建立／讀取／改名／搬移／唯讀／拔除 | ☐ 未執行（見 §5） |
 | Codex 第三輪 re-review（A／B／C，見 §12） | 5 項人工 smoke test 情境 1～5 全部跑完（統一結果表見 §11.5） | ☑ 5／5 全部有明確結論（4 項完全通過、1 項機制通過有保留，無 SKIPPED） |
@@ -183,7 +214,7 @@ Scripts/run-mvp-acceptance.zsh
 | Codex 第三輪 re-review（A／B／C，見 §12） | ↳ 鍵盤 focus 導覽人工驗證（§11.5 情境 3） | ☑ 機制通過，視覺 parity 未能完全確認 |
 | Codex 第三輪 re-review（A／B／C，見 §12） | ↳ hover-preview 不再洪水式跳 alert 人工驗證（§11.5／§11.7 情境 1／2） | ☑ 通過（修復 §11.6 的卡住 bug 後重新驗證，見 §11.7） |
 
-**本階段完成後，依交接規則先交給 Codex review；Codex 第三輪 re-review 的 A／B／C 三項人工驗證已全部完成。Gate B 的 Adobe smoke test 與 Gate D 的 APFS／exFAT 人工項目仍待補（既有、非本輪新增的待辦），Critical／Important 問題（若有）清空、且上述兩項有明確結論後，才開始 Phase 2。**
+**本階段完成後，依交接規則先交給 Codex review；Codex 第三輪 re-review 的 A／B／C 三項人工驗證已全部完成。Gate B 現在是一個明確的合併阻擋項（BLOCKED，產品 bug，見 §4），不是環境限制，需要下一輪先修好 Export 面板的副檔名/UTType 問題、重新從 Test A 開始跑一次真實 Lightroom Classic smoke test 才能解除；Gate D 的 APFS／exFAT 人工項目仍待補（既有、非本輪新增的待辦）。Critical／Important 問題（Gate B 這一項）清空、且 Gate D 有明確結論後，才開始 Phase 2。**
 
 ## 10. Git 狀態
 
@@ -323,3 +354,7 @@ On branch claude/preset-xmp-compatibility
 ### Git 狀態（2026-08-24，§11.7 與本次這則 docs commit 之前）
 
 在上面那次 commit（`76b9afc`，記錄本節時的狀態）之後，又新增了兩個 commit：`e262b7e`（`fix: show a static failed state instead of an eternal decode spinner`，§11.7 的程式碼修復，657 個測試全過）與本節／§11.7 這則 docs commit。已 push 到 origin 的最後一個 commit 仍是 `cfe9b54`；其餘全部 commit（`8518dbc`／`6df75a7`／`a161c6e`／`5c4d91f`／`76b9afc`／`e262b7e`／本次 docs commit）都還在本機，**尚未 push**。main 完全沒被觸碰，未開始 Phase 2，未 amend 任何既有 commit。驗證期間建立的臨時全域 preset `ExposureBump` 已透過 App 內建的刪除功能移除；驗證期間加入 `EditorViewModel.swift` 的三行 `FileHandle.standardError.write` 除錯輸出已用 `git checkout` 還原、確認未進入這次或任何 commit。
+
+### Git 狀態（2026-08-24，Gate B smoke test 這次記錄前，已取代以上兩則）
+
+自上面那則記錄之後，`b0cab5e`（§0/§9/§11.5 摘要語句收斂成單一版本）、`24660a6`（補上 `previewFailureMessage` 的繁體中文翻譯，657 個測試全過）兩個 commit 都已經 **push 到 origin**：`git fetch` 確認 `origin/claude/preset-xmp-compatibility` 與本機 HEAD 一致，皆為 `24660a6`。main 仍完全沒被觸碰（`origin/main` 為 `c70ecc3`，本機 main 領先但與這條 feature branch 的 push 無關）。本節記錄的 §4 Gate B 更新（Adobe 環境已就緒但發現匯出 bug）即將以獨立 docs commit 提交；提交前工作目錄除這份報告外沒有其他變更，`docs/reference/` 全程未被 add／commit／stash／修改／刪除，本輪測試用的隔離 RAW 副本、暫存 Preset、匯出失敗產生的檔案皆已於驗證完成後清除。
