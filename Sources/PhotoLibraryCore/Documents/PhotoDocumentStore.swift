@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import RawProcessingCore
 
@@ -12,19 +13,22 @@ import RawProcessingCore
 /// `FingerprintCalculator` — and the source is shown to still match the
 /// snapshot taken before the copy began, is it moved to its final name and a
 /// document record written. `workingFingerprint` is always computed from the
-/// copy itself, never borrowed from the source. A Swift error or
+/// copy itself, and `sourceFingerprint` is set equal to it rather than being
+/// re-read from the source a second time — see `PhotoDocument.sourceFingerprint`
+/// for why that's the correct semantics, not a shortcut. A Swift error or
 /// cancellation thrown anywhere in that sequence removes the partial copy
 /// and its directory before rethrowing.
 ///
 /// A hard process kill can still leave an orphaned, uncommitted copy on disk
 /// between the rename and the record write. `loadDocument` never treats such
-/// a copy as a document (there is no record for it). Each import writes a
-/// transaction marker recording when it started; `reconcileOrphanedImports()`
-/// only reclaims a record-less directory once its marker shows the import
-/// has been abandoned for a while — a directory whose marker is still fresh
-/// is left alone, so a second `PhotoDocumentStore` instance pointed at the
-/// same root cannot reclaim another import's storage out from under it while
-/// it is genuinely still in flight.
+/// a copy as a document (there is no record for it), and
+/// `reconcileOrphanedImports()` reclaims it. Both `importCopy` and
+/// `reconcileOrphanedImports` hold the same root-level `flock` (see
+/// `RootImportLock`) for their entire duration, which is what makes it safe
+/// for a *different* `PhotoDocumentStore` instance — in this process or
+/// another — to call either one against the same `rootURL` without racing:
+/// the kernel, not any in-memory or time-based bookkeeping, is the
+/// arbiter of "is an import still running here."
 ///
 /// Sidecar reads/writes are delegated to `FileSidecarRepository` — the same
 /// atomic-write, schema-gated, quarantine-on-corruption codec the full
@@ -34,16 +38,14 @@ public actor PhotoDocumentStore {
     private static let recordsDirectoryName = "Records"
     private static let sidecarsDirectoryName = "Sidecars"
     private static let importingFilename = ".importing"
-    /// Name of the per-import transaction marker file. Not `private` so
-    /// tests can fabricate or inspect on-disk transaction state directly —
-    /// the reconciliation contract is defined entirely by what's on disk,
-    /// not by any in-memory actor state, which is what lets a second store
-    /// instance pointed at the same root reason about it correctly.
-    static let transactionMarkerFilename = ".transaction"
-    /// How long a transaction marker must be untouched before
-    /// `reconcileOrphanedImports()` will treat it as abandoned rather than
-    /// still in flight.
-    private static let abandonedTransactionThreshold: TimeInterval = 300
+    /// Name of the root-level lock file. Not `private` so tests can acquire
+    /// or contend for the same lock directly — the mutual-exclusion contract
+    /// is defined entirely by this on-disk lock, not by any in-memory actor
+    /// state, which is what lets a second store instance (or process)
+    /// reason about it correctly. Lives directly under `rootURL`, alongside
+    /// but outside `Documents/`, so it is never itself mistaken for an
+    /// imported document by `reconcileOrphanedImports`.
+    static let importLockFilename = ".photo-document-import.lock"
     /// Bound on how much of each file is held in memory at once while
     /// verifying a copy — the files being compared can be tens of megabytes.
     private static let verificationChunkByteCount = 1 << 20 // 1 MiB
@@ -51,7 +53,6 @@ public actor PhotoDocumentStore {
     private let rootURL: URL
     private let fileManager: FileManager
     private let copyFile: @Sendable (URL, URL) throws -> Void
-    private let now: @Sendable () -> Date
     private let checkCancellation: @Sendable () throws -> Void
     private let writeRecordData: @Sendable (Data, URL, FileManager) throws -> Void
 
@@ -59,7 +60,6 @@ public actor PhotoDocumentStore {
         rootURL: URL,
         fileManager: FileManager = .default,
         copyFile: (@Sendable (URL, URL) throws -> Void)? = nil,
-        now: @escaping @Sendable () -> Date = { Date() },
         checkCancellation: @escaping @Sendable () throws -> Void = { try Task.checkCancellation() },
         writeRecordData: (@Sendable (Data, URL, FileManager) throws -> Void)? = nil
     ) {
@@ -68,7 +68,6 @@ public actor PhotoDocumentStore {
         self.copyFile = copyFile ?? { source, destination in
             try FileManager.default.copyItem(at: source, to: destination)
         }
-        self.now = now
         self.checkCancellation = checkCancellation
         self.writeRecordData = writeRecordData ?? { data, url, fileManager in
             try AtomicFileWriter.write(data, to: url, fileManager: fileManager)
@@ -77,7 +76,8 @@ public actor PhotoDocumentStore {
 
     /// Opens `sourceURL` in place. The RAW is only ever read: adjustments are
     /// saved to a sidecar next to the document record, never back to the
-    /// source file.
+    /// source file. Never creates anything under `Documents/`, so it neither
+    /// needs nor takes the root import lock.
     public func openInPlace(_ sourceURL: URL, bookmarkData: Data?) throws -> PhotoDocument {
         let fingerprint = try FingerprintCalculator.fingerprint(forFileAt: sourceURL)
         let document = PhotoDocument(
@@ -101,12 +101,18 @@ public actor PhotoDocumentStore {
     /// moved to its final name, and before the record is committed — a
     /// cancellation caught at any of those points is cleaned up exactly like
     /// any other thrown error.
+    ///
+    /// Throws `PhotoDocumentError.importInProgress`, making no changes at
+    /// all, if another import or a reconciliation pass already holds the
+    /// root import lock.
     public func importCopy(of sourceURL: URL, bookmarkData: Data?) throws -> PhotoDocument {
+        let lock = try RootImportLock.acquire(at: importLockURL, fileManager: fileManager)
+        defer { lock.release() }
+
         let id = UUID()
         let directory = documentsDirectoryURL.appendingPathComponent(id.uuidString, isDirectory: true)
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            try writeTransactionMarker(in: directory)
 
             let destination = directory.appendingPathComponent(sourceURL.lastPathComponent)
             let temporary = directory.appendingPathComponent(Self.importingFilename)
@@ -122,18 +128,24 @@ public actor PhotoDocumentStore {
             try checkCancellation()
 
             // The source must still be the same file it was when the copy
-            // started, or `sourceFingerprint`/`workingFingerprint` below
-            // could end up describing two different versions of it.
-            let postVerificationSnapshot = try sourceSnapshot(at: sourceURL)
-            guard preCopySnapshot == postVerificationSnapshot else {
+            // started, or the copy just verified above may no longer
+            // describe it. Checked once more, right after every byte has
+            // been read from the source, rather than continuously — see
+            // `SourceSnapshot`.
+            let finalSnapshot = try sourceSnapshot(at: sourceURL)
+            guard preCopySnapshot == finalSnapshot else {
                 throw PhotoDocumentError.sourceModifiedDuringImport
             }
 
-            // Computed independently from each file — `workingFingerprint`
-            // must describe the copy that is actually being kept, never a
-            // value borrowed from the source.
+            // Computed once, from the copy itself — never re-read from the
+            // source. `sourceFingerprint` is set equal to it deliberately:
+            // the copy has just been proven byte-identical to the source as
+            // of `finalSnapshot`, so a second, independent read of the
+            // source here would only reopen the exact TOCTOU window
+            // `finalSnapshot` exists to close, for a value guaranteed to
+            // match anyway. See `PhotoDocument.sourceFingerprint`.
             let workingFingerprint = try FingerprintCalculator.fingerprint(forFileAt: temporary)
-            let sourceFingerprint = try FingerprintCalculator.fingerprint(forFileAt: sourceURL)
+            let sourceFingerprint = workingFingerprint
 
             try checkCancellation()
             try fileManager.moveItem(at: temporary, to: destination)
@@ -149,17 +161,13 @@ public actor PhotoDocumentStore {
             )
             try checkCancellation()
             try writeRecord(document)
-            // No longer needed once a record exists — reconciliation already
-            // ignores any directory with a committed record regardless of
-            // marker state, but removing it keeps the directory tidy.
-            try? fileManager.removeItem(at: directory.appendingPathComponent(Self.transactionMarkerFilename))
             return document
         } catch {
             // Best-effort: if this can't fully clean up (e.g. a permissions
-            // problem), the directory — including its transaction marker —
-            // is left behind rather than silently discarded, and
-            // `reconcileOrphanedImports()` will find and retry it once the
-            // marker shows the import as abandoned.
+            // problem), the directory is left behind. It is still safe from
+            // `reconcileOrphanedImports()` mistaking it for something else,
+            // since that call cannot even start until this method's `defer`
+            // above has released the lock.
             try? fileManager.removeItem(at: directory)
             throw error
         }
@@ -201,22 +209,31 @@ public actor PhotoDocumentStore {
     }
 
     /// Removes app-copy import directories under `Documents/` that have no
-    /// matching committed record *and* whose transaction marker shows the
-    /// import has been abandoned for longer than
-    /// `abandonedTransactionThreshold` — never one that is still plausibly in
-    /// flight, whether that import is running on this store instance,
-    /// another instance in this process, or another process entirely,
-    /// because the decision is made entirely from what's on disk. A
-    /// directory with a committed record is never touched. Call this at a
-    /// point with no import concurrently in flight on *this* instance, e.g.
-    /// app launch; it is still safe if another instance is genuinely mid
-    /// import against the same root.
+    /// matching committed record — the trace a process kill can leave
+    /// between a copy landing at its final name and the record being
+    /// written. A directory with a committed record is never touched.
+    ///
+    /// Holds the same root import lock `importCopy` requires before it can
+    /// even create a `Documents/<id>` directory, for the entire scan, so an
+    /// import genuinely in progress — on this store instance, another
+    /// instance, or another process — cannot have anything removed out from
+    /// under it: this call cannot even start until that import releases the
+    /// lock, and no new import can start while this call holds it. There is
+    /// no timeout anywhere in this decision; a large RAW over a slow
+    /// connection taking far longer than any fixed threshold is not treated
+    /// as abandoned, because nothing here is measuring elapsed time at all.
+    ///
+    /// Throws `PhotoDocumentError.importInProgress`, deleting nothing, if
+    /// the lock is already held elsewhere.
     ///
     /// Directories that fail to be removed are reported in
     /// `PhotoDocumentReconciliationReport.failures` rather than being
     /// swallowed; they remain in place for a later call to retry.
     @discardableResult
     public func reconcileOrphanedImports() throws -> PhotoDocumentReconciliationReport {
+        let lock = try RootImportLock.acquire(at: importLockURL, fileManager: fileManager)
+        defer { lock.release() }
+
         var removed: [UUID] = []
         var failures: [UUID: String] = [:]
 
@@ -232,8 +249,13 @@ public actor PhotoDocumentStore {
 
         for entry in entries {
             guard let id = UUID(uuidString: entry.lastPathComponent) else { continue }
+            // Re-checked immediately before removal. While this method holds
+            // the lock, no importer can create this check's answer out from
+            // under it — `importCopy` cannot commit a record for `id`
+            // without first acquiring the very lock this call is holding —
+            // but the check stays right next to the removal regardless, so
+            // the two can never drift apart even if either one changes.
             guard !fileManager.fileExists(atPath: recordURL(for: id).path) else { continue }
-            guard isAbandoned(entry) else { continue }
             do {
                 try fileManager.removeItem(at: entry)
                 removed.append(id)
@@ -253,6 +275,10 @@ public actor PhotoDocumentStore {
 
     private var recordsDirectoryURL: URL {
         rootURL.appendingPathComponent(Self.recordsDirectoryName, isDirectory: true)
+    }
+
+    private var importLockURL: URL {
+        rootURL.appendingPathComponent(Self.importLockFilename)
     }
 
     private func recordURL(for id: UUID) -> URL {
@@ -389,40 +415,55 @@ public actor PhotoDocumentStore {
             resourceIdentifierDescription: resourceIdentifierDescription
         )
     }
-
-    private func writeTransactionMarker(in directory: URL) throws {
-        let marker = ImportTransactionMarker(startedAt: now())
-        try SidecarCoding.encode(marker).write(to: directory.appendingPathComponent(Self.transactionMarkerFilename))
-    }
-
-    /// Whether the import directory at `entry` (already known to have no
-    /// committed record) should be treated as abandoned. Reads only the
-    /// on-disk marker — nothing about this decision depends on in-memory
-    /// state, which is what makes it safe for a store instance that did not
-    /// start the import to make it.
-    private func isAbandoned(_ entry: URL) -> Bool {
-        let markerURL = entry.appendingPathComponent(Self.transactionMarkerFilename)
-        guard let data = fileManager.contents(atPath: markerURL.path),
-              let marker = try? SidecarCoding.decode(ImportTransactionMarker.self, from: data)
-        else {
-            // No readable marker: either this predates transaction tracking,
-            // or the marker itself never made it to disk. There is already
-            // no record (checked by the caller), so this is safe to treat as
-            // an orphan.
-            return true
-        }
-        return now().timeIntervalSince(marker.startedAt) > Self.abandonedTransactionThreshold
-    }
 }
 
-/// Records when an app-copy import began, written into its per-document
-/// directory alongside the staging file. Its presence (or absence) and age
-/// are the entire signal `reconcileOrphanedImports()` uses to tell an import
-/// that's still running apart from one that was abandoned — deliberately
-/// disk-only, so that signal is meaningful to a `PhotoDocumentStore`
-/// instance other than the one that wrote it.
-struct ImportTransactionMarker: Codable, Equatable {
-    var startedAt: Date
+/// A root-level exclusive advisory lock (`flock`) that makes `importCopy`
+/// and `reconcileOrphanedImports` mutually exclusive across *every*
+/// `PhotoDocumentStore` instance pointed at the same `rootURL` — including
+/// instances in other processes. This is what an actor alone cannot provide:
+/// actor isolation only protects one instance in one process, but the same
+/// store `rootURL` can legitimately be opened by more than one instance (an
+/// app relaunch, a second window, a background extension).
+///
+/// `flock` is a kernel-held lock tied to the open file description: it is
+/// released automatically if the holding process crashes or is killed,
+/// which is what lets `reconcileOrphanedImports` safely reclaim storage left
+/// behind by a killed import without any timeout — a lock that's still held
+/// means the holder (or its process) is still alive, or the kernel would
+/// already have released it.
+///
+/// Acquisition is non-blocking (`LOCK_NB`). If another holder already has
+/// the lock, this throws `PhotoDocumentError.importInProgress` immediately
+/// rather than blocking the calling thread — blocking here would risk
+/// starving Swift's cooperative executor, since actor methods run on threads
+/// drawn from that same limited pool.
+private struct RootImportLock {
+    private let fileDescriptor: Int32
+
+    static func acquire(at url: URL, fileManager: FileManager) throws -> RootImportLock {
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        let fileDescriptor = open(url.path, O_CREAT | O_RDWR, 0o600)
+        guard fileDescriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+
+        guard flock(fileDescriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let capturedErrno = errno
+            close(fileDescriptor)
+            if capturedErrno == EWOULDBLOCK {
+                throw PhotoDocumentError.importInProgress
+            }
+            throw POSIXError(POSIXErrorCode(rawValue: capturedErrno) ?? .EIO)
+        }
+
+        return RootImportLock(fileDescriptor: fileDescriptor)
+    }
+
+    func release() {
+        flock(fileDescriptor, LOCK_UN)
+        close(fileDescriptor)
+    }
 }
 
 /// On-disk shape of a document record. Kept separate from the public

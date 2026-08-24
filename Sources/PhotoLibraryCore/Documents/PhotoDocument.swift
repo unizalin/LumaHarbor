@@ -19,6 +19,15 @@ public struct PhotoDocument: Codable, Equatable, Sendable, Identifiable {
     public let sourceURL: URL
     /// Security-scoped bookmark for `sourceURL`, when the caller supplied one.
     public let sourceBookmarkData: Data?
+    /// Identity of the source *as it was at the moment this document was
+    /// imported* — not a live description of whatever the source currently
+    /// is. For `.appCopy`, this is derived from the verified copy itself
+    /// (see `PhotoDocumentStore.importCopy`), so it equals
+    /// `workingFingerprint` by construction. If the external source changes
+    /// again after import, a later relink/verification pass comparing a
+    /// fresh source fingerprint against this one is expected to see a
+    /// mismatch — that is what surfaces the change, not this field updating
+    /// on its own.
     public let sourceFingerprint: FileFingerprint
     public let workingFingerprint: FileFingerprint
 
@@ -50,5 +59,10 @@ public enum PhotoDocumentError: Error, Equatable, Sendable {
     /// the copy may no longer describe the source it was taken from. The
     /// partial copy and any document record have already been removed.
     case sourceModifiedDuringImport
+    /// Another import or a reconciliation pass already holds the root-level
+    /// import lock for this store's `rootURL` — from this store instance,
+    /// another instance in this process, or another process entirely.
+    /// Nothing was changed; retry once the other operation has finished.
+    case importInProgress
     case documentNotFound(UUID)
 }
