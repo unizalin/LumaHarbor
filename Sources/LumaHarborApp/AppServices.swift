@@ -1,3 +1,4 @@
+import EditorCore
 import Foundation
 import PhotoLibraryCore
 import RawProcessingCore
@@ -32,6 +33,15 @@ struct AppServices {
     /// made *during* a save is still the one that ends up on disk, and proving
     /// that needs control over when the write completes.
     let saveAdjustments: @Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void
+
+    var editorDependencies: EditorDependencies {
+        EditorDependencies(
+            previewScheduler: previewScheduler,
+            previewRenderer: previewRenderer,
+            loadAdjustments: loadAdjustments,
+            saveAdjustments: saveAdjustments
+        )
+    }
 
     static func makeDefault() throws -> AppServices {
         let locations = try ApplicationSupportLocations.standard()

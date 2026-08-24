@@ -1,13 +1,13 @@
+import Combine
 import CoreGraphics
-import Localization
 import Foundation
+import Localization
 import PhotoLibraryCore
 import PresetCore
 import RawProcessingCore
-import SwiftUI
 
 /// Whether the current edit has reached the SSD.
-enum SaveState: Equatable {
+public enum SaveState: Equatable, Sendable {
     case unchanged
     case pending
     case saving
@@ -15,7 +15,7 @@ enum SaveState: Equatable {
     /// Spec §8.2: a failed write must never read as "saved".
     case failed(String)
 
-    var isDirty: Bool {
+    public var isDirty: Bool {
         switch self {
         case .unchanged, .saved: return false
         case .pending, .saving, .failed: return true
@@ -25,7 +25,7 @@ enum SaveState: Equatable {
 
 /// Drives the editing surface for one photo.
 @MainActor
-final class EditorViewModel: ObservableObject {
+public final class EditorSession: ObservableObject {
     /// How long the sliders must be still before the high-quality preview and
     /// the sidecar write are scheduled. Long enough that a drag doesn't queue
     /// dozens of full renders, short enough to feel automatic.
@@ -41,12 +41,12 @@ final class EditorViewModel: ObservableObject {
     /// small enough that a stuck state can't spin forever.
     static let maximumFlushAttempts = 8
 
-    @Published private(set) var photo: PhotoAsset?
-    @Published private(set) var sourceURL: URL?
-    @Published private(set) var previewImage: CGImage?
-    @Published private(set) var originalImage: CGImage?
-    @Published private(set) var previewQuality: PreviewQuality = .interactive
-    @Published private(set) var isRendering = false
+    @Published public private(set) var photo: PhotoAsset?
+    @Published public private(set) var sourceURL: URL?
+    @Published public private(set) var previewImage: CGImage?
+    @Published public private(set) var originalImage: CGImage?
+    @Published public private(set) var previewQuality: PreviewQuality = .interactive
+    @Published public private(set) var isRendering = false
 
     /// True once a decode has failed and nothing since -- a new photo
     /// opened, a fresh frame produced -- has superseded that outcome. Lets
@@ -57,21 +57,21 @@ final class EditorViewModel: ObservableObject {
     /// was actually running (round 3 smoke test: opening a corrupt RAW,
     /// dismissing the alert, and being stuck looking like it's still
     /// decoding forever).
-    @Published private(set) var decodeFailed = false
+    @Published public private(set) var decodeFailed = false
 
-    @Published private(set) var saveState: SaveState = .unchanged
-    @Published private(set) var canUndo = false
-    @Published private(set) var canRedo = false
-    @Published var isShowingOriginal = false
-    @Published var alert: UserAlert?
+    @Published public private(set) var saveState: SaveState = .unchanged
+    @Published public private(set) var canUndo = false
+    @Published public private(set) var canRedo = false
+    @Published public var isShowingOriginal = false
+    @Published public var alert: EditorAlert?
 
     /// Longest edge the preview should cover, in backing-store pixels.
-    @Published var previewPixelDimension = 1_600
+    @Published public var previewPixelDimension = 1_600
 
     /// Fires after a successful sidecar write so the grid's edit badge can
     /// follow along. Addendum §3.2: this is the *only* thing a save changes in
     /// the browser — the neutral thumbnail is deliberately left alone.
-    var onSaved: ((PhotoID, Bool) -> Void)?
+    public var onSaved: ((PhotoID, Bool) -> Void)?
 
     private var history = EditHistory<PhotoAdjustments>(initial: .neutral)
     /// What's actually on disk for this photo right now — set on `open()`, kept
@@ -84,7 +84,7 @@ final class EditorViewModel: ObservableObject {
     /// `.pending` unconditionally, there was no way back to a clean state and
     /// therefore no way to navigate away at all (found manually 2026-08-18).
     private var lastSavedAdjustments: PhotoAdjustments = .neutral
-    private var services: AppServices?
+    private var services: EditorDependencies?
     private var eventTask: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
     private var autosaveTask: Task<Void, Never>?
@@ -113,7 +113,7 @@ final class EditorViewModel: ObservableObject {
     /// baseline yet. Published (not thrown away like `applying(_:mode:)`
     /// used to with `try?`) so the preset browser can show something
     /// non-blocking while hovering, without a modal firing on every row.
-    @Published private(set) var presetPreviewDiagnostics: [PresetDiagnostic] = []
+    @Published public private(set) var presetPreviewDiagnostics: [PresetDiagnostic] = []
 
     /// The exact, safe text `PresetBrowserView` shows for the current hover
     /// preview -- `nil` when there's nothing to say, so the caller can drop
@@ -122,7 +122,7 @@ final class EditorViewModel: ObservableObject {
     /// View). Recomputed from `presetPreviewDiagnostics` rather than stored
     /// separately, so there is exactly one source of truth for "is there a
     /// diagnostic right now" and it can never drift out of sync with it.
-    var presetPreviewMessage: String? { Self.userMessage(for: presetPreviewDiagnostics) }
+    public var presetPreviewMessage: String? { Self.userMessage(for: presetPreviewDiagnostics) }
 
     /// Round 3 (Codex re-review): a hover/keyboard preset preview used to
     /// call `requestInteractivePreview()` unconditionally on every hover,
@@ -174,23 +174,25 @@ final class EditorViewModel: ObservableObject {
     /// `userMessage(for:)` below). A single overwritable value, not a list,
     /// so repeated failures for the same or different hovered presets
     /// de-duplicate onto one line instead of accumulating.
-    @Published private(set) var previewRenderFailureMessage: String?
+    @Published public private(set) var previewRenderFailureMessage: String?
 
-    var adjustments: PhotoAdjustments { history.current }
+    public var adjustments: PhotoAdjustments { history.current }
 
     /// What the preview pipeline should actually render: a live preset
     /// preview if one is active, otherwise the committed edit.
-    var displayedAdjustments: PhotoAdjustments { previewedPresetAdjustments ?? history.current }
+    public var displayedAdjustments: PhotoAdjustments { previewedPresetAdjustments ?? history.current }
 
-    var hasEdits: Bool { !history.current.isNeutral }
+    public var hasEdits: Bool { !history.current.isNeutral }
 
     /// What the main view should draw right now.
-    var displayedImage: CGImage? {
+    public var displayedImage: CGImage? {
         if isShowingOriginal, let originalImage { return originalImage }
         return previewImage
     }
 
-    var canCompareWithOriginal: Bool { originalImage != nil && hasEdits }
+    public var canCompareWithOriginal: Bool { originalImage != nil && hasEdits }
+
+    public init() {}
 
     deinit {
         eventTask?.cancel()
@@ -200,15 +202,15 @@ final class EditorViewModel: ObservableObject {
         interactiveThrottleTask?.cancel()
     }
 
-    func attach(services: AppServices) {
-        guard self.services == nil else { return }
-        self.services = services
-        startObservingPreviews(scheduler: services.previewScheduler)
+    public func attach(dependencies: EditorDependencies) {
+        guard services == nil else { return }
+        services = dependencies
+        startObservingPreviews(scheduler: dependencies.previewScheduler)
     }
 
     // MARK: - Opening
 
-    func open(
+    public func open(
         photo: PhotoAsset,
         sourceURL: URL,
         adjustments: PhotoAdjustments,
@@ -245,7 +247,7 @@ final class EditorViewModel: ObservableObject {
     ///
     /// Callers must have called `flushPendingEdits()` first and seen it succeed
     /// — this drops `history`, so anything unsaved at this point is gone.
-    func close() {
+    public func close() {
         cancelPendingWork()
         photo = nil
         sourceURL = nil
@@ -269,28 +271,28 @@ final class EditorViewModel: ObservableObject {
 
     // MARK: - Editing
 
-    func setAdjustment(_ kind: AdjustmentKind, to value: Double) {
+    public func setAdjustment(_ kind: AdjustmentKind, to value: Double) {
         guard photo != nil else { return }
         guard history.setAdjustment(kind, to: value) else { return }
         didChangeAdjustments()
     }
 
-    func resetAdjustment(_ kind: AdjustmentKind) {
+    public func resetAdjustment(_ kind: AdjustmentKind) {
         guard photo != nil, history.resetAdjustment(kind) else { return }
         didChangeAdjustments()
     }
 
-    func resetAll() {
+    public func resetAll() {
         guard photo != nil, history.resetToNeutral() else { return }
         didChangeAdjustments()
     }
 
-    func undo() {
+    public func undo() {
         guard history.undo() != nil else { return }
         didChangeAdjustments()
     }
 
-    func redo() {
+    public func redo() {
         guard history.redo() != nil else { return }
         didChangeAdjustments()
     }
@@ -309,7 +311,7 @@ final class EditorViewModel: ObservableObject {
     /// The state update below is synchronous and unthrottled, so whichever
     /// preset was hovered *last* is always what a delayed/coalesced
     /// submission actually renders.
-    func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
+    public func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
         guard photo != nil else { return }
         previewIntentVersion += 1
         let result = applying(preset, mode: mode)
@@ -329,7 +331,7 @@ final class EditorViewModel: ObservableObject {
 
     /// Restores the render to the committed edit. Safe to call even if no
     /// preview is active.
-    func cancelPresetPreview() {
+    public func cancelPresetPreview() {
         guard previewedPresetAdjustments != nil else { return }
         previewedPresetAdjustments = nil
         presetPreviewDiagnostics = []
@@ -360,7 +362,7 @@ final class EditorViewModel: ObservableObject {
     /// that fires continuously while moving the pointer, so a single
     /// non-blocking-but-visible notice is appropriate where a modal on every
     /// hover would not be.
-    func commitPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
+    public func commitPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
         guard photo != nil else { return }
         let result = applying(preset, mode: mode)
         previewedPresetAdjustments = nil
@@ -380,7 +382,7 @@ final class EditorViewModel: ObservableObject {
         // something having actually changed.
         let recorded = history.record(result.adjustments)
         if let message = Self.userMessage(for: result.diagnostics) {
-            alert = UserAlert(title: L10n.t("This preset was applied with some limitations"), message: message)
+            alert = EditorAlert(title: L10n.t("This preset was applied with some limitations"), message: message)
         }
         guard recorded else { return }
         didChangeAdjustments()
@@ -621,7 +623,7 @@ final class EditorViewModel: ObservableObject {
             // here, not just the preview-only path above.
             previewImage = nil
             decodeFailed = true
-            alert = UserAlert(title: L10n.t("Couldn't show this photo"), error: error)
+            alert = EditorAlert(title: L10n.t("Couldn't show this photo"), error: error)
         }
     }
 
@@ -648,7 +650,7 @@ final class EditorViewModel: ObservableObject {
     }
 
     /// Writes the sidecar now. Also used by ⌘S and by "close photo".
-    func save() async {
+    public func save() async {
         guard let photo, let services, saveState.isDirty else { return }
         let adjustments = history.current
         saveState = .saving
@@ -665,7 +667,7 @@ final class EditorViewModel: ObservableObject {
                 (error as? LocalizedError)?.errorDescription
                     ?? (error as NSError).localizedDescription
             )
-            alert = UserAlert(title: L10n.t("Couldn't save your edits"), error: error)
+            alert = EditorAlert(title: L10n.t("Couldn't save your edits"), error: error)
         }
     }
 
@@ -680,7 +682,7 @@ final class EditorViewModel: ObservableObject {
     /// Returns `false` when the edit is still unsaved, in which case the caller
     /// must stay exactly where it is.
     @discardableResult
-    func flushPendingEdits() async -> Bool {
+    public func flushPendingEdits() async -> Bool {
         // The debounce is about to be redundant either way.
         autosaveTask?.cancel()
         autosaveTask = nil
@@ -691,7 +693,7 @@ final class EditorViewModel: ObservableObject {
             // Nothing can be written. Saying so here is what stops the caller
             // navigating away and dropping the edit on the floor.
             saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
-            alert = UserAlert(
+            alert = EditorAlert(
                 title: L10n.t("Couldn't save your edits"),
                 message: L10n.t("This drive is read-only, so LumaHarbor can't write next to your photos."),
                 nextStep: L10n.t("Unlock the drive, or copy the library somewhere writable, then try again.")
@@ -719,7 +721,7 @@ final class EditorViewModel: ObservableObject {
 
     /// Called when the drive comes back after being unplugged mid-edit.
     /// Spec §10: in-memory adjustments are kept and the save is retried.
-    func retrySaveAfterReconnect(isReadOnly: Bool) {
+    public func retrySaveAfterReconnect(isReadOnly: Bool) {
         isReadOnlyLibrary = isReadOnly
         guard !isReadOnly, saveState.isDirty else { return }
         Task { await save() }

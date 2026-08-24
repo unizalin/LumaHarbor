@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import XCTest
+@testable import EditorCore
 @testable import LumaHarborApp
 @testable import PhotoLibraryCore
 @testable import RawProcessingCore
@@ -246,6 +247,15 @@ class AppViewModelTestCase: XCTestCase {
             saveAdjustments: saveAdjustments ?? { adjustments, photo in
                 try await libraryService.saveAdjustments(adjustments, for: photo)
             }
+        )
+    }
+
+    func makeEditorDependencies(from services: AppServices) -> EditorDependencies {
+        EditorDependencies(
+            previewScheduler: services.previewScheduler,
+            previewRenderer: services.previewRenderer,
+            loadAdjustments: services.loadAdjustments,
+            saveAdjustments: services.saveAdjustments
         )
     }
 

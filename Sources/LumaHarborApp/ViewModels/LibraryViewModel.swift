@@ -1,6 +1,7 @@
 import AppKit
 import Localization
 import Combine
+import EditorCore
 import Foundation
 import PhotoLibraryCore
 import RawProcessingCore
@@ -54,7 +55,7 @@ public final class LibraryViewModel: ObservableObject {
     @Published var alert: UserAlert?
     @Published var isShowingExportSheet = false
 
-    let editor = EditorViewModel()
+    let editor = EditorSession()
     let presetLibrary = PresetLibraryViewModel()
 
     /// Views only ever hold `@EnvironmentObject var model: LibraryViewModel`
@@ -100,7 +101,7 @@ public final class LibraryViewModel: ObservableObject {
 
     private func install(services: AppServices) {
         self.services = services
-        editor.attach(services: services)
+        editor.attach(dependencies: services.editorDependencies)
         editor.onSaved = { [weak self] photoID, hasEdits in
             self?.updateEditBadge(photoID: photoID, hasEdits: hasEdits)
         }
