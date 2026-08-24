@@ -45,5 +45,10 @@ public enum PhotoDocumentError: Error, Equatable, Sendable {
     /// The copy's bytes didn't match the source after copying. The partial
     /// copy and any document record have already been removed.
     case copyVerificationFailed
+    /// The source file's size, modification date, or resource identifier
+    /// changed between the start of the copy and the end of verification —
+    /// the copy may no longer describe the source it was taken from. The
+    /// partial copy and any document record have already been removed.
+    case sourceModifiedDuringImport
     case documentNotFound(UUID)
 }
