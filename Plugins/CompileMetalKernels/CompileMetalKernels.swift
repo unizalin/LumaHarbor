@@ -15,7 +15,12 @@ import PackagePlugin
 struct CompileMetalKernelsPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
         guard let module = target as? SourceModuleTarget else { return [] }
-        let metalFiles = module.sourceFiles(withSuffix: "metal").map(\.path)
+        let kernelsDirectory = module.directory.appending(subpath: "Kernels")
+        guard FileManager.default.fileExists(atPath: kernelsDirectory.string) else { return [] }
+        let metalFiles = try FileManager.default.contentsOfDirectory(atPath: kernelsDirectory.string)
+            .filter { $0.hasSuffix(".metal") }
+            .sorted()
+            .map { kernelsDirectory.appending(subpath: $0) }
         guard !metalFiles.isEmpty else { return [] }
 
         let workDirectory = context.pluginWorkDirectory
@@ -33,13 +38,33 @@ struct CompileMetalKernelsPlugin: BuildToolPlugin {
         set -e
         mkdir -p \(shellQuote(intermediatesDirectory.string))
         AIR_FILES=""
+        METAL_SDK=""
+        METAL_TARGET=""
+        case "${PLATFORM_NAME:-}" in
+            iphoneos)
+                METAL_SDK="iphoneos"
+                METAL_TARGET="air64-apple-ios${IPHONEOS_DEPLOYMENT_TARGET:-17.0}"
+                ;;
+            iphonesimulator)
+                METAL_SDK="iphonesimulator"
+                METAL_TARGET="air64-apple-ios${IPHONEOS_DEPLOYMENT_TARGET:-17.0}-simulator"
+                ;;
+        esac
         for f in \(metalFiles.map { shellQuote($0.string) }.joined(separator: " ")); do
             base=$(basename "$f" .metal)
             air=\(shellQuote(intermediatesDirectory.string))/"$base".air
-            xcrun metal -fcikernel -c "$f" -o "$air"
+            if [ -n "$METAL_SDK" ]; then
+                xcrun --sdk "$METAL_SDK" metal -target "$METAL_TARGET" -fcikernel -c "$f" -o "$air"
+            else
+                xcrun metal -fcikernel -c "$f" -o "$air"
+            fi
             AIR_FILES="$AIR_FILES $air"
         done
-        xcrun metallib -cikernel $AIR_FILES -o \(shellQuote(metallibFile.string))
+        if [ -n "$METAL_SDK" ]; then
+            xcrun --sdk "$METAL_SDK" metallib -cikernel $AIR_FILES -o \(shellQuote(metallibFile.string))
+        else
+            xcrun metallib -cikernel $AIR_FILES -o \(shellQuote(metallibFile.string))
+        fi
         """
 
         return [

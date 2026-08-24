@@ -17,7 +17,7 @@ extension BookmarkError: LocalizedError {
         case .couldNotResolve:
             return L10n.t("LumaHarbor no longer has access to this photo folder.")
         case .accessDenied(let path):
-            return "\(L10n.t("macOS denied access to")) \(path)."
+            return "\(L10n.t("The system denied access to")) \(path)."
         }
     }
 
@@ -37,10 +37,26 @@ public struct ResolvedBookmark: Sendable {
 /// Spec §7: this is how folder access survives a relaunch. The data stays in
 /// Application Support on this Mac and is never written to the SSD or synced.
 public enum SecurityScopedBookmark {
+    private static var creationOptions: URL.BookmarkCreationOptions {
+        #if os(macOS)
+        [.withSecurityScope]
+        #else
+        [.minimalBookmark]
+        #endif
+    }
+
+    private static var resolutionOptions: URL.BookmarkResolutionOptions {
+        #if os(macOS)
+        [.withSecurityScope]
+        #else
+        [.withoutUI]
+        #endif
+    }
+
     public static func makeBookmarkData(for url: URL) throws -> Data {
         do {
             return try url.bookmarkData(
-                options: [.withSecurityScope],
+                options: creationOptions,
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
@@ -57,7 +73,7 @@ public enum SecurityScopedBookmark {
         do {
             let url = try URL(
                 resolvingBookmarkData: data,
-                options: [.withSecurityScope],
+                options: resolutionOptions,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )

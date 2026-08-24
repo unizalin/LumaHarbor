@@ -90,7 +90,7 @@
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten.";
 "LumaHarbor's local index couldn't be opened." = "LumaHarbor's local index couldn't be opened.";
 "LumaHarbor's local index reported an error." = "LumaHarbor's local index reported an error.";
-"macOS denied access to" = "macOS denied access to";
+"The system denied access to" = "The system denied access to";
 "Magenta" = "Magenta";
 "Merge keeps fields the preset doesn't set; Replace starts from neutral" = "Merge keeps fields the preset doesn't set; Replace starts from neutral";
 "Merge" = "Merge";

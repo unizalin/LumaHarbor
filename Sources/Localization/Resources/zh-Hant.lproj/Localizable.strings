@@ -90,7 +90,7 @@
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor 會以完整解析度重新解碼原始 RAW，並將結果標記為 sRGB。如果目的地已有同名檔案，會自動加上流水號──不會覆蓋任何檔案。";
 "LumaHarbor's local index couldn't be opened." = "無法開啟 LumaHarbor 的本機索引。";
 "LumaHarbor's local index reported an error." = "LumaHarbor 的本機索引回報了一個錯誤。";
-"macOS denied access to" = "macOS 拒絕存取：";
+"The system denied access to" = "系統拒絕存取：";
 "Magenta" = "洋紅";
 "Merge keeps fields the preset doesn't set; Replace starts from neutral" = "合併會保留 Preset 未設定的欄位；取代則從中性值重新開始";
 "Merge" = "合併";

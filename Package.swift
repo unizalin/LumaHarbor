@@ -9,13 +9,16 @@ let package = Package(
     name: "LumaHarbor",
     defaultLocalization: "en",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        .iOS(.v17)
     ],
     products: [
         .executable(name: "LumaHarbor", targets: ["LumaHarbor"]),
         .library(name: "PhotoLibraryCore", targets: ["PhotoLibraryCore"]),
         .library(name: "RawProcessingCore", targets: ["RawProcessingCore"]),
-        .library(name: "PresetCore", targets: ["PresetCore"])
+        .library(name: "PresetCore", targets: ["PresetCore"]),
+        .library(name: "EditorCore", targets: ["EditorCore"]),
+        .library(name: "AdjustmentUI", targets: ["AdjustmentUI"])
     ],
     targets: [
         // Holds Localizable.strings and the L10n lookup that every other
@@ -30,6 +33,7 @@ let package = Package(
         .target(
             name: "RawProcessingCore",
             dependencies: ["Localization"],
+            exclude: ["Kernels"],
             plugins: ["CompileMetalKernels"]
         ),
 
@@ -51,6 +55,15 @@ let package = Package(
         // Depends on RawProcessingCore only for the pure `PhotoAdjustments`
         // value type that the sidecar serialises. Never imports SwiftUI.
         .target(name: "PhotoLibraryCore", dependencies: ["RawProcessingCore", "PresetCore", "Localization"]),
+
+        .target(
+            name: "EditorCore",
+            dependencies: ["PhotoLibraryCore", "RawProcessingCore", "PresetCore", "Localization"]
+        ),
+        .target(
+            name: "AdjustmentUI",
+            dependencies: ["EditorCore", "RawProcessingCore", "Localization"]
+        ),
 
         // SwiftUI + AppKit layer. Never touches CIRAWFilter directly.
         .target(
@@ -75,6 +88,8 @@ let package = Package(
         .testTarget(
             name: "LumaHarborIntegrationTests",
             dependencies: ["PhotoLibraryCore", "RawProcessingCore"]
-        )
+        ),
+        .testTarget(name: "EditorCoreTests", dependencies: ["EditorCore"]),
+        .testTarget(name: "AdjustmentUITests", dependencies: ["AdjustmentUI", "EditorCore", "RawProcessingCore"])
     ]
 )
