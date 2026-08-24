@@ -220,6 +220,22 @@ final class EditorViewModelPreviewTests: AppViewModelTestCase {
             model.editor.previewImage,
             "A failed decode left the previous photo's frame on screen looking like a success"
         )
+        XCTAssertTrue(
+            model.editor.decodeFailed,
+            "EditorView has no other way to tell this apart from still-in-flight and would show " +
+            "an indefinite \"Decoding RAW…\" spinner over a decode that has already given up"
+        )
+
+        // A further edit that decodes successfully must clear the stuck-looking
+        // state again -- decodeFailed isn't a one-way latch for this photo.
+        model.editor.setAdjustment(.exposure, to: 1.0)
+        await waitUntilAppCondition("the recovered preview to land") {
+            await MainActor.run { model.editor.previewImage != nil }
+        }
+        XCTAssertFalse(
+            model.editor.decodeFailed,
+            "A subsequent successful decode must clear the earlier failure's state"
+        )
     }
 
     // MARK: - Reverting on a read-only drive must not be a dead end
@@ -474,6 +490,15 @@ extension EditorViewModelPreviewTests {
         XCTAssertNil(
             model.editor.previewRenderFailureMessage,
             "A general open failure is not a preview failure and must not use that channel"
+        )
+        XCTAssertTrue(
+            model.editor.decodeFailed,
+            "A photo whose decode failed and won't be retried must not read as still rendering " +
+            "-- EditorView would otherwise show an indefinite \"Decoding RAW…\" spinner over nothing"
+        )
+        XCTAssertFalse(
+            model.editor.isRendering,
+            "Nothing is actually in flight once the failure has been reported"
         )
     }
 }
