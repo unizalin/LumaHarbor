@@ -68,7 +68,7 @@ let package = Package(
         // SwiftUI + AppKit layer. Never touches CIRAWFilter directly.
         .target(
             name: "LumaHarborApp",
-            dependencies: ["EditorCore", "PhotoLibraryCore", "RawProcessingCore", "PresetCore", "Localization"]
+            dependencies: ["AdjustmentUI", "EditorCore", "PhotoLibraryCore", "RawProcessingCore", "PresetCore", "Localization"]
         ),
 
         // Thin launcher so the SwiftUI App type stays in a testable library target.
