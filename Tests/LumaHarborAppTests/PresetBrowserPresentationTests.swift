@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import LumaHarborApp
@@ -115,5 +116,34 @@ final class PresetBrowserPresentationTests: XCTestCase {
     func testUnhandledDirectionsGoNowhere() {
         XCTAssertNil(PresetFocusNavigation.nextIndex(current: 1, direction: .left, count: 3))
         XCTAssertNil(PresetFocusNavigation.nextIndex(current: 1, direction: .right, count: 3))
+    }
+
+    // MARK: - PresetExportPanelFactory (Gate B smoke test, 2026-08-24: a typed
+    // ".xmp" filename was silently rewritten to ".lhpreset" because
+    // NSSavePanel doesn't preserve an extension outside `allowedContentTypes`
+    // unless `allowsOtherFileTypes` is set -- reproduced by hand twice via
+    // the real Export... panel before this fix, `exportAsXMP` was
+    // unreachable from the UI no matter what the user typed.
+
+    @MainActor
+    func testExportPanelAllowsOtherFileTypesSoATypedExtensionIsNeverSilentlyRewritten() {
+        let panel = NSSavePanel()
+        PresetExportPanelFactory.configure(panel, presetName: "Test Preset")
+        XCTAssertTrue(
+            panel.allowsOtherFileTypes,
+            "Without this, NSSavePanel silently rewrites a typed .xmp filename to " +
+            "the first allowedContentTypes extension (.lhpreset) -- reproduced by hand: " +
+            "typing \"Test Preset.xmp\" actually saved as \"Test Preset.xmp.lhpreset\""
+        )
+    }
+
+    func testExportPanelDeclaresXMPAsAnExplicitlyAllowedType() {
+        let extensions = PresetExportPanelFactory.allowedContentTypes()
+            .compactMap { $0.preferredFilenameExtension?.lowercased() }
+        XCTAssertTrue(
+            extensions.contains("xmp"),
+            "xmp should be a recognized allowed type (for Finder's icon/filtering), " +
+            "not merely tolerated via allowsOtherFileTypes"
+        )
     }
 }

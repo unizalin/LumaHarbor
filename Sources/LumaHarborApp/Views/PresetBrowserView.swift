@@ -20,6 +20,39 @@ enum PresetCopyDestination {
     }
 }
 
+/// Configures the `NSSavePanel` used by `exportPreset`, factored out so its
+/// file-type setup is unit-testable without driving a real modal panel
+/// (XCTest can't drive `NSSavePanel.runModal()`).
+///
+/// Gate B smoke test (2026-08-24): `allowedContentTypes` only declared
+/// `lhpreset`/`xml`, and `allowsOtherFileTypes` was left at its default
+/// `false`. NSSavePanel silently rewrites any extension the user types that
+/// isn't in `allowedContentTypes`, re-appending the first type's extension
+/// instead -- so typing "MyPreset.xmp" actually saved as
+/// "MyPreset.xmp.lhpreset", and `exportPreset`'s `pathExtension == "xmp"`
+/// check was never true through this UI, no matter what the user named the
+/// file. `exportAsXMP` was unreachable from Export... entirely, silently:
+/// no error, no warning, just the wrong format on disk. Reproduced twice by
+/// hand; `XMPImportExportTests` couldn't have caught this since those
+/// exercise `exportAsXMP` directly, bypassing the panel.
+enum PresetExportPanelFactory {
+    static func allowedContentTypes() -> [UTType] {
+        [
+            .init(filenameExtension: "lhpreset") ?? .data,
+            .init(filenameExtension: "xmp") ?? .xml
+        ]
+    }
+
+    @MainActor
+    static func configure(_ panel: NSSavePanel, presetName: String) {
+        panel.title = L10n.t("Export Preset")
+        panel.nameFieldStringValue = presetName
+        panel.allowedContentTypes = allowedContentTypes()
+        panel.allowsOtherFileTypes = true
+        panel.canCreateDirectories = true
+    }
+}
+
 /// Who most recently asked to preview a preset: a real mouse hover, or
 /// keyboard focus moving through the list. Whichever fired most recently
 /// owns the current preview -- a stale hover-exit or focus-loss event from a
@@ -284,10 +317,7 @@ struct PresetBrowserView: View {
 
     private func exportPreset(_ item: PresetListItem) {
         let panel = NSSavePanel()
-        panel.title = L10n.t("Export Preset")
-        panel.nameFieldStringValue = item.document.name
-        panel.allowedContentTypes = [.init(filenameExtension: "lhpreset") ?? .data, .xml]
-        panel.canCreateDirectories = true
+        PresetExportPanelFactory.configure(panel, presetName: item.document.name)
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
