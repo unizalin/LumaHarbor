@@ -41,6 +41,13 @@ struct EditorView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .padding(16)
+                } else if model.editor.decodeFailed {
+                    // Distinct from the spinner below: nothing is actually
+                    // running (isRendering is false too), so showing
+                    // "Decoding RAW…" here would be a permanent lie -- the
+                    // decode already gave up, dismissing the alert doesn't
+                    // change that.
+                    decodeFailedPlaceholder
                 } else {
                     ProgressView(L10n.t("Decoding RAW…"))
                         .controlSize(.large)
@@ -64,6 +71,16 @@ struct EditorView: View {
             .onAppear {
                 updatePreviewSize(geometry.size)
             }
+        }
+    }
+
+    private var decodeFailedPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text(L10n.t("Couldn't show this photo"))
+                .foregroundStyle(.secondary)
         }
     }
 

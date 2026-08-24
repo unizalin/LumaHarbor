@@ -47,6 +47,18 @@ final class EditorViewModel: ObservableObject {
     @Published private(set) var originalImage: CGImage?
     @Published private(set) var previewQuality: PreviewQuality = .interactive
     @Published private(set) var isRendering = false
+
+    /// True once a decode has failed and nothing since -- a new photo
+    /// opened, a fresh frame produced -- has superseded that outcome. Lets
+    /// `EditorView` tell "still working" (`isRendering`) apart from "gave up
+    /// for good"; without this, `previewImage == nil` alone can't
+    /// distinguish the two, and the view fell back to showing an indefinite
+    /// "Decoding RAW…" spinner after a decode failure even though nothing
+    /// was actually running (round 3 smoke test: opening a corrupt RAW,
+    /// dismissing the alert, and being stuck looking like it's still
+    /// decoding forever).
+    @Published private(set) var decodeFailed = false
+
     @Published private(set) var saveState: SaveState = .unchanged
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
@@ -210,6 +222,7 @@ final class EditorViewModel: ObservableObject {
         self.lastSavedAdjustments = adjustments
         self.isReadOnlyLibrary = isReadOnly
         self.previewImage = nil
+        self.decodeFailed = false
         self.originalImage = nil
         self.isShowingOriginal = false
         self.saveState = .unchanged
@@ -237,6 +250,7 @@ final class EditorViewModel: ObservableObject {
         photo = nil
         sourceURL = nil
         previewImage = nil
+        decodeFailed = false
         originalImage = nil
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
@@ -566,6 +580,7 @@ final class EditorViewModel: ObservableObject {
             }
             lastDisplayedGeneration = result.token.generation
             previewImage = result.image.cgImage
+            decodeFailed = false
             previewQuality = result.quality
             if let baseline = result.image.whiteBalanceBaseline {
                 whiteBalanceBaseline = baseline
@@ -605,6 +620,7 @@ final class EditorViewModel: ObservableObject {
             // keeps the modal alert: spec requires a real error stay visible
             // here, not just the preview-only path above.
             previewImage = nil
+            decodeFailed = true
             alert = UserAlert(title: L10n.t("Couldn't show this photo"), error: error)
         }
     }
