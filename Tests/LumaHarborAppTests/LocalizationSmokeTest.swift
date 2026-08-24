@@ -68,6 +68,7 @@ final class LocalizationSmokeTest: XCTestCase {
             "Orange", "Preserved: kept but not applied", "Preset group", "Preset name", "Presets", "Purple",
             "Reading files…", "Red", "Rename Preset", "Rename…", "Replace", "Save", "Save to", "Search presets",
             "Sharpening", "Split Toning", "This Library", "This preset has no adjustments LumaHarbor can apply yet.",
+            "This preset's preview couldn't be rendered right now.",
             "Toggle favorite", "Tone Curve", "Vignette", "Yellow"
         ]
         for key in keys {
