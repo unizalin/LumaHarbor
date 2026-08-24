@@ -208,6 +208,7 @@
 "This photo has saved adjustments" = "This photo has saved adjustments";
 "This photo hasn't been cached yet and its drive isn't connected." = "This photo hasn't been cached yet and its drive isn't connected.";
 "This preset has no adjustments LumaHarbor can apply yet." = "This preset has no adjustments LumaHarbor can apply yet.";
+"This preset's preview couldn't be rendered right now." = "This preset's preview couldn't be rendered right now.";
 "This RAW file appears to be damaged." = "This RAW file appears to be damaged.";
 "Tint" = "Tint";
 "Toggle favorite" = "Toggle favorite";
