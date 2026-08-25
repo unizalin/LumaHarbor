@@ -34,8 +34,10 @@
 最新一次真實執行（三個 fixture 環境變數皆已匯出、exFAT 隨身碟已掛載）的 summary 相對路徑：
 
 ```
-.build/ipad-vertical-slice/20260825T134258Z/summary.md
+.build/ipad-vertical-slice/20260825T151022Z-47599-39431444112907/summary.md
 ```
+
+（此次 run 的 summary 記錄 `Commit: a5df8963b0f8994d5a6cbcd9b149260b5df14ddb`，與 §5.2 修正完成後的 HEAD 完全一致；目錄名稱已改為 timestamp+PID+random，見 §5.2 finding 5。）
 
 摘要內容：
 
@@ -107,6 +109,26 @@ RawFixtureTests: FAIL (executed 9 tests, expected exactly 8)
 3. **同時重寫 signal self-test 的中斷目標**：原本用裸的 `sleep 3` 當作步驟的替身指令，靠「等 log 檔出現」判斷已經開始執行、靠 `pgrep -f '^sleep 3$'` 這種名稱比對判斷有沒有殘留，兩者都有時序上的競態、也可能誤判其他程序。改成專用、確定性的兩層 helper：root helper 先把自己的 PID 寫進 pidfile，再啟動一個真正的 grandchild、等 grandchild 把自己的 PID 也寫進另一個 pidfile 且 `kill -0` 確認存活後，才 touch 一個 ready file；self-test 只等這個 ready file（不是猜固定秒數），確認就緒後才送出真正的 OS signal，事後也是直接用兩個 pidfile 內記錄的精確 PID 做「行程是否還在」的斷言，不再依賴名稱比對。
 
 修復後 `LUMAHARBOR_IPAD_RUNNER_SELFTEST=1 Scripts/run-ipad-vertical-slice-acceptance.zsh` 在前景連續執行 10 次，每次都是 Overall PASS、exit 0，且每次結束後對 `interrupt-root`／`interrupt-child`／`fail-with-7`／`fake-swifttest`／runner 本身的精確程序檢查都確認無殘留。
+
+### 5.2 Runner 的 pre-landing review 修正（本輪：runner 修正，非產品程式碼）
+
+第二輪修復（§5.1）合併後，Codex 對 `Scripts/run-ipad-vertical-slice-acceptance.zsh` 做了一次完整的 pre-landing review，找出 7 項既有缺陷，每項都補了新的、確定性的 self-test 案例：
+
+1. **`handle_terminating_signal` 在 `CURRENT_STEP_KEY` 為空時未設定 `overall_ok=0`**：訊號若發生在 preflight、兩個步驟之間，或 `finalize_run` 執行期間，先前可能出現所有步驟 SKIPPED、Overall 卻是 PASS。修法雙管齊下：handler 一進入就無條件設 `overall_ok=0`；`Overall result` 改成從 `STEP_STATE` 現場重新推導（每個必要步驟都必須確實讀到 `PASS`），不再只信任外部旗標。新增「訊號打在兩個步驟之間」與「訊號打在 `finalize_run` 執行中」兩個 self-test 案例。
+2. **`finalize_run` 無條件呼叫 `xcodebuild -version`**：`xcodebuild` 不存在或回傳非零時，先前會在 `set -e` 下讓整個 script 中止，summary.md 完全不會產生。抽出 `collect_xcode_version()`，best-effort，永遠回傳某個值（失敗時回傳 `"unknown"`），絕不讓非零結束碼往外傳。新增 missing／failing 兩種情境的 self-test。
+3. **`evaluate_xctest_log` 讓 `Executed 0 tests, with 0 failures` 通過**：明確拒絕 `executed == 0`。新增 0／1／正常數量三種 self-test 情境。
+4. **`LUMAHARBOR_IPAD_SELFTEST_*_CMD` 在正式執行也會生效**：使用者 shell 裡若殘留先前互動除錯時匯出的環境變數，正式執行可能被悄悄接管。`step_command_for` 現在額外要求 `LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER` 指向一個「真的存在於磁碟上」的檔案——這個路徑由當次 `run_selftest()` 執行時新建、明確透過每個 case 自己 spawn 的 child 傳入，絕不是固定、可能殘留在使用者 shell 設定檔裡的值。新增案例：即使五個 override 環境變數都設定，但沒有這個 marker 檔案時，五個步驟仍然使用真正的正式指令。
+5. **`RUN_DIR` 只用秒級 timestamp、`mkdir -p`**：同一秒內並行執行的兩個 runner 會共用同一個目錄、互相覆蓋 logs／summary。改成 timestamp+PID+random 的排他 `mkdir`（不加 `-p`），衝突時重試。新增兩個 fake runner 並行執行的 self-test，驗證產生兩個各自獨立、各自 Overall PASS 的目錄。
+6. **`SUMMARY_WRITTEN` 設得太早**：`finalize_run` 執行到一半再收到訊號，可能跳過收尾、留下未遮蔽 log 或完全沒有 summary。改成 `notStarted／finalizing／finalized` 三態：`finalizing` 期間收到的訊號只記錄 `DEFERRED_SIGNAL` 就返回，讓被中斷的那次 `finalize_run` 呼叫自然接續執行完（含原子寫入與 privacy scan），呼叫端在 `finalize_run` 返回後才依 `DEFERRED_SIGNAL` 決定結束碼。同時把兩處 `redact_file` 的 `sed` 呼叫改成 `|| true`（best-effort），確保磁碟滿／權限錯誤這類遮蔽失敗不會在既有的 grep 安全網有機會攔截之前就讓整個 script 中止。
+7. **路徑遮蔽 regex 不支援空白與 Unicode**：原本的字元類別只允許 `[A-Za-z0-9_./+=@%-]`，`/Volumes/Client Photos/secret.ARW` 這種帶空白的路徑只會被遮到 `/Volumes/Client`，privacy scan 卻誤判乾淨。新增「引號包住的路徑」專用 pattern（用配對的引號明確界定範圍，空白／中文／括號都安全涵蓋），並把沒加引號的 catch-all 改成排除清單（只排除引號、角括號、`|`），刻意允許空白與非 ASCII 字元通過——寧可多遮掉同一行後面幾個字（安全方向的犧牲），也不留下磁碟名稱或檔名的後半段。新增涵蓋空白、引號、括號與繁體中文的 self-test。
+
+同一輪也依 review 要求額外處理：
+
+- **Timeout 分支**：新增 self-test，用 `LUMAHARBOR_IPAD_STEP_TIMEOUT_SECONDS=1` 搭配永遠不會結束的目標指令，驗證 `TIMEOUT_HIT`／exit 124／下游 SKIPPED／summary FAIL／子程序完整清理全部正確。
+- **Process group 評估**：認真評估過改用 OS process group（`kill -TERM -- -PGID`）取代目前的「PID 快照＋walk」設計，並明確判定不採用——macOS 沒有 `setsid`，要讓 zsh 的背景工作自動取得獨立 process group 必須開啟 job control（`setopt monitor`），但這在非互動式呼叫（本 runner 實際最常見的使用情境：CI、背景執行、沒有 controlling TTY）下風險更高，可能因為 SIGTTIN/SIGTTOU 造成新的一類卡死，比目前這道窄範圍的競態更難排查。改用兩個具體、範圍明確的緩解：(a) 在送出最終 KILL 之前、且只在 root PID 確認還活著時，額外重新掃描一次子程序樹，補上 grace period 期間新 fork 出來的子程序（不會重蹈「root 已死後重新掃描」的舊 bug）；(b) 每次送信號前用 `ps -o lstart=` 重新核對目標 PID 的啟動時間指紋，啟動時間對不上（代表已被系統回收給別的程序）就跳過，不盲目送出信號。
+- **HEAD／dirty state 一致性**：runner 開始時記錄 `git rev-parse HEAD` 與 `git status --porcelain` 的變更檔案數，`finalize_run` 時重新核對；任一個變了就在 summary 加上「## Repo state」區塊回報 FAIL，避免長時間執行把混合版本的結果歸到錯誤的 commit。
+
+修復後 self-test（含新增的 9 個案例，加上既有 17 個訊號／生命週期案例與 parser／redaction 檢查）在前景連續執行 10 次，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身、`interrupt-root`／`interrupt-child`／helper／`sleep 3600` 的精確程序檢查都確認無殘留。真實 fixture 目錄下重跑完整 Task 8 自動驗收，`summary.md` 的 `Commit` 欄位與本輪修正完成的 HEAD 完全一致（見 §3 開頭）。
 
 ## 6. 實機五項 gate（NOT RUN）
 
