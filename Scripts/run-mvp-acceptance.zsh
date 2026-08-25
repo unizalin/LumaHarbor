@@ -43,6 +43,29 @@ SCRIPT_DIR="${SCRIPT_PATH:h}"
 ROOT_DIR="${SCRIPT_DIR:h}"
 
 # ---------------------------------------------------------------------------
+# Approved RawFixtureTests baseline. This is a fixed, human-approved count —
+# deliberately not `swift test`'s own live test count — so that adding or
+# removing a RawFixtureTests case can never silently pass this gate without a
+# person noticing: `evaluate_xctest_log` below treats any executed count
+# other than exactly this one as FAIL, the same as any skip or failure.
+#
+# Currently corresponds to the 9 approved cases in
+# Tests/LumaHarborIntegrationTests/RawFixtureTests.swift:
+#   testEveryFixtureDecodes, testSonyArwReportsPlausibleMetadata,
+#   testPreviewDecodeHonoursTheRequestedSize,
+#   testFullDecodeReturnsNativeResolution,
+#   testWhiteBalanceOffsetChangesTheRender,
+#   testFullResolutionExportMatchesTheSourceDimensions,
+#   testExportingNeverModifiesTheOriginal,
+#   testPreviewSchedulerDeliversARenderedFrameForARealRaw,
+#   testInteractivePreviewLatencyForARealPhoto.
+#
+# Whoever adds or removes a RawFixtureTests case MUST update this constant
+# and docs/testing/mvp-acceptance-report-template.md in the SAME commit —
+# otherwise this gate will (correctly) start failing every future run.
+RAWFIXTURE_EXPECTED_TEST_COUNT=9
+
+# ---------------------------------------------------------------------------
 # XCTest summary parsing. `swift test` exits 0 even when XCTest reports
 # skipped tests, so a bare exit-code check would mislabel a run with silent
 # skips as PASS. These two functions are also exercised by an internal,
@@ -171,31 +194,40 @@ run_selftest() {
         print -r -- "selftest: 2 tests skipped (comma form, plural) -> FAIL (expected FAIL): ok"
     fi
 
-    write_selftest_case "${tmp}/executed-7.log" \
-        "Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
-    if evaluate_xctest_log "${tmp}/executed-7.log" 8 >/dev/null; then
-        print -r -- "selftest: executed=7, required=8 -> unexpectedly PASSED"
+    # These three cases exercise the RawFixtureTests gate's actual approved
+    # baseline (RAWFIXTURE_EXPECTED_TEST_COUNT) rather than a stale literal,
+    # so the self-test can never drift out of sync with the real gate: under
+    # the baseline (a test silently vanished), exactly the baseline (the
+    # approved, current case), and over the baseline (a new case landed
+    # without updating RAWFIXTURE_EXPECTED_TEST_COUNT) must all be exercised.
+    local rawfixture_under=$((RAWFIXTURE_EXPECTED_TEST_COUNT - 1))
+    local rawfixture_over=$((RAWFIXTURE_EXPECTED_TEST_COUNT + 1))
+
+    write_selftest_case "${tmp}/executed-under.log" \
+        "Executed ${rawfixture_under} tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
+    if evaluate_xctest_log "${tmp}/executed-under.log" "$RAWFIXTURE_EXPECTED_TEST_COUNT" >/dev/null; then
+        print -r -- "selftest: executed=${rawfixture_under}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> unexpectedly PASSED"
         failures=$((failures + 1))
     else
-        print -r -- "selftest: executed=7, required=8 -> FAIL (expected FAIL): ok"
+        print -r -- "selftest: executed=${rawfixture_under}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> FAIL (expected FAIL): ok"
     fi
 
-    write_selftest_case "${tmp}/executed-8.log" \
-        "Executed 8 tests, with 0 tests skipped, 0 failures (0 unexpected) in 0.001 (0.001) seconds"
-    if evaluate_xctest_log "${tmp}/executed-8.log" 8 >/dev/null; then
-        print -r -- "selftest: executed=8, required=8 -> PASS (expected PASS): ok"
+    write_selftest_case "${tmp}/executed-exact.log" \
+        "Executed ${RAWFIXTURE_EXPECTED_TEST_COUNT} tests, with 0 tests skipped, 0 failures (0 unexpected) in 0.001 (0.001) seconds"
+    if evaluate_xctest_log "${tmp}/executed-exact.log" "$RAWFIXTURE_EXPECTED_TEST_COUNT" >/dev/null; then
+        print -r -- "selftest: executed=${RAWFIXTURE_EXPECTED_TEST_COUNT}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> PASS (expected PASS): ok"
     else
-        print -r -- "selftest: executed=8, required=8 -> unexpectedly FAILED"
+        print -r -- "selftest: executed=${RAWFIXTURE_EXPECTED_TEST_COUNT}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> unexpectedly FAILED"
         failures=$((failures + 1))
     fi
 
-    write_selftest_case "${tmp}/executed-9.log" \
-        "Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
-    if evaluate_xctest_log "${tmp}/executed-9.log" 8 >/dev/null; then
-        print -r -- "selftest: executed=9, required=8 -> unexpectedly PASSED"
+    write_selftest_case "${tmp}/executed-over.log" \
+        "Executed ${rawfixture_over} tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
+    if evaluate_xctest_log "${tmp}/executed-over.log" "$RAWFIXTURE_EXPECTED_TEST_COUNT" >/dev/null; then
+        print -r -- "selftest: executed=${rawfixture_over}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> unexpectedly PASSED"
         failures=$((failures + 1))
     else
-        print -r -- "selftest: executed=9, required=8 -> FAIL (expected FAIL): ok"
+        print -r -- "selftest: executed=${rawfixture_over}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> FAIL (expected FAIL): ok"
     fi
 
     print -r -- "no XCTest summary in this log at all" > "${tmp}/unparsable.log"
@@ -1024,7 +1056,7 @@ if (( ! PREFLIGHT_ONLY )); then
                 announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
             elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
                 "${rawfixture_cmd[@]}"; then
-                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
+                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" "$RAWFIXTURE_EXPECTED_TEST_COUNT")"; then
                     STEP_RAWFIXTURE="PASS"
                 else
                     STEP_RAWFIXTURE="FAIL (${step_reason})"

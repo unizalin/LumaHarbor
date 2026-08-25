@@ -213,14 +213,26 @@ evaluate_xctest_log() {
 # unrelated swift/xcodebuild process elsewhere on the machine.
 # ---------------------------------------------------------------------------
 
-kill_descendants_of() {
-    local root_pid="$1" sig="$2"
-    local -a to_visit=("$root_pid") all_pids=()
+# collect_descendant_pids <root_pid>
+# Prints, one per line, root_pid followed by every currently-live descendant
+# discovered via `pgrep -P`, ordered leaf-first (the deepest descendants
+# first, root_pid last). This is a one-shot snapshot: callers MUST take it
+# BEFORE sending any signal to root_pid, and reuse that same snapshot for
+# every signal in the escalation (TERM, then KILL) — a *second* pgrep
+# traversal rooted at root_pid, taken after root_pid has already been
+# signalled, can find zero descendants even while they are still alive: once
+# root_pid exits, its children are reparented away from it (typically to
+# launchd), so `pgrep -P root_pid` no longer sees them at all. Re-deriving
+# the descendant list after the first signal is exactly how a live
+# descendant survives cleanup undetected.
+collect_descendant_pids() {
+    local root_pid="$1"
+    local -a to_visit=("$root_pid") ordered_pids=()
     while (( ${#to_visit[@]} > 0 )); do
         local pid="${to_visit[1]}"
         to_visit=("${to_visit[@]:1}")
         [[ -n "$pid" ]] || continue
-        all_pids+=("$pid")
+        ordered_pids+=("$pid")
         local -a children
         local pgrep_output=""
         pgrep_output="$(pgrep -P "$pid" 2>/dev/null)" || true
@@ -230,19 +242,58 @@ kill_descendants_of() {
             [[ -n "$child" ]] && to_visit+=("$child")
         done
     done
+    # ordered_pids is in BFS order (root, then children, then
+    # grandchildren, ...); print it reversed so the caller signals
+    # deepest-first, root_pid last — a parent's early exit can then never
+    # race a not-yet-signalled child, since every PID was already resolved
+    # up front and is signalled directly by PID, never via the parent.
+    local idx
+    for (( idx = ${#ordered_pids[@]}; idx >= 1; idx-- )); do
+        print -r -- "${ordered_pids[$idx]}"
+    done
+}
+
+# signal_pid_list <signal> <pid>...
+# Sends exactly one signal to exactly the given PIDs — never a broad
+# process-name or process-group kill — so this can only ever touch PIDs a
+# caller already resolved itself.
+signal_pid_list() {
+    local sig="$1"
+    shift
     local p
-    for p in "${all_pids[@]}"; do
+    for p in "$@"; do
         [[ -n "$p" ]] || continue
         kill -"$sig" "$p" 2>/dev/null || true
     done
 }
 
+# all_pids_gone <pid>...
+# True (0) only once every given PID has exited. Used to bound the grace
+# wait between TERM and KILL, and to confirm cleanup actually completed
+# rather than merely having been requested.
+all_pids_gone() {
+    local p
+    for p in "$@"; do
+        [[ -n "$p" ]] || continue
+        kill -0 "$p" 2>/dev/null && return 1
+    done
+    return 0
+}
+
 # run_with_timeout <timeout_seconds> <logfile> <cwd> cmd...
 # Runs cmd... with the given working directory as the sole child of a
-# dedicated wrapper subshell, mirroring its combined output to both the
-# console and logfile. Sets the global TIMEOUT_HIT (0/1) and
-# RUN_WITH_TIMEOUT_PID (the wrapper's PID, valid only while the command is
-# running). Returns the command's own exit code, or 124 on a timeout.
+# dedicated wrapper subshell. Output is captured only to logfile — there is
+# deliberately no live console tail: an earlier version backgrounded
+# `tail -f` to mirror progress live, but that gave every exit path (normal
+# completion, timeout, and an external INT/TERM/HUP delivered to this
+# script) one more backgrounded PID it had to remember to clean up, and a
+# signal arriving at exactly the wrong instant could leave that `tail -f`
+# running after the acceptance run itself had already exited. Each step's
+# own PASS/FAIL line is still printed to the console by its caller once the
+# step finishes; the full transcript is always in logfile regardless. Sets
+# the global TIMEOUT_HIT (0/1) and RUN_WITH_TIMEOUT_PID (the wrapper's PID,
+# valid only while the command is running). Returns the command's own exit
+# code, or 124 on a timeout.
 TIMEOUT_HIT=0
 RUN_WITH_TIMEOUT_PID=0
 run_with_timeout() {
@@ -255,20 +306,19 @@ run_with_timeout() {
     local cmd_pid=$!
     RUN_WITH_TIMEOUT_PID=$cmd_pid
 
-    tail -f -n +1 -- "$logfile" &
-    local tail_pid=$!
-
     local elapsed=0 grace=5
     while kill -0 "$cmd_pid" 2>/dev/null; do
         if (( elapsed >= timeout_seconds )); then
             TIMEOUT_HIT=1
-            kill_descendants_of "$cmd_pid" TERM
+            local -a victims
+            victims=("${(f)$(collect_descendant_pids "$cmd_pid")}")
+            signal_pid_list TERM "${victims[@]}"
             local waited=0
-            while (( waited < grace )) && kill -0 "$cmd_pid" 2>/dev/null; do
+            while (( waited < grace )) && ! all_pids_gone "${victims[@]}"; do
                 sleep 1
                 waited=$((waited + 1))
             done
-            kill_descendants_of "$cmd_pid" KILL
+            signal_pid_list KILL "${victims[@]}"
             break
         fi
         sleep 1
@@ -277,8 +327,6 @@ run_with_timeout() {
 
     local exit_code=0
     wait "$cmd_pid" 2>/dev/null || exit_code=$?
-    kill "$tail_pid" 2>/dev/null || true
-    wait "$tail_pid" 2>/dev/null || true
     RUN_WITH_TIMEOUT_PID=0
 
     if (( TIMEOUT_HIT )); then
@@ -417,9 +465,17 @@ finalize_run() {
         redact_file "${RUN_DIR}/${STEP_LOGFILE[$key]}"
     done
 
-    local commit xcode_version arch
+    local commit xcode_version_output xcode_version arch
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || print -r -- unknown)"
-    xcode_version="$(xcodebuild -version 2>/dev/null | head -n1)"
+    # `xcodebuild -version | head -n1` would close its read end as soon as it
+    # has one line, which can deliver SIGPIPE to xcodebuild while it is still
+    # writing its second line — under `set -o pipefail` that turns into a 141
+    # exit for this whole command substitution, which `set -e` then treats as
+    # this line failing and aborts the entire runner mid-finalize_run. Capture
+    # the full output first (no pipe, so nothing can ever close early on
+    # xcodebuild), then take the first line with parameter expansion instead.
+    xcode_version_output="$(xcodebuild -version 2>/dev/null)"
+    xcode_version="${xcode_version_output%%$'\n'*}"
     [[ -z "$xcode_version" ]] && xcode_version="unknown"
     arch="$(uname -m)"
 
@@ -534,9 +590,16 @@ handle_terminating_signal() {
             [[ "$k" == "$key" ]] && found=1
         done
         if (( RUN_WITH_TIMEOUT_PID != 0 )); then
-            kill_descendants_of "$RUN_WITH_TIMEOUT_PID" TERM
-            sleep 1
-            kill_descendants_of "$RUN_WITH_TIMEOUT_PID" KILL
+            # One snapshot, reused for both signals — see collect_descendant_pids.
+            local -a victims
+            victims=("${(f)$(collect_descendant_pids "$RUN_WITH_TIMEOUT_PID")}")
+            signal_pid_list TERM "${victims[@]}"
+            local waited=0
+            while (( waited < 5 )) && ! all_pids_gone "${victims[@]}"; do
+                sleep 1
+                waited=$((waited + 1))
+            done
+            signal_pid_list KILL "${victims[@]}"
         fi
     fi
     finalize_run
@@ -561,22 +624,31 @@ handle_terminating_signal() {
 
 typeset -A FASTPASS_CMD
 FAIL_WITH_7_HELPER=""
+INTERRUPT_ROOT_HELPER=""
+INTERRUPT_CHILD_HELPER=""
 
 # run_signal_selftest_case <target-key> <signal-name> <expected-exit-code>
 # Launches a fresh subprocess of this very script with every step up to and
 # including target-key substituted for a cheap, controllable command (steps
-# before the target get an instant-pass stand-in; the target gets a
-# controllable `sleep 3`). Once the target step has demonstrably started —
-# its log file exists, created the instant run_with_timeout begins for that
-# step, which is also the instant CURRENT_STEP_KEY is set — this is the
-# deterministic ready-file-style handshake used instead of guessing a fixed
-# sleep duration. A real OS signal is then sent to the subprocess itself, and
-# the resulting summary.md is read back and checked the same way an operator
-# would.
+# before the target get an instant-pass stand-in; the target gets
+# INTERRUPT_ROOT_HELPER, a dedicated two-process helper — see its own
+# comment below for why). Readiness is a deterministic handshake (a ready
+# file, written only once both the helper's root process and its real
+# grandchild process have confirmed PIDs on disk) rather than any fixed
+# sleep guess. A real OS signal is then sent to the runner subprocess
+# itself, and both the resulting summary.md and the helper's own two exact
+# PIDs (read back from the pidfiles it wrote, never a broad `pgrep -f`
+# pattern match) are checked the same way an operator would.
 run_signal_selftest_case() {
     local target_key="$1" signal_name="$2" expected_exit="$3"
     local label="signal ${signal_name} during ${target_key}"
     local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local root_pidfile="${case_tmp}/root.pid"
+    local child_pidfile="${case_tmp}/child.pid"
+    local ready_file="${case_tmp}/ready"
 
     local -a before_dirs
     before_dirs=("${ROOT_DIR}"/.build/ipad-vertical-slice/*(N))
@@ -586,7 +658,7 @@ run_signal_selftest_case() {
         local k
         for k in "${STEP_ORDER[@]}"; do
             if [[ "$k" == "$target_key" ]]; then
-                export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="sleep 3"
+                export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="${INTERRUPT_ROOT_HELPER} ${root_pidfile} ${child_pidfile} ${ready_file} ${INTERRUPT_CHILD_HELPER}"
                 break
             else
                 export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="${FASTPASS_CMD[$k]}"
@@ -596,37 +668,43 @@ run_signal_selftest_case() {
     ) >/dev/null 2>&1 &
     local child_pid=$!
 
-    local new_dir="" deadline=$((SECONDS + 15))
-    local d
-    while (( SECONDS < deadline )); do
-        for d in "${ROOT_DIR}"/.build/ipad-vertical-slice/*(N); do
-            if (( ${before_dirs[(Ie)$d]} == 0 )); then
-                new_dir="$d"
-                break
-            fi
-        done
-        [[ -n "$new_dir" ]] && break
-        sleep 0.05
+    # Deterministic handshake: the ready file only exists once the helper's
+    # root process has confirmed its grandchild is alive (see
+    # INTERRUPT_ROOT_HELPER's own script body) — never a fixed sleep guess.
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
+        sleep 0.02
     done
-    if [[ -z "$new_dir" ]]; then
-        print -r -- "selftest: ${label} -> the subprocess never created a run directory"
+
+    if [[ ! -f "$ready_file" ]]; then
+        print -r -- "selftest: ${label} -> the interrupt-target helper never signalled ready"
         kill -KILL "$child_pid" 2>/dev/null || true
         wait "$child_pid" 2>/dev/null || true
+        rm -rf -- "$case_tmp"
         return 1
     fi
 
-    local target_log="${new_dir}/${STEP_LOGFILE[$target_key]}"
-    local wait_deadline=$((SECONDS + 20))
-    while (( SECONDS < wait_deadline )); do
-        [[ -f "$target_log" ]] && break
-        sleep 0.02
-    done
-    if [[ ! -f "$target_log" ]]; then
-        print -r -- "selftest: ${label} -> the target step never started"
+    local root_helper_pid="" grandchild_pid=""
+    [[ -s "$root_pidfile" ]] && root_helper_pid="$(<"$root_pidfile")"
+    [[ -s "$child_pidfile" ]] && grandchild_pid="$(<"$child_pidfile")"
+    if [[ -z "$root_helper_pid" || -z "$grandchild_pid" ]]; then
+        print -r -- "selftest: ${label} -> ready file existed but a pidfile was empty"
         kill -KILL "$child_pid" 2>/dev/null || true
         wait "$child_pid" 2>/dev/null || true
+        rm -rf -- "$case_tmp"
         return 1
     fi
+
+    # The run directory the runner subprocess created — needed to locate
+    # summary.md afterward, not for timing (the ready-file wait above
+    # already proves the target step is genuinely in flight).
+    local new_dir="" d
+    for d in "${ROOT_DIR}"/.build/ipad-vertical-slice/*(N); do
+        if (( ${before_dirs[(Ie)$d]} == 0 )); then
+            new_dir="$d"
+            break
+        fi
+    done
 
     kill -s "$signal_name" "$child_pid" 2>/dev/null || true
     local rc=0
@@ -639,67 +717,85 @@ run_signal_selftest_case() {
         case_failures=$((case_failures + 1))
     fi
 
-    local summary="${new_dir}/summary.md"
-    if [[ ! -f "$summary" ]]; then
-        print -r -- "selftest: ${label} -> no summary.md was written"
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
         case_failures=$((case_failures + 1))
     else
-        if grep -q '^Overall result: FAIL$' "$summary"; then
-            print -r -- "selftest: ${label} -> Overall result: FAIL (expected): ok"
-        else
-            print -r -- "selftest: ${label} -> summary.md did not report an overall FAIL"
-            case_failures=$((case_failures + 1))
-        fi
-
-        if grep -qF -- "- ${STEP_LABEL[$target_key]}: FAIL (interrupted by ${signal_name})" "$summary"; then
-            print -r -- "selftest: ${label} -> interrupted step labelled correctly: ok"
-        else
-            print -r -- "selftest: ${label} -> interrupted step was not labelled correctly"
-            case_failures=$((case_failures + 1))
-        fi
-
-        if grep -qF -- 'SKIPPED (not yet run)' "$summary"; then
-            print -r -- "selftest: ${label} -> a step still carried the stale default reason"
+        local summary="${new_dir}/summary.md"
+        if [[ ! -f "$summary" ]]; then
+            print -r -- "selftest: ${label} -> no summary.md was written"
             case_failures=$((case_failures + 1))
         else
-            print -r -- "selftest: ${label} -> no stale default reason leaked: ok"
-        fi
-
-        local reason="${STEP_BLOCK_REASON[$target_key]:-}"
-        if [[ -n "$reason" ]]; then
-            local found=0 k downstream_ok=1
-            for k in "${STEP_ORDER[@]}"; do
-                if (( found )); then
-                    if ! grep -qF -- "- ${STEP_LABEL[$k]}: SKIPPED (${reason})" "$summary"; then
-                        downstream_ok=0
-                    fi
-                fi
-                [[ "$k" == "$target_key" ]] && found=1
-            done
-            if (( downstream_ok )); then
-                print -r -- "selftest: ${label} -> downstream steps correctly blame ${target_key}: ok"
+            if grep -q '^Overall result: FAIL$' "$summary"; then
+                print -r -- "selftest: ${label} -> Overall result: FAIL (expected): ok"
             else
-                print -r -- "selftest: ${label} -> a downstream step did not correctly blame ${target_key}"
+                print -r -- "selftest: ${label} -> summary.md did not report an overall FAIL"
                 case_failures=$((case_failures + 1))
             fi
-        fi
 
-        if has_private_path "$summary"; then
-            print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
-            case_failures=$((case_failures + 1))
-        else
-            print -r -- "selftest: ${label} -> no private path in summary.md (expected): ok"
+            if grep -qF -- "- ${STEP_LABEL[$target_key]}: FAIL (interrupted by ${signal_name})" "$summary"; then
+                print -r -- "selftest: ${label} -> interrupted step labelled correctly: ok"
+            else
+                print -r -- "selftest: ${label} -> interrupted step was not labelled correctly"
+                case_failures=$((case_failures + 1))
+            fi
+
+            if grep -qF -- 'SKIPPED (not yet run)' "$summary"; then
+                print -r -- "selftest: ${label} -> a step still carried the stale default reason"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no stale default reason leaked: ok"
+            fi
+
+            local reason="${STEP_BLOCK_REASON[$target_key]:-}"
+            if [[ -n "$reason" ]]; then
+                local found=0 k downstream_ok=1
+                for k in "${STEP_ORDER[@]}"; do
+                    if (( found )); then
+                        if ! grep -qF -- "- ${STEP_LABEL[$k]}: SKIPPED (${reason})" "$summary"; then
+                            downstream_ok=0
+                        fi
+                    fi
+                    [[ "$k" == "$target_key" ]] && found=1
+                done
+                if (( downstream_ok )); then
+                    print -r -- "selftest: ${label} -> downstream steps correctly blame ${target_key}: ok"
+                else
+                    print -r -- "selftest: ${label} -> a downstream step did not correctly blame ${target_key}"
+                    case_failures=$((case_failures + 1))
+                fi
+            fi
+
+            if has_private_path "$summary"; then
+                print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no private path in summary.md (expected): ok"
+            fi
         fi
     fi
 
-    sleep 1
-    if pgrep -f '^sleep 3$' >/dev/null 2>&1; then
-        print -r -- "selftest: ${label} -> a descendant process survived the interruption"
-        case_failures=$((case_failures + 1))
+    # Precise-PID survivor check against the two exact PIDs the helper
+    # itself reported — never a broad `pgrep -f` name/pattern match, which
+    # can both miss a renamed process and false-positive on an unrelated one.
+    local survivor_deadline=$((SECONDS + 5))
+    local root_gone=0 grandchild_gone=0
+    while (( SECONDS < survivor_deadline )); do
+        kill -0 "$root_helper_pid" 2>/dev/null || root_gone=1
+        kill -0 "$grandchild_pid" 2>/dev/null || grandchild_gone=1
+        (( root_gone && grandchild_gone )) && break
+        sleep 0.1
+    done
+    if (( root_gone && grandchild_gone )); then
+        print -r -- "selftest: ${label} -> helper root and grandchild both exited (expected): ok"
     else
-        print -r -- "selftest: ${label} -> no descendant process left running (expected): ok"
+        print -r -- "selftest: ${label} -> a helper process survived the interruption (root_gone=${root_gone} grandchild_gone=${grandchild_gone})"
+        case_failures=$((case_failures + 1))
+        kill -KILL "$root_helper_pid" 2>/dev/null || true
+        kill -KILL "$grandchild_pid" 2>/dev/null || true
     fi
 
+    rm -rf -- "$case_tmp"
     (( case_failures == 0 ))
 }
 
@@ -955,6 +1051,40 @@ run_selftest() {
         print -r -- 'exit 7'
     } > "$FAIL_WITH_7_HELPER"
     chmod +x "$FAIL_WITH_7_HELPER"
+
+    # Deterministic two-process interrupt target for the signal-case tests
+    # below: a real grandchild process (not just the wrapper subshell
+    # run_with_timeout already forks) whose exact PID is recorded on disk,
+    # so a case can assert on precise PIDs instead of a `pgrep -f` name
+    # pattern. INTERRUPT_CHILD_HELPER writes its own PID to $1, then blocks.
+    INTERRUPT_CHILD_HELPER="${helper_dir}/interrupt-child.zsh"
+    {
+        print -r -- '#!/usr/bin/env zsh'
+        print -r -- 'print -r -- "$$" > "$1"'
+        print -r -- 'while true; do sleep 3600; done'
+    } > "$INTERRUPT_CHILD_HELPER"
+    chmod +x "$INTERRUPT_CHILD_HELPER"
+
+    # INTERRUPT_ROOT_HELPER args: <root_pidfile> <child_pidfile> <ready_file>
+    # <child_script>. Writes its own PID, launches child_script as a real
+    # child, waits for that child to confirm its own PID on disk AND for
+    # that PID to answer `kill -0`, only then touches ready_file — the
+    # caller's readiness handshake — and finally blocks on the child so both
+    # processes stay alive together until signalled.
+    INTERRUPT_ROOT_HELPER="${helper_dir}/interrupt-root.zsh"
+    {
+        print -r -- '#!/usr/bin/env zsh'
+        print -r -- 'root_pidfile="$1"; child_pidfile="$2"; ready_file="$3"; child_script="$4"'
+        print -r -- 'print -r -- "$$" > "$root_pidfile"'
+        print -r -- '"$child_script" "$child_pidfile" &'
+        print -r -- 'child_pid=$!'
+        print -r -- 'while [[ ! -s "$child_pidfile" ]]; do sleep 0.02; done'
+        print -r -- 'grandchild_pid="$(<"$child_pidfile")"'
+        print -r -- 'while ! kill -0 "$grandchild_pid" 2>/dev/null; do sleep 0.02; done'
+        print -r -- 'touch "$ready_file"'
+        print -r -- 'wait "$child_pid"'
+    } > "$INTERRUPT_ROOT_HELPER"
+    chmod +x "$INTERRUPT_ROOT_HELPER"
 
     FASTPASS_CMD=(
         strictbuild   "true"

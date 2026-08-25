@@ -94,7 +94,8 @@ Log 路徑（repo-ignored，例如 `.build/mvp-acceptance/<timestamp>/swift-test
 LUMAHARBOR_RAW_FIXTURE_DIR=/path/to/private/fixtures swift test --filter RawFixtureTests
 ```
 
-`RawFixtureTests` 8 個既有案例逐一記錄（不得 skip）：
+`RawFixtureTests` 9 個既有案例逐一記錄（不得 skip；此數量對應 `Scripts/run-mvp-acceptance.zsh` 的
+`RAWFIXTURE_EXPECTED_TEST_COUNT` 常數，新增或移除案例時必須同一 commit 同步更新兩處）：
 
 | # | 測試名稱 | 結果 | 備註 |
 |---|---|---|---|
@@ -106,6 +107,7 @@ LUMAHARBOR_RAW_FIXTURE_DIR=/path/to/private/fixtures swift test --filter RawFixt
 | 6 | `testFullResolutionExportMatchesTheSourceDimensions` | ☐ Pass ☐ Fail | |
 | 7 | `testExportingNeverModifiesTheOriginal` | ☐ Pass ☐ Fail | |
 | 8 | `testPreviewSchedulerDeliversARenderedFrameForARealRaw` | ☐ Pass ☐ Fail | |
+| 9 | `testInteractivePreviewLatencyForARealPhoto` | ☐ Pass ☐ Fail | |
 
 人工補驗（無法自動化的視覺判斷）：
 
