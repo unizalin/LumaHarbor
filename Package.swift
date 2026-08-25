@@ -47,7 +47,7 @@ let package = Package(
         ),
 
         // Compiles Sources/RawProcessingCore/Kernels/*.metal into a
-        // default.metallib resource at build time -- `swift build`'s own
+        // CoreImageKernels.metallib resource at build time -- `swift build`'s own
         // build system, unlike Xcode's, does not do this automatically.
         .plugin(
             name: "CompileMetalKernels",
