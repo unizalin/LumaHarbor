@@ -133,16 +133,27 @@ extension PhotoDocumentEditorDependencies {
 /// (`editor`, set once at `init`) — callers must read it from here rather
 /// than constructing their own.
 ///
-/// **Serialization.** Every state-changing operation (a fresh open, a
-/// restore, a close) claims a new `generation` before doing any `await`.
-/// Only the operation whose generation is still current when its async work
-/// finishes is allowed to touch `document`/`documentScope`/
-/// `isPreparingDocument`/`editor` — an operation that finishes after being
-/// superseded discards whatever it produced (stopping any scope it opened,
-/// and rolling back any document it newly created) instead of clobbering
-/// whatever the newer operation already committed. This is what makes
-/// overlapping opens, and a close racing an open, resolve to exactly one
-/// consistent outcome instead of a data race.
+/// **Serialization.** Every operation that may end up owning `document`/
+/// `documentScope`/`editor` (a fresh open, a startup restore, a close)
+/// mints an `OperationToken` *synchronously*, at its public entry point,
+/// before creating any `Task` — never from inside a `Task`'s body, where
+/// the order tokens get minted in could end up not matching the order the
+/// operations were actually requested in. Only the operation whose token is
+/// still `currentToken` when its async work finishes is allowed to touch
+/// shared state; a superseded operation discards whatever it produced
+/// (stopping any scope it opened, rolling back any document it newly
+/// created) instead of clobbering whatever the newer operation already
+/// committed.
+///
+/// **Switching documents is two-phase.** A fresh open never touches the
+/// document already open until the *new* one is fully built and validated
+/// (copied/fingerprinted, metadata decoded, adjustments loaded). Only then
+/// is the old document flushed, and only after that succeeds does the
+/// hand-off happen — stopping the old scope, installing the new document,
+/// and moving the active-document pointer directly from the old ID to the
+/// new one, never through `nil`. If building the new document or flushing
+/// the old one fails, the old document is left exactly as it was: open,
+/// editable, its scope untouched.
 @MainActor
 public final class PhotoDocumentEditor: ObservableObject {
     public let editor = EditorSession()
@@ -154,9 +165,9 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     /// True while a selection or restore is being prepared — a copy or
     /// fingerprint in flight, a bookmark being resolved, metadata being
-    /// read — before `editor.open` is called. Distinct from
-    /// `editor.isRendering`, which only covers preview decoding of an
-    /// already-open document.
+    /// read — before the switch to it (or the initial open) actually
+    /// happens. Distinct from `editor.isRendering`, which only covers
+    /// preview decoding of an already-open document.
     @Published public private(set) var isPreparingDocument = false
 
     /// A file has been picked and is waiting for the user to choose
@@ -172,19 +183,31 @@ public final class PhotoDocumentEditor: ObservableObject {
     /// is `EditorSession`'s to own.
     @Published public var alert: EditorAlert?
 
+    /// A safe (path-free), non-modal diagnostic for background cleanup
+    /// that didn't fully succeed — an incomplete rollback, or a bookmark
+    /// refresh that couldn't be persisted. Never blocks the user, and never
+    /// affects whether the document they're looking at is valid; a caller
+    /// can surface it in a diagnostics UI, or just inspect it in tests.
+    @Published public private(set) var cleanupDiagnostic: String?
+
     private let dependencies: PhotoDocumentEditorDependencies
     private var pendingSelection: (url: URL, scope: any SecurityScopedResource)?
     private var documentScope: (any SecurityScopedResource)?
     private var startupTask: Task<Void, Never>?
     private var openingTask: Task<Void, Never>?
     /// The in-flight flush shared by whichever operations are currently
-    /// racing to close the same current document. See
-    /// `flushAndCloseCurrentDocument(checkingGeneration:)`.
+    /// racing to close/replace the same current document. See
+    /// `flushCurrentDocumentIfDirty()`.
     private var activeFlushTask: Task<Bool, Never>?
-    /// Bumped by every operation that may commit `document`/`documentScope`
-    /// — a fresh open, a restore attempt, or a close. See the type's doc
-    /// comment.
-    private var generation: UInt64 = 0
+
+    /// Identifies one lifecycle operation from the moment it is minted to
+    /// the moment it either commits or discards itself.
+    private struct OperationToken: Equatable {
+        let generation: UInt64
+    }
+
+    private var currentGeneration: UInt64 = 0
+    private var currentToken: OperationToken?
 
     public init(dependencies: PhotoDocumentEditorDependencies) {
         self.dependencies = dependencies
@@ -211,20 +234,44 @@ public final class PhotoDocumentEditor: ObservableObject {
         activeFlushTask?.cancel()
     }
 
+    // MARK: - Token bookkeeping
+
+    private func mintToken() -> OperationToken {
+        currentGeneration += 1
+        let token = OperationToken(generation: currentGeneration)
+        currentToken = token
+        return token
+    }
+
+    private func isCurrent(_ token: OperationToken) -> Bool {
+        currentToken == token
+    }
+
     // MARK: - Startup: reconcile, then restore
 
     /// Reclaims storage left behind by an import the app was killed in the
-    /// middle of, then — only once that has finished — tries to restore the
-    /// most recently open document. Safe to call once per launch.
+    /// middle of, then — only once that has finished, and only if the user
+    /// has not started opening or closing anything in the meantime — tries
+    /// to restore the most recently open document. Safe to call once per
+    /// launch.
     public func performStartupSequence() {
         guard startupTask == nil else { return }
+        // Snapshotted *before* reconciliation runs: if this still matches
+        // `currentGeneration` once reconciliation finishes, nothing else
+        // has minted a token since startup began, so restoring is still
+        // this launch's to do. A fresh selection the user makes while
+        // reconciliation is still running bumps `currentGeneration` itself
+        // and so invalidates this baseline — restore simply never attempts
+        // anything in that case, rather than racing (let alone cancelling)
+        // the user's own open.
+        let startupBaselineGeneration = currentGeneration
         // `Task {}` here inherits `@MainActor` from this method, exactly
         // like `EditorSession.startObservingPreviews` — the body only
         // touches `@Published` state after each `await` has already taken
         // the actual file-system work off this actor.
         startupTask = Task { [weak self] in
             await self?.reconcileOrphanedImports()
-            await self?.restoreActiveDocumentIfPossible()
+            await self?.restoreActiveDocumentIfPossible(ifStillAtBaseline: startupBaselineGeneration)
         }
     }
 
@@ -249,29 +296,33 @@ public final class PhotoDocumentEditor: ObservableObject {
         }
     }
 
-    /// Restores the document remembered by `loadActiveDocumentID`, if any.
-    /// Never touches `document`/`documentScope` if the user has already
-    /// opened something else in the meantime (a fresh selection always
-    /// wins), and never deletes anything on failure — unlike a fresh open,
-    /// there is no newly created document here to roll back, only a
-    /// pointer to an existing one.
-    private func restoreActiveDocumentIfPossible() async {
+    /// Restores the document remembered by `loadActiveDocumentID`, if any —
+    /// but only if `baselineGeneration` (captured before reconciliation
+    /// started) is still current, i.e. the user has not already started
+    /// opening or closing something. Never deletes anything on failure:
+    /// unlike a fresh open, there is no newly created document here to roll
+    /// back, only a pointer to an existing one — see
+    /// `classifyRestoreFailure(_:)` for which failures still clear that
+    /// pointer.
+    private func restoreActiveDocumentIfPossible(ifStillAtBaseline baselineGeneration: UInt64) async {
         guard document == nil else { return }
+        guard currentGeneration == baselineGeneration else { return }
         guard let activeID = dependencies.loadActiveDocumentID() else { return }
 
-        openingTask?.cancel()
-        let myGeneration = beginNewGeneration()
+        let token = mintToken()
         isPreparingDocument = true
 
         do {
-            let existingDocument = try await dependencies.store.loadDocument(id: activeID)
+            let loadedDocument = try await dependencies.store.loadDocument(id: activeID)
             let ownedScope: (any SecurityScopedResource)?
+            let runtimeDocument: PhotoDocument
 
-            switch existingDocument.storageMode {
+            switch loadedDocument.storageMode {
             case .appCopy:
                 ownedScope = nil
+                runtimeDocument = loadedDocument
             case .inPlace:
-                guard let bookmarkData = existingDocument.sourceBookmarkData else {
+                guard let bookmarkData = loadedDocument.sourceBookmarkData else {
                     throw RestoreError.missingBookmark
                 }
                 let resolved = try dependencies.resolveScope(bookmarkData)
@@ -279,39 +330,147 @@ public final class PhotoDocumentEditor: ObservableObject {
                     resolved.resource.stop()
                     throw RestoreError.accessDenied
                 }
-                if resolved.isStale, let refreshed = try? dependencies.makeBookmark(resolved.resource.url) {
-                    // Best-effort: a failure to persist the refresh just
-                    // means the *next* restore may hit the same staleness
-                    // again, not that this one fails.
-                    try? await dependencies.store.updateSourceBookmark(refreshed, documentID: existingDocument.id)
-                }
+                // The metadata decode, preview and editor `sourceURL` below
+                // must all use exactly where the bookmark resolved to, not
+                // the possibly-stale `workingURL` the record last
+                // persisted — those can differ (a remounted volume, a
+                // renamed enclosing folder) even when `isStale` reports
+                // `false`.
+                runtimeDocument = await reconciledInPlaceDocument(loadedDocument, resolvedTo: resolved)
                 ownedScope = resolved.resource
             }
 
-            let (photo, adjustments) = try await loadEditorState(for: existingDocument)
-            guard commitOpenedDocument(
-                generation: myGeneration,
-                document: existingDocument,
-                scope: ownedScope,
-                photo: photo,
-                adjustments: adjustments
-            ) else {
+            let (photo, adjustments) = try await loadEditorState(for: runtimeDocument)
+            guard isCurrent(token) else {
                 ownedScope?.stop()
                 return
             }
+            commitDocument(token: token, document: runtimeDocument, scope: ownedScope, photo: photo, adjustments: adjustments)
         } catch {
-            guard generation == myGeneration else { return }
+            guard isCurrent(token) else { return }
             isPreparingDocument = false
-            // Never retry forever against the same broken pointer, and
-            // never claim success it didn't achieve.
-            dependencies.saveActiveDocumentID(nil)
-            alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't reopen your last photo"), for: error)
+            if shouldClearActiveDocumentID(after: error) {
+                dependencies.saveActiveDocumentID(nil)
+            }
+            alert = restoreFailureAlert(for: error)
         }
+    }
+
+    /// Reconciles a restored `.inPlace` document's persisted location with
+    /// where its bookmark actually resolved. When they already match and
+    /// the bookmark isn't stale, this is a no-op returning `document`
+    /// unchanged. Persistence failures never fail the restore itself — the
+    /// in-memory document used for *this* restore is always correct — they
+    /// only surface via `cleanupDiagnostic`, since a caller must be able to
+    /// tell the difference between "restored cleanly" and "restored, but
+    /// the next restore may redo this work" rather than that being
+    /// silently swallowed.
+    private func reconciledInPlaceDocument(
+        _ document: PhotoDocument,
+        resolvedTo resolved: ResolvedSecurityScope
+    ) async -> PhotoDocument {
+        let resolvedURL = resolved.resource.url
+        guard resolvedURL != document.workingURL else {
+            if resolved.isStale {
+                await refreshBookmark(for: resolvedURL, documentID: document.id)
+            }
+            return document
+        }
+
+        // The bookmark now resolves somewhere other than the last
+        // persisted location -- the working/source URL and the bookmark
+        // that produced it must be persisted together, never one without
+        // the other (a fresh bookmark recorded against a stale URL, or
+        // vice versa, would silently break the *next* restore).
+        guard let bookmark = try? dependencies.makeBookmark(resolvedURL) else {
+            cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember access to this photo for next time.")
+            return relocated(document, to: resolvedURL, bookmarkData: document.sourceBookmarkData)
+        }
+        do {
+            try await dependencies.store.updateInPlaceLocation(newURL: resolvedURL, bookmarkData: bookmark, documentID: document.id)
+            return try await dependencies.store.loadDocument(id: document.id)
+        } catch {
+            cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember access to this photo for next time.")
+            return relocated(document, to: resolvedURL, bookmarkData: bookmark)
+        }
+    }
+
+    private func refreshBookmark(for url: URL, documentID: UUID) async {
+        guard let refreshed = try? dependencies.makeBookmark(url) else {
+            cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember access to this photo for next time.")
+            return
+        }
+        do {
+            try await dependencies.store.updateSourceBookmark(refreshed, documentID: documentID)
+        } catch {
+            cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember access to this photo for next time.")
+        }
+    }
+
+    private func relocated(_ document: PhotoDocument, to newURL: URL, bookmarkData: Data?) -> PhotoDocument {
+        PhotoDocument(
+            id: document.id,
+            storageMode: .inPlace,
+            workingURL: newURL,
+            sourceURL: newURL,
+            sourceBookmarkData: bookmarkData,
+            sourceFingerprint: document.sourceFingerprint,
+            workingFingerprint: document.workingFingerprint
+        )
     }
 
     private enum RestoreError: Error {
         case missingBookmark
         case accessDenied
+    }
+
+    /// Only a genuinely unrecoverable failure clears the remembered active
+    /// document: the record itself is gone. Everything else — an offline
+    /// external drive, a security scope that failed this one time, a
+    /// transient decode or sidecar-read failure — leaves the pointer in
+    /// place so the *next* launch (or an explicit retry) can succeed
+    /// without the user having to re-pick the file from Files.
+    private func shouldClearActiveDocumentID(after error: Error) -> Bool {
+        switch error {
+        case PhotoDocumentError.documentNotFound:
+            return true
+        case RestoreError.missingBookmark:
+            // A record saved without ever getting a bookmark can never
+            // resolve on its own; only re-selecting the file (a fresh
+            // open) can recover it.
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Restore-specific failures get their own actionable text rather than
+    /// falling through to a generic "something went wrong" — a retry-vs-
+    /// relink distinction the user can actually act on.
+    private func restoreFailureAlert(for error: Error) -> EditorAlert {
+        let title = L10n.t("Couldn't reopen your last photo")
+        switch error {
+        case PhotoDocumentError.documentNotFound:
+            return EditorAlert(
+                title: title,
+                message: L10n.t("LumaHarbor couldn't find this photo's saved document."),
+                nextStep: L10n.t("Choose the file again from Files.")
+            )
+        case RestoreError.missingBookmark:
+            return EditorAlert(
+                title: title,
+                message: L10n.t("LumaHarbor no longer has access to this file."),
+                nextStep: L10n.t("Choose the file again from Files.")
+            )
+        case RestoreError.accessDenied:
+            return EditorAlert(
+                title: title,
+                message: L10n.t("LumaHarbor no longer has access to this file."),
+                nextStep: L10n.t("Reconnect the drive, then try again.")
+            )
+        default:
+            return SafeErrorPresentation.alert(title: title, for: error)
+        }
     }
 
     // MARK: - Selecting a file
@@ -357,11 +516,17 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     /// The user tapped a mode button for the pending selection.
     ///
-    /// Claims and clears `pendingSelection` synchronously, before this
-    /// method returns — a confirmation dialog's own dismissal bookkeeping
+    /// Claims and clears `pendingSelection`, and mints this operation's
+    /// token, synchronously — before this method returns and before any
+    /// `Task` is created. A confirmation dialog's own dismissal bookkeeping
     /// runs right after the button's action closure returns and calls back
-    /// into `cancelPendingSelection()`. Doing the claim here, synchronously,
-    /// means there is nothing left for that callback to race.
+    /// into `cancelPendingSelection()`; doing the claim here means there is
+    /// nothing left for that callback to race. Minting the token here too
+    /// — rather than as the first line of the `Task` body — is what
+    /// guarantees token order always matches call order: two calls to this
+    /// method in sequence always mint their tokens in that same sequence,
+    /// regardless of which of their `Task` bodies the scheduler happens to
+    /// run first.
     public func beginOpeningPendingSelection(mode: PhotoDocumentOpenMode) {
         guard let selection = pendingSelection else { return }
         pendingSelection = nil
@@ -369,40 +534,31 @@ public final class PhotoDocumentEditor: ObservableObject {
         openFreshSelection(url: selection.url, scope: selection.scope, mode: mode)
     }
 
-    // MARK: - Opening a fresh selection
+    // MARK: - Opening a fresh selection (two-phase switch)
 
     private func openFreshSelection(url: URL, scope: any SecurityScopedResource, mode: PhotoDocumentOpenMode) {
         openingTask?.cancel()
+        let token = mintToken()
         isPreparingDocument = true
 
         openingTask = Task { [weak self, dependencies] in
             guard let self else { return }
-            // Whatever is currently open must be flushed and closed first,
-            // under the *same* generation this operation will use for its
-            // own commit -- so, from `editor`'s point of view, the old
-            // document's close and the new one's open are one continuous
-            // hand-off with nothing else able to touch `editor` in between,
-            // never a moment where a still-resolving flush and a fresh
-            // `editor.open` could interleave.
-            let myGeneration = self.beginNewGeneration()
-            guard await self.flushAndCloseCurrentDocument(checkingGeneration: myGeneration) else {
-                // A real flush failure (not a supersede) -- `EditorSession`
-                // has already surfaced why through its own `alert`. Not
-                // this operation's place to retry; just stop the scope it
-                // otherwise would have used.
-                scope.stop()
-                if self.generation == myGeneration { self.isPreparingDocument = false }
-                return
-            }
-            guard self.generation == myGeneration else {
-                // Superseded while closing the previous document -- some
-                // other operation now owns `document`/`documentScope`.
+            guard !Task.isCancelled, self.isCurrent(token) else {
+                // Superseded before this task's body got to run at all.
                 scope.stop()
                 return
             }
 
-            var createdDocument: PhotoDocument?
+            // Declared *outside* the `do` block, unlike everything else
+            // built during phase 1, so a genuine thrown error (not just a
+            // supersede) can still find and roll back whatever was already
+            // created -- e.g. the copy/record committed fine, but reading
+            // its metadata right afterward failed.
+            var pendingCreation: PhotoDocumentCreation?
+
             do {
+                // PHASE 1: build and fully validate the new document --
+                // never touches whatever is currently open.
                 let bookmarkData: Data?
                 switch mode {
                 case .inPlace:
@@ -420,55 +576,107 @@ public final class PhotoDocumentEditor: ObservableObject {
                     bookmarkData = try? dependencies.makeBookmark(url)
                 }
 
-                let newDocument: PhotoDocument
-                let ownedScope: (any SecurityScopedResource)?
+                let creation: PhotoDocumentCreation
                 switch mode {
                 case .inPlace:
-                    newDocument = try await dependencies.store.openInPlace(url, bookmarkData: bookmarkData)
-                    ownedScope = scope
+                    creation = try await dependencies.store.openInPlace(url, bookmarkData: bookmarkData)
                 case .appCopy:
-                    newDocument = try await dependencies.store.importCopy(of: url, bookmarkData: bookmarkData)
+                    creation = try await dependencies.store.importCopy(of: url, bookmarkData: bookmarkData)
                     // The verified copy is committed to App storage; the
                     // external source is no longer read from, so its scope
-                    // is released right away.
+                    // is released right away, independent of whether the
+                    // switch this is part of ultimately succeeds.
                     scope.stop()
-                    ownedScope = nil
                 }
-                createdDocument = newDocument
+                pendingCreation = creation
 
-                let (photo, adjustments) = try await self.loadEditorState(for: newDocument)
-
-                guard self.commitOpenedDocument(
-                    generation: myGeneration, document: newDocument, scope: ownedScope,
-                    photo: photo, adjustments: adjustments
-                ) else {
-                    // Superseded before this could land -- nothing here has
-                    // been shown to the user, so undo it exactly as if the
-                    // open had failed.
-                    ownedScope?.stop()
-                    _ = await dependencies.store.rollbackDocument(newDocument)
+                guard !Task.isCancelled, self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
                     return
                 }
+
+                let (photo, adjustments) = try await self.loadEditorState(for: creation.document)
+
+                guard !Task.isCancelled, self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    return
+                }
+
+                // PHASE 2: the new document is fully built and validated.
+                // Only now is whatever was open before touched at all.
+                let oldFlushed = await self.flushCurrentDocumentIfDirty()
+                guard self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    return
+                }
+                guard oldFlushed else {
+                    // The previously-open document couldn't be flushed --
+                    // `EditorSession` has already surfaced why through its
+                    // own `alert`. Abort the switch entirely: the old
+                    // document remains open, valid and untouched; the new
+                    // one, never shown, is rolled back.
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    self.isPreparingDocument = false
+                    return
+                }
+
+                // Atomic hand-off: no `await` between here and the end of
+                // this block, so nothing else can run on the main actor in
+                // between. The active-document pointer moves directly from
+                // whatever it was to the new ID -- never through `nil`.
+                let previousScope = self.documentScope
+                self.documentScope = mode == .inPlace ? scope : nil
+                self.document = creation.document
+                self.editor.open(
+                    photo: photo, sourceURL: creation.document.workingURL,
+                    adjustments: adjustments, isReadOnly: false
+                )
+                self.dependencies.saveActiveDocumentID(creation.document.id)
+                self.isPreparingDocument = false
+                previousScope?.stop()
+                // After the swap above, not part of it -- by this point
+                // `document`/`documentScope`/`editor` are already fully
+                // updated, so awaiting the actor here can't reopen any
+                // atomicity gap.
+                await dependencies.store.finalizeCreation(creation)
             } catch is CancellationError {
-                // A newer selection or a close pre-empted this one. For an
+                // A newer selection or a close pre-empted this one before
+                // it could even reach its own checks above (e.g. while
+                // still awaiting `openInPlace`/`importCopy` itself). For an
                 // in-flight `importCopy`, the store's own cancellation
-                // cleanup has already removed the partial copy; this only
-                // needs to release the scope and roll back a document that
-                // *fully* committed before the cancellation was observed.
+                // cleanup has already removed the partial copy; a fully
+                // committed creation (cancelled just after) still needs
+                // rolling back here.
                 scope.stop()
-                if let createdDocument {
-                    _ = await dependencies.store.rollbackDocument(createdDocument)
+                if let pendingCreation {
+                    await self.discard(pendingCreation, sourceScope: nil)
                 }
             } catch {
                 scope.stop()
-                if let createdDocument {
-                    _ = await dependencies.store.rollbackDocument(createdDocument)
+                if let pendingCreation {
+                    await self.discard(pendingCreation, sourceScope: nil)
                 }
-                guard self.generation == myGeneration else { return }
+                guard self.isCurrent(token) else { return }
                 self.isPreparingDocument = false
                 self.alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't open this photo"), for: error)
             }
         }
+    }
+
+    /// Rolls back a creation that was built but must never be shown --
+    /// superseded, or the switch it was part of was aborted. `sourceScope`
+    /// is the `.inPlace` source scope to stop, if this creation held one
+    /// (an `.appCopy` creation's source scope was already stopped right
+    /// after the copy completed).
+    private func discard(_ creation: PhotoDocumentCreation, sourceScope: (any SecurityScopedResource)?) async {
+        sourceScope?.stop()
+        let report = await dependencies.store.rollbackNewDocument(creation)
+        recordIfIncomplete(report)
+    }
+
+    private func recordIfIncomplete(_ report: PhotoDocumentRollbackReport) {
+        guard !report.isFullyCleaned else { return }
+        cleanupDiagnostic = L10n.t("LumaHarbor couldn't finish cleaning up after a photo that failed to open.")
     }
 
     // MARK: - Shared open machinery
@@ -494,100 +702,89 @@ public final class PhotoDocumentEditor: ObservableObject {
         return (photo, adjustments)
     }
 
-    /// Commits a freshly produced document if — and only if — `generation`
-    /// is still current. Returns whether the commit happened; a caller that
-    /// gets back `false` must undo anything it produced instead of touching
-    /// shared state.
-    private func commitOpenedDocument(
-        generation: UInt64,
+    /// Commits an already-fully-prepared *existing* document (the restore
+    /// path only — a fresh open's own two-phase hand-off is inlined in
+    /// `openFreshSelection`, since it also needs to flush and replace
+    /// whatever was open first).
+    private func commitDocument(
+        token: OperationToken,
         document: PhotoDocument,
         scope: (any SecurityScopedResource)?,
         photo: PhotoAsset,
         adjustments: PhotoAdjustments
-    ) -> Bool {
-        guard self.generation == generation else { return false }
+    ) {
         documentScope = scope
         self.document = document
-        // `sourceURL` is always the working copy — the file LumaHarbor
-        // actually decodes and previews from — never the external RAW in
-        // app-copy mode.
         editor.open(photo: photo, sourceURL: document.workingURL, adjustments: adjustments, isReadOnly: false)
         dependencies.saveActiveDocumentID(document.id)
         isPreparingDocument = false
-        return true
-    }
-
-    private func beginNewGeneration() -> UInt64 {
-        generation += 1
-        return generation
     }
 
     // MARK: - Closing
 
-    /// Flushes pending edits and tears the editor down. Returns `false` —
-    /// leaving the document, editor and scope untouched — when something
-    /// unsaved could not be written; `EditorSession.flushPendingEdits()` has
-    /// already surfaced that failure through `editor.alert`. Callers must
-    /// not proceed with switching or closing when this returns `false`.
-    ///
-    /// Claims its own generation before the flush's `await`, exactly like
-    /// an open — if a new open lands while this is still flushing, this
-    /// call finds itself superseded afterward and leaves the *new*
-    /// document and scope alone rather than closing them.
+    /// Cancels any in-flight open (even one still building a document that
+    /// has not yet committed), then flushes and tears down whatever is
+    /// currently open, if anything. Returns `false` — leaving the document,
+    /// editor and scope untouched — when something unsaved could not be
+    /// written; `EditorSession.flushPendingEdits()` has already surfaced
+    /// that failure through `editor.alert`.
     @discardableResult
     public func closeCurrentDocument() async -> Bool {
-        guard document != nil else { return true }
+        // Mints a new token *before* anything else, synchronously -- this
+        // alone guarantees a pending open (even one still stuck mid-decode,
+        // with `document` still `nil`) can never commit after this call
+        // starts, regardless of when its `Task` actually gets cancelled.
         openingTask?.cancel()
-        isPreparingDocument = true
-        let myGeneration = beginNewGeneration()
+        openingTask = nil
+        let token = mintToken()
 
-        let result = await flushAndCloseCurrentDocument(checkingGeneration: myGeneration)
-        if generation == myGeneration {
+        guard document != nil else {
             isPreparingDocument = false
+            return true
         }
-        return result
-    }
 
-    /// Flushes and closes whatever document is currently open, if any,
-    /// honoring `myGeneration`: if a newer operation has taken over by the
-    /// time the flush finishes, `document`/`documentScope`/`editor` are
-    /// left alone — they belong to that newer operation now — and only
-    /// whether the flush itself succeeded is reported.
-    ///
-    /// Safe to call from two places "at once" — a direct user close, and a
-    /// fresh open's own "replace whatever was already open" step, both do.
-    /// Concurrent callers share the *same* underlying flush via
-    /// `activeFlushTask` rather than each calling `EditorSession
-    /// .flushPendingEdits()` independently: two concurrent flushes of the
-    /// same session is not something `EditorSession` is built to tolerate,
-    /// and without sharing, a fresh open's `editor.open()` could otherwise
-    /// land in the middle of a still-resolving close's flush and corrupt
-    /// what it was flushing.
-    private func flushAndCloseCurrentDocument(checkingGeneration myGeneration: UInt64) async -> Bool {
-        guard document != nil else { return true }
-
-        let flushTask: Task<Bool, Never>
-        if let existing = activeFlushTask {
-            flushTask = existing
-        } else {
-            let task = Task { [editor] in await editor.flushPendingEdits() }
-            activeFlushTask = task
-            flushTask = task
-        }
-        let flushed = await flushTask.value
-        activeFlushTask = nil
-
-        guard generation == myGeneration else {
-            // Superseded while the flush was in flight -- whatever is
-            // current now owns `document`/`documentScope`/`editor`.
+        isPreparingDocument = true
+        let flushed = await flushCurrentDocumentIfDirty()
+        guard isCurrent(token) else {
+            // Superseded while flushing (e.g. a fresh open that itself
+            // flushed-and-replaced this same document) -- that operation
+            // owns things now.
             return flushed
         }
-        guard flushed else { return false }
+        guard flushed else {
+            isPreparingDocument = false
+            return false
+        }
         editor.close()
+        let closedScope = documentScope
         document = nil
-        documentScope?.stop()
         documentScope = nil
         dependencies.saveActiveDocumentID(nil)
+        isPreparingDocument = false
+        closedScope?.stop()
         return true
+    }
+
+    /// Flushes whatever document is currently open, if any, without
+    /// touching `document`/`documentScope`/`editor`/the active-document
+    /// pointer itself — callers (`closeCurrentDocument`, and a fresh open's
+    /// own phase-2 hand-off) decide what to do once this resolves, using
+    /// their own token to check they are still allowed to act.
+    ///
+    /// Safe to call from two places "at once": concurrent callers share the
+    /// *same* underlying flush via `activeFlushTask` rather than each
+    /// calling `EditorSession.flushPendingEdits()` independently, since two
+    /// concurrent flushes of the same session is not something
+    /// `EditorSession` is built to tolerate.
+    private func flushCurrentDocumentIfDirty() async -> Bool {
+        guard document != nil else { return true }
+        if let existing = activeFlushTask {
+            return await existing.value
+        }
+        let task = Task { [editor] in await editor.flushPendingEdits() }
+        activeFlushTask = task
+        let result = await task.value
+        activeFlushTask = nil
+        return result
     }
 }

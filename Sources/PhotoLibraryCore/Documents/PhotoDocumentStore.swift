@@ -55,6 +55,11 @@ public actor PhotoDocumentStore {
     private let copyFile: @Sendable (URL, URL) throws -> Void
     private let checkCancellation: @Sendable () throws -> Void
     private let writeRecordData: @Sendable (Data, URL, FileManager) throws -> Void
+    /// Receipts minted by `openInPlace`/`importCopy` for a document that
+    /// has not yet been finalized (kept) or rolled back. Backs
+    /// `rollbackNewDocument(_:)`'s single-use, unforgeable-receipt
+    /// contract — see `PhotoDocumentCreation`.
+    private var pendingCreationReceipts: Set<UUID> = []
 
     public init(
         rootURL: URL,
@@ -78,7 +83,10 @@ public actor PhotoDocumentStore {
     /// saved to a sidecar next to the document record, never back to the
     /// source file. Never creates anything under `Documents/`, so it neither
     /// needs nor takes the root import lock.
-    public func openInPlace(_ sourceURL: URL, bookmarkData: Data?) throws -> PhotoDocument {
+    ///
+    /// Returns a `PhotoDocumentCreation`, not a bare `PhotoDocument` — see
+    /// that type's documentation for why.
+    public func openInPlace(_ sourceURL: URL, bookmarkData: Data?) throws -> PhotoDocumentCreation {
         let fingerprint = try FingerprintCalculator.fingerprint(forFileAt: sourceURL)
         let document = PhotoDocument(
             storageMode: .inPlace,
@@ -89,7 +97,7 @@ public actor PhotoDocumentStore {
             workingFingerprint: fingerprint
         )
         try writeRecord(document)
-        return document
+        return mintCreation(for: document)
     }
 
     /// Copies `sourceURL` into App storage. See the type documentation for
@@ -105,7 +113,10 @@ public actor PhotoDocumentStore {
     /// Throws `PhotoDocumentError.importInProgress`, making no changes at
     /// all, if another import or a reconciliation pass already holds the
     /// root import lock.
-    public func importCopy(of sourceURL: URL, bookmarkData: Data?) throws -> PhotoDocument {
+    ///
+    /// Returns a `PhotoDocumentCreation`, not a bare `PhotoDocument` — see
+    /// that type's documentation for why.
+    public func importCopy(of sourceURL: URL, bookmarkData: Data?) throws -> PhotoDocumentCreation {
         let lock = try RootImportLock.acquire(at: importLockURL, fileManager: fileManager)
         defer { lock.release() }
 
@@ -161,7 +172,7 @@ public actor PhotoDocumentStore {
             )
             try checkCancellation()
             try writeRecord(document)
-            return document
+            return mintCreation(for: document)
         } catch {
             // Best-effort: if this can't fully clean up (e.g. a permissions
             // problem), the directory is left behind. It is still safe from
@@ -184,52 +195,120 @@ public actor PhotoDocumentStore {
     /// Atomically rewrites a document's `sourceBookmarkData` — used to
     /// persist a refreshed bookmark after restoring an `.inPlace` document
     /// finds the saved one stale (macOS/iOS ask for the bookmark to be
-    /// regenerated, but the old one still resolves for that one restore).
-    /// Every other field of the record, including the working location, is
-    /// left untouched.
+    /// regenerated, but the old one still resolves for that one restore),
+    /// when the bookmark still resolves to the *same* `workingURL`. Every
+    /// other field of the record, including the working location, is left
+    /// untouched. When a stale bookmark resolves to a *different* URL, use
+    /// `updateInPlaceLocation(newURL:bookmarkData:documentID:)` instead — a
+    /// bookmark refresh must never be persisted alongside a working URL
+    /// that no longer matches where it actually resolves.
     public func updateSourceBookmark(_ bookmarkData: Data, documentID: UUID) throws {
         var record = try loadRecord(id: documentID)
         record.sourceBookmarkData = bookmarkData
         try writeRecordData(try SidecarCoding.encode(record), recordURL(for: documentID), fileManager)
     }
 
+    /// Atomically moves an `.inPlace` document's persisted location to
+    /// `newURL`, together with the bookmark that resolved to it — used when
+    /// restoring finds the saved bookmark now resolves somewhere other than
+    /// the last persisted `workingURL` (e.g. an external volume remounted
+    /// under a new path). `workingURL` and `sourceURL` always move together
+    /// for an `.inPlace` document, since they are the same file; this never
+    /// leaves a fresh bookmark recorded alongside a stale working URL, or
+    /// vice versa. Fingerprints are untouched — the file's *content*
+    /// identity has not changed, only where it currently resolves.
+    public func updateInPlaceLocation(newURL: URL, bookmarkData: Data, documentID: UUID) throws {
+        var record = try loadRecord(id: documentID)
+        record.workingURL = newURL
+        record.sourceURL = newURL
+        record.sourceBookmarkData = bookmarkData
+        try writeRecordData(try SidecarCoding.encode(record), recordURL(for: documentID), fileManager)
+    }
+
+    /// Marks `creation` as kept: the document it produced has been shown to
+    /// the user and must never be rolled back after this, even by a caller
+    /// that (in error) still holds and reuses the same `PhotoDocumentCreation`
+    /// value. Idempotent — finalizing an already-finalized or already-rolled-
+    /// back creation does nothing.
+    public func finalizeCreation(_ creation: PhotoDocumentCreation) {
+        pendingCreationReceipts.remove(creation.receipt)
+    }
+
     /// Removes a document this store itself created but that never
     /// finished being shown to the user — e.g. `importCopy`/`openInPlace`
     /// committed successfully, but reading the working file's metadata
-    /// right afterward failed. Removes only what this store wrote for
-    /// `document`: its record and sidecar always, and its App-storage copy
-    /// in `.appCopy` mode only. Never touches `sourceURL` — an `.inPlace`
-    /// document's `workingURL` *is* the external RAW, so rolling one back
-    /// only removes the record and sidecar this store created, never the
-    /// file itself.
+    /// right afterward failed.
     ///
-    /// This is for a document *this call just created* — restoring an
-    /// *existing* document that then fails to open must never call this;
-    /// there is nothing here to roll back, and doing so would delete real
-    /// user data.
+    /// Takes the `PhotoDocumentCreation` `openInPlace`/`importCopy` handed
+    /// back, not a bare `PhotoDocument` — a caller cannot construct or
+    /// otherwise obtain a `PhotoDocumentCreation` for a document it did not
+    /// just create (there is no public initializer, and `loadDocument`
+    /// returns a plain `PhotoDocument`), so this can never be pointed at
+    /// existing user data by accident or misuse. It is also single-use: the
+    /// receipt is consumed on the first call, whether that call is this one
+    /// or `finalizeCreation(_:)`, so a stale or reused value can never
+    /// trigger a second, unintended deletion.
     ///
-    /// Best-effort, like the cleanup path inside `importCopy` already is:
-    /// failures are swallowed rather than thrown, since there is nothing
-    /// more useful a caller could do with a rollback failure than what
-    /// `importCopy` already does with a copy failure. The returned `Bool`
-    /// reports whether every trace was actually removed, for callers (tests
-    /// included) that want to confirm cleanup succeeded.
+    /// Removes only what this store wrote for the creation: its record and
+    /// sidecar always, and its App-storage copy in `.appCopy` mode only.
+    /// Never touches `sourceURL` — an `.inPlace` document's `workingURL`
+    /// *is* the external RAW, so rolling one back only removes the record
+    /// and sidecar this store created, never the file itself.
+    ///
+    /// Restoring an *existing* document that then fails to open must never
+    /// call this; there is nothing here to roll back, and doing so would
+    /// delete real user data — which is exactly what the receipt contract
+    /// above prevents even if a caller tried.
     @discardableResult
-    public func rollbackDocument(_ document: PhotoDocument) -> Bool {
+    public func rollbackNewDocument(_ creation: PhotoDocumentCreation) -> PhotoDocumentRollbackReport {
+        guard pendingCreationReceipts.remove(creation.receipt) != nil else {
+            // Already finalized, already rolled back, or (should be
+            // impossible given the receipt contract) unrecognized -- never
+            // touch disk for a receipt this call doesn't recognize as
+            // still pending.
+            return PhotoDocumentRollbackReport(lock: .notApplicable, record: .notApplicable, sidecar: .notApplicable, copy: .notApplicable)
+        }
+
+        let document = creation.document
+        let recordURL = recordURL(for: document.id)
+        let sidecarURL = sidecarsDirectoryURL(documentID: document.id)
+
+        var lockResult: PhotoDocumentRollbackReport.StepResult = .notApplicable
+        var copyResult: PhotoDocumentRollbackReport.StepResult = .notApplicable
         if document.storageMode == .appCopy {
+            let copyDirectory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
             if let lock = try? RootImportLock.acquire(at: importLockURL, fileManager: fileManager) {
+                lockResult = .succeeded
                 defer { lock.release() }
-                let directory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
-                try? fileManager.removeItem(at: directory)
+                try? fileManager.removeItem(at: copyDirectory)
+                copyResult = fileManager.fileExists(atPath: copyDirectory.path) ? .failed : .succeeded
+            } else {
+                // Contention with a concurrent import/reconciliation pass:
+                // removing the copy without the lock would race whatever
+                // holds it, so this step is reported as failed rather than
+                // attempted unprotected. Record/sidecar removal below does
+                // not need this lock and still proceeds independently, so a
+                // failure here alone never leaves *those* half-done.
+                lockResult = .failed
+                copyResult = .failed
             }
         }
-        try? fileManager.removeItem(at: recordURL(for: document.id))
-        try? fileManager.removeItem(at: sidecarsDirectoryURL(documentID: document.id))
 
-        let recordGone = !fileManager.fileExists(atPath: recordURL(for: document.id).path)
-        let copyDirectory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
-        let copyGone = document.storageMode != .appCopy || !fileManager.fileExists(atPath: copyDirectory.path)
-        return recordGone && copyGone
+        try? fileManager.removeItem(at: recordURL)
+        let recordResult: PhotoDocumentRollbackReport.StepResult =
+            fileManager.fileExists(atPath: recordURL.path) ? .failed : .succeeded
+
+        try? fileManager.removeItem(at: sidecarURL)
+        let sidecarResult: PhotoDocumentRollbackReport.StepResult =
+            fileManager.fileExists(atPath: sidecarURL.path) ? .failed : .succeeded
+
+        return PhotoDocumentRollbackReport(lock: lockResult, record: recordResult, sidecar: sidecarResult, copy: copyResult)
+    }
+
+    private func mintCreation(for document: PhotoDocument) -> PhotoDocumentCreation {
+        let receipt = UUID()
+        pendingCreationReceipts.insert(receipt)
+        return PhotoDocumentCreation(document: document, receipt: receipt)
     }
 
     private func loadRecord(id: UUID) throws -> PhotoDocumentRecord {

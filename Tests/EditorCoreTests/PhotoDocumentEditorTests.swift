@@ -42,15 +42,41 @@ private struct FailingDecoder: RawDecoding {
     }
 }
 
+/// Fails only for URLs whose filename is in `failingFilenames` -- matched
+/// by filename, not full path, since an `.appCopy` document's `workingURL`
+/// is a copy under App storage with the same filename but a different
+/// directory than the external source that was picked.
+private struct SelectivelyFailingDecoder: RawDecoding {
+    let identifier = DecoderIdentifier(kind: "fake-selective-fail", version: "1")
+    let failingFilenames: Set<String>
+    func supportsFile(at url: URL) -> Bool { true }
+    func readMetadata(at url: URL) throws -> RawMetadata {
+        if failingFilenames.contains(url.lastPathComponent) {
+            throw RawDecodingError.unsupportedFormat(path: url.path)
+        }
+        return RawMetadata()
+    }
+    func decode(_ request: RawDecodeRequest) throws -> DecodedRawImage {
+        throw RawDecodingError.unsupportedFormat(path: request.url.path)
+    }
+}
+
 /// Blocks `readMetadata` for each configured URL until that URL's
 /// `release(_:)` is called, and returns immediately for any URL never
 /// gated. This is what lets a test hold one or more "open" operations stuck
 /// mid-flight, in whatever order it chooses, to prove how a later one
 /// resolves against them.
+///
+/// `waitUntilArrived(at:)` gives a test a *deterministic* way to know a
+/// gated call has actually been entered (and is now blocked), instead of
+/// guessing with a fixed `Task.sleep` -- a test drives the two operations it
+/// cares about entirely off these signals, never off wall-clock time.
 private final class GatedDecoder: RawDecoding, @unchecked Sendable {
     let identifier = DecoderIdentifier(kind: "fake-gated", version: "1")
     private let lock = NSLock()
     private var semaphores: [URL: DispatchSemaphore] = [:]
+    private var arrived: Set<URL> = []
+    private var arrivalContinuations: [URL: [CheckedContinuation<Void, Never>]] = [:]
 
     init(gatedURLs: [URL]) {
         for url in gatedURLs { semaphores[url] = DispatchSemaphore(value: 0) }
@@ -60,10 +86,24 @@ private final class GatedDecoder: RawDecoding, @unchecked Sendable {
 
     func supportsFile(at url: URL) -> Bool { true }
 
-    func readMetadata(at url: URL) throws -> RawMetadata {
+    /// Runs `body` with `lock` held. A plain synchronous function, called
+    /// from both sync and async contexts below -- keeping the lock/unlock
+    /// pair themselves inside a non-async function is what avoids Swift 6's
+    /// "unavailable from asynchronous contexts" diagnostic on `NSLock`,
+    /// since neither call is textually inside an `async` function body.
+    private func withLock<T>(_ body: () -> T) -> T {
         lock.lock()
-        let semaphore = semaphores[url]
-        lock.unlock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    func readMetadata(at url: URL) throws -> RawMetadata {
+        let (semaphore, continuations) = withLock {
+            arrived.insert(url)
+            let continuations = arrivalContinuations.removeValue(forKey: url) ?? []
+            return (semaphores[url], continuations)
+        }
+        for continuation in continuations { continuation.resume() }
         semaphore?.wait()
         return RawMetadata()
     }
@@ -73,10 +113,23 @@ private final class GatedDecoder: RawDecoding, @unchecked Sendable {
     }
 
     func release(_ url: URL) {
-        lock.lock()
-        let semaphore = semaphores[url]
-        lock.unlock()
+        let semaphore = withLock { semaphores[url] }
         semaphore?.signal()
+    }
+
+    /// Suspends until `readMetadata(at: url)` has actually been entered
+    /// (and, if `url` is gated, is now blocked there).
+    func waitUntilArrived(at url: URL) async {
+        let alreadyArrived = withLock { arrived.contains(url) }
+        guard !alreadyArrived else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resolvedImmediately = withLock { () -> Bool in
+                if arrived.contains(url) { return true }
+                arrivalContinuations[url, default: []].append(continuation)
+                return false
+            }
+            if resolvedImmediately { continuation.resume() }
+        }
     }
 }
 
@@ -103,6 +156,13 @@ private final class Harness {
     private(set) var madeScopes: [FakeSecurityScopedResource] = []
     private(set) var resolvedScopes: [FakeSecurityScopedResource] = []
     private(set) var savedActiveDocumentIDs: [UUID?] = []
+    /// The URL `makeBookmark` was last called with -- the default
+    /// `resolveScope` echoes this back, so a test that doesn't explicitly
+    /// override `resolveScopeResult` gets the realistic behavior ("the
+    /// bookmark resolves back to where it was created") rather than an
+    /// unrelated placeholder URL that would spuriously look like the
+    /// document moved.
+    private(set) var lastBookmarkedURL: URL?
 
     init() {
         rootURL = FileManager.default.temporaryDirectory
@@ -135,11 +195,15 @@ private final class Harness {
                 if let result = self?.resolveScopeResult {
                     return try result.get()
                 }
-                let scope = FakeSecurityScopedResource(url: URL(fileURLWithPath: "/resolved"), isAccessing: true)
+                let url = self?.lastBookmarkedURL ?? URL(fileURLWithPath: "/resolved")
+                let scope = FakeSecurityScopedResource(url: url, isAccessing: true)
                 self?.resolvedScopes.append(scope)
                 return ResolvedSecurityScope(resource: scope, isStale: false)
             },
-            makeBookmark: { [weak self] _ in try self?.bookmarkCreationResult.get() ?? Data() },
+            makeBookmark: { [weak self] url in
+                self?.lastBookmarkedURL = url
+                return try self?.bookmarkCreationResult.get() ?? Data()
+            },
             loadActiveDocumentID: { [weak self] in self?.activeDocumentID },
             saveActiveDocumentID: { [weak self] id in
                 self?.activeDocumentID = id
@@ -245,7 +309,11 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertNotEqual(reloaded.sourceBookmarkData, originalBookmark)
     }
 
-    func testAnInvalidBookmarkShowsASafeErrorAndNeverFabricatesADocument() async throws {
+    /// A resolve failure is transient (e.g. the external volume is
+    /// temporarily offline) -- the active document pointer must survive it
+    /// so a later retry (or the next launch) can still succeed, and the
+    /// alert must stay safe.
+    func testATransientResolveFailureShowsASafeErrorButNeverFabricatesADocumentAndKeepsTheActiveID() async throws {
         let harness = Harness()
         let sourceURL = harness.makeSourceFile()
 
@@ -264,12 +332,112 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         XCTAssertNil(secondEditor.document, "a failed restore must never fake success by opening something")
         XCTAssertNil(secondEditor.editor.photo, "no new/neutral document may be fabricated in EditorSession either")
-        // Never silently retried against the same broken pointer forever.
-        XCTAssertNil(harness.activeDocumentID)
+        // Transient failure: the pointer must survive for a retry.
+        XCTAssertEqual(harness.activeDocumentID, documentID)
+
+        // And the retry actually succeeds once the volume is back.
+        harness.resolveScopeResult = nil
+        let thirdEditor = harness.makeEditor()
+        thirdEditor.performStartupSequence()
+        try await waitUntil { thirdEditor.document != nil }
+        XCTAssertEqual(thirdEditor.document?.id, documentID)
+
         // The document itself (and its sidecar) must survive untouched --
         // restoring an existing document never deletes user data on failure.
         let stillThere = try await harness.store.loadDocument(id: documentID)
         XCTAssertEqual(stillThere.id, documentID)
+    }
+
+    /// The one genuinely unrecoverable case -- the record itself is gone --
+    /// is the only one that clears the active-document pointer, so a
+    /// broken pointer is not retried forever.
+    func testRestoreClearsTheActiveIDOnlyWhenTheRecordIsDefinitivelyGone() async throws {
+        let harness = Harness()
+        harness.activeDocumentID = UUID() // never actually created
+        let editor = harness.makeEditor()
+
+        editor.performStartupSequence()
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertNil(editor.document)
+        XCTAssertNil(harness.activeDocumentID, "documentNotFound is definitive -- the pointer must be cleared")
+    }
+
+    /// A fresh user selection must win over startup restore even when both
+    /// start together and the fresh open is still mid-flight (blocked at
+    /// its own metadata gate, `document` still `nil`) by the time restore's
+    /// logic would run. Restore must neither race it nor cancel it.
+    func testFreshSelectionBeatsStartupRestoreEvenWhileStillMidFlight() async throws {
+        let harness = Harness()
+        let sourceURLA = harness.makeSourceFile(named: "a.ARW")
+        let firstEditor = harness.makeEditor()
+        firstEditor.beginSelecting(sourceURLA)
+        firstEditor.beginOpeningPendingSelection(mode: .appCopy)
+        try await waitUntil { firstEditor.document != nil }
+        let documentAID = try XCTUnwrap(firstEditor.document?.id)
+
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+        let gate = GatedDecoder(gatedURL: urlB)
+        harness.decoder = gate
+        let secondEditor = harness.makeEditor()
+
+        // `performStartupSequence()` only captures a baseline and starts a
+        // background `Task` -- it does not run reconciliation/restore
+        // synchronously. Starting the fresh selection here, still in the
+        // same synchronous call, guarantees its token is minted before
+        // that background task can possibly begin, regardless of scheduling.
+        secondEditor.performStartupSequence()
+        secondEditor.beginSelecting(urlB)
+        secondEditor.beginOpeningPendingSelection(mode: .inPlace)
+        await gate.waitUntilArrived(at: urlB)
+
+        // Restore must not have touched anything -- neither cancelling B's
+        // still-in-flight open nor overwriting the active pointer with A.
+        XCTAssertNil(secondEditor.document)
+        XCTAssertTrue(secondEditor.isPreparingDocument, "B's own open must still be the one in progress")
+
+        gate.release(urlB)
+        try await waitUntil { secondEditor.document != nil }
+        XCTAssertEqual(secondEditor.document?.sourceURL, urlB, "B must win -- its open was never cancelled by restore")
+        XCTAssertNotEqual(secondEditor.document?.id, documentAID)
+    }
+
+    /// When a bookmark resolves somewhere other than the last persisted
+    /// `workingURL` (e.g. a remounted volume), metadata decode and the
+    /// editor's `sourceURL` must use exactly where it resolved to, and that
+    /// location must be persisted so a later restore doesn't need to
+    /// rediscover it.
+    func testInPlaceRestoreUsesTheBookmarkResolvedURLWhenItDiffersFromThePersistedOne() async throws {
+        let harness = Harness()
+        let oldURL = harness.makeSourceFile(named: "old-location.ARW")
+        let firstEditor = harness.makeEditor()
+        firstEditor.beginSelecting(oldURL)
+        firstEditor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { firstEditor.document != nil }
+        let documentID = try XCTUnwrap(firstEditor.document?.id)
+
+        // The old location is gone; a new one, with the same bytes, exists.
+        let newURL = harness.rootURL.appendingPathComponent("new-location.ARW")
+        try FileManager.default.moveItem(at: oldURL, to: newURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldURL.path))
+
+        let relocatedScope = FakeSecurityScopedResource(url: newURL, isAccessing: true)
+        harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: relocatedScope, isStale: false))
+        harness.bookmarkCreationResult = .success(Data("relocated-bookmark".utf8))
+
+        let secondEditor = harness.makeEditor()
+        secondEditor.performStartupSequence()
+        try await waitUntil { secondEditor.document != nil }
+
+        XCTAssertEqual(secondEditor.document?.workingURL, newURL)
+        XCTAssertEqual(secondEditor.document?.sourceURL, newURL)
+        XCTAssertEqual(secondEditor.editor.sourceURL, newURL, "the editor must decode/preview from where the bookmark actually resolved")
+
+        // Persisted -- a later restore doesn't need to redo this work.
+        let reloadedFromStore = try await harness.store.loadDocument(id: documentID)
+        XCTAssertEqual(reloadedFromStore.workingURL, newURL)
+        XCTAssertEqual(reloadedFromStore.sourceURL, newURL)
+        XCTAssertEqual(reloadedFromStore.sourceBookmarkData, Data("relocated-bookmark".utf8))
     }
 
     // MARK: 2. Serializing overlapping opens
@@ -284,9 +452,10 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         editor.beginSelecting(urlA)
         editor.beginOpeningPendingSelection(mode: .inPlace)
-        // Give the first operation a moment to actually reach the gate
-        // before the second one preempts it.
-        try await Task.sleep(for: .milliseconds(50))
+        // Deterministically wait until the first operation has actually
+        // reached (and is now blocked at) its metadata-decode gate, rather
+        // than guessing how long that takes.
+        await gate.waitUntilArrived(at: urlA)
 
         editor.beginSelecting(urlB)
         editor.beginOpeningPendingSelection(mode: .inPlace)
@@ -315,17 +484,20 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         editor.beginSelecting(urlA)
         editor.beginOpeningPendingSelection(mode: .inPlace)
-        try await Task.sleep(for: .milliseconds(50))
+        await gate.waitUntilArrived(at: urlA)
 
         editor.beginSelecting(urlB)
         editor.beginOpeningPendingSelection(mode: .inPlace)
         try await waitUntil { editor.document?.sourceURL == urlB }
         let documentB = try XCTUnwrap(editor.document)
+        let scopeA = try XCTUnwrap(harness.madeScopes.first { $0.url == urlA })
 
         // The stale operation for A "fails" from A's point of view (its
-        // decoder call unblocks and returns), which must not touch B.
+        // decoder call unblocks and returns), which must not touch B. Wait
+        // for A's own scope-stop -- the real, observable signal that its
+        // supersede path actually ran -- instead of guessing a delay.
         gate.release(urlA)
-        try await Task.sleep(for: .milliseconds(100))
+        try await waitUntil { scopeA.stopCount == 1 }
 
         XCTAssertEqual(editor.document?.id, documentB.id)
         XCTAssertFalse(editor.isPreparingDocument)
@@ -345,16 +517,19 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         editor.beginSelecting(urlA)
         editor.beginOpeningPendingSelection(mode: .inPlace)
-        try await Task.sleep(for: .milliseconds(30))
+        await gate.waitUntilArrived(at: urlA)
 
         editor.beginSelecting(urlB)
         editor.beginOpeningPendingSelection(mode: .inPlace)
-        try await Task.sleep(for: .milliseconds(30))
+        await gate.waitUntilArrived(at: urlB)
+        let scopeA = try XCTUnwrap(harness.madeScopes.first { $0.url == urlA })
 
-        // A's stale operation resolves first; B is still gated, so it
-        // cannot possibly have committed yet.
+        // A's stale operation resolves first; B is still gated (confirmed
+        // arrived above, and not yet released), so it cannot possibly have
+        // committed yet. Wait for A's own scope-stop -- the real signal
+        // that its supersede path has run -- rather than guessing a delay.
         gate.release(urlA)
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitUntil { scopeA.stopCount == 1 }
         XCTAssertTrue(editor.isPreparingDocument, "B's own preparation must still be in progress")
         XCTAssertNil(editor.document, "A's stale completion must not have committed anything")
 
@@ -416,6 +591,81 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertEqual(editor.document?.sourceURL, urlB)
         XCTAssertEqual(editor.editor.photo?.id, PhotoID(try XCTUnwrap(editor.document?.id)))
         XCTAssertEqual(scopeA.stopCount, 1, "A's scope must be released exactly once when it is replaced")
+    }
+
+    /// The two-phase switch itself: if the *new* document fails to finish
+    /// preparing (here, its metadata decode fails), the document already
+    /// open must be left exactly as it was -- still open, still editable,
+    /// its scope still valid, the active pointer never having moved off it
+    /// even momentarily -- and still restorable after a relaunch.
+    func testSwitchingToADocumentThatFailsToPrepareLeavesTheOldOneFullyValidAndReopenable() async throws {
+        let harness = Harness()
+        let urlA = harness.makeSourceFile(named: "a.ARW")
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+        harness.decoder = SelectivelyFailingDecoder(failingFilenames: ["b.ARW"])
+        let editor = harness.makeEditor()
+
+        editor.beginSelecting(urlA)
+        editor.beginOpeningPendingSelection(mode: .appCopy)
+        try await waitUntil { editor.document != nil }
+        let documentA = try XCTUnwrap(editor.document)
+        editor.editor.setAdjustment(.exposure, to: 0.4)
+        XCTAssertTrue(editor.editor.saveState.isDirty)
+
+        editor.beginSelecting(urlB)
+        editor.beginOpeningPendingSelection(mode: .appCopy)
+        try await waitUntil { editor.alert != nil }
+
+        // A must still be exactly as it was.
+        XCTAssertEqual(editor.document?.id, documentA.id, "A must still be the open document")
+        XCTAssertEqual(editor.editor.photo?.id, PhotoID(documentA.id))
+        XCTAssertEqual(editor.editor.adjustments.exposure, 0.4, "A's in-memory edit must survive")
+        XCTAssertEqual(harness.activeDocumentID, documentA.id, "the active pointer must still point at A, never nil in between")
+
+        // The failed switch to B must not have left an orphaned copy behind.
+        let documentsDirectory = harness.rootURL
+            .appendingPathComponent("Store", isDirectory: true)
+            .appendingPathComponent("Documents", isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: documentsDirectory.path)) ?? []
+        XCTAssertEqual(entries.count, 1, "only A's copy should exist; B's failed copy must have been rolled back")
+
+        // A's edit -- made before the failed switch -- can still be flushed
+        // and, after a simulated relaunch, restored.
+        let flushed = await editor.editor.flushPendingEdits()
+        XCTAssertTrue(flushed)
+        let thirdEditor = harness.makeEditor()
+        thirdEditor.performStartupSequence()
+        try await waitUntil { thirdEditor.document != nil }
+        XCTAssertEqual(thirdEditor.document?.id, documentA.id)
+        XCTAssertEqual(thirdEditor.editor.adjustments.exposure, 0.4)
+    }
+
+    // MARK: 3. Closing cancels a not-yet-committed open
+
+    /// `closeCurrentDocument()` must cancel an open that is still preparing
+    /// -- `document` still `nil` -- not just one that already committed.
+    func testCloseCancelsAnOpenStillPreparingBeforeItEverCommits() async throws {
+        let harness = Harness()
+        let url = harness.makeSourceFile()
+        let gate = GatedDecoder(gatedURL: url)
+        harness.decoder = gate
+        let editor = harness.makeEditor()
+
+        editor.beginSelecting(url)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        await gate.waitUntilArrived(at: url)
+        XCTAssertNil(editor.document, "the open must still be mid-flight, not yet committed")
+        let scope = try XCTUnwrap(harness.madeScopes.first { $0.url == url })
+
+        let closed = await editor.closeCurrentDocument()
+        XCTAssertTrue(closed, "nothing had actually committed yet, so close trivially succeeds")
+
+        gate.release(url)
+        try await waitUntil { scope.stopCount == 1 }
+
+        XCTAssertNil(editor.document, "the pending open must never commit after close cancelled it")
+        XCTAssertNil(harness.activeDocumentID)
+        XCTAssertFalse(editor.isPreparingDocument)
     }
 
     // MARK: 4. Rollback of a document that never finished opening
