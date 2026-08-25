@@ -2,7 +2,7 @@
 // deprecated CIKL `CIKernel(source:)`/`CIColorKernel(source:)` string kernels
 // that used to live inline in AdjustmentPipeline.swift.
 //
-// Compiled into a `default.metallib` resource by the `CompileMetalKernels`
+// Compiled into a `CoreImageKernels.metallib` resource by the `CompileMetalKernels`
 // SwiftPM build plugin, which invokes `xcrun metal -fcikernel` /
 // `xcrun metallib -cikernel` on this file -- NOT the `[[stitchable]]`
 // attribute some newer Core Image Metal kernel examples use. Both were tried
