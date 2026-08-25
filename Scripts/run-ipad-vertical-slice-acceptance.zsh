@@ -761,7 +761,7 @@ finalize_run() {
         print -r -- "## Repo state"
         print -r -- ""
         if (( repo_state_ok )); then
-            print -r -- "Repo state: PASS (HEAD and working-tree change count unchanged since the run started)"
+            print -r -- "Repo state: PASS (HEAD and working-tree content fingerprint unchanged since the run started)"
         else
             print -r -- "Repo state: FAIL (HEAD or the working tree's content changed during the run — start HEAD ${START_HEAD}, end HEAD ${end_head}, start fingerprint ${START_FINGERPRINT}, end fingerprint ${end_fingerprint})"
         fi
