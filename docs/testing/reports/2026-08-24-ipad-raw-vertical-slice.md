@@ -34,10 +34,10 @@
 最新一次真實執行（三個 fixture 環境變數皆已匯出、exFAT 隨身碟已掛載）的 summary 相對路徑：
 
 ```
-.build/ipad-vertical-slice/20260825T151022Z-47599-39431444112907/summary.md
+.build/ipad-vertical-slice/20260825T161711Z-12638-4944641828667/summary.md
 ```
 
-（此次 run 的 summary 記錄 `Commit: a5df8963b0f8994d5a6cbcd9b149260b5df14ddb`，與 §5.2 修正完成後的 HEAD 完全一致；目錄名稱已改為 timestamp+PID+random，見 §5.2 finding 5。）
+（此次 run 的 summary 記錄 `Commit: c75ac623241ce7871569fd9324cf5eeac1583179`，與 §5.3 修正完成後的 HEAD 完全一致；目錄名稱已改為 timestamp+PID+random，見 §5.2 finding 5。）
 
 摘要內容：
 
@@ -129,6 +129,17 @@ RawFixtureTests: FAIL (executed 9 tests, expected exactly 8)
 - **HEAD／dirty state 一致性**：runner 開始時記錄 `git rev-parse HEAD` 與 `git status --porcelain` 的變更檔案數，`finalize_run` 時重新核對；任一個變了就在 summary 加上「## Repo state」區塊回報 FAIL，避免長時間執行把混合版本的結果歸到錯誤的 commit。
 
 修復後 self-test（含新增的 9 個案例，加上既有 17 個訊號／生命週期案例與 parser／redaction 檢查）在前景連續執行 10 次，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身、`interrupt-root`／`interrupt-child`／helper／`sleep 3600` 的精確程序檢查都確認無殘留。真實 fixture 目錄下重跑完整 Task 8 自動驗收，`summary.md` 的 `Commit` 欄位與本輪修正完成的 HEAD 完全一致（見 §3 開頭）。
+
+### 5.3 Codex 第二輪 pre-landing review：BLOCKED → 修正（本輪：runner 修正，非產品程式碼）
+
+§5.2 的修正合併後，Codex 做了第二輪驗證並回報 **BLOCKED**，找到 4 項真實缺陷（其中一項是實際成功利用的 bypass，不是理論推測）：
+
+1. **`LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER` 只驗證檔案存在**：Codex 直接把這個變數指向 `/etc/passwd`（幾乎每台 Unix 系統都存在的檔案），成功讓五個正式指令全部被 override 取代，且產生 `Overall result: PASS`。修法：新增 `selftest_child_authorized()`，要求 marker 檔案的**內容**必須與另一個環境變數 `LUMAHARBOR_IPAD_SELFTEST_CHILD_TOKEN` 完全相符——這個 token 是 `run_selftest()` 每次執行時用 `$RANDOM` 三次疊加牆鐘時間現場產生的隨機值，與 marker 路徑一起明確傳給每個 case 自己 spawn 的 child，絕不是任何既存檔案「碰巧」會有的內容。**誠實聲明範圍**：這無法防範「讀過本檔案原始碼、刻意手動複製兩個值」的使用者——在純 shell script、且驗證邏輯對呼叫者本身可見的前提下，沒有任何機制能做到這點——但確實堵住了 Codex 實際示範的那個漏洞：拿任意既存檔案當 marker。新增 self-test 完整重現 `/etc/passwd` 攻擊（外加「token 存在但不相符」的情境），驗證五個步驟都仍使用真正的正式指令。
+2. **`DEFERRED_SIGNAL` 只在 `finalize_run` 某一個時間點被讀取一次**：如果訊號剛好落在「Overall 已判定為 PASS 並寫進暫存檔」之後、但「原子 `mv` 發布成真正的 summary.md」之前，先前的設計會把這個較晚抵達的訊號漏掉，發布出去的 summary 仍然錯誤地寫著 PASS。修法：在 `finalize_run` 內新增第二個 self-test 專用暫停點（緊接在 Overall 行寫入暫存檔之後、`mv` 之前），並在 `mv` 前的最後一刻再檢查一次 `DEFERRED_SIGNAL`——若這時才發現訊號已抵達，就地把暫存檔裡的 `Overall result: PASS` 改寫成 `FAIL`，然後才執行 `mv`。這個最終檢查與緊接其後的 `mv`，本身仍完整落在既有的 `SUMMARY_STATE == "finalizing"` 遞延保護範圍內：訊號若剛好打在這兩行上，一樣只會被記錄然後讓執行緒繼續，不會遺失。新增 self-test 精確在這個「Overall 已判定 PASS 之後」的窗口送出訊號，驗證最終發布的 summary 仍正確顯示 FAIL。
+3. **`finalize_run` 對各步驟 log 呼叫 `redact_file` 沒有容錯**：`sed` 若失敗，`set -e` 會在 privacy scan 執行之前就讓整個 script 中止——而且問題比原本以為的更深：連 `redact_literal`／`redact_pattern` 內部真正呼叫 `sed` 的那一行都沒有 `|| true`，代表同一個檔案內第一個失敗的 pattern 就會讓「同一個 `redact_file` 呼叫」裡後面所有 pattern 全部跳過執行。修法：把 `|| true` 加在 `redact_literal`／`redact_pattern` 內部真正呼叫 `sed` 的那一行（而不只是外層呼叫點），並補上逐步驟 log 迴圈原本缺漏的 `|| true`。新增端到端 self-test：把一個永遠失敗的假 `sed` 塞進 child 的 `PATH` 最前面，並讓其中一個步驟的 log 刻意寫入一個真正的 `/Users/` 路徑，驗證 `finalize_run` 仍完整跑完、privacy scan 真的抓到這個未被遮蔽的洩漏，且 Privacy scan 與 Overall 都正確回報 FAIL。
+4. **Repo state 只比較 `git status --porcelain` 的行數**：這個作法對「同一個 dirty 檔案內容又改變」「dirty A 換成 dirty B（檔案數不變）」「檔案在 tracked／untracked 之間切換」三種情境都是盲點，因為這些情境不一定會改變 porcelain 輸出的行數。修法：新增 `git_worktree_fingerprint()`，改成雜湊 `git diff HEAD --binary`（涵蓋所有 tracked 相對 HEAD 的差異，含 staged／unstaged 與實際內容）加上每個 untracked 檔案的路徑與內容。新增 self-test，針對一個獨立、用完即丟的 scratch git repo（完全不動到真正的專案 repo），驗證上述三種情境下 fingerprint 確實都會改變。
+
+修復後 self-test（本輪再新增 6 個案例，總計涵蓋前兩輪的 26 個既有案例）在前景連續執行 10 次，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身與所有 helper 的精確程序檢查都確認無殘留。`Scripts/run-mvp-acceptance.zsh` self-test（本輪未變動）重新驗證仍全數通過。真實 fixture 目錄下重跑完整 Task 8 自動驗收，`summary.md` 的 `Commit` 欄位（`c75ac623241ce7871569fd9324cf5eeac1583179`）與本輪修正完成的最終 HEAD 完全一致（見 §3 開頭）。
 
 ## 6. 實機五項 gate（NOT RUN）
 
