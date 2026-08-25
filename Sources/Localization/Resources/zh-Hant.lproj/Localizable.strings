@@ -16,6 +16,7 @@
 "Blacks" = "黑色";
 "Blue" = "藍";
 "Cancel" = "取消";
+"Can't verify this photo" = "無法驗證這張照片";
 "Choose a different output location." = "選擇其他輸出位置。";
 "Choose a photo from Files or an external drive." = "從「檔案」App 或外接磁碟選擇一張照片。";
 "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them." = "選擇磁碟上的一個資料夾。LumaHarbor 會直接讀取原位置的 RAW 檔案，永遠不會搬移或修改它們。";
@@ -237,6 +238,7 @@
 "This drive is read-only, so LumaHarbor can't write next to your photos." = "這個磁碟是唯讀的，所以 LumaHarbor 無法把檔案寫在照片旁邊。";
 "This drive isn't connected" = "這個磁碟未連接";
 "This file changed while LumaHarbor was checking it." = "這個檔案在 LumaHarbor 檢查時發生了變動。";
+"This file is too large for LumaHarbor to safely confirm it's the same photo." = "這個檔案太大，LumaHarbor 無法安全確認是否為同一張照片。";
 "This file couldn't be read" = "這個檔案無法讀取";
 "This Library" = "此照片庫";
 "This library's index file is damaged." = "這個相片庫的索引檔案已經損壞。";

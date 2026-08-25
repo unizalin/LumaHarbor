@@ -16,6 +16,7 @@
 "Blacks" = "Blacks";
 "Blue" = "Blue";
 "Cancel" = "Cancel";
+"Can't verify this photo" = "Can't verify this photo";
 "Choose a different output location." = "Choose a different output location.";
 "Choose a photo from Files or an external drive." = "Choose a photo from Files or an external drive.";
 "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them." = "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them.";
@@ -237,6 +238,7 @@
 "This drive is read-only, so LumaHarbor can't write next to your photos." = "This drive is read-only, so LumaHarbor can't write next to your photos.";
 "This drive isn't connected" = "This drive isn't connected";
 "This file changed while LumaHarbor was checking it." = "This file changed while LumaHarbor was checking it.";
+"This file is too large for LumaHarbor to safely confirm it's the same photo." = "This file is too large for LumaHarbor to safely confirm it's the same photo.";
 "This file couldn't be read" = "This file couldn't be read";
 "This Library" = "This Library";
 "This library's index file is damaged." = "This library's index file is damaged.";

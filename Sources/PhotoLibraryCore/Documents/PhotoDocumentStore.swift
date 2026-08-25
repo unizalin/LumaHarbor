@@ -66,7 +66,7 @@ public actor PhotoDocumentStore {
     /// finished?" across a process crash is the `.pending`/`.committed`
     /// state written into the record itself (see `PhotoDocumentRecord
     /// .lifecycleState`) and reconciled by `reconcileOrphanedImports
-    /// (activeDocumentID:)` on the next launch.
+    /// (activePointer:)` on the next launch.
     private enum CreationState {
         case pending
         case finalized
@@ -324,59 +324,102 @@ public actor PhotoDocumentStore {
     /// Re-links an existing `.inPlace` document to `candidateURL` — used
     /// when its bookmark can no longer be resolved (missing, or itself
     /// unreadable) and the user has picked what they believe is the same
-    /// file again from Files.
+    /// file again from Files. `resolvedBookmarkURL` is where a *fresh*
+    /// bookmark minted from `candidateURL` (by the caller, immediately
+    /// beforehand) actually resolves back to — passed in rather than
+    /// re-resolved here because only the caller has the security-scoped
+    /// bookmark machinery to do that.
     ///
-    /// Verifies `candidateURL` *before* touching anything, using a
-    /// full-content SHA-256 digest (`contentDigestSHA256`) rather than the
-    /// sampled `FileFingerprint` — a large file with identical size and
-    /// identical first/last MiB but a corrupted or substituted middle must
-    /// still be rejected, which a sampled comparison alone cannot catch.
-    /// Records written before full digests existed (`contentDigestSHA256
-    /// == nil`) fall back to the sampled fingerprint instead — a weaker
-    /// guarantee, and never reported to the caller as though it were the
-    /// same full-content proof (see `RelinkError`). A successful relink
-    /// always upgrades the record with the freshly verified full digest,
-    /// migrating a legacy record forward rather than leaving the gap for
-    /// next time too.
+    /// This is a single identity transaction, not a sequence of
+    /// independent checks a swap could slip between:
     ///
-    /// Guards the read itself against a TOCTOU swap: `candidateURL` is
-    /// snapshotted (size / modification date / resource identifier)
-    /// immediately before and after the full read, and any difference
-    /// throws `RelinkError.sourceModifiedDuringRelink` rather than trusting
-    /// a digest computed over bytes that may no longer be what is actually
-    /// at `candidateURL` by the time this call finishes. The bookmark
-    /// backing `bookmarkData` is expected to have been minted from this
-    /// exact `candidateURL` immediately beforehand by the caller — this
-    /// call never re-resolves it — so there is no separate window in which
-    /// the bookmark could point somewhere other than what was verified
-    /// here.
+    /// 1. `candidateURL` is opened exactly once. Every fact used below —
+    ///    the full-content SHA-256, the legacy sampled-fingerprint
+    ///    fallback, and the identity re-checked at the end — comes from
+    ///    that one open file descriptor, via `fstat(2)`, never a second
+    ///    independent open.
+    /// 2. The digest is compared against `contentDigestSHA256` (full
+    ///    guarantee) or, for a legacy record with none, the sampled
+    ///    `sourceFingerprint` — but *only* when `candidateURL` is small
+    ///    enough (`FingerprintCalculator.wholeFileThreshold`) that the
+    ///    sample is actually a full-file hash; a larger legacy-record
+    ///    candidate throws `RelinkError.legacyFullDigestUnavailable`
+    ///    rather than accepting a guarantee weaker than the user has any
+    ///    way to know about.
+    /// 3. Immediately before commit, both `candidateURL` and
+    ///    `resolvedBookmarkURL` are `stat(2)`-ed again and their device,
+    ///    inode, size, modification time, and status-change time must all
+    ///    match what was captured from the open descriptor in step 1 — a
+    ///    swap of either path between the read and the commit, or a
+    ///    bookmark that resolves to a different file than the one just
+    ///    verified, is caught here.
     ///
-    /// On any mismatch, nothing is changed — the existing record, sidecar,
-    /// and everything else about the document is left completely
+    /// On any mismatch at any step, nothing is changed — the existing
+    /// record, sidecar, bookmark and working `URL` are left completely
     /// untouched, so a caller can safely let the user try picking again.
-    public func relinkInPlaceDocument(documentID: UUID, candidateURL: URL, bookmarkData: Data) throws -> PhotoDocument {
+    public func relinkInPlaceDocument(
+        documentID: UUID,
+        candidateURL: URL,
+        bookmarkData: Data,
+        resolvedBookmarkURL: URL
+    ) throws -> PhotoDocument {
         let record = try loadRecord(id: documentID)
         guard record.storageMode == .inPlace else {
             throw RelinkError.notInPlace
         }
 
-        let preSnapshot = try sourceSnapshot(at: candidateURL)
-        let candidateDigest = try fullContentDigest(forFileAt: candidateURL)
-        try checkCancellation()
-        let postSnapshot = try sourceSnapshot(at: candidateURL)
-        guard preSnapshot == postSnapshot else {
-            throw RelinkError.sourceModifiedDuringRelink
+        let handle = try FileHandle(forReadingFrom: candidateURL)
+        defer { try? handle.close() }
+        let openedIdentity = try fileIdentity(fileDescriptor: handle.fileDescriptor)
+
+        // A legacy record's sampled fingerprint is only a genuine
+        // full-content guarantee when the whole file fits under
+        // `wholeFileThreshold` -- `FingerprintCalculator` hashes the
+        // entire file at that size, not just its edges. Accumulated from
+        // the same read as the digest below, so there is still only one
+        // open of `candidateURL`.
+        let needsLegacyFallbackBuffer = record.contentDigestSHA256 == nil
+            && openedIdentity.size <= FingerprintCalculator.wholeFileThreshold
+        var legacyBuffer: Data? = needsLegacyFallbackBuffer ? Data() : nil
+
+        var hasher = SHA256()
+        while true {
+            try checkCancellation()
+            let chunk = try handle.read(upToCount: Self.verificationChunkByteCount) ?? Data()
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+            if legacyBuffer != nil { legacyBuffer!.append(chunk) }
         }
+        let candidateDigest = Self.hexString(hasher.finalize())
 
         if let expectedDigest = record.contentDigestSHA256 {
             guard candidateDigest == expectedDigest else {
                 throw RelinkError.contentMismatch
             }
-        } else {
-            let candidateFingerprint = try FingerprintCalculator.fingerprint(forFileAt: candidateURL)
+        } else if let legacyBuffer {
+            let candidateFingerprint = FingerprintCalculator.fingerprint(forData: legacyBuffer)
             guard candidateFingerprint == record.sourceFingerprint else {
                 throw RelinkError.fingerprintMismatch
             }
+        } else {
+            // Legacy record, but too large for the sample to mean
+            // anything -- refuse rather than silently under-verify.
+            throw RelinkError.legacyFullDigestUnavailable
+        }
+
+        // Final identity re-check, right before commit: both the path the
+        // user picked and where the fresh bookmark actually resolves must
+        // still be the *exact* file (device + inode, not merely a
+        // same-looking path) that was opened and hashed above, with
+        // nothing about it changed since.
+        try checkCancellation()
+        let candidateRecheck = try fileIdentity(atPath: candidateURL.path)
+        guard candidateRecheck == openedIdentity else {
+            throw RelinkError.sourceModifiedDuringRelink
+        }
+        let resolvedRecheck = try fileIdentity(atPath: resolvedBookmarkURL.path)
+        guard resolvedRecheck == openedIdentity else {
+            throw RelinkError.bookmarkIdentityMismatch
         }
 
         try updateInPlaceLocation(
@@ -412,7 +455,7 @@ public actor PhotoDocumentStore {
     /// ever runs (or while its write is in flight), the record stays
     /// `.pending` and the lease stays held (kernel-released automatically
     /// on process death). The *next* launch's `reconcileOrphanedImports
-    /// (activeDocumentID:)` finds it, sees whether it matches the durably
+    /// (activePointer:)` finds it, sees whether it matches the durably
     /// persisted active document pointer (moved to it *before* finalize is
     /// even attempted — see `PhotoDocumentEditor.openFreshSelection`), and
     /// promotes or rolls it back accordingly.
@@ -480,7 +523,7 @@ public actor PhotoDocumentStore {
     /// (or vice versa) is still on disk. The receipt itself is consumed
     /// only once every applicable step has actually succeeded; if any step
     /// fails, the receipt stays valid and the outcome is `.retryRequired`,
-    /// so a caller (or a later `reconcileOrphanedImports(activeDocumentID:)`
+    /// so a caller (or a later `reconcileOrphanedImports(activePointer:)`
     /// pass, via the record's still-`.pending` on-disk state) can safely
     /// retry without risking a double-delete or a lost cleanup.
     @discardableResult
@@ -590,10 +633,12 @@ public actor PhotoDocumentStore {
         return try SidecarCoding.decode(PhotoDocumentRecord.self, from: Data(contentsOf: url))
     }
 
+    private var sidecarsRootDirectoryURL: URL {
+        rootURL.appendingPathComponent(Self.sidecarsDirectoryName, isDirectory: true)
+    }
+
     private func sidecarsDirectoryURL(documentID: UUID) -> URL {
-        rootURL
-            .appendingPathComponent(Self.sidecarsDirectoryName, isDirectory: true)
-            .appendingPathComponent(documentID.uuidString, isDirectory: true)
+        sidecarsRootDirectoryURL.appendingPathComponent(documentID.uuidString, isDirectory: true)
     }
 
     /// The currently saved adjustments for a document, or `.neutral` when no
@@ -629,33 +674,55 @@ public actor PhotoDocumentStore {
     /// far longer than any fixed threshold is not treated as abandoned,
     /// because nothing here measures elapsed time.
     ///
-    /// **Pass 1** removes `Documents/` directories with no record at all —
-    /// a kill between an app-copy landing at its final name and the record
-    /// ever being written.
+    /// **Pass 1** removes both kinds of orphan a kill can leave with no
+    /// record ever pointing at them at all: `Documents/<id>` directories
+    /// (a kill between an app-copy landing at its final name and the
+    /// record ever being written) and `Sidecars/<id>` directories (a kill
+    /// between `saveAdjustments` writing one and the record that would
+    /// reference it existing). Neither determination depends on the active
+    /// pointer, so this pass always runs regardless of `activePointer`'s
+    /// state. A `Sidecars/` entry whose name isn't a well-formed UUID is
+    /// left completely untouched and reported in
+    /// `PhotoDocumentReconciliationReport.ignoredSidecarEntries` — it may
+    /// not even be this store's data, and this pass's job is reclaiming
+    /// known orphans, not guessing about the unknown.
     ///
     /// **Pass 2** resolves every record still marked `.pending` — a kill
     /// between the record being written and `finalizeCreation(_:)`
-    /// completing. `activeDocumentID` (the caller's remembered
-    /// last-open document, e.g. from `UserDefaults`) is what decides each
-    /// one's fate: a pending record whose id matches it survived far enough
-    /// to be the document the user was actually handed off to, so it is
-    /// *promoted* to `.committed` rather than deleted. Every other pending
-    /// record never finished being shown to anyone and is rolled back
-    /// exactly like a same-session `rollbackNewDocument(_:)` would — record
-    /// and sidecar always, and its `Documents/` copy for `.appCopy`; an
-    /// `.inPlace` record's rollback never touches the external RAW, since
-    /// `workingURL` *is* that RAW. A record already `.committed` (including
-    /// every legacy record written before this field existed) is never
-    /// touched by this pass.
+    /// completing. `activePointer` (the durably persisted active-document
+    /// pointer — see `loadActiveDocumentPointer()`) is what decides each
+    /// one's fate: a pending record whose id matches `.active(id)` survived
+    /// far enough to be the document the user was actually handed off to,
+    /// so it is *promoted* to `.committed` rather than deleted. If
+    /// `activePointer` is `.corrupt`, this entire pass is skipped and
+    /// `PhotoDocumentReconciliationReport.activePointerWasUnreadable` is
+    /// `true` — acting on *any* pending record while the pointer's own
+    /// content cannot be trusted risks rolling back the very document the
+    /// user was mid-handoff to. Otherwise, every pending record that
+    /// doesn't match `.active(id)` never finished being shown to anyone and
+    /// is rolled back exactly like a same-session `rollbackNewDocument(_:)`
+    /// would — record and sidecar always, and its `Documents/` copy for
+    /// `.appCopy`; an `.inPlace` record's rollback never touches the
+    /// external RAW, since `workingURL` *is* that RAW. A record already
+    /// `.committed` (including every legacy record written before this
+    /// field existed) is never touched by this pass.
     ///
     /// Throws `PhotoDocumentError.importInProgress`, changing nothing, if
-    /// the lock is already held elsewhere. Individual failures within
-    /// either pass are collected in `PhotoDocumentReconciliationReport
-    /// .failures` rather than aborting the whole call; whatever could not
-    /// be resolved is left in place for a later call to retry.
+    /// the lock is already held elsewhere. A directory-listing failure in
+    /// either pass propagates rather than being treated as "empty" — an
+    /// unreadable `Documents/`, `Sidecars/`, or `Records/` is not the same
+    /// as an empty one, and must not be silently reconciled as if nothing
+    /// were there. Individual per-entry failures within either pass are
+    /// instead collected in `PhotoDocumentReconciliationReport.failures`
+    /// (fixed, path-free diagnostics — never `NSError.localizedDescription`,
+    /// which can carry an absolute path) rather than aborting the whole
+    /// call; whatever could not be resolved is left in place for a later
+    /// call to retry.
     @discardableResult
-    public func reconcileOrphanedImports(activeDocumentID: UUID?) throws -> PhotoDocumentReconciliationReport {
+    public func reconcileOrphanedImports(activePointer: ActiveDocumentPointer) throws -> PhotoDocumentReconciliationReport {
         var removedOrphanIDs: [UUID] = []
+        var removedOrphanSidecarIDs: [UUID] = []
+        var ignoredSidecarEntries: [String] = []
         var failures: [UUID: String] = [:]
 
         // PASS 1 needs the root lock: enumerating and removing entries
@@ -677,25 +744,47 @@ public actor PhotoDocumentStore {
                         try fileManager.removeItem(at: entry)
                         removedOrphanIDs.append(id)
                     } catch {
-                        failures[id] = (error as NSError).localizedDescription
+                        failures[id] = Self.orphanCopyRemovalFailureMessage
+                    }
+                }
+            }
+            if fileManager.fileExists(atPath: sidecarsRootDirectoryURL.path) {
+                let entries = try fileManager.contentsOfDirectory(at: sidecarsRootDirectoryURL, includingPropertiesForKeys: nil)
+                for entry in entries {
+                    guard let id = UUID(uuidString: entry.lastPathComponent) else {
+                        // Not even a well-formed UUID -- never delete
+                        // something this pass cannot positively identify
+                        // as its own orphan. Only the entry's own name is
+                        // recorded, never a full path.
+                        ignoredSidecarEntries.append(entry.lastPathComponent)
+                        continue
+                    }
+                    guard !fileManager.fileExists(atPath: recordURL(for: id).path) else { continue }
+                    do {
+                        try fileManager.removeItem(at: entry)
+                        removedOrphanSidecarIDs.append(id)
+                    } catch {
+                        failures[id] = Self.orphanSidecarRemovalFailureMessage
                     }
                 }
             }
         }
 
-        // PASS 2 resolves every record still marked `.pending`. Each
-        // record's per-document lease is acquired non-blockingly *before*
-        // this pass touches it at all — see `PendingLock`. If it is
-        // already held, the process that created it (or a concurrent
-        // finalize/rollback, even in this same process) is still alive and
-        // actively working on it; this pass never touches such a record.
-        // Only once the lease is actually held here — proof the creation
-        // is orphaned, not merely slow — does this pass decide to promote
-        // or roll it back.
+        // PASS 2 resolves every record still marked `.pending`. Skipped
+        // entirely if the active pointer itself is unreadable -- see the
+        // type documentation above for why.
         var promotedPendingIDs: [UUID] = []
         var rolledBackPendingIDs: [UUID] = []
+        var activePointerWasUnreadable = false
 
-        if fileManager.fileExists(atPath: recordsDirectoryURL.path) {
+        if case .corrupt = activePointer {
+            activePointerWasUnreadable = true
+        } else if fileManager.fileExists(atPath: recordsDirectoryURL.path) {
+            let activeDocumentID: UUID? = {
+                if case .active(let id) = activePointer { return id }
+                return nil
+            }()
+
             let recordFiles = try fileManager.contentsOfDirectory(at: recordsDirectoryURL, includingPropertiesForKeys: nil)
             for recordFile in recordFiles {
                 guard recordFile.pathExtension == "json",
@@ -735,7 +824,7 @@ public actor PhotoDocumentStore {
                         try writeRecordData(try SidecarCoding.encode(promoted), recordFile, fileManager)
                         promotedPendingIDs.append(filenameID)
                     } catch {
-                        failures[filenameID] = (error as NSError).localizedDescription
+                        failures[filenameID] = Self.promotionWriteFailureMessage
                     }
                     continue
                 }
@@ -750,7 +839,7 @@ public actor PhotoDocumentStore {
 
                 if freshRecord.storageMode == .appCopy {
                     guard let rootLock = try? RootImportLock.acquire(at: importLockURL, fileManager: fileManager) else {
-                        failures[filenameID] = "Could not acquire the import lock to finish rolling back an interrupted import."
+                        failures[filenameID] = Self.rollbackFailureMessage
                         continue
                     }
                     defer { rootLock.release() }
@@ -768,18 +857,32 @@ public actor PhotoDocumentStore {
                 if priorStepsOK && recordResult == .succeeded {
                     rolledBackPendingIDs.append(filenameID)
                 } else {
-                    failures[filenameID] = "Could not fully roll back an interrupted import."
+                    failures[filenameID] = Self.rollbackFailureMessage
                 }
             }
         }
 
         return PhotoDocumentReconciliationReport(
             removedOrphanIDs: removedOrphanIDs,
+            removedOrphanSidecarIDs: removedOrphanSidecarIDs,
+            ignoredSidecarEntries: ignoredSidecarEntries,
             promotedPendingIDs: promotedPendingIDs,
             rolledBackPendingIDs: rolledBackPendingIDs,
-            failures: failures
+            failures: failures,
+            activePointerWasUnreadable: activePointerWasUnreadable
         )
     }
+
+    /// Fixed, path-free diagnostics for `PhotoDocumentReconciliationReport
+    /// .failures` — deliberately never `(error as NSError)
+    /// .localizedDescription`, which can embed the exact absolute path
+    /// that failed (e.g. `NSCocoaErrorDomain` "couldn't be removed because
+    /// you don't have permission to access <path>") straight into
+    /// diagnostics a UI might display or a log might persist.
+    private static let orphanCopyRemovalFailureMessage = "Could not remove an orphaned import."
+    private static let orphanSidecarRemovalFailureMessage = "Could not remove an orphaned sidecar."
+    private static let promotionWriteFailureMessage = "Could not finish confirming an interrupted import."
+    private static let rollbackFailureMessage = "Could not fully roll back an interrupted import."
 
     /// Guards against promoting a `.pending` record to `.committed` that
     /// this pass cannot actually verify — see the type documentation on
@@ -793,6 +896,11 @@ public actor PhotoDocumentStore {
         guard record.id == filenameID else {
             return "Record id does not match its filename."
         }
+        if let digest = record.contentDigestSHA256 {
+            guard digest.count == 64, digest.allSatisfy(\.isHexDigit) else {
+                return "Stored content digest is malformed."
+            }
+        }
         switch record.storageMode {
         case .appCopy:
             let workingURL: URL
@@ -805,15 +913,24 @@ public actor PhotoDocumentStore {
             guard fileManager.fileExists(atPath: workingURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
                 return "App-copy working file is missing or is not a regular file."
             }
-        case .inPlace:
-            // The working file is external to the store; its presence is
-            // neither something this pass can nor should verify.
-            break
-        }
-        if let digest = record.contentDigestSHA256 {
-            guard digest.count == 64, digest.allSatisfy(\.isHexDigit) else {
-                return "Stored content digest is malformed."
+            // Existence and shape alone don't prove the bytes are still
+            // what this record claims -- silent disk corruption in the
+            // untouched middle of a large working copy would pass both
+            // checks above. When a digest was recorded, re-hash the
+            // working file and require an exact match before promoting;
+            // a legacy record with no digest at all falls back to the
+            // existence/shape check only, same as before.
+            if let expectedDigest = record.contentDigestSHA256 {
+                guard let actualDigest = try? fullContentDigest(forFileAt: workingURL), actualDigest == expectedDigest else {
+                    return "App-copy working file content does not match its stored digest."
+                }
             }
+        case .inPlace:
+            // The working file is external to the store; its presence and
+            // content are neither something this pass can nor should
+            // verify -- relink already carries that guarantee for the
+            // in-place path.
+            break
         }
         return nil
     }
@@ -823,17 +940,41 @@ public actor PhotoDocumentStore {
     /// Reads the durably persisted active-document pointer — in the same
     /// durability domain (an atomic file under `rootURL`, via the same
     /// `writeRecordData`/`AtomicFileWriter` path every record uses) as
-    /// document records themselves, rather than `UserDefaults`. That is
-    /// what lets `reconcileOrphanedImports(activeDocumentID:)` reason
-    /// about "does this pending record match the durably remembered active
-    /// document" as a single consistent crash-recovery domain. Returns
-    /// `nil` on any read/decode failure — including "the file has never
-    /// been written" — never throws, since there being no active document
-    /// yet is an ordinary, common state, not an error.
+    /// document records themselves, rather than `UserDefaults`. Never
+    /// throws — every outcome, including "unreadable" and "malformed", is
+    /// represented in `ActiveDocumentPointer` itself, since a caller (most
+    /// importantly `reconcileOrphanedImports(activePointer:)`) has to
+    /// react differently to "no active document" than to "cannot currently
+    /// tell what the active document is."
+    public func loadActiveDocumentPointer() -> ActiveDocumentPointer {
+        guard fileManager.fileExists(atPath: activePointerURL.path) else {
+            return .missing
+        }
+        guard let data = try? Data(contentsOf: activePointerURL) else {
+            return .corrupt
+        }
+        guard let record = try? SidecarCoding.decode(ActivePointerRecord.self, from: data) else {
+            return .corrupt
+        }
+        if let id = record.documentID {
+            return .active(id)
+        }
+        return .noActiveDocument
+    }
+
+    /// Convenience for callers (restore) that only ever care about "is
+    /// there a document to restore" — `.missing`, `.noActiveDocument`, and
+    /// `.corrupt` are all equally "nothing to restore" from that single
+    /// caller's point of view, and restore never deletes anything on its
+    /// own regardless of which one it was, so collapsing them here is
+    /// safe. `reconcileOrphanedImports`, which *can* delete things, uses
+    /// `loadActiveDocumentPointer()` directly instead and must not use
+    /// this.
     public func loadActiveDocumentID() -> UUID? {
-        guard let data = try? Data(contentsOf: activePointerURL) else { return nil }
-        guard let record = try? SidecarCoding.decode(ActivePointerRecord.self, from: data) else { return nil }
-        return record.documentID
+        if case .active(let id) = loadActiveDocumentPointer() {
+            return id
+        }
+        return nil
     }
 
     /// Durably writes the active-document pointer. Throws — rather than
@@ -1019,6 +1160,58 @@ public actor PhotoDocumentStore {
         digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// A file's kernel-level identity — device and inode, not merely a path
+    /// — plus size and both timestamps `stat(2)` reports. Two `URL`s that
+    /// resolve to the same `(device, inode)` are, by definition, the exact
+    /// same file on disk regardless of what path either was reached
+    /// through; a path alone can never prove that (it could have been
+    /// unlinked and a different file created at the same location). Used
+    /// by `relinkInPlaceDocument` to prove the file it hashed is still the
+    /// same file at both `candidateURL` and wherever the fresh bookmark
+    /// resolved to, right up to the moment of commit.
+    private struct FileIdentity: Equatable {
+        let device: Int32
+        let inode: UInt64
+        let size: Int64
+        let modificationSeconds: Int
+        let modificationNanoseconds: Int
+        let statusChangeSeconds: Int
+        let statusChangeNanoseconds: Int
+
+        init(_ status: stat) {
+            device = status.st_dev
+            inode = UInt64(status.st_ino)
+            size = Int64(status.st_size)
+            modificationSeconds = status.st_mtimespec.tv_sec
+            modificationNanoseconds = status.st_mtimespec.tv_nsec
+            statusChangeSeconds = status.st_ctimespec.tv_sec
+            statusChangeNanoseconds = status.st_ctimespec.tv_nsec
+        }
+    }
+
+    /// `fstat(2)` on an already-open file descriptor — the identity of
+    /// exactly the bytes that descriptor reads, immune to the path it was
+    /// opened through being replaced afterward.
+    private func fileIdentity(fileDescriptor: Int32) throws -> FileIdentity {
+        var status = stat()
+        guard fstat(fileDescriptor, &status) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return FileIdentity(status)
+    }
+
+    /// `stat(2)` on a path — re-checked immediately before a commit to
+    /// prove the path still resolves to the exact same file (by device and
+    /// inode, not merely by name) as whatever was actually opened and
+    /// hashed earlier in the same call.
+    private func fileIdentity(atPath path: String) throws -> FileIdentity {
+        var status = stat()
+        guard stat(path, &status) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return FileIdentity(status)
+    }
+
     /// A cheap, best-effort description of a source file's identity, used to
     /// detect a write landing on it during an import. Deliberately not a
     /// full re-read: that's what `contentsAreIdentical` already does, at the
@@ -1122,7 +1315,7 @@ private struct RootImportLock {
 /// **Lock ordering.** Whenever both this lease and `RootImportLock` are
 /// needed together, this lease is always acquired *first* — see
 /// `importCopy`, `rollbackNewDocument`, and
-/// `reconcileOrphanedImports(activeDocumentID:)`. `openInPlace` never
+/// `reconcileOrphanedImports(activePointer:)`. `openInPlace` never
 /// needs the root lock at all. Following this order everywhere rules out
 /// the deadlock a mixed order would risk (one caller holding the lease and
 /// waiting on the root lock, another holding the root lock and waiting on
@@ -1198,7 +1391,7 @@ private struct PhotoDocumentRecord: Codable {
     /// Whether a creation has finished being handed off to the user
     /// (`.committed`) or might still be interrupted mid-handoff
     /// (`.pending`). Backs crash-durable creation tracking — see
-    /// `reconcileOrphanedImports(activeDocumentID:)`.
+    /// `reconcileOrphanedImports(activePointer:)`.
     enum LifecycleState: String, Codable {
         case pending
         case committed
@@ -1230,6 +1423,16 @@ private struct PhotoDocumentRecord: Codable {
 public struct PhotoDocumentReconciliationReport: Equatable, Sendable {
     /// `Documents/` directories found with no record at all, and removed.
     public let removedOrphanIDs: [UUID]
+    /// `Sidecars/<uuid>` directories found with no record at all, and
+    /// removed — the sidecar-side counterpart to `removedOrphanIDs`. A kill
+    /// between `saveAdjustments` writing a sidecar and the record that
+    /// would reference it existing can leave one of these behind.
+    public let removedOrphanSidecarIDs: [UUID]
+    /// `Sidecars/` entries whose name isn't even a well-formed UUID —
+    /// too malformed to safely treat as an orphan (it may not be this
+    /// store's data at all) and left completely untouched. Contains only
+    /// each entry's own directory name, never a full path.
+    public let ignoredSidecarEntries: [String]
     /// Pending records that matched the remembered active document and
     /// were promoted to `.committed` — the app survived far enough to hand
     /// this document off to the user before being killed.
@@ -1239,18 +1442,34 @@ public struct PhotoDocumentReconciliationReport: Equatable, Sendable {
     /// `.appCopy`) its `Documents/` copy.
     public let rolledBackPendingIDs: [UUID]
     /// Entries that could not be fully resolved, keyed by id, with a
-    /// diagnostic description. Left in place for a later call to retry.
+    /// fixed, path-free diagnostic description. Left in place for a later
+    /// call to retry.
     public let failures: [UUID: String]
+    /// `true` when the active-document pointer itself could not be read or
+    /// decoded (`ActiveDocumentPointer.corrupt`). When this is `true`,
+    /// pass 2 (every pending record) was skipped entirely — promoting or
+    /// rolling back *anything* while the pointer's own content can't be
+    /// trusted risks acting on the wrong document. Orphan copy/sidecar
+    /// directories with no record at all (`removedOrphanIDs`/
+    /// `removedOrphanSidecarIDs`) are unaffected, since that determination
+    /// never depended on the pointer.
+    public let activePointerWasUnreadable: Bool
 
     public init(
         removedOrphanIDs: [UUID],
+        removedOrphanSidecarIDs: [UUID] = [],
+        ignoredSidecarEntries: [String] = [],
         promotedPendingIDs: [UUID] = [],
         rolledBackPendingIDs: [UUID] = [],
-        failures: [UUID: String]
+        failures: [UUID: String],
+        activePointerWasUnreadable: Bool = false
     ) {
         self.removedOrphanIDs = removedOrphanIDs
+        self.removedOrphanSidecarIDs = removedOrphanSidecarIDs
+        self.ignoredSidecarEntries = ignoredSidecarEntries
         self.promotedPendingIDs = promotedPendingIDs
         self.rolledBackPendingIDs = rolledBackPendingIDs
         self.failures = failures
+        self.activePointerWasUnreadable = activePointerWasUnreadable
     }
 }
