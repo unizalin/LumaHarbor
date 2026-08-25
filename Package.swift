@@ -15,7 +15,11 @@ let package = Package(
     products: [
         .executable(name: "LumaHarbor", targets: ["LumaHarbor"]),
         .library(name: "PhotoLibraryCore", targets: ["PhotoLibraryCore"]),
-        .library(name: "RawProcessingCore", targets: ["RawProcessingCore"]),
+        // RawProcessingCore deliberately remains an internal target. It
+        // carries CompileMetalKernels; exposing it as another top-level
+        // product makes Xcode schedule the plugin twice when the root package
+        // is opened directly. External apps depend on EditorCore and
+        // AdjustmentUI, which bring RawProcessingCore in transitively.
         .library(name: "PresetCore", targets: ["PresetCore"]),
         .library(name: "EditorCore", targets: ["EditorCore"]),
         .library(name: "AdjustmentUI", targets: ["AdjustmentUI"]),
