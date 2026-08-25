@@ -600,6 +600,15 @@ handle_terminating_signal() {
                 waited=$((waited + 1))
             done
             signal_pid_list KILL "${victims[@]}"
+
+            # Reap the wrapper subshell — it is this process's own direct
+            # child (everything deeper was only ever reachable through it,
+            # never `wait`-able by us directly) — before finalize_run runs,
+            # so it is never left as a zombie. `wait` returning the
+            # torn-down child's own (often nonzero/signal) exit status must
+            # not itself be treated as this line failing under `set -e`.
+            wait "$RUN_WITH_TIMEOUT_PID" 2>/dev/null || true
+            RUN_WITH_TIMEOUT_PID=0
         fi
     fi
     finalize_run
@@ -627,18 +636,85 @@ FAIL_WITH_7_HELPER=""
 INTERRUPT_ROOT_HELPER=""
 INTERRUPT_CHILD_HELPER=""
 
+# cleanup_signal_case_helper <runner_pid> <root_helper_pid> <leaf_pid> <label>
+# The one cleanup path every exit of run_signal_selftest_case (and the
+# dedicated ready-handshake-failure case below) funnels through, so no
+# return path can skip it. Two independent guarantees, in order:
+#   1. If runner_pid is still alive, its ENTIRE current descendant tree is
+#      collected fresh (collect_descendant_pids — a one-shot, leaf-first
+#      snapshot, the same mechanism the real runner uses on itself) and
+#      torn down TERM-then-KILL, then runner_pid itself is wait/reaped —
+#      this is what actually prevents a leak on a broken/hung case
+#      (ready-timeout or an empty pidfile), where the runner is never
+#      signalled by the case itself and so never runs its own cleanup.
+#   2. If root_helper_pid and/or leaf_pid are known (read from the
+#      pidfiles), each is checked by its own exact PID — never a broad
+#      `pgrep -f` name pattern — and force-killed if it somehow survived
+#      step 1 (e.g. the runner's OWN signal handler is what was supposed to
+#      clean it up, and this is the check that would catch that handler
+#      failing to do so).
+# Returns non-zero only when step 2 finds and has to force-kill a survivor —
+# step 1 succeeding or having nothing to do is never itself a failure.
+cleanup_signal_case_helper() {
+    local runner_pid="$1" root_helper_pid="$2" leaf_pid="$3" label="$4"
+    local ok=1
+
+    if [[ -n "$runner_pid" ]] && kill -0 "$runner_pid" 2>/dev/null; then
+        local -a victims
+        victims=("${(f)$(collect_descendant_pids "$runner_pid")}")
+        signal_pid_list TERM "${victims[@]}"
+        local deadline=$((SECONDS + 5))
+        while (( SECONDS < deadline )) && ! all_pids_gone "${victims[@]}"; do
+            sleep 0.1
+        done
+        signal_pid_list KILL "${victims[@]}"
+    fi
+    if [[ -n "$runner_pid" ]]; then
+        wait "$runner_pid" 2>/dev/null || true
+    fi
+
+    if [[ -n "$root_helper_pid" || -n "$leaf_pid" ]]; then
+        local root_gone=1 leaf_gone=1
+        [[ -n "$root_helper_pid" ]] && root_gone=0
+        [[ -n "$leaf_pid" ]] && leaf_gone=0
+        local survive_deadline=$((SECONDS + 5))
+        while (( SECONDS < survive_deadline )); do
+            if [[ -n "$root_helper_pid" ]]; then
+                kill -0 "$root_helper_pid" 2>/dev/null || root_gone=1
+            fi
+            if [[ -n "$leaf_pid" ]]; then
+                kill -0 "$leaf_pid" 2>/dev/null || leaf_gone=1
+            fi
+            (( root_gone && leaf_gone )) && break
+            sleep 0.1
+        done
+        if (( root_gone && leaf_gone )); then
+            print -r -- "selftest: ${label} -> helper root and leaf both exited (expected): ok"
+        else
+            print -r -- "selftest: ${label} -> a helper process survived cleanup (root_gone=${root_gone} leaf_gone=${leaf_gone})"
+            ok=0
+            [[ -n "$root_helper_pid" ]] && { kill -KILL "$root_helper_pid" 2>/dev/null || true }
+            [[ -n "$leaf_pid" ]] && { kill -KILL "$leaf_pid" 2>/dev/null || true }
+        fi
+    fi
+
+    (( ok ))
+}
+
 # run_signal_selftest_case <target-key> <signal-name> <expected-exit-code>
 # Launches a fresh subprocess of this very script with every step up to and
 # including target-key substituted for a cheap, controllable command (steps
 # before the target get an instant-pass stand-in; the target gets
 # INTERRUPT_ROOT_HELPER, a dedicated two-process helper — see its own
 # comment below for why). Readiness is a deterministic handshake (a ready
-# file, written only once both the helper's root process and its real
-# grandchild process have confirmed PIDs on disk) rather than any fixed
-# sleep guess. A real OS signal is then sent to the runner subprocess
-# itself, and both the resulting summary.md and the helper's own two exact
-# PIDs (read back from the pidfiles it wrote, never a broad `pgrep -f`
-# pattern match) are checked the same way an operator would.
+# file, written only once both the helper's root process and its real leaf
+# process have confirmed PIDs on disk) rather than any fixed sleep guess. A
+# real OS signal is then sent to the runner subprocess itself, and both the
+# resulting summary.md and the helper's own two exact PIDs (read back from
+# the pidfiles it wrote, never a broad `pgrep -f` pattern match) are checked
+# the same way an operator would. Every exit path — ready-timeout, an empty
+# pidfile, or the normal post-signal path — funnels through
+# cleanup_signal_case_helper before case_tmp is ever removed.
 run_signal_selftest_case() {
     local target_key="$1" signal_name="$2" expected_exit="$3"
     local label="signal ${signal_name} during ${target_key}"
@@ -669,30 +745,37 @@ run_signal_selftest_case() {
     local child_pid=$!
 
     # Deterministic handshake: the ready file only exists once the helper's
-    # root process has confirmed its grandchild is alive (see
-    # INTERRUPT_ROOT_HELPER's own script body) — never a fixed sleep guess.
+    # root process has confirmed its leaf is alive (see INTERRUPT_ROOT_HELPER's
+    # own script body) — never a fixed sleep guess.
     local ready_deadline=$((SECONDS + 20))
     while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
         sleep 0.02
     done
 
+    # Read back whatever pidfiles exist regardless of which path this case
+    # takes below — even a case that never reaches "ready" may have a
+    # partially-written root pidfile, and cleanup_signal_case_helper should
+    # verify whatever is actually known.
+    local root_helper_pid="" leaf_pid=""
+    [[ -s "$root_pidfile" ]] && root_helper_pid="$(<"$root_pidfile")"
+    [[ -s "$child_pidfile" ]] && leaf_pid="$(<"$child_pidfile")"
+
     if [[ ! -f "$ready_file" ]]; then
         print -r -- "selftest: ${label} -> the interrupt-target helper never signalled ready"
-        kill -KILL "$child_pid" 2>/dev/null || true
-        wait "$child_pid" 2>/dev/null || true
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "$root_helper_pid" "$leaf_pid" "$label" || case_failures=$((case_failures + 1))
         rm -rf -- "$case_tmp"
-        return 1
+        (( case_failures == 0 ))
+        return
     fi
 
-    local root_helper_pid="" grandchild_pid=""
-    [[ -s "$root_pidfile" ]] && root_helper_pid="$(<"$root_pidfile")"
-    [[ -s "$child_pidfile" ]] && grandchild_pid="$(<"$child_pidfile")"
-    if [[ -z "$root_helper_pid" || -z "$grandchild_pid" ]]; then
+    if [[ -z "$root_helper_pid" || -z "$leaf_pid" ]]; then
         print -r -- "selftest: ${label} -> ready file existed but a pidfile was empty"
-        kill -KILL "$child_pid" 2>/dev/null || true
-        wait "$child_pid" 2>/dev/null || true
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "$root_helper_pid" "$leaf_pid" "$label" || case_failures=$((case_failures + 1))
         rm -rf -- "$case_tmp"
-        return 1
+        (( case_failures == 0 ))
+        return
     fi
 
     # The run directory the runner subprocess created — needed to locate
@@ -775,24 +858,75 @@ run_signal_selftest_case() {
         fi
     fi
 
-    # Precise-PID survivor check against the two exact PIDs the helper
-    # itself reported — never a broad `pgrep -f` name/pattern match, which
-    # can both miss a renamed process and false-positive on an unrelated one.
-    local survivor_deadline=$((SECONDS + 5))
-    local root_gone=0 grandchild_gone=0
-    while (( SECONDS < survivor_deadline )); do
-        kill -0 "$root_helper_pid" 2>/dev/null || root_gone=1
-        kill -0 "$grandchild_pid" 2>/dev/null || grandchild_gone=1
-        (( root_gone && grandchild_gone )) && break
-        sleep 0.1
+    # Final, unconditional cleanup + precise-PID verification. By this point
+    # the runner already exited via `wait` above, so step 1 inside the
+    # helper is normally a no-op; step 2 is the real assertion here — it is
+    # what actually proves handle_terminating_signal cleaned up correctly.
+    cleanup_signal_case_helper "$child_pid" "$root_helper_pid" "$leaf_pid" "$label" || case_failures=$((case_failures + 1))
+
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+# run_ready_handshake_failure_selftest_case — a deterministic
+# failure-path case: the target step's own command hangs (a bare `sleep`,
+# never routed through INTERRUPT_ROOT_HELPER) and so can never produce the
+# ready-file handshake. Must FAIL within the real, bounded ready-file
+# deadline — never hang — and must leave nothing from the runner's process
+# tree behind. This exercises the exact scenario collect_descendant_pids was
+# introduced for: a hung target step where cleanup can only rely on the
+# runner's own PID as a starting point, never a pidfile that was never
+# written.
+run_ready_handshake_failure_selftest_case() {
+    local label="ready-handshake failure (strictbuild)"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local ready_file="${case_tmp}/ready"
+
+    (
+        unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_STRICTBUILD_CMD="sleep 3600"
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    local child_pid=$!
+
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
+        sleep 0.02
     done
-    if (( root_gone && grandchild_gone )); then
-        print -r -- "selftest: ${label} -> helper root and grandchild both exited (expected): ok"
-    else
-        print -r -- "selftest: ${label} -> a helper process survived the interruption (root_gone=${root_gone} grandchild_gone=${grandchild_gone})"
+
+    if [[ -f "$ready_file" ]]; then
+        print -r -- "selftest: ${label} -> ready file unexpectedly appeared (this case must never produce one)"
         case_failures=$((case_failures + 1))
-        kill -KILL "$root_helper_pid" 2>/dev/null || true
-        kill -KILL "$grandchild_pid" 2>/dev/null || true
+    else
+        print -r -- "selftest: ${label} -> correctly never completed the ready handshake within the deadline (expected): ok"
+    fi
+
+    # Snapshot the runner's entire live descendant tree (its bare
+    # `sleep 3600` payload included) by exact PID BEFORE any cleanup, via
+    # the same pgrep-P-scoped-to-a-known-root walk the runner uses on
+    # itself — never a broad process-name pattern — so cleanup can be
+    # verified precisely afterward even though no pidfile was ever written
+    # for this deliberately-broken case.
+    local -a before_cleanup_pids=()
+    if kill -0 "$child_pid" 2>/dev/null; then
+        before_cleanup_pids=("${(f)$(collect_descendant_pids "$child_pid")}")
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+
+    if (( ${#before_cleanup_pids[@]} > 0 )); then
+        if all_pids_gone "${before_cleanup_pids[@]}"; then
+            print -r -- "selftest: ${label} -> every process in the runner's tree exited after cleanup (expected): ok"
+        else
+            print -r -- "selftest: ${label} -> at least one process from the runner's tree survived cleanup"
+            case_failures=$((case_failures + 1))
+        fi
+    else
+        print -r -- "selftest: ${label} -> the runner subprocess already had no live tree to check (unexpected for this case)"
+        case_failures=$((case_failures + 1))
     fi
 
     rm -rf -- "$case_tmp"
@@ -1053,15 +1187,19 @@ run_selftest() {
     chmod +x "$FAIL_WITH_7_HELPER"
 
     # Deterministic two-process interrupt target for the signal-case tests
-    # below: a real grandchild process (not just the wrapper subshell
+    # below: a real leaf process (not just the wrapper subshell
     # run_with_timeout already forks) whose exact PID is recorded on disk,
     # so a case can assert on precise PIDs instead of a `pgrep -f` name
-    # pattern. INTERRUPT_CHILD_HELPER writes its own PID to $1, then blocks.
+    # pattern. INTERRUPT_CHILD_HELPER writes its own PID to $1, then execs
+    # straight into `sleep` — exec replaces the process image but keeps the
+    # same PID, so the PID written to $1 is the PID of the actual process
+    # left blocking (the leaf), not a zsh wrapper shell that itself spawns
+    # one more, untracked `sleep` underneath it.
     INTERRUPT_CHILD_HELPER="${helper_dir}/interrupt-child.zsh"
     {
         print -r -- '#!/usr/bin/env zsh'
         print -r -- 'print -r -- "$$" > "$1"'
-        print -r -- 'while true; do sleep 3600; done'
+        print -r -- 'exec sleep 3600'
     } > "$INTERRUPT_CHILD_HELPER"
     chmod +x "$INTERRUPT_CHILD_HELPER"
 
@@ -1079,8 +1217,8 @@ run_selftest() {
         print -r -- '"$child_script" "$child_pidfile" &'
         print -r -- 'child_pid=$!'
         print -r -- 'while [[ ! -s "$child_pidfile" ]]; do sleep 0.02; done'
-        print -r -- 'grandchild_pid="$(<"$child_pidfile")"'
-        print -r -- 'while ! kill -0 "$grandchild_pid" 2>/dev/null; do sleep 0.02; done'
+        print -r -- 'leaf_pid="$(<"$child_pidfile")"'
+        print -r -- 'while ! kill -0 "$leaf_pid" 2>/dev/null; do sleep 0.02; done'
         print -r -- 'touch "$ready_file"'
         print -r -- 'wait "$child_pid"'
     } > "$INTERRUPT_ROOT_HELPER"
@@ -1105,6 +1243,7 @@ run_selftest() {
     run_fastfail_selftest_case || failures=$((failures + 1))
     run_fakepass_selftest_case || failures=$((failures + 1))
     run_missinghelper_selftest_case || failures=$((failures + 1))
+    run_ready_handshake_failure_selftest_case || failures=$((failures + 1))
 
     rm -rf -- "$helper_dir"
 
