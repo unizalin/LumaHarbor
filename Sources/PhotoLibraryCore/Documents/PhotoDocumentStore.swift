@@ -1228,6 +1228,15 @@ public actor PhotoDocumentStore {
         guard closingIdentity == openedIdentity else {
             throw PhotoDocumentError.sourceModifiedDuringImport
         }
+        let closingPathIdentity: FileIdentity
+        do {
+            closingPathIdentity = try fileIdentity(atPath: url.path)
+        } catch {
+            throw PhotoDocumentError.sourceModifiedDuringImport
+        }
+        guard closingPathIdentity == openedIdentity else {
+            throw PhotoDocumentError.sourceModifiedDuringImport
+        }
 
         let fingerprint = FileFingerprint(fileSize: fileSize, edgeDigest: FingerprintCalculator.hexString(fingerprintHasher.finalize()))
         let digest = Self.hexString(digestHasher.finalize())

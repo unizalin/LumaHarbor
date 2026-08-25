@@ -74,13 +74,14 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
         return process
     }
 
-    /// Reads whatever the helper has written to stderr so far and redacts
-    /// anything that looks like an absolute path before it's ever put into
-    /// an assertion message -- a diagnostic aid must not itself become the
-    /// thing leaking a private path.
+    /// Drains a helper's stderr after it has terminated and redacts anything
+    /// that looks like an absolute path before it is put into an assertion
+    /// message. Callers must reap the process first so reading through the
+    /// pipe can never wait for a still-live writer.
     private func sanitizedStandardError(of process: Process) -> String {
         guard let pipe = process.standardError as? Pipe else { return "<no stderr captured>" }
-        let data = pipe.fileHandleForReading.availableData
+        let data = (try? pipe.fileHandleForReading.readToEnd()) ?? nil
+        guard let data else { return "<unavailable>" }
         guard !data.isEmpty, let text = String(data: data, encoding: .utf8), !text.isEmpty else {
             return "<empty>"
         }
@@ -94,6 +95,19 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
             }
         }
         return redacted
+    }
+
+    private func terminateAndCollectDiagnostic(for process: Process) -> String {
+        let wasRunning = process.isRunning
+        if wasRunning {
+            kill(process.processIdentifier, SIGKILL)
+        }
+        process.waitUntilExit()
+
+        let lifecycle = wasRunning
+            ? "was still running and was terminated with status \(process.terminationStatus), reason \(process.terminationReason.rawValue)"
+            : "had exited with status \(process.terminationStatus), reason \(process.terminationReason.rawValue)"
+        return "Helper process \(lifecycle). stderr: \(sanitizedStandardError(of: process))"
     }
 
     /// Polls for the helper's ready file rather than sleeping a guessed
@@ -118,19 +132,12 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
 
-        let stillRunning = process.isRunning
-        let statusDescription = stillRunning
-            ? "still running (pid \(process.processIdentifier))"
-            : "exited with status \(process.terminationStatus), reason \(process.terminationReason.rawValue)"
+        let diagnostic = terminateAndCollectDiagnostic(for: process)
         XCTFail(
             "Timed out waiting for PendingLeaseHelper to signal it holds the lease. "
-                + "Helper process is \(statusDescription). stderr: \(sanitizedStandardError(of: process))",
+                + diagnostic,
             file: file, line: line
         )
-        if stillRunning {
-            kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
-        }
         throw SetupFailure()
     }
 
@@ -241,5 +248,38 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
         // this specific recovery path went through a normal in-process
         // rollback call.
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path))
+    }
+
+    func testCollectingDiagnosticsFromASilentChildIsBoundedAndReapsIt() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["5"]
+        process.standardError = Pipe()
+        try process.run()
+        defer { forceCleanup(process) }
+
+        let startedAt = Date()
+        _ = terminateAndCollectDiagnostic(for: process)
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertLessThan(elapsed, 1, "diagnostic collection must not wait for a silent child's natural exit")
+        XCTAssertFalse(process.isRunning)
+    }
+
+    func testCollectedDiagnosticsRedactPrivatePaths() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "echo '/Users/example/private.ARW /Volumes/Camera/card.ARW /private/var/example /private/tmp/example' >&2"]
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+
+        let diagnostic = terminateAndCollectDiagnostic(for: process)
+
+        XCTAssertFalse(diagnostic.contains("/Users/"))
+        XCTAssertFalse(diagnostic.contains("/Volumes/"))
+        XCTAssertFalse(diagnostic.contains("/private/var/"))
+        XCTAssertFalse(diagnostic.contains("/private/tmp/"))
+        XCTAssertTrue(diagnostic.contains("<redacted-path>"))
     }
 }

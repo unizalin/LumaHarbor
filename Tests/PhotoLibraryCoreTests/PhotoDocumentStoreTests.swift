@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Foundation
 import XCTest
 @testable import PhotoLibraryCore
@@ -1532,21 +1533,83 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(report.failures.isEmpty)
     }
 
+    func testOpenInPlaceRejectsAPathReplacedAfterTheSourceWasHashed() async throws {
+        let originalTargetURL = try makeSourceFile(named: "original-target.ARW", byteCount: 4_096, pattern: 0x61)
+        let replacementTargetURL = try makeSourceFile(named: "replacement-target.ARW", byteCount: 4_096, pattern: 0x62)
+        let sourceURL = temporaryDirectory.appendingPathComponent("selected-source.ARW")
+        try FileManager.default.createSymbolicLink(at: sourceURL, withDestinationURL: originalTargetURL)
+        let originalBytes = try Data(contentsOf: originalTargetURL)
+        let replacementBytes = Data(repeating: 0x62, count: 4_096)
+        let trigger = MutateSourceOnCallTrigger(mutateAtCall: 3) {
+            try FileManager.default.removeItem(at: sourceURL)
+            try FileManager.default.createSymbolicLink(at: sourceURL, withDestinationURL: replacementTargetURL)
+        }
+        let (store, rootURL) = makeStore(checkCancellation: { try trigger.checkCancellation() })
+
+        do {
+            let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+            _ = await store.rollbackNewDocument(creation)
+            XCTFail("expected a replacement at sourceURL to be rejected")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .sourceModifiedDuringImport)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: originalTargetURL), originalBytes)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), replacementBytes)
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+        let pendingLocksURL = rootURL.appendingPathComponent("PendingLocks", isDirectory: true)
+        let lockFilenames = try FileManager.default.contentsOfDirectory(atPath: pendingLocksURL.path)
+        XCTAssertEqual(lockFilenames.count, 1)
+        let lockID = lockFilenames.first
+            .map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
+            .flatMap(UUID.init(uuidString:))
+        let releasedLeaseProbe = lockID.flatMap { RawPendingLockHandle(rootURL: rootURL, documentID: $0) }
+        XCTAssertNotNil(releasedLeaseProbe, "the rejected creation must release its pending lease")
+        releasedLeaseProbe?.release()
+    }
+
+    func testOpenInPlaceReportsSourceModifiedWhenTheSelectedPathDisappearsAfterHashing() async throws {
+        let originalTargetURL = try makeSourceFile(named: "vanishing-link-target.ARW", byteCount: 4_096, pattern: 0x71)
+        let sourceURL = temporaryDirectory.appendingPathComponent("vanishing-selected-source.ARW")
+        try FileManager.default.createSymbolicLink(at: sourceURL, withDestinationURL: originalTargetURL)
+        let trigger = MutateSourceOnCallTrigger(mutateAtCall: 3) {
+            try FileManager.default.removeItem(at: sourceURL)
+        }
+        let (store, rootURL) = makeStore(checkCancellation: { try trigger.checkCancellation() })
+
+        do {
+            _ = try await store.openInPlace(sourceURL, bookmarkData: nil)
+            XCTFail("expected a selected path that disappeared to be rejected")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .sourceModifiedDuringImport)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalTargetURL.path))
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+    }
+
     /// Same identity transaction, large-file path: the fingerprint's
     /// edge-sampling (captured from the first chunk and a rolling tail
     /// buffer while streaming for the digest) must still agree exactly
     /// with `FingerprintCalculator`'s own independent computation over
     /// the same bytes.
     func testOpenInPlaceSingleFDFingerprintMatchesFingerprintCalculatorForALargeFile() async throws {
-        let byteCount = Int(FingerprintCalculator.wholeFileThreshold) + (3 << 20)
-        let sourceURL = try makeSourceFile(named: "large.ARW", byteCount: byteCount, pattern: 0x53)
+        let head = Data(repeating: 0x13, count: FingerprintCalculator.edgeChunkByteCount)
+        let middle = Data(repeating: 0x57, count: 3 << 20)
+        let tail = Data(repeating: 0xA9, count: FingerprintCalculator.edgeChunkByteCount)
+        let bytes = head + middle + tail
+        XCTAssertGreaterThan(Int64(bytes.count), FingerprintCalculator.wholeFileThreshold)
+        XCTAssertNotEqual(head, tail)
+        let sourceURL = temporaryDirectory.appendingPathComponent("large.ARW")
+        try bytes.write(to: sourceURL)
         let (store, _) = makeStore()
 
         let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
 
         let independentlyComputed = try FingerprintCalculator.fingerprint(forFileAt: sourceURL)
         XCTAssertEqual(document.sourceFingerprint, independentlyComputed)
-        XCTAssertNotNil(document.contentDigestSHA256)
+        let expectedDigest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(document.contentDigestSHA256, expectedDigest)
     }
 
     func testImportCopyCleansUpWhenCopyFileWritesPartialContentThenThrows() async throws {
