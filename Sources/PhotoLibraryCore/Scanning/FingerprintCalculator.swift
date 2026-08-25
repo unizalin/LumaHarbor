@@ -116,7 +116,14 @@ public enum FingerprintCalculator {
 
     /// Domain tag plus the little-endian size, so two files that share edge bytes
     /// but differ in length can't collide.
-    private static func header(fileSize: Int64) -> Data {
+    ///
+    /// Not `private`: `PhotoDocumentStore` (same module) needs this exact
+    /// header to accumulate a `FileFingerprint`-compatible hash itself,
+    /// from a single already-open file descriptor it's also computing a
+    /// full-content digest from — see `PhotoDocumentStore.openInPlace`.
+    /// Still not `public`; this is an internal on-disk-format detail, not
+    /// API for other modules.
+    static func header(fileSize: Int64) -> Data {
         var data = Data(domainSeparator.utf8)
         withUnsafeBytes(of: UInt64(bitPattern: fileSize).littleEndian) { buffer in
             data.append(contentsOf: buffer)
@@ -124,7 +131,8 @@ public enum FingerprintCalculator {
         return data
     }
 
-    private static func hexString(_ digest: SHA256Digest) -> String {
+    /// Not `private`, for the same reason `header(fileSize:)` isn't.
+    static func hexString(_ digest: SHA256Digest) -> String {
         digest.map { String(format: "%02x", $0) }.joined()
     }
 }

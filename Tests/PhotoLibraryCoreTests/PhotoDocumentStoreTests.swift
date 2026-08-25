@@ -1496,6 +1496,59 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try Data(contentsOf: sourceURL), before)
     }
 
+    /// `openInPlace` reads `sourceURL` through a single open file
+    /// descriptor to compute both the sampled `FileFingerprint` and the
+    /// full-content digest (Codex round-5 review) — a write landing on
+    /// that exact file between the read finishing and the closing
+    /// `fstat` re-check must be caught, deterministically, not merely by
+    /// chance timing. `MutateSourceOnCallTrigger` lands the mutation on
+    /// the exact `checkCancellation` call between the read loop finishing
+    /// and that final identity re-check, for a file small enough (under
+    /// the whole-file-threshold path) that the call sequence is fixed:
+    /// #1 the one non-empty chunk read, #2 the EOF read, #3 the
+    /// post-loop pre-recheck call.
+    func testOpenInPlaceRejectsASourceMutatedAfterBeingHashedButBeforeTheClosingIdentityCheck() async throws {
+        let sourceURL = try makeSourceFile(byteCount: 4_096, pattern: 0x51)
+        let trigger = MutateSourceOnCallTrigger(mutateAtCall: 3) {
+            try Data(repeating: 0x52, count: 4_096).write(to: sourceURL)
+        }
+        let (store, rootURL) = makeStore(checkCancellation: { try trigger.checkCancellation() })
+
+        do {
+            _ = try await store.openInPlace(sourceURL, bookmarkData: nil)
+            XCTFail("expected a source mutated during identity computation to be rejected")
+        } catch {
+            XCTAssertEqual(error as? PhotoDocumentError, .sourceModifiedDuringImport)
+        }
+
+        // Nothing was written -- no pending record, and (indirectly) no
+        // lease left behind either: a fresh store's reconciliation over
+        // this same root finds nothing pending to promote or roll back.
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
+        let freshStore = PhotoDocumentStore(rootURL: rootURL)
+        let report = try await freshStore.reconcileOrphanedImports(activePointer: .noActiveDocument)
+        XCTAssertTrue(report.rolledBackPendingIDs.isEmpty)
+        XCTAssertTrue(report.promotedPendingIDs.isEmpty)
+        XCTAssertTrue(report.failures.isEmpty)
+    }
+
+    /// Same identity transaction, large-file path: the fingerprint's
+    /// edge-sampling (captured from the first chunk and a rolling tail
+    /// buffer while streaming for the digest) must still agree exactly
+    /// with `FingerprintCalculator`'s own independent computation over
+    /// the same bytes.
+    func testOpenInPlaceSingleFDFingerprintMatchesFingerprintCalculatorForALargeFile() async throws {
+        let byteCount = Int(FingerprintCalculator.wholeFileThreshold) + (3 << 20)
+        let sourceURL = try makeSourceFile(named: "large.ARW", byteCount: byteCount, pattern: 0x53)
+        let (store, _) = makeStore()
+
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
+
+        let independentlyComputed = try FingerprintCalculator.fingerprint(forFileAt: sourceURL)
+        XCTAssertEqual(document.sourceFingerprint, independentlyComputed)
+        XCTAssertNotNil(document.contentDigestSHA256)
+    }
+
     func testImportCopyCleansUpWhenCopyFileWritesPartialContentThenThrows() async throws {
         struct PartialCopyError: Error {}
         let sourceURL = try makeSourceFile(byteCount: 8_192)

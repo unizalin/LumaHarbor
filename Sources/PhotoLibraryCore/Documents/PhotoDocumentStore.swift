@@ -143,11 +143,17 @@ public actor PhotoDocumentStore {
         // past this method's return — see that property's documentation.
         let lease = try PendingLock.acquire(at: pendingLockURL(for: id), fileManager: fileManager)
         do {
-            let fingerprint = try FingerprintCalculator.fingerprint(forFileAt: sourceURL)
-            // A full-content digest, not just the sampled fingerprint
-            // above, so a future relink can prove full-file identity —
-            // see `PhotoDocument.contentDigestSHA256`.
-            let digest = try fullContentDigest(forFileAt: sourceURL)
+            // Single identity transaction, same shape as
+            // `relinkInPlaceDocument`: `sourceURL` is opened exactly once;
+            // both the sampled `FileFingerprint` and the full-content
+            // digest come from that one file descriptor, and its identity
+            // is `fstat`-ed both before the read starts and again right
+            // after it finishes — a change to the file mid-read (even one
+            // that never touches the path, e.g. an in-place write to the
+            // same inode) throws rather than silently committing a
+            // fingerprint/digest pair that describes bytes that no longer
+            // exist.
+            let (fingerprint, digest) = try fingerprintAndDigest(forFileAt: sourceURL)
             let document = PhotoDocument(
                 id: id,
                 storageMode: .inPlace,
@@ -1154,6 +1160,78 @@ public actor PhotoDocumentStore {
             hasher.update(data: chunk)
         }
         return Self.hexString(hasher.finalize())
+    }
+
+    /// Computes both a `FileFingerprint` (`FingerprintCalculator`'s
+    /// sampled-or-whole-file algorithm, byte-for-byte compatible with it)
+    /// and a full-content digest from a *single* open of `url` — used by
+    /// `openInPlace`, where re-opening the source a second time to compute
+    /// each independently would double both the I/O and the TOCTOU window.
+    ///
+    /// The file's identity (`fstat`) is captured the moment it's opened
+    /// and re-checked the moment the read finishes; any difference — a
+    /// write landing on this exact file while it's being read, not merely
+    /// the path being replaced — throws `PhotoDocumentError
+    /// .sourceModifiedDuringImport` rather than returning a
+    /// fingerprint/digest pair for bytes that may no longer describe what
+    /// is actually there.
+    private func fingerprintAndDigest(forFileAt url: URL) throws -> (fingerprint: FileFingerprint, digest: String) {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let openedIdentity = try fileIdentity(fileDescriptor: handle.fileDescriptor)
+        let fileSize = openedIdentity.size
+
+        var digestHasher = SHA256()
+        var fingerprintHasher = SHA256()
+        fingerprintHasher.update(data: FingerprintCalculator.header(fileSize: fileSize))
+
+        if fileSize <= FingerprintCalculator.wholeFileThreshold {
+            // Small file: every byte goes into both hashers, identically
+            // to how `fullContentDigest` and `FingerprintCalculator` would
+            // each treat it independently.
+            while true {
+                try checkCancellation()
+                let chunk = try handle.read(upToCount: Self.verificationChunkByteCount) ?? Data()
+                if chunk.isEmpty { break }
+                digestHasher.update(data: chunk)
+                fingerprintHasher.update(data: chunk)
+            }
+        } else {
+            // Large file: the digest still needs every byte, but the
+            // fingerprint only samples the first and last
+            // `edgeChunkByteCount`. The head is captured directly from
+            // the first chunk; the tail is tracked as a rolling buffer
+            // (bounded at `edgeChunkByteCount`) updated as each chunk
+            // streams past, rather than seeking back after the fact —
+            // this is still a single sequential pass over the file.
+            var isFirstChunk = true
+            var tailBuffer = Data()
+            while true {
+                try checkCancellation()
+                let chunk = try handle.read(upToCount: Self.verificationChunkByteCount) ?? Data()
+                if chunk.isEmpty { break }
+                digestHasher.update(data: chunk)
+                if isFirstChunk {
+                    fingerprintHasher.update(data: chunk.prefix(FingerprintCalculator.edgeChunkByteCount))
+                    isFirstChunk = false
+                }
+                tailBuffer.append(chunk)
+                if tailBuffer.count > FingerprintCalculator.edgeChunkByteCount {
+                    tailBuffer.removeFirst(tailBuffer.count - FingerprintCalculator.edgeChunkByteCount)
+                }
+            }
+            fingerprintHasher.update(data: tailBuffer.suffix(FingerprintCalculator.edgeChunkByteCount))
+        }
+
+        try checkCancellation()
+        let closingIdentity = try fileIdentity(fileDescriptor: handle.fileDescriptor)
+        guard closingIdentity == openedIdentity else {
+            throw PhotoDocumentError.sourceModifiedDuringImport
+        }
+
+        let fingerprint = FileFingerprint(fileSize: fileSize, edgeDigest: FingerprintCalculator.hexString(fingerprintHasher.finalize()))
+        let digest = Self.hexString(digestHasher.finalize())
+        return (fingerprint, digest)
     }
 
     private static func hexString(_ digest: SHA256Digest) -> String {
