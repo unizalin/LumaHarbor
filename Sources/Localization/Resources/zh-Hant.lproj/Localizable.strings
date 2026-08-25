@@ -194,6 +194,7 @@
 "That export location is read-only." = "這個匯出位置是唯讀的。";
 "That location can't be written to." = "無法寫入這個位置。";
 "That photo folder is no longer in your library list." = "這個照片資料夾已經不在你的相片庫清單中。";
+"That's not the same photo" = "這不是同一張照片";
 "The copy didn't match the original file, so nothing was saved." = "複本與原始檔案不相符，因此沒有儲存任何內容。";
 "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings." = "損壞的檔案已經被移到一旁，你的 RAW 檔案沒有受到影響。重新開始編輯即可寫入新的設定。";
 "The damaged file has been set aside. Rescan the folder to rebuild it." = "損壞的檔案已經被移到一旁。重新掃描這個資料夾即可重建。";
@@ -221,6 +222,7 @@
 "There isn't enough free space to save your edits." = "空間不足，無法儲存你的編輯。";
 "These edits were saved by a newer version of LumaHarbor" = "這些編輯是由新版本的 LumaHarbor 儲存的";
 "This camera's RAW format isn't supported yet." = "這台相機的 RAW 格式尚未支援。";
+"This file doesn't match the photo LumaHarbor is trying to reconnect." = "這個檔案與 LumaHarbor 正在嘗試重新連結的照片不符。";
 "This camera's RAW isn't supported yet" = "這台相機的 RAW 格式尚未支援";
 "This drive is read-only, so edits can't be saved next to your photos." = "這個磁碟是唯讀的，所以無法把編輯存在照片旁邊。";
 "This drive is read-only, so edits can't be saved." = "這個磁碟是唯讀的，所以無法儲存編輯。";

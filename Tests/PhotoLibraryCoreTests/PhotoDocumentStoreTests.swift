@@ -446,7 +446,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // Simulates a kill partway through the copy: only the staging file exists.
         try Data(repeating: 0x11, count: 128).write(to: orphanDirectory.appendingPathComponent(".importing"))
 
-        let report = try await store.reconcileOrphanedImports()
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
 
         XCTAssertEqual(report.removedOrphanIDs, [orphanID])
         XCTAssertTrue(report.failures.isEmpty)
@@ -469,7 +469,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
             // expected
         }
 
-        let report = try await store.reconcileOrphanedImports()
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
 
         XCTAssertEqual(report.removedOrphanIDs, [orphanID])
         XCTAssertFalse(FileManager.default.fileExists(atPath: orphanDirectory.path))
@@ -479,13 +479,141 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        // A real commit -- the document has actually been shown to the
+        // user -- not just a still-`.pending` creation.
+        await store.finalizeCreation(creation)
+        let document = creation.document
 
-        let report = try await store.reconcileOrphanedImports()
+        // No active document remembered at all: a committed record must
+        // survive regardless, since only `.pending` records are ever
+        // subject to the active-ID promote-or-rollback decision.
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
         XCTAssertFalse(report.removedOrphanIDs.contains(document.id))
+        XCTAssertFalse(report.rolledBackPendingIDs.contains(document.id))
 
         let reloaded = try await store.loadDocument(id: document.id)
         XCTAssertEqual(try Data(contentsOf: reloaded.workingURL), try Data(contentsOf: sourceURL))
+    }
+
+    // MARK: - 3a. Crash-durable creation lifecycle (survives a process restart)
+    //
+    // Every test in this section builds its state with one `PhotoDocumentStore`
+    // instance, then constructs a *brand-new* instance over the same `rootURL`
+    // before calling `reconcileOrphanedImports` -- the new instance's
+    // in-memory creation-state cache starts empty, exactly like a real
+    // relaunch after a kill, so only the on-disk `.pending`/`.committed`
+    // record state can be driving the outcome.
+
+    func testCrashAfterAppCopyRecordButBeforeHandoffIsRolledBackOnNextLaunch() async throws {
+        let sourceURL = try makeSourceFile()
+        let originalSourceBytes = try Data(contentsOf: sourceURL)
+        let (firstProcessStore, rootURL) = makeStore()
+
+        // Simulates the process being killed right after `importCopy`
+        // commits its `.pending` record -- `finalizeCreation` never runs.
+        let creation = try await firstProcessStore.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+        XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
+
+        let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
+        let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
+
+        XCTAssertTrue(report.rolledBackPendingIDs.contains(documentID))
+        do {
+            _ = try await secondProcessStore.loadDocument(id: documentID)
+            XCTFail("expected the never-finalized app-copy creation to be rolled back")
+        } catch PhotoDocumentError.documentNotFound(documentID) {
+            // expected
+        }
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents").appendingPathComponent(documentID.uuidString))
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Sidecars").appendingPathComponent(documentID.uuidString))
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalSourceBytes)
+    }
+
+    func testCrashAfterInPlaceRecordButBeforeHandoffIsRolledBackWithoutTouchingTheRAW() async throws {
+        let sourceURL = try makeSourceFile()
+        let originalSourceBytes = try Data(contentsOf: sourceURL)
+        let (firstProcessStore, rootURL) = makeStore()
+
+        let creation = try await firstProcessStore.openInPlace(sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+
+        let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
+        let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
+
+        XCTAssertTrue(report.rolledBackPendingIDs.contains(documentID))
+        do {
+            _ = try await secondProcessStore.loadDocument(id: documentID)
+            XCTFail("expected the never-finalized in-place creation to be rolled back")
+        } catch PhotoDocumentError.documentNotFound(documentID) {
+            // expected
+        }
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Sidecars").appendingPathComponent(documentID.uuidString))
+        // The external RAW must never be touched by an in-place rollback.
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalSourceBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path))
+    }
+
+    func testCrashAfterActiveIDHandoffButBeforeFinalizeIsPromotedNotDeleted() async throws {
+        let sourceURL = try makeSourceFile()
+        let (firstProcessStore, rootURL) = makeStore()
+
+        // Simulates a kill that happened *after* `PhotoDocumentEditor`
+        // moved the active-document pointer to the new document, but
+        // before `finalizeCreation` completed -- see
+        // `PhotoDocumentEditor.openFreshSelection`'s atomic hand-off.
+        let creation = try await firstProcessStore.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+        try await firstProcessStore.saveAdjustments(.neutral.setting(.exposure, to: 0.8), documentID: documentID)
+
+        let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
+        let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: documentID)
+
+        XCTAssertTrue(report.promotedPendingIDs.contains(documentID))
+        XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
+        let reloaded = try await secondProcessStore.loadDocument(id: documentID)
+        XCTAssertEqual(reloaded.id, documentID)
+        let adjustments = try await secondProcessStore.loadAdjustments(documentID: documentID)
+        XCTAssertEqual(adjustments.exposure, 0.8, "the document -- and its already-autosaved edit -- must be preserved, not lost")
+
+        // Now genuinely committed: a *later* launch with no (or a
+        // different) active ID must no longer touch it.
+        let thirdProcessStore = PhotoDocumentStore(rootURL: rootURL)
+        let laterReport = try await thirdProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
+        XCTAssertFalse(laterReport.rolledBackPendingIDs.contains(documentID))
+        _ = try await thirdProcessStore.loadDocument(id: documentID)
+    }
+
+    /// A record written before crash-durable creation tracking existed has
+    /// no `lifecycleState` key in its JSON at all -- not merely `null` --
+    /// and must be treated as `.committed`, immune to the active-ID
+    /// promote-or-rollback decision, regardless of what (if anything) the
+    /// active document pointer says.
+    func testLegacyRecordWithoutALifecycleFieldIsTreatedAsCommitted() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(documentID.uuidString).json")
+
+        // Strip the `lifecycleState` key entirely, simulating a record
+        // written by a version of this store before the field existed --
+        // not merely setting it to `null`, since that is also not how a
+        // genuinely legacy file would look on disk.
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        json?.removeValue(forKey: "lifecycleState")
+        let strippedData = try JSONSerialization.data(withJSONObject: json as Any)
+        try strippedData.write(to: recordURL)
+
+        // A mismatched (or absent) active ID would roll back a genuinely
+        // `.pending` record -- proving this one survives is what shows it
+        // was correctly read as `.committed`.
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+        XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
+        XCTAssertFalse(report.promotedPendingIDs.contains(documentID), "a legacy record is already committed -- there is nothing to promote")
+        _ = try await store.loadDocument(id: documentID)
     }
 
     // MARK: - 3b. Root import lock: real cross-instance contention
@@ -507,7 +635,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         }
 
         do {
-            _ = try await store.reconcileOrphanedImports()
+            _ = try await store.reconcileOrphanedImports(activeDocumentID: nil)
             XCTFail("Expected reconciliation to report the lock as busy rather than proceed")
         } catch {
             XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
@@ -601,7 +729,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         defer { externalLock.release() }
 
         do {
-            _ = try await store.reconcileOrphanedImports()
+            _ = try await store.reconcileOrphanedImports(activeDocumentID: nil)
             XCTFail("Expected reconciliation to defer while the lock is held, no matter how long")
         } catch {
             XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
@@ -622,7 +750,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         try setPosixPermissions(0o555, at: documentsDirectory)
         defer { try? setPosixPermissions(0o755, at: documentsDirectory) }
 
-        let report = try await store.reconcileOrphanedImports()
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
 
         XCTAssertTrue(report.removedOrphanIDs.isEmpty)
         XCTAssertNotNil(report.failures[orphanID])
@@ -1043,6 +1171,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: document.workingURL.path))
 
         let report = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(report.outcome, .cleaned)
         XCTAssertTrue(report.isFullyCleaned)
         XCTAssertEqual(report.lock, .succeeded)
         XCTAssertEqual(report.record, .succeeded)
@@ -1071,6 +1200,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
 
         let report = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(report.outcome, .cleaned)
         XCTAssertTrue(report.isFullyCleaned)
         XCTAssertEqual(report.lock, .notApplicable)
         XCTAssertEqual(report.copy, .notApplicable)
@@ -1090,17 +1220,21 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
     }
 
     /// A receipt is single-use: once a creation has been rolled back, a
-    /// second call with the same value must be a safe no-op, never a second
-    /// (potentially destructive-looking) deletion attempt.
+    /// second call with the same value must explicitly report
+    /// `.alreadyRolledBack`, never disguise itself as another successful
+    /// cleanup.
     func testRollbackNewDocumentIsSingleUse() async throws {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
         let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
 
         let first = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(first.outcome, .cleaned)
         XCTAssertTrue(first.isFullyCleaned)
 
         let second = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(second.outcome, .alreadyRolledBack)
+        XCTAssertFalse(second.isFullyCleaned, "an already-rolled-back result must never read as success")
         XCTAssertEqual(second.lock, .notApplicable)
         XCTAssertEqual(second.record, .notApplicable)
         XCTAssertEqual(second.sidecar, .notApplicable)
@@ -1109,7 +1243,9 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
 
     /// Once a creation is finalized (kept), its receipt must never be able
     /// to delete the now-legitimate document, even if a caller (in error)
-    /// still holds and reuses the same `PhotoDocumentCreation` value.
+    /// still holds and reuses the same `PhotoDocumentCreation` value -- and
+    /// must say so explicitly via `.alreadyFinalized`, not just "nothing to
+    /// do".
     func testRollbackNewDocumentNeverDeletesAFinalizedCreation() async throws {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
@@ -1117,6 +1253,8 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         await store.finalizeCreation(creation)
 
         let report = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(report.outcome, .alreadyFinalized)
+        XCTAssertFalse(report.isFullyCleaned, "an already-finalized rejection must never read as a successful cleanup")
         XCTAssertEqual(report.record, .notApplicable)
         XCTAssertEqual(report.copy, .notApplicable)
 
@@ -1169,37 +1307,64 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: blocker.path)
 
         let report = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(report.outcome, .retryRequired)
         XCTAssertFalse(report.isFullyCleaned)
+        XCTAssertEqual(report.lock, .succeeded, "the lock was actually available and acquired -- only the sidecar step itself failed")
+        XCTAssertEqual(report.copy, .succeeded)
+        XCTAssertEqual(report.record, .succeeded)
         XCTAssertEqual(report.sidecar, .failed)
-        XCTAssertEqual(report.record, .succeeded, "the record removal is independent and must still be attempted/reported on its own")
 
-        // Cleanup so the temp directory can be removed afterward.
+        // The receipt is still valid for a retry -- it was not consumed by
+        // a partially-failed attempt.
         try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: blocker.path)
+        let retried = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(retried.outcome, .cleaned)
     }
 
     /// Contention for the root import lock must not produce a half-done
-    /// rollback where the copy is silently left behind while the record and
-    /// sidecar disappear as if nothing were wrong.
+    /// rollback where some of {copy, record, sidecar} disappear while
+    /// others remain, and must not consume the receipt -- a caller (or a
+    /// later `reconcileOrphanedImports`, via the record's on-disk
+    /// `.pending` state) must be able to retry once the contention clears.
     func testRollbackNewDocumentUnderLockContentionNeverSilentlyDropsTheCopy() async throws {
         let sourceURL = try makeSourceFile()
         let (store, rootURL) = makeStore()
         let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        try await store.saveAdjustments(.neutral, documentID: creation.document.id)
 
         let contender = RawImportLockHandle(rootURL: rootURL)
-        defer { contender?.release() }
         XCTAssertNotNil(contender, "expected to hold the lock for this test")
 
         let report = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(report.outcome, .retryRequired)
         XCTAssertFalse(report.isFullyCleaned)
         XCTAssertEqual(report.lock, .failed)
-        XCTAssertEqual(report.copy, .failed)
-        // Record/sidecar removal does not need the root lock and must
-        // still be attempted and reported independently.
-        XCTAssertEqual(report.record, .succeeded)
-        XCTAssertEqual(report.sidecar, .succeeded)
+        // Nothing was attempted -- not just the copy -- while the lock
+        // could not be acquired.
+        XCTAssertEqual(report.copy, .notApplicable)
+        XCTAssertEqual(report.record, .notApplicable)
+        XCTAssertEqual(report.sidecar, .notApplicable)
 
-        // The copy itself is still on disk -- not silently dropped.
+        // Every trace is still fully present and consistent.
         XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
+        let stillLoadable = try await store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillLoadable.id, creation.document.id)
+        let stillSaved = try await store.loadAdjustments(documentID: creation.document.id)
+        XCTAssertEqual(stillSaved, .neutral)
+
+        // Once the contention clears, the *same* creation can retry and
+        // this time actually clean up everything.
+        contender?.release()
+        let retried = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(retried.outcome, .cleaned)
+        XCTAssertTrue(retried.isFullyCleaned)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
+        do {
+            _ = try await store.loadDocument(id: creation.document.id)
+            XCTFail("expected the record to be gone after the successful retry")
+        } catch PhotoDocumentError.documentNotFound(creation.document.id) {
+            // expected
+        }
     }
 
     func testUpdateSourceBookmarkRewritesOnlyThatFieldAtomically() async throws {
