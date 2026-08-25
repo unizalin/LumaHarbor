@@ -55,11 +55,21 @@ public actor PhotoDocumentStore {
     private let copyFile: @Sendable (URL, URL) throws -> Void
     private let checkCancellation: @Sendable () throws -> Void
     private let writeRecordData: @Sendable (Data, URL, FileManager) throws -> Void
-    /// Receipts minted by `openInPlace`/`importCopy` for a document that
-    /// has not yet been finalized (kept) or rolled back. Backs
+    /// In-memory lifecycle of every receipt `openInPlace`/`importCopy` has
+    /// minted in *this* actor instance's lifetime. Backs
     /// `rollbackNewDocument(_:)`'s single-use, unforgeable-receipt
-    /// contract — see `PhotoDocumentCreation`.
-    private var pendingCreationReceipts: Set<UUID> = []
+    /// contract — see `PhotoDocumentCreation`. This is a fast, in-process
+    /// cache only: the durable source of truth for "was this creation ever
+    /// finished?" across a process crash is the `.pending`/`.committed`
+    /// state written into the record itself (see `PhotoDocumentRecord
+    /// .lifecycleState`) and reconciled by `reconcileOrphanedImports
+    /// (activeDocumentID:)` on the next launch.
+    private enum CreationState {
+        case pending
+        case finalized
+        case rolledBack
+    }
+    private var creationStates: [UUID: CreationState] = [:]
 
     public init(
         rootURL: URL,
@@ -96,7 +106,7 @@ public actor PhotoDocumentStore {
             sourceFingerprint: fingerprint,
             workingFingerprint: fingerprint
         )
-        try writeRecord(document)
+        try writeRecord(document, lifecycleState: .pending)
         return mintCreation(for: document)
     }
 
@@ -171,7 +181,7 @@ public actor PhotoDocumentStore {
                 workingFingerprint: workingFingerprint
             )
             try checkCancellation()
-            try writeRecord(document)
+            try writeRecord(document, lifecycleState: .pending)
             return mintCreation(for: document)
         } catch {
             // Best-effort: if this can't fully clean up (e.g. a permissions
@@ -225,13 +235,56 @@ public actor PhotoDocumentStore {
         try writeRecordData(try SidecarCoding.encode(record), recordURL(for: documentID), fileManager)
     }
 
+    /// Re-links an existing `.inPlace` document to `candidateURL` — used
+    /// when its bookmark can no longer be resolved (missing, or itself
+    /// unreadable) and the user has picked what they believe is the same
+    /// file again from Files.
+    ///
+    /// Verifies `candidateURL`'s content fingerprint matches the document's
+    /// original `sourceFingerprint` *before* touching anything — an
+    /// unrelated RAW can never be attached to another document's saved
+    /// sidecar/adjustments by mistake. On a mismatch, throws
+    /// `RelinkError.fingerprintMismatch` and leaves the existing record,
+    /// sidecar, and everything else about the document completely
+    /// untouched, so a caller can safely let the user try picking again.
+    public func relinkInPlaceDocument(documentID: UUID, candidateURL: URL, bookmarkData: Data) throws -> PhotoDocument {
+        let record = try loadRecord(id: documentID)
+        guard record.storageMode == .inPlace else {
+            throw RelinkError.notInPlace
+        }
+        let candidateFingerprint = try FingerprintCalculator.fingerprint(forFileAt: candidateURL)
+        guard candidateFingerprint == record.sourceFingerprint else {
+            throw RelinkError.fingerprintMismatch
+        }
+        try updateInPlaceLocation(newURL: candidateURL, bookmarkData: bookmarkData, documentID: documentID)
+        return try loadDocument(id: documentID)
+    }
+
     /// Marks `creation` as kept: the document it produced has been shown to
     /// the user and must never be rolled back after this, even by a caller
     /// that (in error) still holds and reuses the same `PhotoDocumentCreation`
     /// value. Idempotent — finalizing an already-finalized or already-rolled-
     /// back creation does nothing.
+    ///
+    /// Also persists `.committed` into the record on disk. This is what
+    /// makes the commit crash-durable rather than only living in this
+    /// actor's memory: if the process is killed after this call started but
+    /// before the write lands, the in-memory state above is lost along with
+    /// everything else, but the *next* launch's `reconcileOrphanedImports
+    /// (activeDocumentID:)` will find the record still `.pending`, see it
+    /// matches the remembered active document (this call runs only after
+    /// that pointer has already been moved to it — see `PhotoDocumentEditor
+    /// .openFreshSelection`), and promote it to `.committed` itself. A
+    /// failure to write here is therefore not fatal to this session — the
+    /// document is already fully open and usable — only to how quickly the
+    /// on-disk state catches up.
     public func finalizeCreation(_ creation: PhotoDocumentCreation) {
-        pendingCreationReceipts.remove(creation.receipt)
+        guard creationStates[creation.receipt] == .pending else { return }
+        creationStates[creation.receipt] = .finalized
+        guard var record = try? loadRecord(id: creation.document.id) else { return }
+        record.lifecycleState = .committed
+        guard let encoded = try? SidecarCoding.encode(record) else { return }
+        try? writeRecordData(encoded, recordURL(for: creation.document.id), fileManager)
     }
 
     /// Removes a document this store itself created but that never
@@ -259,40 +312,73 @@ public actor PhotoDocumentStore {
     /// call this; there is nothing here to roll back, and doing so would
     /// delete real user data — which is exactly what the receipt contract
     /// above prevents even if a caller tried.
+    ///
+    /// For `.appCopy`, every step — copy, record, sidecar — waits until the
+    /// root import lock is actually held before touching anything: a failed
+    /// lock acquisition deletes nothing and does not consume the receipt,
+    /// so there is never a half state where the record is gone but the copy
+    /// (or vice versa) is still on disk. The receipt itself is consumed
+    /// only once every applicable step has actually succeeded; if any step
+    /// fails, the receipt stays valid and the outcome is `.retryRequired`,
+    /// so a caller (or a later `reconcileOrphanedImports(activeDocumentID:)`
+    /// pass, via the record's still-`.pending` on-disk state) can safely
+    /// retry without risking a double-delete or a lost cleanup.
     @discardableResult
     public func rollbackNewDocument(_ creation: PhotoDocumentCreation) -> PhotoDocumentRollbackReport {
-        guard pendingCreationReceipts.remove(creation.receipt) != nil else {
-            // Already finalized, already rolled back, or (should be
-            // impossible given the receipt contract) unrecognized -- never
-            // touch disk for a receipt this call doesn't recognize as
-            // still pending.
-            return PhotoDocumentRollbackReport(lock: .notApplicable, record: .notApplicable, sidecar: .notApplicable, copy: .notApplicable)
+        switch creationStates[creation.receipt] {
+        case .none:
+            // Should be impossible given the receipt contract (no public
+            // initializer, single-use), but never touch disk for a receipt
+            // this instance doesn't recognize at all.
+            return PhotoDocumentRollbackReport(
+                outcome: .unknownReceipt, lock: .notApplicable, record: .notApplicable, sidecar: .notApplicable, copy: .notApplicable
+            )
+        case .finalized:
+            return PhotoDocumentRollbackReport(
+                outcome: .alreadyFinalized, lock: .notApplicable, record: .notApplicable, sidecar: .notApplicable, copy: .notApplicable
+            )
+        case .rolledBack:
+            return PhotoDocumentRollbackReport(
+                outcome: .alreadyRolledBack, lock: .notApplicable, record: .notApplicable, sidecar: .notApplicable, copy: .notApplicable
+            )
+        case .some(.pending):
+            break
         }
 
         let document = creation.document
         let recordURL = recordURL(for: document.id)
         let sidecarURL = sidecarsDirectoryURL(documentID: document.id)
 
-        var lockResult: PhotoDocumentRollbackReport.StepResult = .notApplicable
-        var copyResult: PhotoDocumentRollbackReport.StepResult = .notApplicable
-        if document.storageMode == .appCopy {
-            let copyDirectory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
-            if let lock = try? RootImportLock.acquire(at: importLockURL, fileManager: fileManager) {
-                lockResult = .succeeded
-                defer { lock.release() }
-                try? fileManager.removeItem(at: copyDirectory)
-                copyResult = fileManager.fileExists(atPath: copyDirectory.path) ? .failed : .succeeded
-            } else {
-                // Contention with a concurrent import/reconciliation pass:
-                // removing the copy without the lock would race whatever
-                // holds it, so this step is reported as failed rather than
-                // attempted unprotected. Record/sidecar removal below does
-                // not need this lock and still proceeds independently, so a
-                // failure here alone never leaves *those* half-done.
-                lockResult = .failed
-                copyResult = .failed
-            }
+        guard document.storageMode == .appCopy else {
+            // `.inPlace` never touches `Documents/` or the root lock: only
+            // the record and sidecar this store itself wrote are at stake.
+            try? fileManager.removeItem(at: recordURL)
+            let recordResult: PhotoDocumentRollbackReport.StepResult =
+                fileManager.fileExists(atPath: recordURL.path) ? .failed : .succeeded
+            try? fileManager.removeItem(at: sidecarURL)
+            let sidecarResult: PhotoDocumentRollbackReport.StepResult =
+                fileManager.fileExists(atPath: sidecarURL.path) ? .failed : .succeeded
+
+            let cleaned = recordResult == .succeeded && sidecarResult == .succeeded
+            if cleaned { creationStates[creation.receipt] = .rolledBack }
+            return PhotoDocumentRollbackReport(
+                outcome: cleaned ? .cleaned : .retryRequired,
+                lock: .notApplicable, record: recordResult, sidecar: sidecarResult, copy: .notApplicable
+            )
         }
+
+        guard let lock = try? RootImportLock.acquire(at: importLockURL, fileManager: fileManager) else {
+            // Nothing attempted, nothing deleted, receipt still valid.
+            return PhotoDocumentRollbackReport(
+                outcome: .retryRequired, lock: .failed, record: .notApplicable, sidecar: .notApplicable, copy: .notApplicable
+            )
+        }
+        defer { lock.release() }
+
+        let copyDirectory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
+        try? fileManager.removeItem(at: copyDirectory)
+        let copyResult: PhotoDocumentRollbackReport.StepResult =
+            fileManager.fileExists(atPath: copyDirectory.path) ? .failed : .succeeded
 
         try? fileManager.removeItem(at: recordURL)
         let recordResult: PhotoDocumentRollbackReport.StepResult =
@@ -302,12 +388,17 @@ public actor PhotoDocumentStore {
         let sidecarResult: PhotoDocumentRollbackReport.StepResult =
             fileManager.fileExists(atPath: sidecarURL.path) ? .failed : .succeeded
 
-        return PhotoDocumentRollbackReport(lock: lockResult, record: recordResult, sidecar: sidecarResult, copy: copyResult)
+        let cleaned = copyResult == .succeeded && recordResult == .succeeded && sidecarResult == .succeeded
+        if cleaned { creationStates[creation.receipt] = .rolledBack }
+        return PhotoDocumentRollbackReport(
+            outcome: cleaned ? .cleaned : .retryRequired,
+            lock: .succeeded, record: recordResult, sidecar: sidecarResult, copy: copyResult
+        )
     }
 
     private func mintCreation(for document: PhotoDocument) -> PhotoDocumentCreation {
         let receipt = UUID()
-        pendingCreationReceipts.insert(receipt)
+        creationStates[receipt] = .pending
         return PhotoDocumentCreation(document: document, receipt: receipt)
     }
 
@@ -348,63 +439,116 @@ public actor PhotoDocumentStore {
         try repository.write(sidecar: sidecar)
     }
 
-    /// Removes app-copy import directories under `Documents/` that have no
-    /// matching committed record — the trace a process kill can leave
-    /// between a copy landing at its final name and the record being
-    /// written. A directory with a committed record is never touched.
+    /// Reclaims two different traces a process kill can leave behind, both
+    /// under the same root import lock `importCopy` requires before it can
+    /// even create a `Documents/<id>` directory — so an import genuinely in
+    /// progress, on this store instance, another instance, or another
+    /// process, cannot have anything removed out from under it, and no new
+    /// import can start while this call holds the lock. There is no timeout
+    /// anywhere in either pass; a large RAW over a slow connection taking
+    /// far longer than any fixed threshold is not treated as abandoned,
+    /// because nothing here measures elapsed time.
     ///
-    /// Holds the same root import lock `importCopy` requires before it can
-    /// even create a `Documents/<id>` directory, for the entire scan, so an
-    /// import genuinely in progress — on this store instance, another
-    /// instance, or another process — cannot have anything removed out from
-    /// under it: this call cannot even start until that import releases the
-    /// lock, and no new import can start while this call holds it. There is
-    /// no timeout anywhere in this decision; a large RAW over a slow
-    /// connection taking far longer than any fixed threshold is not treated
-    /// as abandoned, because nothing here is measuring elapsed time at all.
+    /// **Pass 1** removes `Documents/` directories with no record at all —
+    /// a kill between an app-copy landing at its final name and the record
+    /// ever being written.
     ///
-    /// Throws `PhotoDocumentError.importInProgress`, deleting nothing, if
-    /// the lock is already held elsewhere.
+    /// **Pass 2** resolves every record still marked `.pending` — a kill
+    /// between the record being written and `finalizeCreation(_:)`
+    /// completing. `activeDocumentID` (the caller's remembered
+    /// last-open document, e.g. from `UserDefaults`) is what decides each
+    /// one's fate: a pending record whose id matches it survived far enough
+    /// to be the document the user was actually handed off to, so it is
+    /// *promoted* to `.committed` rather than deleted. Every other pending
+    /// record never finished being shown to anyone and is rolled back
+    /// exactly like a same-session `rollbackNewDocument(_:)` would — record
+    /// and sidecar always, and its `Documents/` copy for `.appCopy`; an
+    /// `.inPlace` record's rollback never touches the external RAW, since
+    /// `workingURL` *is* that RAW. A record already `.committed` (including
+    /// every legacy record written before this field existed) is never
+    /// touched by this pass.
     ///
-    /// Directories that fail to be removed are reported in
-    /// `PhotoDocumentReconciliationReport.failures` rather than being
-    /// swallowed; they remain in place for a later call to retry.
+    /// Throws `PhotoDocumentError.importInProgress`, changing nothing, if
+    /// the lock is already held elsewhere. Individual failures within
+    /// either pass are collected in `PhotoDocumentReconciliationReport
+    /// .failures` rather than aborting the whole call; whatever could not
+    /// be resolved is left in place for a later call to retry.
     @discardableResult
-    public func reconcileOrphanedImports() throws -> PhotoDocumentReconciliationReport {
+    public func reconcileOrphanedImports(activeDocumentID: UUID?) throws -> PhotoDocumentReconciliationReport {
         let lock = try RootImportLock.acquire(at: importLockURL, fileManager: fileManager)
         defer { lock.release() }
 
-        var removed: [UUID] = []
+        var removedOrphanIDs: [UUID] = []
+        var promotedPendingIDs: [UUID] = []
+        var rolledBackPendingIDs: [UUID] = []
         var failures: [UUID: String] = [:]
 
-        guard fileManager.fileExists(atPath: documentsDirectoryURL.path) else {
-            // Nothing has ever been imported into this store, so there is
-            // nothing to reconcile.
-            return PhotoDocumentReconciliationReport(removedOrphanIDs: [], failures: [:])
-        }
-        let entries = try fileManager.contentsOfDirectory(
-            at: documentsDirectoryURL,
-            includingPropertiesForKeys: nil
-        )
-
-        for entry in entries {
-            guard let id = UUID(uuidString: entry.lastPathComponent) else { continue }
-            // Re-checked immediately before removal. While this method holds
-            // the lock, no importer can create this check's answer out from
-            // under it — `importCopy` cannot commit a record for `id`
-            // without first acquiring the very lock this call is holding —
-            // but the check stays right next to the removal regardless, so
-            // the two can never drift apart even if either one changes.
-            guard !fileManager.fileExists(atPath: recordURL(for: id).path) else { continue }
-            do {
-                try fileManager.removeItem(at: entry)
-                removed.append(id)
-            } catch {
-                failures[id] = (error as NSError).localizedDescription
+        if fileManager.fileExists(atPath: documentsDirectoryURL.path) {
+            let entries = try fileManager.contentsOfDirectory(at: documentsDirectoryURL, includingPropertiesForKeys: nil)
+            for entry in entries {
+                guard let id = UUID(uuidString: entry.lastPathComponent) else { continue }
+                // Re-checked immediately before removal — see the type
+                // documentation for why this can never drift from what
+                // holding the lock already guarantees.
+                guard !fileManager.fileExists(atPath: recordURL(for: id).path) else { continue }
+                do {
+                    try fileManager.removeItem(at: entry)
+                    removedOrphanIDs.append(id)
+                } catch {
+                    failures[id] = (error as NSError).localizedDescription
+                }
             }
         }
 
-        return PhotoDocumentReconciliationReport(removedOrphanIDs: removed, failures: failures)
+        if fileManager.fileExists(atPath: recordsDirectoryURL.path) {
+            let recordFiles = try fileManager.contentsOfDirectory(at: recordsDirectoryURL, includingPropertiesForKeys: nil)
+            for recordFile in recordFiles {
+                guard recordFile.pathExtension == "json",
+                      let id = UUID(uuidString: recordFile.deletingPathExtension().lastPathComponent) else { continue }
+                guard let record = try? SidecarCoding.decode(PhotoDocumentRecord.self, from: Data(contentsOf: recordFile)) else {
+                    // Corrupt/unreadable: not this pass's job to repair --
+                    // `loadDocument` surfaces this loudly if actually opened.
+                    continue
+                }
+                guard record.effectiveLifecycleState == .pending else { continue }
+
+                if let activeDocumentID, record.id == activeDocumentID {
+                    var promoted = record
+                    promoted.lifecycleState = .committed
+                    do {
+                        try writeRecordData(try SidecarCoding.encode(promoted), recordFile, fileManager)
+                        promotedPendingIDs.append(id)
+                    } catch {
+                        failures[id] = (error as NSError).localizedDescription
+                    }
+                    continue
+                }
+
+                var stepFailed = false
+                try? fileManager.removeItem(at: recordFile)
+                if fileManager.fileExists(atPath: recordFile.path) { stepFailed = true }
+                let sidecarURL = sidecarsDirectoryURL(documentID: id)
+                try? fileManager.removeItem(at: sidecarURL)
+                if fileManager.fileExists(atPath: sidecarURL.path) { stepFailed = true }
+                if record.storageMode == .appCopy {
+                    let copyDirectory = documentsDirectoryURL.appendingPathComponent(id.uuidString, isDirectory: true)
+                    try? fileManager.removeItem(at: copyDirectory)
+                    if fileManager.fileExists(atPath: copyDirectory.path) { stepFailed = true }
+                }
+                if stepFailed {
+                    failures[id] = "Could not fully roll back an interrupted import."
+                } else {
+                    rolledBackPendingIDs.append(id)
+                }
+            }
+        }
+
+        return PhotoDocumentReconciliationReport(
+            removedOrphanIDs: removedOrphanIDs,
+            promotedPendingIDs: promotedPendingIDs,
+            rolledBackPendingIDs: rolledBackPendingIDs,
+            failures: failures
+        )
     }
 
     // MARK: - Private
@@ -425,7 +569,12 @@ public actor PhotoDocumentStore {
         recordsDirectoryURL.appendingPathComponent("\(id.uuidString).json")
     }
 
-    private func writeRecord(_ document: PhotoDocument) throws {
+    /// Writes a brand-new record. `lifecycleState` is always explicit here
+    /// (never inherited from an existing record, since there isn't one
+    /// yet) — every call site creating a document for the first time must
+    /// say `.pending`; only `finalizeCreation(_:)` and the reconciliation
+    /// promotion path may write `.committed`.
+    private func writeRecord(_ document: PhotoDocument, lifecycleState: PhotoDocumentRecord.LifecycleState) throws {
         let record = PhotoDocumentRecord(
             id: document.id,
             storageMode: document.storageMode,
@@ -434,7 +583,8 @@ public actor PhotoDocumentStore {
             sourceURL: document.sourceURL,
             sourceBookmarkData: document.sourceBookmarkData,
             sourceFingerprint: document.sourceFingerprint,
-            workingFingerprint: document.workingFingerprint
+            workingFingerprint: document.workingFingerprint,
+            lifecycleState: lifecycleState
         )
         try writeRecordData(try SidecarCoding.encode(record), recordURL(for: document.id), fileManager)
     }
@@ -614,6 +764,15 @@ private struct RootImportLock {
 /// populated and used as the fallback, and an absent app-copy
 /// `workingPathComponents` is opportunistically migrated by `loadDocument`.
 private struct PhotoDocumentRecord: Codable {
+    /// Whether a creation has finished being handed off to the user
+    /// (`.committed`) or might still be interrupted mid-handoff
+    /// (`.pending`). Backs crash-durable creation tracking — see
+    /// `reconcileOrphanedImports(activeDocumentID:)`.
+    enum LifecycleState: String, Codable {
+        case pending
+        case committed
+    }
+
     var id: UUID
     var storageMode: PhotoDocumentStorageMode
     var workingPathComponents: [String]?
@@ -622,19 +781,41 @@ private struct PhotoDocumentRecord: Codable {
     var sourceBookmarkData: Data?
     var sourceFingerprint: FileFingerprint
     var workingFingerprint: FileFingerprint
+    /// Absent (`nil`) in every record written before crash-durable
+    /// creation tracking existed. Treated as `.committed` for backward
+    /// compatibility: those records were always written by a single,
+    /// synchronous commit step with no separate pending phase a crash
+    /// could land in the middle of.
+    var lifecycleState: LifecycleState?
+
+    var effectiveLifecycleState: LifecycleState { lifecycleState ?? .committed }
 }
 
 /// Result of a `reconcileOrphanedImports()` pass.
 public struct PhotoDocumentReconciliationReport: Equatable, Sendable {
-    /// Orphaned import directories that were found and removed.
+    /// `Documents/` directories found with no record at all, and removed.
     public let removedOrphanIDs: [UUID]
-    /// Orphan directories that were found but could not be removed, keyed by
-    /// id, with the underlying failure description. Left in place for a
-    /// later call to retry.
+    /// Pending records that matched the remembered active document and
+    /// were promoted to `.committed` — the app survived far enough to hand
+    /// this document off to the user before being killed.
+    public let promotedPendingIDs: [UUID]
+    /// Pending records that did *not* match the active document (or there
+    /// was none) and were rolled back — record, sidecar, and (for
+    /// `.appCopy`) its `Documents/` copy.
+    public let rolledBackPendingIDs: [UUID]
+    /// Entries that could not be fully resolved, keyed by id, with a
+    /// diagnostic description. Left in place for a later call to retry.
     public let failures: [UUID: String]
 
-    public init(removedOrphanIDs: [UUID], failures: [UUID: String]) {
+    public init(
+        removedOrphanIDs: [UUID],
+        promotedPendingIDs: [UUID] = [],
+        rolledBackPendingIDs: [UUID] = [],
+        failures: [UUID: String]
+    ) {
         self.removedOrphanIDs = removedOrphanIDs
+        self.promotedPendingIDs = promotedPendingIDs
+        self.rolledBackPendingIDs = rolledBackPendingIDs
         self.failures = failures
     }
 }

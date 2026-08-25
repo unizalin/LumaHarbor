@@ -194,6 +194,7 @@
 "That export location is read-only." = "That export location is read-only.";
 "That location can't be written to." = "That location can't be written to.";
 "That photo folder is no longer in your library list." = "That photo folder is no longer in your library list.";
+"That's not the same photo" = "That's not the same photo";
 "The copy didn't match the original file, so nothing was saved." = "The copy didn't match the original file, so nothing was saved.";
 "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings." = "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings.";
 "The damaged file has been set aside. Rescan the folder to rebuild it." = "The damaged file has been set aside. Rescan the folder to rebuild it.";
@@ -221,6 +222,7 @@
 "There isn't enough free space to save your edits." = "There isn't enough free space to save your edits.";
 "These edits were saved by a newer version of LumaHarbor" = "These edits were saved by a newer version of LumaHarbor";
 "This camera's RAW format isn't supported yet." = "This camera's RAW format isn't supported yet.";
+"This file doesn't match the photo LumaHarbor is trying to reconnect." = "This file doesn't match the photo LumaHarbor is trying to reconnect.";
 "This camera's RAW isn't supported yet" = "This camera's RAW isn't supported yet";
 "This drive is read-only, so edits can't be saved next to your photos." = "This drive is read-only, so edits can't be saved next to your photos.";
 "This drive is read-only, so edits can't be saved." = "This drive is read-only, so edits can't be saved.";

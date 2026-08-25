@@ -155,7 +155,11 @@ private final class Harness {
     var resolveScopeResult: Result<ResolvedSecurityScope, Error>?
     private(set) var madeScopes: [FakeSecurityScopedResource] = []
     private(set) var resolvedScopes: [FakeSecurityScopedResource] = []
-    private(set) var savedActiveDocumentIDs: [UUID?] = []
+    // `fileprivate(set)`, not `private(set)`: the test methods below reset
+    // this mid-test (`removeAll()`) to isolate the sequence a specific
+    // operation writes, and both `Harness` and the test class live in this
+    // one file.
+    fileprivate(set) var savedActiveDocumentIDs: [UUID?] = []
     /// The URL `makeBookmark` was last called with -- the default
     /// `resolveScope` echoes this back, so a test that doesn't explicitly
     /// override `resolveScopeResult` gets the realistic behavior ("the
@@ -729,5 +733,313 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertEqual(stillThere.id, documentID)
         let stillSaved = try await harness.store.loadAdjustments(documentID: documentID)
         XCTAssertEqual(stillSaved.exposure, 2)
+    }
+
+    // MARK: 5. Relinking a document with a missing bookmark
+
+    /// A document created directly via the store with `bookmarkData: nil`
+    /// stands in for one saved before bookmarks were mandatory for
+    /// `.inPlace` documents -- the only realistic way one ends up without
+    /// one today.
+    private func makeUnbookmarkedInPlaceDocument(
+        _ harness: Harness, sourceURL: URL, adjustments: PhotoAdjustments = .neutral
+    ) async throws -> PhotoDocumentCreation {
+        let creation = try await harness.store.openInPlace(sourceURL, bookmarkData: nil)
+        await harness.store.finalizeCreation(creation)
+        if adjustments != .neutral {
+            try await harness.store.saveAdjustments(adjustments, documentID: creation.document.id)
+        }
+        return creation
+    }
+
+    func testMissingBookmarkShowsRelinkAndKeepsActiveIDAndAdjustments() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let edited = PhotoAdjustments.neutral.setting(.exposure, to: 0.65)
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
+        harness.activeDocumentID = creation.document.id
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.pendingRelink != nil }
+
+        XCTAssertNil(editor.document, "must not fake success by opening a neutral placeholder under a new ID")
+        XCTAssertEqual(editor.pendingRelink?.documentID, creation.document.id)
+        XCTAssertEqual(editor.pendingRelink?.sourceFingerprint, creation.document.sourceFingerprint)
+        XCTAssertEqual(harness.activeDocumentID, creation.document.id, "a missing bookmark must not clear the active pointer")
+    }
+
+    func testRelinkingToTheCorrectFileRestoresTheSameDocumentAndAdjustments() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let edited = PhotoAdjustments.neutral.setting(.contrast, to: 15)
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
+        harness.activeDocumentID = creation.document.id
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.pendingRelink != nil }
+
+        // The user picks the *same* file again from Files.
+        editor.beginRelinkSelection(sourceURL)
+        try await waitUntil { editor.document != nil }
+
+        XCTAssertEqual(editor.document?.id, creation.document.id, "relink must reuse the existing document ID, never mint a new one")
+        XCTAssertNil(editor.pendingRelink)
+        XCTAssertEqual(editor.editor.adjustments.contrast, 15, "the existing sidecar's adjustments must carry over")
+        XCTAssertEqual(harness.activeDocumentID, creation.document.id)
+    }
+
+    func testRelinkingToTheWrongFileIsRejectedAndLeavesExistingDataUntouched() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile(named: "original.ARW", pattern: 0xAA)
+        let wrongURL = harness.makeSourceFile(named: "different.ARW", pattern: 0xBB)
+        let edited = PhotoAdjustments.neutral.setting(.contrast, to: 15)
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
+        harness.activeDocumentID = creation.document.id
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.pendingRelink != nil }
+
+        editor.beginRelinkSelection(wrongURL)
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertNil(editor.document, "a fingerprint-mismatched file must never be attached to the existing document")
+        XCTAssertNotNil(editor.pendingRelink, "the prompt must stay so the user can try picking again")
+        XCTAssertEqual(harness.activeDocumentID, creation.document.id)
+
+        let stillSaved = try await harness.store.loadAdjustments(documentID: creation.document.id)
+        XCTAssertEqual(stillSaved.contrast, 15)
+        let stillDocument = try await harness.store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillDocument.workingURL, sourceURL, "the record must still point at the original location")
+    }
+
+    func testCancellingRelinkLeavesExistingDataUntouched() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let edited = PhotoAdjustments.neutral.setting(.exposure, to: 0.3)
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
+        harness.activeDocumentID = creation.document.id
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.pendingRelink != nil }
+
+        editor.cancelRelink()
+
+        XCTAssertNil(editor.pendingRelink)
+        XCTAssertNil(editor.document)
+        XCTAssertEqual(harness.activeDocumentID, creation.document.id)
+        let stillSaved = try await harness.store.loadAdjustments(documentID: creation.document.id)
+        XCTAssertEqual(stillSaved.exposure, 0.3)
+    }
+
+    // MARK: 6. Restore scope ownership on every path
+
+    /// Finds and overwrites every `.json` file under a document's sidecar
+    /// directory with invalid content, so `loadAdjustments` throws --
+    /// without needing to know `FileSidecarRepository`'s exact internal
+    /// layout.
+    private func corruptSidecar(for documentID: UUID, in harness: Harness) throws {
+        let sidecarDirectory = harness.rootURL
+            .appendingPathComponent("Store", isDirectory: true)
+            .appendingPathComponent("Sidecars", isDirectory: true)
+            .appendingPathComponent(documentID.uuidString, isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(at: sidecarDirectory, includingPropertiesForKeys: nil) else {
+            XCTFail("expected a sidecar directory to enumerate")
+            return
+        }
+        var corruptedAny = false
+        for case let file as URL in enumerator where file.pathExtension == "json" {
+            try Data("not valid json".utf8).write(to: file)
+            corruptedAny = true
+        }
+        XCTAssertTrue(corruptedAny, "expected to find at least one sidecar JSON file to corrupt")
+    }
+
+    func testInPlaceRestoreMetadataFailureStopsTheScopeExactlyOnce() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL)
+        // Give it a real bookmark this time -- this test is about a decode
+        // failure, not a missing-bookmark relink.
+        try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
+        harness.activeDocumentID = creation.document.id
+        harness.decoder = FailingDecoder()
+
+        let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
+        harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: restoredScope, isStale: false))
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertNil(editor.document)
+        XCTAssertEqual(restoredScope.stopCount, 1)
+    }
+
+    func testInPlaceRestoreAdjustmentsLoadFailureStopsTheScopeExactlyOnce() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL)
+        try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
+        try await harness.store.saveAdjustments(.neutral, documentID: creation.document.id)
+        try corruptSidecar(for: creation.document.id, in: harness)
+        harness.activeDocumentID = creation.document.id
+
+        let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
+        harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: restoredScope, isStale: false))
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertNil(editor.document)
+        XCTAssertEqual(restoredScope.stopCount, 1)
+    }
+
+    func testRestoreScopeSupersededByAFreshOpenStopsExactlyOnce() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile(named: "a.ARW")
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL)
+        try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
+        harness.activeDocumentID = creation.document.id
+
+        let restoreGate = GatedDecoder(gatedURL: sourceURL)
+        harness.decoder = restoreGate
+        let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
+        harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: restoredScope, isStale: false))
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        await restoreGate.waitUntilArrived(at: sourceURL)
+
+        // A fresh selection pre-empts the still-in-flight restore.
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+        editor.beginSelecting(urlB)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document?.sourceURL == urlB }
+
+        restoreGate.release(sourceURL)
+        try await waitUntil { restoredScope.stopCount == 1 }
+
+        XCTAssertEqual(editor.document?.sourceURL, urlB, "the superseded restore must not clobber the fresh open")
+        XCTAssertEqual(restoredScope.stopCount, 1)
+    }
+
+    func testSuccessfulRestoreScopeStaysOpenUntilClose() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL)
+        try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
+        harness.activeDocumentID = creation.document.id
+
+        let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
+        harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: restoredScope, isStale: false))
+
+        let editor = harness.makeEditor()
+        editor.performStartupSequence()
+        try await waitUntil { editor.document != nil }
+
+        XCTAssertEqual(restoredScope.stopCount, 0, "the scope must still be held while the restored document is open")
+
+        let closed = await editor.closeCurrentDocument()
+        XCTAssertTrue(closed)
+        XCTAssertEqual(restoredScope.stopCount, 1)
+    }
+
+    // MARK: 7. Active-document-ID write sequencing
+
+    func testFailingToPrepareANewDocumentWritesNoActiveID() async throws {
+        let harness = Harness()
+        harness.decoder = FailingDecoder()
+        let sourceURL = harness.makeSourceFile()
+        let editor = harness.makeEditor()
+
+        editor.beginSelecting(sourceURL)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertTrue(harness.savedActiveDocumentIDs.isEmpty)
+    }
+
+    func testFailingToFlushTheOldDocumentWritesNoActiveID() async throws {
+        let harness = Harness()
+        let urlA = harness.makeSourceFile(named: "a.ARW")
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+        let editor = harness.makeEditor()
+
+        editor.beginSelecting(urlA)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document?.sourceURL == urlA }
+        let documentAID = try XCTUnwrap(editor.document?.id)
+        harness.savedActiveDocumentIDs.removeAll()
+
+        // Force the next save to fail without touching file permissions
+        // (unreliable when running as root in CI): pre-write a
+        // newer-schema sidecar so `PhotoDocumentStore.saveAdjustments`
+        // rejects overwriting it -- the same technique
+        // `PhotoDocumentStoreTests.testSaveAdjustmentsRejectsANewerSchemaSidecarWithoutOverwriting`
+        // uses.
+        try await harness.store.saveAdjustments(.neutral, documentID: documentAID)
+        let repositoryRoot = harness.rootURL
+            .appendingPathComponent("Store", isDirectory: true)
+            .appendingPathComponent("Sidecars", isDirectory: true)
+            .appendingPathComponent(documentAID.uuidString, isDirectory: true)
+        let repository = FileSidecarRepository(libraryRootURL: repositoryRoot)
+        var newerSidecar = try XCTUnwrap(try repository.loadSidecar(for: PhotoID(documentAID)))
+        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
+        try repository.write(sidecar: newerSidecar)
+
+        editor.editor.setAdjustment(.exposure, to: 0.5)
+
+        editor.beginSelecting(urlB)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil {
+            if case .failed = editor.editor.saveState { return true }
+            return false
+        }
+
+        XCTAssertTrue(harness.savedActiveDocumentIDs.isEmpty, "a flush failure must abort the switch before any active-ID write")
+        XCTAssertEqual(editor.document?.sourceURL, urlA, "the old document must remain open")
+    }
+
+    func testSuccessfulSwitchWritesExactlyOneNewIDWithNoNilInBetween() async throws {
+        let harness = Harness()
+        let urlA = harness.makeSourceFile(named: "a.ARW")
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+        let editor = harness.makeEditor()
+
+        editor.beginSelecting(urlA)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document?.sourceURL == urlA }
+        let documentAID = try XCTUnwrap(editor.document?.id)
+        harness.savedActiveDocumentIDs.removeAll()
+
+        editor.beginSelecting(urlB)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document?.sourceURL == urlB }
+        let documentBID = try XCTUnwrap(editor.document?.id)
+
+        XCTAssertEqual(harness.savedActiveDocumentIDs, [documentBID], "exactly one write, directly to the new ID")
+        XCTAssertNotEqual(documentAID, documentBID)
+        XCTAssertFalse(harness.savedActiveDocumentIDs.contains(nil), "the active ID must never pass through nil while switching")
+    }
+
+    func testSuccessfulCloseWritesNilLast() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+        let editor = harness.makeEditor()
+
+        editor.beginSelecting(sourceURL)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document != nil }
+
+        let closed = await editor.closeCurrentDocument()
+        XCTAssertTrue(closed)
+
+        let lastWrite = try XCTUnwrap(harness.savedActiveDocumentIDs.last, "expected at least one active-ID write")
+        XCTAssertNil(lastWrite, "the last write on a successful close must be nil")
     }
 }

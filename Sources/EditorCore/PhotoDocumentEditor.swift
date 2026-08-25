@@ -175,6 +175,21 @@ public final class PhotoDocumentEditor: ObservableObject {
     /// `pendingSelection`, not here.
     @Published public private(set) var hasPendingSelection = false
 
+    /// Set when restoring the last-open `.inPlace` document finds its
+    /// bookmark missing or otherwise unresolvable. The document itself
+    /// (record, sidecar, active pointer) is still fully intact — only the
+    /// path to reach the external RAW again is gone. A view can use this to
+    /// show a "Choose the file again" affordance that calls
+    /// `beginRelinkSelection(_:)`, distinct from the normal "Open a new
+    /// photo" flow, since picking the wrong file here must be rejected
+    /// rather than silently starting a second, unrelated document.
+    @Published public private(set) var pendingRelink: PendingRelink?
+
+    public struct PendingRelink: Equatable, Sendable {
+        public let documentID: UUID
+        public let sourceFingerprint: FileFingerprint
+    }
+
     /// Open/restore/copy failures, and anything the launch-time
     /// reconciliation pass couldn't clean up. Kept separate from
     /// `editor.alert`, which is `EditorSession`'s own — a failure to *open*
@@ -277,7 +292,9 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     private func reconcileOrphanedImports() async {
         do {
-            let report = try await dependencies.store.reconcileOrphanedImports()
+            let report = try await dependencies.store.reconcileOrphanedImports(
+                activeDocumentID: dependencies.loadActiveDocumentID()
+            )
             guard !report.failures.isEmpty else { return }
             alert = EditorAlert(
                 title: L10n.t("Startup cleanup incomplete"),
@@ -312,22 +329,30 @@ public final class PhotoDocumentEditor: ObservableObject {
         let token = mintToken()
         isPreparingDocument = true
 
+        // Declared *outside* the `do` block -- like `openFreshSelection`'s
+        // `pendingCreation` -- so every exit path (a genuine thrown error,
+        // not just the in-`do` supersede checks) can still find and stop
+        // it. Ownership transfers to `documentScope` only inside
+        // `commitDocument`, at the very end of the success path; every
+        // other path here must stop it itself exactly once, since nothing
+        // else is going to.
+        var candidateScope: (any SecurityScopedResource)?
+        var loadedSourceFingerprint: FileFingerprint?
         do {
             let loadedDocument = try await dependencies.store.loadDocument(id: activeID)
-            let ownedScope: (any SecurityScopedResource)?
+            loadedSourceFingerprint = loadedDocument.sourceFingerprint
             let runtimeDocument: PhotoDocument
 
             switch loadedDocument.storageMode {
             case .appCopy:
-                ownedScope = nil
                 runtimeDocument = loadedDocument
             case .inPlace:
                 guard let bookmarkData = loadedDocument.sourceBookmarkData else {
                     throw RestoreError.missingBookmark
                 }
                 let resolved = try dependencies.resolveScope(bookmarkData)
+                candidateScope = resolved.resource
                 guard resolved.resource.isAccessing else {
-                    resolved.resource.stop()
                     throw RestoreError.accessDenied
                 }
                 // The metadata decode, preview and editor `sourceURL` below
@@ -337,16 +362,29 @@ public final class PhotoDocumentEditor: ObservableObject {
                 // renamed enclosing folder) even when `isStale` reports
                 // `false`.
                 runtimeDocument = await reconciledInPlaceDocument(loadedDocument, resolvedTo: resolved)
-                ownedScope = resolved.resource
             }
 
             let (photo, adjustments) = try await loadEditorState(for: runtimeDocument)
             guard isCurrent(token) else {
-                ownedScope?.stop()
+                candidateScope?.stop()
                 return
             }
-            commitDocument(token: token, document: runtimeDocument, scope: ownedScope, photo: photo, adjustments: adjustments)
+            commitDocument(token: token, document: runtimeDocument, scope: candidateScope, photo: photo, adjustments: adjustments)
+        } catch RestoreError.missingBookmark {
+            candidateScope?.stop()
+            guard isCurrent(token) else { return }
+            isPreparingDocument = false
+            // Recoverable via relink, not a reason to abandon the pointer
+            // or force the user to start over as a brand-new document.
+            // `loadedSourceFingerprint` is always set by this point --
+            // `missingBookmark` is only thrown after `loadDocument`
+            // already succeeded.
+            if let loadedSourceFingerprint {
+                pendingRelink = PendingRelink(documentID: activeID, sourceFingerprint: loadedSourceFingerprint)
+            }
+            alert = restoreFailureAlert(for: RestoreError.missingBookmark)
         } catch {
+            candidateScope?.stop()
             guard isCurrent(token) else { return }
             isPreparingDocument = false
             if shouldClearActiveDocumentID(after: error) {
@@ -502,6 +540,82 @@ public final class PhotoDocumentEditor: ObservableObject {
         hasPendingSelection = false
     }
 
+    // MARK: - Relinking a document with a missing bookmark
+
+    /// The user dismissed the relink prompt without picking a file. The
+    /// existing document (record, sidecar, active pointer) is completely
+    /// untouched — they can try again later from the same prompt.
+    public func cancelRelink() {
+        pendingRelink = nil
+    }
+
+    /// The user picked a file in response to `pendingRelink`. Verifies
+    /// `url`'s content fingerprint matches the document's original
+    /// `sourceFingerprint` before touching anything — an unrelated RAW can
+    /// never get attached to another document's saved sidecar/adjustments
+    /// by mistake. On a mismatch, `pendingRelink` stays set (so the user
+    /// can try again) and nothing on disk changes. On success, the
+    /// existing document's `workingURL`/`sourceURL`/bookmark are updated in
+    /// place and it is opened with its own already-saved adjustments —
+    /// never a fresh, neutral document under a new ID.
+    public func beginRelinkSelection(_ url: URL) {
+        guard let relink = pendingRelink else { return }
+        let scope = dependencies.makeScope(url)
+        guard scope.isAccessing else {
+            scope.stop()
+            alert = EditorAlert(
+                title: L10n.t("Couldn't open this photo"),
+                message: L10n.t("LumaHarbor couldn't get permission to read this file."),
+                nextStep: L10n.t("Choose the file again from Files.")
+            )
+            return
+        }
+
+        openingTask?.cancel()
+        let token = mintToken()
+        isPreparingDocument = true
+
+        openingTask = Task { [weak self, dependencies] in
+            guard let self else { return }
+            guard !Task.isCancelled, self.isCurrent(token) else {
+                scope.stop()
+                return
+            }
+            do {
+                let bookmarkData = try dependencies.makeBookmark(url)
+                let relinkedDocument = try await dependencies.store.relinkInPlaceDocument(
+                    documentID: relink.documentID, candidateURL: url, bookmarkData: bookmarkData
+                )
+                guard !Task.isCancelled, self.isCurrent(token) else {
+                    scope.stop()
+                    return
+                }
+                let (photo, adjustments) = try await self.loadEditorState(for: relinkedDocument)
+                guard self.isCurrent(token) else {
+                    scope.stop()
+                    return
+                }
+                self.commitDocument(token: token, document: relinkedDocument, scope: scope, photo: photo, adjustments: adjustments)
+            } catch RelinkError.fingerprintMismatch {
+                scope.stop()
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                // `pendingRelink` deliberately stays set -- the existing
+                // document is untouched and the user can try picking again.
+                self.alert = EditorAlert(
+                    title: L10n.t("That's not the same photo"),
+                    message: L10n.t("This file doesn't match the photo LumaHarbor is trying to reconnect."),
+                    nextStep: L10n.t("Choose the file again from Files.")
+                )
+            } catch {
+                scope.stop()
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                self.alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't open this photo"), for: error)
+            }
+        }
+    }
+
     /// A `fileImporter` call failed for a reason other than the user
     /// cancelling. Never forwards the underlying error's own text — a
     /// provider failure can carry a path in its description just like the
@@ -633,6 +747,7 @@ public final class PhotoDocumentEditor: ObservableObject {
                 )
                 self.dependencies.saveActiveDocumentID(creation.document.id)
                 self.isPreparingDocument = false
+                self.pendingRelink = nil
                 previousScope?.stop()
                 // After the swap above, not part of it -- by this point
                 // `document`/`documentScope`/`editor` are already fully
@@ -718,6 +833,7 @@ public final class PhotoDocumentEditor: ObservableObject {
         editor.open(photo: photo, sourceURL: document.workingURL, adjustments: adjustments, isReadOnly: false)
         dependencies.saveActiveDocumentID(document.id)
         isPreparingDocument = false
+        pendingRelink = nil
     }
 
     // MARK: - Closing

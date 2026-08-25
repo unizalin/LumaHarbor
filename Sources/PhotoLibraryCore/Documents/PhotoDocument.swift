@@ -77,15 +77,46 @@ public struct PhotoDocumentCreation: Sendable {
 /// Structured result of `PhotoDocumentStore.rollbackNewDocument(_:)`, one
 /// entry per step it attempts — never collapsed to a single `Bool`, so a
 /// caller can tell exactly what did and didn't get cleaned up.
+///
+/// Only `PhotoDocumentStore` constructs this — the initializer is
+/// module-internal so a client cannot fabricate a report (e.g. a fake
+/// `.cleaned` outcome) and act as though cleanup happened when it didn't.
 public struct PhotoDocumentRollbackReport: Equatable, Sendable {
     public enum StepResult: Equatable, Sendable {
         /// This step doesn't apply to this document's storage mode (e.g.
-        /// `copy` for an `.inPlace` document).
+        /// `copy` for an `.inPlace` document), or wasn't attempted because
+        /// the receipt didn't warrant it (see `Outcome`).
         case notApplicable
         case succeeded
         case failed
     }
 
+    /// Mutually exclusive top-level result. Only `.cleaned` means every
+    /// applicable step actually succeeded and the receipt was consumed;
+    /// every other case leaves both disk and the receipt exactly as they
+    /// were before the call.
+    public enum Outcome: Equatable, Sendable {
+        /// Every applicable step succeeded; the receipt is now consumed
+        /// and can never be used again.
+        case cleaned
+        /// At least one applicable step failed (including "couldn't even
+        /// acquire the root lock"); nothing was deleted, and the receipt
+        /// is still valid — safe to call again, once whatever's blocking
+        /// the failing step clears.
+        case retryRequired
+        /// This creation was already finalized (kept) by an earlier call;
+        /// nothing was touched.
+        case alreadyFinalized
+        /// This creation was already rolled back by an earlier call;
+        /// nothing was touched.
+        case alreadyRolledBack
+        /// The receipt isn't one this store instance recognizes at all.
+        /// Should be unreachable given `PhotoDocumentCreation`'s contract,
+        /// but never treated as success if it somehow occurs.
+        case unknownReceipt
+    }
+
+    public let outcome: Outcome
     /// Whether the root import lock was acquired — only meaningful for
     /// `.appCopy`, where removing the App-storage copy needs it.
     public let lock: StepResult
@@ -93,18 +124,20 @@ public struct PhotoDocumentRollbackReport: Equatable, Sendable {
     public let sidecar: StepResult
     public let copy: StepResult
 
-    public init(lock: StepResult, record: StepResult, sidecar: StepResult, copy: StepResult) {
+    init(outcome: Outcome, lock: StepResult, record: StepResult, sidecar: StepResult, copy: StepResult) {
+        self.outcome = outcome
         self.lock = lock
         self.record = record
         self.sidecar = sidecar
         self.copy = copy
     }
 
-    /// `true` only when every applicable step actually succeeded — a
-    /// caller that only checks this, rather than the individual steps, is
-    /// still told the truth about whether anything was left behind.
+    /// `true` only for `Outcome.cleaned` — every other outcome (including
+    /// "already finalized"/"already rolled back", which report every step
+    /// as `.notApplicable` since nothing was attempted) is *not* success
+    /// from a caller's point of view and must not be read as one.
     public var isFullyCleaned: Bool {
-        [lock, record, sidecar, copy].allSatisfy { $0 != .failed }
+        outcome == .cleaned
     }
 }
 
@@ -123,4 +156,15 @@ public enum PhotoDocumentError: Error, Equatable, Sendable {
     /// Nothing was changed; retry once the other operation has finished.
     case importInProgress
     case documentNotFound(UUID)
+}
+
+/// Thrown by `PhotoDocumentStore.relinkInPlaceDocument(documentID:candidateURL:bookmarkData:)`.
+public enum RelinkError: Error, Equatable, Sendable {
+    /// The document being relinked isn't `.inPlace` — an `.appCopy`
+    /// document never loses access to its working file this way.
+    case notInPlace
+    /// `candidateURL`'s content fingerprint doesn't match the document's
+    /// original `sourceFingerprint`. Nothing was changed — the existing
+    /// record, sidecar and adjustments are all still exactly as they were.
+    case fingerprintMismatch
 }

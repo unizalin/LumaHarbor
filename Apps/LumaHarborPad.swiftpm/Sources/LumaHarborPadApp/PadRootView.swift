@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct PadRootView: View {
     @ObservedObject var model: PadEditorModel
     @State private var isImporting = false
+    @State private var isRelinking = false
 
     var body: some View {
         NavigationStack {
@@ -76,6 +77,19 @@ struct PadRootView: View {
                         dismissButton: .default(Text(L10n.t("OK")))
                     )
                 }
+                // Separate from the normal `fileImporter` above: picking a
+                // file here goes through `beginRelinkSelection`, which
+                // verifies it against the existing document's fingerprint
+                // before touching anything, rather than starting a brand
+                // new document under a new ID.
+                .fileImporter(
+                    isPresented: $isRelinking,
+                    allowedContentTypes: [.image, .data],
+                    allowsMultipleSelection: false
+                ) { result in
+                    guard let url = try? result.get().first else { return }
+                    model.beginRelinkSelection(url)
+                }
         }
         .task {
             model.performStartupSequence()
@@ -86,6 +100,19 @@ struct PadRootView: View {
     private var content: some View {
         if model.document != nil {
             PadEditorView(model: model)
+        } else if model.pendingRelink != nil {
+            ContentUnavailableView {
+                Label(L10n.t("Couldn't reopen your last photo"), systemImage: "questionmark.folder")
+            } description: {
+                Text(L10n.t("LumaHarbor no longer has access to this file."))
+            } actions: {
+                Button(L10n.t("Choose the file again from Files.")) {
+                    isRelinking = true
+                }
+                Button(L10n.t("Cancel"), role: .cancel) {
+                    model.cancelRelink()
+                }
+            }
         } else if model.isPreparingDocument {
             ProgressView(L10n.t("Opening photo…"))
         } else {
