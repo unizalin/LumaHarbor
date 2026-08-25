@@ -136,10 +136,28 @@ redact_file() {
     redact_literal "$file" "${LUMAHARBOR_APFS_TEST_DIR:-}" "<APFS_TEST_DIR>"
     redact_literal "$file" "${LUMAHARBOR_EXFAT_TEST_DIR:-}" "<EXFAT_TEST_DIR>"
     redact_literal "$file" "${HOME:-}" "<HOME>"
-    redact_pattern "$file" '/Users/[A-Za-z0-9_./+=@%-]+' "<HOME_PATH>"
-    redact_pattern "$file" '/Volumes/[A-Za-z0-9_./+=@%-]+' "<VOLUME_PATH>"
-    redact_pattern "$file" '/private/var/[A-Za-z0-9_./+=@%-]+' "<PRIVATE_VAR_PATH>"
-    redact_pattern "$file" '/private/tmp/[A-Za-z0-9_./+=@%-]+' "<PRIVATE_TMP_PATH>"
+    # Quoted forms first: a path that was wrapped in quotes (common in
+    # xcodebuild/Xcode diagnostics — e.g. "/Volumes/Client Photos/x.ARW")
+    # can contain spaces, parens, or non-ASCII (Traditional Chinese, etc.)
+    # with no ambiguity about where it ends, since the matching quote
+    # unambiguously bounds it. The whole quoted span, quotes included, is
+    # replaced.
+    redact_pattern "$file" '"(/Users/[^"]*|/Volumes/[^"]*|/private/var/[^"]*|/private/tmp/[^"]*)"' '"<PATH>"'
+    redact_pattern "$file" "'(/Users/[^']*|/Volumes/[^']*|/private/var/[^']*|/private/tmp/[^']*)'" "'<PATH>'"
+    # Unquoted catch-all: everything after the prefix up to the next quote,
+    # angle bracket, pipe, or end of line is treated as part of the path —
+    # deliberately not stopping at plain spaces or restricted to ASCII, so
+    # a bare (unquoted) path containing spaces or non-ASCII characters is
+    # still fully consumed rather than leaving its second half (a volume
+    # name, a filename) sitting unredacted in the log. Over-redacting a
+    # few trailing words of surrounding prose on the same line is an
+    # acceptable, safe-direction trade-off for a privacy filter — the
+    # failure mode this must avoid is a private path surviving, not a log
+    # line reading slightly less precisely.
+    redact_pattern "$file" '/Users/[^"'\''<>|]+' "<HOME_PATH>"
+    redact_pattern "$file" '/Volumes/[^"'\''<>|]+' "<VOLUME_PATH>"
+    redact_pattern "$file" '/private/var/[^"'\''<>|]+' "<PRIVATE_VAR_PATH>"
+    redact_pattern "$file" '/private/tmp/[^"'\''<>|]+' "<PRIVATE_TMP_PATH>"
 }
 
 # has_private_path <file> — the grep safety net. True (0) means a forbidden
@@ -148,6 +166,24 @@ has_private_path() {
     local file="$1"
     [[ -f "$file" ]] || return 1
     grep -Eq '/Users/|/Volumes/|/private/var/|/private/tmp/' "$file" 2>/dev/null
+}
+
+# collect_xcode_version — best-effort; always prints something (never fails
+# and never aborts the caller under `set -e`). `xcodebuild -version` being
+# missing from PATH, or existing but exiting non-zero, must not be able to
+# take down finalize_run before summary.md is written — this is exactly the
+# same class of bug the earlier SIGPIPE fix addressed for the same call
+# site, generalized to cover "xcodebuild isn't there at all" too. Prints
+# "unknown" rather than an empty string when nothing usable comes back.
+collect_xcode_version() {
+    local output=""
+    output="$(xcodebuild -version 2>/dev/null)" || output=""
+    local first_line="${output%%$'\n'*}"
+    if [[ -z "$first_line" ]]; then
+        print -r -- "unknown"
+    else
+        print -r -- "$first_line"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -194,6 +230,10 @@ evaluate_xctest_log() {
     local -a fields
     fields=(${=parsed})
     local executed="${fields[1]}" skipped="${fields[2]}" failures="${fields[3]}"
+    if (( executed == 0 )); then
+        print -r -- "0 tests executed — an empty run must never count as a pass"
+        return 1
+    fi
     if (( skipped != 0 )); then
         print -r -- "${skipped} test(s) skipped (executed ${executed}, failures ${failures})"
         return 1
@@ -207,24 +247,75 @@ evaluate_xctest_log() {
 
 # ---------------------------------------------------------------------------
 # Timeout watchdog + descendant cleanup. Stock-macOS-only (no GNU coreutils
-# `timeout`). A command runs inside its own subshell wrapper so the wrapper's
-# PID is a stable root for walking exactly its own descendants via
-# `pgrep -P` — never a broad process-name match, so this can never touch an
-# unrelated swift/xcodebuild process elsewhere on the machine.
+# `timeout`, no `setsid`). A command runs inside its own subshell wrapper so
+# the wrapper's PID is a stable root for walking exactly its own descendants
+# via `pgrep -P` — never a broad process-name match, so this can never touch
+# an unrelated swift/xcodebuild process elsewhere on the machine.
+#
+# Process groups were deliberately NOT adopted here in place of this
+# snapshot-and-walk approach, despite a process-group-wide `kill -TERM --
+# -PGID` being immune to both of the residual races documented below (a
+# child forked after the snapshot, and a recycled PID). Getting each step
+# its own process group on stock macOS/zsh requires enabling job control
+# (`setopt monitor`) for a non-interactive script — there is no `setsid`
+# binary on macOS, and zsh only assigns a background job its own process
+# group when MONITOR is on. That trade is worse than the race it would
+# close: a non-interactive invocation (exactly how this runner is normally
+# used — CI, backgrounded, no controlling TTY) is precisely the situation
+# where job-control machinery is least predictable — a backgrounded job
+# that tries to read or write the terminal under MONITOR can be stopped
+# with SIGTTIN/SIGTTOU, which has no controlling TTY to even deliver a
+# meaningful stop to here, and turns a rare, narrow race into a new class
+# of hangs that would be far harder to diagnose than the two remaining
+# risks below. Those two are instead mitigated directly:
+#
+#   1. A descendant forked *after* the initial snapshot but *before* the
+#      final KILL (e.g. during the TERM grace period) would, in the naive
+#      version of this design, never be discovered. Mitigated by
+#      re-collecting the tree exactly once more, but ONLY while the root
+#      PID is confirmed still alive — see run_with_timeout and
+#      handle_terminating_signal, which each take this supplemental
+#      snapshot before their final KILL, not after the root has already
+#      exited (which was the original, already-fixed bug: rescanning
+#      *after* root death finds nothing, since exited processes' children
+#      are reparented away from them). A process forked in the sub-second
+#      gap between the very first snapshot and the first TERM landing, by
+#      a process that *also* exits before that supplemental rescan, is a
+#      narrower residual window this cannot close without process groups;
+#      it was judged acceptable given how this runner's actual commands
+#      (swift/xcodebuild/run-mvp-acceptance.zsh) behave in practice.
+#   2. A PID already signalled and exited could, after some delay, be
+#      recycled by the OS for a completely unrelated process before this
+#      runner's own later KILL is sent to what it still believes is the
+#      original target. Mitigated by recording each PID's process start
+#      time (`ps -o lstart=`) at snapshot time and re-checking it
+#      immediately before every signal: a PID whose start time no longer
+#      matches — or that no longer exists — is skipped rather than
+#      blindly signalled.
 # ---------------------------------------------------------------------------
 
+# pid_identity <pid> — prints the process's start time (a cheap, good-enough
+# fingerprint), or nothing if it doesn't currently exist. Two calls for the
+# same PID returning different non-empty values means the OS recycled that
+# PID for a different process in between.
+pid_identity() {
+    ps -o lstart= -p "$1" 2>/dev/null
+}
+
 # collect_descendant_pids <root_pid>
-# Prints, one per line, root_pid followed by every currently-live descendant
-# discovered via `pgrep -P`, ordered leaf-first (the deepest descendants
-# first, root_pid last). This is a one-shot snapshot: callers MUST take it
-# BEFORE sending any signal to root_pid, and reuse that same snapshot for
-# every signal in the escalation (TERM, then KILL) — a *second* pgrep
-# traversal rooted at root_pid, taken after root_pid has already been
-# signalled, can find zero descendants even while they are still alive: once
-# root_pid exits, its children are reparented away from it (typically to
-# launchd), so `pgrep -P root_pid` no longer sees them at all. Re-deriving
-# the descendant list after the first signal is exactly how a live
-# descendant survives cleanup undetected.
+# Prints, one per line, "<pid> <identity>" for root_pid followed by every
+# currently-live descendant discovered via `pgrep -P`, ordered leaf-first
+# (the deepest descendants first, root_pid last). This is a one-shot
+# snapshot: callers MUST take it BEFORE sending any signal to root_pid, and
+# reuse that same snapshot for every signal in the escalation (TERM, then
+# KILL) — a *second* pgrep traversal rooted at root_pid, taken after
+# root_pid has already been signalled, can find zero descendants even while
+# they are still alive: once root_pid exits, its children are reparented
+# away from it (typically to launchd), so `pgrep -P root_pid` no longer
+# sees them at all. Re-deriving the descendant list after the first signal
+# is exactly how a live descendant survives cleanup undetected. See the
+# block comment above for the one narrowly-scoped exception to "never
+# re-derive" this runner does use, and why.
 collect_descendant_pids() {
     local root_pid="$1"
     local -a to_visit=("$root_pid") ordered_pids=()
@@ -249,33 +340,45 @@ collect_descendant_pids() {
     # up front and is signalled directly by PID, never via the parent.
     local idx
     for (( idx = ${#ordered_pids[@]}; idx >= 1; idx-- )); do
-        print -r -- "${ordered_pids[$idx]}"
+        print -r -- "${ordered_pids[$idx]} $(pid_identity "${ordered_pids[$idx]}")"
     done
 }
 
-# signal_pid_list <signal> <pid>...
+# signal_pid_list <signal> <"pid identity">...
 # Sends exactly one signal to exactly the given PIDs — never a broad
-# process-name or process-group kill — so this can only ever touch PIDs a
-# caller already resolved itself.
+# process-name or process-group kill, and never a PID whose current
+# identity (start time) no longer matches the one recorded when it was
+# snapshotted, since that means either it already exited or the OS has
+# since reused its number for an unrelated process.
 signal_pid_list() {
     local sig="$1"
     shift
-    local p
-    for p in "$@"; do
-        [[ -n "$p" ]] || continue
-        kill -"$sig" "$p" 2>/dev/null || true
+    local entry pid identity current
+    for entry in "$@"; do
+        [[ -n "$entry" ]] || continue
+        pid="${entry%% *}"
+        identity="${entry#* }"
+        [[ -n "$pid" ]] || continue
+        current="$(pid_identity "$pid")"
+        [[ -n "$current" ]] || continue
+        if [[ -n "$identity" && "$current" != "$identity" ]]; then
+            continue
+        fi
+        kill -"$sig" "$pid" 2>/dev/null || true
     done
 }
 
-# all_pids_gone <pid>...
+# all_pids_gone <"pid identity">...
 # True (0) only once every given PID has exited. Used to bound the grace
 # wait between TERM and KILL, and to confirm cleanup actually completed
 # rather than merely having been requested.
 all_pids_gone() {
-    local p
-    for p in "$@"; do
-        [[ -n "$p" ]] || continue
-        kill -0 "$p" 2>/dev/null && return 1
+    local entry pid
+    for entry in "$@"; do
+        [[ -n "$entry" ]] || continue
+        pid="${entry%% *}"
+        [[ -n "$pid" ]] || continue
+        kill -0 "$pid" 2>/dev/null && return 1
     done
     return 0
 }
@@ -318,6 +421,16 @@ run_with_timeout() {
                 sleep 1
                 waited=$((waited + 1))
             done
+            # Supplemental rescan for anything forked during the grace
+            # window above — ONLY while cmd_pid is confirmed still alive,
+            # never after it has already exited (see the block comment
+            # above collect_descendant_pids for why that distinction
+            # matters).
+            if kill -0 "$cmd_pid" 2>/dev/null; then
+                local -a fresh
+                fresh=("${(f)$(collect_descendant_pids "$cmd_pid")}")
+                victims=("${victims[@]}" "${fresh[@]}")
+            fi
             signal_pid_list KILL "${victims[@]}"
             break
         fi
@@ -345,9 +458,17 @@ STEP_TIMEOUT_SECONDS=$STEP_TIMEOUT_SECONDS_DEFAULT
 CURRENT_STEP_KEY=""
 
 # step_command_for <key> — sets globals STEP_CWD and STEP_CMD (an array) for
-# the real command a step runs. Overridden per-step, only when the
-# corresponding LUMAHARBOR_IPAD_SELFTEST_<KEY>_CMD env var is set, by the
-# self-test below.
+# the real command a step runs. The five real production commands below can
+# NEVER be replaced by a LUMAHARBOR_IPAD_SELFTEST_<KEY>_CMD override merely
+# because that env var happens to be set — a normal shell could easily still
+# have one exported from an earlier interactive self-test debugging session,
+# and a production run must never silently run "true" instead of an actual
+# build because of that. The override is honored only when
+# LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER names a file that actually exists on
+# disk right now: a path freshly created by THIS invocation of run_selftest
+# (see there), threaded explicitly into each case's spawned child, and
+# deleted the moment that self-test run ends — never a fixed, memorable
+# name anyone could pre-create or leave lingering in a shell profile.
 STEP_CWD=""
 STEP_CMD=()
 step_command_for() {
@@ -375,14 +496,16 @@ step_command_for() {
             ;;
     esac
 
-    local override_var="LUMAHARBOR_IPAD_SELFTEST_${key:u}_CMD"
-    local override_value="${(P)override_var:-}"
-    if [[ -n "$override_value" ]]; then
-        # Self-test hook values are always a bare command (a plain word, or a
-        # single word plus a numeric argument, or an executable path) — never
-        # quoted — precisely so this shell-word split never has to reason
-        # about quoting.
-        STEP_CMD=(${(z)override_value})
+    if [[ -n "${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}" && -f "${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}" ]]; then
+        local override_var="LUMAHARBOR_IPAD_SELFTEST_${key:u}_CMD"
+        local override_value="${(P)override_var:-}"
+        if [[ -n "$override_value" ]]; then
+            # Self-test hook values are always a bare command (a plain word, or
+            # a single word plus a numeric argument, or an executable path) —
+            # never quoted — precisely so this shell-word split never has to
+            # reason about quoting.
+            STEP_CMD=(${(z)override_value})
+        fi
     fi
 }
 
@@ -448,42 +571,93 @@ run_step() {
 # signal trap can call it safely — whichever happens first wins.
 # ---------------------------------------------------------------------------
 
-SUMMARY_WRITTEN=0
+# SUMMARY_STATE is a three-state machine, not a single "written" flag:
+#   notStarted -> finalizing -> finalized
+# The old design set a "written" flag the INSTANT finalize_run began, so a
+# signal landing mid-finalize_run (mid-redaction, mid-write) saw the guard
+# already tripped and returned instantly — skipping the rest of
+# finalize_run entirely and potentially leaving no summary.md, a stale one,
+# or unredacted logs behind. Now: a signal that lands while state is
+# "finalizing" does not re-enter or abort finalize_run at all; it just
+# records DEFERRED_SIGNAL and returns, letting the interrupted call resume
+# and run to completion (through the atomic mv and the privacy scan) before
+# anything exits. Whichever code path called finalize_run checks
+# DEFERRED_SIGNAL once it returns and exits with the right signal-derived
+# code instead of falling through to its normal ending.
+SUMMARY_STATE="notStarted"
+DEFERRED_SIGNAL=""
+
+# exit_for_signal <SIGNAL> — the one place the HUP/INT/TERM -> exit-code
+# mapping lives, shared by handle_terminating_signal and every code path
+# that has to honor a DEFERRED_SIGNAL after finalize_run returns.
+exit_for_signal() {
+    local sig="$1"
+    case "$sig" in
+        HUP) exit 129 ;;
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+        *) exit 130 ;;
+    esac
+}
 
 # finalize_run — redacts every log that exists, writes summary.md (commit,
 # timestamp, Xcode version, architecture, per-step state/exit-code, the
-# parsed swift-test executed/skipped/failures counts, a privacy-scan result,
-# and the overall result), then runs the grep safety net over every kept
-# artifact. A leftover unredacted path flips privacy_ok (and therefore
-# overall_ok) to failing even if every step itself passed.
+# parsed swift-test executed/skipped/failures counts, a repo-state check, a
+# privacy-scan result, and the overall result), then runs the grep safety
+# net over every kept artifact. The Overall line is derived fresh from
+# STEP_STATE here — every step must literally read "PASS" — rather than
+# trusting an external `overall_ok` flag that a signal landing outside any
+# step (before the first step, between two steps, or after the last one)
+# could leave untouched, which is exactly how an all-SKIPPED run could
+# previously still report Overall PASS.
 finalize_run() {
-    (( SUMMARY_WRITTEN )) && return 0
-    SUMMARY_WRITTEN=1
+    if [[ "$SUMMARY_STATE" == "finalized" || "$SUMMARY_STATE" == "finalizing" ]]; then
+        return 0
+    fi
+    SUMMARY_STATE="finalizing"
+
+    # Self-test-only: pause here, gated behind the same child-mode marker
+    # step_command_for requires for its own overrides, so a real run can
+    # never be made to stall. Lets a test deterministically land a signal
+    # while state is "finalizing" instead of racing a real (sub-second)
+    # finalize_run.
+    if [[ -n "${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}" && -f "${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}" \
+        && -n "${LUMAHARBOR_IPAD_SELFTEST_FINALIZE_PAUSE_FILE:-}" \
+        && -n "${LUMAHARBOR_IPAD_SELFTEST_FINALIZE_PAUSE_READY_FILE:-}" ]]; then
+        touch "${LUMAHARBOR_IPAD_SELFTEST_FINALIZE_PAUSE_READY_FILE}"
+        local pause_deadline=$((SECONDS + 30))
+        while (( SECONDS < pause_deadline )) && [[ ! -f "${LUMAHARBOR_IPAD_SELFTEST_FINALIZE_PAUSE_FILE}" ]]; do
+            sleep 0.02
+        done
+    fi
 
     local key
     for key in "${STEP_ORDER[@]}"; do
         redact_file "${RUN_DIR}/${STEP_LOGFILE[$key]}"
     done
 
-    local commit xcode_version_output xcode_version arch
+    local commit xcode_version arch
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || print -r -- unknown)"
-    # `xcodebuild -version | head -n1` would close its read end as soon as it
-    # has one line, which can deliver SIGPIPE to xcodebuild while it is still
-    # writing its second line — under `set -o pipefail` that turns into a 141
-    # exit for this whole command substitution, which `set -e` then treats as
-    # this line failing and aborts the entire runner mid-finalize_run. Capture
-    # the full output first (no pipe, so nothing can ever close early on
-    # xcodebuild), then take the first line with parameter expansion instead.
-    xcode_version_output="$(xcodebuild -version 2>/dev/null)"
-    xcode_version="${xcode_version_output%%$'\n'*}"
-    [[ -z "$xcode_version" ]] && xcode_version="unknown"
+    xcode_version="$(collect_xcode_version)"
     arch="$(uname -m)"
+
+    # Repo state must not have moved out from under a long-running run —
+    # otherwise a build/test log produced against one commit could end up
+    # attributed to whatever HEAD happens to be current by the time this
+    # summary is written. Neither the hash nor a dirty-file *count* is
+    # private information, so both are safe to print as-is.
+    local end_head end_dirty repo_state_ok=1
+    end_head="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || print -r -- unknown)"
+    end_dirty="$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$end_head" != "$START_HEAD" || "$end_dirty" != "$START_DIRTY" ]]; then
+        repo_state_ok=0
+    fi
 
     local tmp_summary="${SUMMARY_FILE}.tmp.$$"
     {
         print -r -- "# iPad RAW editing vertical slice acceptance run ${TIMESTAMP}"
         print -r -- ""
-        print -r -- "- Commit: ${commit}"
+        print -r -- "- Commit: ${START_HEAD}"
         print -r -- "- Timestamp (UTC): ${TIMESTAMP}"
         print -r -- "- Xcode version: ${xcode_version}"
         print -r -- "- Architecture: ${arch}"
@@ -512,11 +686,26 @@ finalize_run() {
         print -r -- "## Logs"
         print -r -- ""
         for key in "${STEP_ORDER[@]}"; do
-            print -r -- "- ${STEP_LABEL[$key]}: .build/ipad-vertical-slice/${TIMESTAMP}/${STEP_LOGFILE[$key]}"
+            print -r -- "- ${STEP_LABEL[$key]}: .build/ipad-vertical-slice/${RUN_DIR_NAME}/${STEP_LOGFILE[$key]}"
         done
+        print -r -- ""
+        print -r -- "## Repo state"
+        print -r -- ""
+        if (( repo_state_ok )); then
+            print -r -- "Repo state: PASS (HEAD and working-tree change count unchanged since the run started)"
+        else
+            print -r -- "Repo state: FAIL (HEAD or the working tree changed during the run — start HEAD ${START_HEAD}, end HEAD ${end_head}, start dirty-file count ${START_DIRTY}, end dirty-file count ${end_dirty})"
+        fi
     } > "$tmp_summary"
 
-    redact_file "$tmp_summary"
+    # A redaction failure (disk full, a permission error, ...) must not be
+    # allowed to abort the script under `set -e` before the privacy scan
+    # below ever runs — `|| true` lets execution continue to that scan,
+    # which is the actual fail-closed guarantee: an sed call that silently
+    # did nothing leaves the original, still-unredacted text in place, and
+    # has_private_path below will find it and flip Overall to FAIL, exactly
+    # as if redaction had never been attempted.
+    redact_file "$tmp_summary" || true
 
     local privacy_ok=1
     local -a leaked_files=()
@@ -545,7 +734,24 @@ finalize_run() {
         fi
     } > "$diagnostic"
 
+    # Every required step must literally read "PASS" — computed fresh here,
+    # never trusted from an external flag, so a signal delivered outside
+    # any step (before the first one, between two, or after the last) can
+    # never leave stale SKIPPED steps sitting next to an Overall PASS.
+    local steps_ok=1
+    for key in "${STEP_ORDER[@]}"; do
+        [[ "${STEP_STATE[$key]}" == "PASS" ]] || steps_ok=0
+    done
+    # A signal already recorded by this point (it must have arrived at or
+    # before this line, since DEFERRED_SIGNAL is only ever set by a trap
+    # that then lets this very function resume and reach here) means the
+    # run was interrupted, full stop — never a PASS, regardless of what
+    # every individual step happened to already finish doing.
+    [[ -n "$DEFERRED_SIGNAL" ]] && steps_ok=0
+    (( repo_state_ok )) || steps_ok=0
+
     {
+        print -r -- ""
         print -r -- "## Privacy scan"
         print -r -- ""
         if (( privacy_ok )); then
@@ -554,7 +760,7 @@ finalize_run() {
             print -r -- "Privacy scan: FAIL (see runner-diagnostic.log for affected file names)"
         fi
         print -r -- ""
-        if (( overall_ok && privacy_ok )); then
+        if (( steps_ok && privacy_ok )); then
             print -r -- "Overall result: PASS"
         else
             print -r -- "Overall result: FAIL"
@@ -562,25 +768,44 @@ finalize_run() {
     } >> "$tmp_summary"
 
     mv -f -- "$tmp_summary" "$SUMMARY_FILE"
-    overall_ok=$(( overall_ok && privacy_ok ))
+    overall_ok=$(( steps_ok && privacy_ok ))
+
+    SUMMARY_STATE="finalized"
 
     print -r -- ""
-    print -r -- "Full logs and summary: .build/ipad-vertical-slice/${TIMESTAMP}"
+    print -r -- "Full logs and summary: .build/ipad-vertical-slice/${RUN_DIR_NAME}"
 }
 
 # handle_terminating_signal <SIGNAL>
-# INT/TERM/HUP must still produce a usable summary.md: mark whichever step
-# was in flight as interrupted, mark every step after it SKIPPED with that
-# same step's normal block reason (matching the non-interrupted fail-fast
-# path exactly, so a reader never sees two different phrasings for "this
-# didn't run because X failed"), tear down exactly that step's own process
-# tree, then finalize.
+# INT/TERM/HUP must still produce a usable summary.md, and the run must
+# always end up FAIL, no matter where in the run the signal actually lands —
+# mid-step, in the gap between two steps, or while finalize_run itself is
+# already running. `overall_ok=0` is set unconditionally, first thing,
+# before even checking whether a step is in flight: a signal arriving
+# outside any step (CURRENT_STEP_KEY empty) must never leave overall_ok
+# untouched, which is exactly how a run interrupted between steps or during
+# finalization could previously still summarize as Overall PASS with every
+# remaining step sitting there SKIPPED.
+#
+# If finalize_run is already running (SUMMARY_STATE == "finalizing"), this
+# does none of its own cleanup and does not exit — it only records
+# DEFERRED_SIGNAL and returns, letting the interrupted finalize_run resume
+# and run to completion (through its atomic mv and privacy scan) rather
+# than leaving a half-written tmp file or no summary.md at all. Whichever
+# code called finalize_run checks DEFERRED_SIGNAL once it returns and exits
+# from there instead of falling through to its normal ending.
 handle_terminating_signal() {
     local sig="$1"
+    overall_ok=0
+
+    if [[ "$SUMMARY_STATE" == "finalizing" ]]; then
+        [[ -z "$DEFERRED_SIGNAL" ]] && DEFERRED_SIGNAL="$sig"
+        return
+    fi
+
     if [[ -n "$CURRENT_STEP_KEY" ]]; then
         local key="$CURRENT_STEP_KEY"
         STEP_STATE[$key]="FAIL (interrupted by ${sig})"
-        overall_ok=0
         local reason="${STEP_BLOCK_REASON[$key]:-}"
         local found=0 k
         for k in "${STEP_ORDER[@]}"; do
@@ -599,6 +824,13 @@ handle_terminating_signal() {
                 sleep 1
                 waited=$((waited + 1))
             done
+            # See run_with_timeout's own timeout branch for why a second,
+            # narrowly-scoped rescan happens here before the final KILL.
+            if kill -0 "$RUN_WITH_TIMEOUT_PID" 2>/dev/null; then
+                local -a fresh
+                fresh=("${(f)$(collect_descendant_pids "$RUN_WITH_TIMEOUT_PID")}")
+                victims=("${victims[@]}" "${fresh[@]}")
+            fi
             signal_pid_list KILL "${victims[@]}"
 
             # Reap the wrapper subshell — it is this process's own direct
@@ -611,16 +843,15 @@ handle_terminating_signal() {
             RUN_WITH_TIMEOUT_PID=0
         fi
     fi
-    finalize_run
 
-    local exit_code
-    case "$sig" in
-        HUP) exit_code=129 ;;
-        INT) exit_code=130 ;;
-        TERM) exit_code=143 ;;
-        *) exit_code=130 ;;
-    esac
-    exit "$exit_code"
+    if [[ "$SUMMARY_STATE" != "finalized" ]]; then
+        finalize_run
+    fi
+
+    if [[ -n "$DEFERRED_SIGNAL" ]]; then
+        exit_for_signal "$DEFERRED_SIGNAL"
+    fi
+    exit_for_signal "$sig"
 }
 
 # ===========================================================================
@@ -635,6 +866,7 @@ typeset -A FASTPASS_CMD
 FAIL_WITH_7_HELPER=""
 INTERRUPT_ROOT_HELPER=""
 INTERRUPT_CHILD_HELPER=""
+SELFTEST_CHILD_MARKER=""
 
 # cleanup_signal_case_helper <runner_pid> <root_helper_pid> <leaf_pid> <label>
 # The one cleanup path every exit of run_signal_selftest_case (and the
@@ -667,6 +899,11 @@ cleanup_signal_case_helper() {
         while (( SECONDS < deadline )) && ! all_pids_gone "${victims[@]}"; do
             sleep 0.1
         done
+        if kill -0 "$runner_pid" 2>/dev/null; then
+            local -a fresh
+            fresh=("${(f)$(collect_descendant_pids "$runner_pid")}")
+            victims=("${victims[@]}" "${fresh[@]}")
+        fi
         signal_pid_list KILL "${victims[@]}"
     fi
     if [[ -n "$runner_pid" ]]; then
@@ -731,6 +968,7 @@ run_signal_selftest_case() {
 
     (
         unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
         local k
         for k in "${STEP_ORDER[@]}"; do
             if [[ "$k" == "$target_key" ]]; then
@@ -887,6 +1125,7 @@ run_ready_handshake_failure_selftest_case() {
 
     (
         unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
         export LUMAHARBOR_IPAD_SELFTEST_STRICTBUILD_CMD="sleep 3600"
         exec "$SCRIPT_PATH"
     ) >/dev/null 2>&1 &
@@ -943,6 +1182,7 @@ run_fastfail_selftest_case() {
 
     (
         unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
         export LUMAHARBOR_IPAD_SELFTEST_STRICTBUILD_CMD="$FAIL_WITH_7_HELPER"
         exec "$SCRIPT_PATH"
     ) >/dev/null 2>&1 &
@@ -993,6 +1233,7 @@ run_fakepass_selftest_case() {
 
     (
         unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
         local k
         for k in "${STEP_ORDER[@]}"; do
             export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="${FASTPASS_CMD[$k]}"
@@ -1056,6 +1297,7 @@ run_missinghelper_selftest_case() {
 
     (
         unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
         export LUMAHARBOR_IPAD_SELFTEST_STRICTBUILD_CMD="${FASTPASS_CMD[strictbuild]}"
         export LUMAHARBOR_IPAD_SELFTEST_SWIFTTEST_CMD="${FASTPASS_CMD[swifttest]}"
         export LUMAHARBOR_IPAD_SELFTEST_SIMBUILD_CMD="${FASTPASS_CMD[simbuild]}"
@@ -1100,6 +1342,442 @@ run_missinghelper_selftest_case() {
     (( case_failures == 0 ))
 }
 
+# run_override_rejected_outside_selftest_case — production mode cannot have
+# its five real commands replaced by overrides: exports every
+# LUMAHARBOR_IPAD_SELFTEST_<KEY>_CMD var exactly as a stale shell session
+# could leave them, but deliberately WITHOUT the child-mode marker file,
+# and verifies step_command_for falls back to each step's real production
+# command anyway. A direct, fast check of the gating logic itself — no
+# runner subprocess needed, and none of the (expensive) real commands are
+# actually invoked.
+run_override_rejected_outside_selftest_case() {
+    local case_failures=0
+    local label="overrides are ignored outside self-test child mode"
+
+    local k
+    for k in "${STEP_ORDER[@]}"; do
+        export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="true"
+    done
+    local saved_marker="${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}"
+    unset LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER
+
+    local all_real=1
+    for k in "${STEP_ORDER[@]}"; do
+        step_command_for "$k"
+        case "$k" in
+            strictbuild|swifttest)
+                [[ "${STEP_CMD[1]}" == "swift" ]] || all_real=0
+                ;;
+            simbuild)
+                [[ "${STEP_CMD[1]}" == "xcodebuild" ]] || all_real=0
+                ;;
+            mvppreflight|mvpacceptance)
+                [[ "${STEP_CMD[1]}" == "${ROOT_DIR}/Scripts/run-mvp-acceptance.zsh" ]] || all_real=0
+                ;;
+        esac
+    done
+
+    for k in "${STEP_ORDER[@]}"; do
+        unset "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"
+    done
+    [[ -n "$saved_marker" ]] && export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$saved_marker"
+
+    if (( all_real )); then
+        print -r -- "selftest: ${label} -> all five steps used their real production command (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> at least one step honored an override with no child-mode marker present"
+        case_failures=$((case_failures + 1))
+    fi
+
+    (( case_failures == 0 ))
+}
+
+# run_timeout_selftest_case — a deterministic, non-signal trigger of
+# run_with_timeout's own TIMEOUT_HIT path: strictbuild is given a 1-second
+# STEP_TIMEOUT_SECONDS budget and a target that blocks indefinitely. Must
+# surface as an ordinary FAIL (exit 1, not a signal exit code), record
+# exit 124 for the timed-out step, correctly skip everything after it, and
+# leave nothing running.
+run_timeout_selftest_case() {
+    local label="strictbuild times out"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local root_pidfile="${case_tmp}/root.pid"
+    local child_pidfile="${case_tmp}/child.pid"
+    local ready_file="${case_tmp}/ready"
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}"/.build/ipad-vertical-slice/*(N))
+
+    (
+        unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
+        export LUMAHARBOR_IPAD_STEP_TIMEOUT_SECONDS=1
+        export LUMAHARBOR_IPAD_SELFTEST_STRICTBUILD_CMD="${INTERRUPT_ROOT_HELPER} ${root_pidfile} ${child_pidfile} ${ready_file} ${INTERRUPT_CHILD_HELPER}"
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    local child_pid=$!
+
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
+        sleep 0.02
+    done
+
+    local root_helper_pid="" leaf_pid=""
+    [[ -s "$root_pidfile" ]] && root_helper_pid="$(<"$root_pidfile")"
+    [[ -s "$child_pidfile" ]] && leaf_pid="$(<"$child_pidfile")"
+
+    if [[ ! -f "$ready_file" ]]; then
+        print -r -- "selftest: ${label} -> the interrupt-target helper never signalled ready"
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "$root_helper_pid" "$leaf_pid" "$label" || case_failures=$((case_failures + 1))
+        rm -rf -- "$case_tmp"
+        (( case_failures == 0 ))
+        return
+    fi
+
+    local new_dir="" d
+    for d in "${ROOT_DIR}"/.build/ipad-vertical-slice/*(N); do
+        if (( ${before_dirs[(Ie)$d]} == 0 )); then
+            new_dir="$d"
+            break
+        fi
+    done
+
+    # No signal sent here — the 1-second STEP_TIMEOUT_SECONDS override is
+    # what must trip run_with_timeout's own TIMEOUT_HIT path on its own.
+    local rc=0
+    wait "$child_pid" 2>/dev/null || rc=$?
+
+    if (( rc == 1 )); then
+        print -r -- "selftest: ${label} -> exit code ${rc} (expected 1, an ordinary FAIL, not a signal exit): ok"
+    else
+        print -r -- "selftest: ${label} -> exit code ${rc}, expected 1"
+        case_failures=$((case_failures + 1))
+    fi
+
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
+        case_failures=$((case_failures + 1))
+    else
+        local summary="${new_dir}/summary.md"
+        if [[ ! -f "$summary" ]]; then
+            print -r -- "selftest: ${label} -> no summary.md was written"
+            case_failures=$((case_failures + 1))
+        else
+            if grep -q '^Overall result: FAIL$' "$summary"; then
+                print -r -- "selftest: ${label} -> Overall result: FAIL (expected): ok"
+            else
+                print -r -- "selftest: ${label} -> summary.md did not report an overall FAIL"
+                case_failures=$((case_failures + 1))
+            fi
+            if grep -qF -- "- ${STEP_LABEL[strictbuild]}: FAIL (timed out after 1s" "$summary"; then
+                print -r -- "selftest: ${label} -> timed-out step labelled correctly: ok"
+            else
+                print -r -- "selftest: ${label} -> timed-out step was not labelled correctly"
+                case_failures=$((case_failures + 1))
+            fi
+            if grep -qF -- '[exit 124]' "$summary"; then
+                print -r -- "selftest: ${label} -> step exit code recorded as 124: ok"
+            else
+                print -r -- "selftest: ${label} -> step exit code was not recorded as 124"
+                case_failures=$((case_failures + 1))
+            fi
+            if grep -qF -- "- ${STEP_LABEL[swifttest]}: SKIPPED (${STEP_BLOCK_REASON[strictbuild]})" "$summary"; then
+                print -r -- "selftest: ${label} -> downstream step correctly blames strictbuild: ok"
+            else
+                print -r -- "selftest: ${label} -> downstream step did not correctly blame strictbuild"
+                case_failures=$((case_failures + 1))
+            fi
+            if has_private_path "$summary"; then
+                print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no private path in summary.md (expected): ok"
+            fi
+        fi
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "$root_helper_pid" "$leaf_pid" "$label" || case_failures=$((case_failures + 1))
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+# run_outside_step_signal_selftest_case — a deterministic trigger of a
+# signal landing OUTSIDE any step: strictbuild passes, then the runner
+# pauses in the gap before swifttest starts (CURRENT_STEP_KEY genuinely
+# empty) via the self-test-only inter-step hook, and TERM is delivered
+# there. This is exactly the scenario that could previously leave the
+# summary reporting Overall PASS with every remaining step SKIPPED.
+run_outside_step_signal_selftest_case() {
+    local label="signal TERM between steps (after strictbuild)"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local ready_file="${case_tmp}/interstep-ready"
+    local go_file="${case_tmp}/interstep-go"
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}"/.build/ipad-vertical-slice/*(N))
+
+    (
+        unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
+        export LUMAHARBOR_IPAD_SELFTEST_STRICTBUILD_CMD="${FASTPASS_CMD[strictbuild]}"
+        export LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_PAUSE_AFTER="strictbuild"
+        export LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_READY_FILE="$ready_file"
+        export LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_GO_FILE="$go_file"
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    local child_pid=$!
+
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
+        sleep 0.02
+    done
+
+    if [[ ! -f "$ready_file" ]]; then
+        print -r -- "selftest: ${label} -> the runner never reached the inter-step pause"
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+        rm -rf -- "$case_tmp"
+        (( case_failures == 0 ))
+        return
+    fi
+
+    local new_dir="" d
+    for d in "${ROOT_DIR}"/.build/ipad-vertical-slice/*(N); do
+        if (( ${before_dirs[(Ie)$d]} == 0 )); then
+            new_dir="$d"
+            break
+        fi
+    done
+
+    kill -s TERM "$child_pid" 2>/dev/null || true
+    local rc=0
+    wait "$child_pid" 2>/dev/null || rc=$?
+
+    if (( rc == 143 )); then
+        print -r -- "selftest: ${label} -> exit code ${rc} (expected 143): ok"
+    else
+        print -r -- "selftest: ${label} -> exit code ${rc}, expected 143"
+        case_failures=$((case_failures + 1))
+    fi
+
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
+        case_failures=$((case_failures + 1))
+    else
+        local summary="${new_dir}/summary.md"
+        if [[ ! -f "$summary" ]]; then
+            print -r -- "selftest: ${label} -> no summary.md was written"
+            case_failures=$((case_failures + 1))
+        else
+            if grep -q '^Overall result: FAIL$' "$summary"; then
+                print -r -- "selftest: ${label} -> Overall result: FAIL despite the signal landing outside any step (expected): ok"
+            else
+                print -r -- "selftest: ${label} -> summary.md incorrectly reported Overall PASS for a signal delivered outside any step"
+                case_failures=$((case_failures + 1))
+            fi
+            if grep -qF -- "- ${STEP_LABEL[strictbuild]}: PASS" "$summary"; then
+                print -r -- "selftest: ${label} -> the already-completed step still correctly shows PASS: ok"
+            else
+                print -r -- "selftest: ${label} -> the already-completed step's own PASS was lost"
+                case_failures=$((case_failures + 1))
+            fi
+            if has_private_path "$summary"; then
+                print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no private path in summary.md (expected): ok"
+            fi
+        fi
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+# run_finalize_interrupt_selftest_case — a deterministic trigger of a
+# signal landing WHILE finalize_run itself is running (SUMMARY_STATE ==
+# "finalizing"): every step passes via fastpass, then finalize_run pauses
+# right after entering "finalizing" via the self-test-only hook, and TERM
+# is delivered there. Must still produce a complete, atomically-written,
+# fully-redacted summary.md (deferred termination, not an aborted
+# mid-write), reporting Overall FAIL because the run was interrupted.
+run_finalize_interrupt_selftest_case() {
+    local label="signal TERM during finalize_run"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local pause_ready_file="${case_tmp}/finalize-pause-ready"
+    local pause_go_file="${case_tmp}/finalize-pause-go"
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}"/.build/ipad-vertical-slice/*(N))
+
+    (
+        unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
+        local k
+        for k in "${STEP_ORDER[@]}"; do
+            export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="${FASTPASS_CMD[$k]}"
+        done
+        export LUMAHARBOR_IPAD_SELFTEST_FINALIZE_PAUSE_FILE="$pause_go_file"
+        export LUMAHARBOR_IPAD_SELFTEST_FINALIZE_PAUSE_READY_FILE="$pause_ready_file"
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    local child_pid=$!
+
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$pause_ready_file" ]]; do
+        sleep 0.02
+    done
+
+    if [[ ! -f "$pause_ready_file" ]]; then
+        print -r -- "selftest: ${label} -> the runner never reached the finalize_run pause"
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+        rm -rf -- "$case_tmp"
+        (( case_failures == 0 ))
+        return
+    fi
+
+    local new_dir="" d
+    for d in "${ROOT_DIR}"/.build/ipad-vertical-slice/*(N); do
+        if (( ${before_dirs[(Ie)$d]} == 0 )); then
+            new_dir="$d"
+            break
+        fi
+    done
+
+    kill -s TERM "$child_pid" 2>/dev/null || true
+    # Give the deferred-termination design a moment to prove it is still
+    # making progress (resuming finalize_run) rather than dying immediately,
+    # before letting it actually finish.
+    sleep 0.3
+    touch "$pause_go_file"
+
+    local rc=0
+    wait "$child_pid" 2>/dev/null || rc=$?
+
+    if (( rc == 143 )); then
+        print -r -- "selftest: ${label} -> exit code ${rc} (expected 143): ok"
+    else
+        print -r -- "selftest: ${label} -> exit code ${rc}, expected 143"
+        case_failures=$((case_failures + 1))
+    fi
+
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
+        case_failures=$((case_failures + 1))
+    else
+        local summary="${new_dir}/summary.md"
+        if [[ ! -f "$summary" ]]; then
+            print -r -- "selftest: ${label} -> no summary.md was written despite the deferred-termination design"
+            case_failures=$((case_failures + 1))
+        else
+            print -r -- "selftest: ${label} -> summary.md was written despite the signal landing mid-finalize_run (expected): ok"
+            if grep -q '^Overall result: FAIL$' "$summary"; then
+                print -r -- "selftest: ${label} -> Overall result: FAIL (expected, the run was interrupted even though every step had already passed): ok"
+            else
+                print -r -- "selftest: ${label} -> summary.md incorrectly reported Overall PASS despite the interruption"
+                case_failures=$((case_failures + 1))
+            fi
+            if has_private_path "$summary"; then
+                print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> no private path in summary.md (expected): ok"
+            fi
+        fi
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+# run_concurrent_runs_selftest_case — two fastpass runners launched back to
+# back, virtually guaranteed to land in the same UTC second: must get two
+# distinct, exclusively-created run directories, never share or clobber
+# one another's logs/summary.md.
+run_concurrent_runs_selftest_case() {
+    local label="concurrent runs get isolated run directories"
+    local case_failures=0
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}"/.build/ipad-vertical-slice/*(N))
+
+    local pid_a pid_b
+    (
+        unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
+        local k
+        for k in "${STEP_ORDER[@]}"; do
+            export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="${FASTPASS_CMD[$k]}"
+        done
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    pid_a=$!
+    (
+        unset LUMAHARBOR_IPAD_RUNNER_SELFTEST
+        export LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER="$SELFTEST_CHILD_MARKER"
+        local k
+        for k in "${STEP_ORDER[@]}"; do
+            export "LUMAHARBOR_IPAD_SELFTEST_${k:u}_CMD"="${FASTPASS_CMD[$k]}"
+        done
+        exec "$SCRIPT_PATH"
+    ) >/dev/null 2>&1 &
+    pid_b=$!
+
+    local rc_a=0 rc_b=0
+    wait "$pid_a" 2>/dev/null || rc_a=$?
+    wait "$pid_b" 2>/dev/null || rc_b=$?
+
+    if (( rc_a == 0 && rc_b == 0 )); then
+        print -r -- "selftest: ${label} -> both concurrent runs exited 0 (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> exit codes were ${rc_a} and ${rc_b}, expected 0 and 0"
+        case_failures=$((case_failures + 1))
+    fi
+
+    local -a new_dirs=()
+    local d
+    for d in "${ROOT_DIR}"/.build/ipad-vertical-slice/*(N); do
+        if (( ${before_dirs[(Ie)$d]} == 0 )); then
+            new_dirs+=("$d")
+        fi
+    done
+
+    if (( ${#new_dirs[@]} == 2 )); then
+        print -r -- "selftest: ${label} -> exactly two new, distinct run directories were created (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> found ${#new_dirs[@]} new run director(y/ies), expected 2 — a collision would show up as 1"
+        case_failures=$((case_failures + 1))
+    fi
+
+    local both_pass=1
+    for d in "${new_dirs[@]}"; do
+        if [[ ! -f "${d}/summary.md" ]] || ! grep -q '^Overall result: PASS$' "${d}/summary.md"; then
+            both_pass=0
+        fi
+    done
+    if (( ${#new_dirs[@]} == 2 && both_pass )); then
+        print -r -- "selftest: ${label} -> both run directories have their own Overall PASS summary.md: ok"
+    else
+        print -r -- "selftest: ${label} -> at least one run directory is missing an Overall PASS summary.md"
+        case_failures=$((case_failures + 1))
+    fi
+
+    (( case_failures == 0 ))
+}
+
 run_selftest() {
     local failures=0
     local tmp
@@ -1138,8 +1816,25 @@ run_selftest() {
         print -r -- "selftest: parser two-failures -> FAIL (expected): ok"
     fi
 
-    # --- Redaction correctness: masks private paths, preserves relative
-    # source locations, test counts and error text untouched. ---
+    print -r -- "Executed 0 tests, with 0 failures (0 unexpected) in 0.01 (0.01) seconds" > "${tmp}/zero-executed.log"
+    if evaluate_xctest_log "${tmp}/zero-executed.log" >/dev/null; then
+        print -r -- "selftest: parser executed-zero -> unexpectedly PASSED (an empty run must never count as a pass)"
+        failures=$((failures + 1))
+    else
+        print -r -- "selftest: parser executed-zero -> FAIL (expected): ok"
+    fi
+
+    print -r -- "Executed 1 test, with 0 failures (0 unexpected) in 0.01 (0.01) seconds" > "${tmp}/one-executed.log"
+    if evaluate_xctest_log "${tmp}/one-executed.log" >/dev/null; then
+        print -r -- "selftest: parser executed-one -> PASS (expected, a real non-empty run): ok"
+    else
+        print -r -- "selftest: parser executed-one -> unexpectedly FAILED"
+        failures=$((failures + 1))
+    fi
+
+    # --- Redaction correctness: masks private paths (including ones with
+    # embedded spaces, Traditional Chinese, quotes and parens), preserves
+    # relative source locations, test counts and error text untouched. ---
     local sample="${tmp}/sample.log"
     {
         print -r -- "error at ${ROOT_DIR}/Sources/Foo.swift:12:5: bad thing happened"
@@ -1147,11 +1842,24 @@ run_selftest() {
         print -r -- "note: external drive /Volumes/SomeDrive/file.ARW"
         print -r -- "note: scratch /private/tmp/abc123/x"
         print -r -- "note: var scratch /private/var/folders/xy/abc/T/thing"
+        print -r -- 'note: unquoted volume with a space /Volumes/Client Photos/secret.ARW copy failed'
+        print -r -- 'note: quoted volume with a space "/Volumes/Client Photos/secret.ARW" copy failed'
+        print -r -- "note: unicode volume /Volumes/客戶照片/機密檔案.ARW copy failed"
+        print -r -- "note: parens (see /Users/someone/My Documents/notes.txt) for detail"
         print -r -- "Executed 4 tests, with 0 failures (0 unexpected) in 0.01 (0.01) seconds"
     } > "$sample"
     redact_file "$sample"
     local redaction_ok=1
     if has_private_path "$sample"; then
+        redaction_ok=0
+    fi
+    if grep -qF -- 'Client Photos' "$sample" || grep -qF -- 'secret.ARW' "$sample"; then
+        redaction_ok=0
+    fi
+    if grep -qF -- '客戶照片' "$sample" || grep -qF -- '機密檔案' "$sample"; then
+        redaction_ok=0
+    fi
+    if grep -qF -- 'My Documents' "$sample" || grep -qF -- 'notes.txt' "$sample"; then
         redaction_ok=0
     fi
     if ! grep -qF -- '<REPO_ROOT>/Sources/Foo.swift:12:5: bad thing happened' "$sample"; then
@@ -1161,7 +1869,7 @@ run_selftest() {
         redaction_ok=0
     fi
     if (( redaction_ok )); then
-        print -r -- "selftest: redaction masks private paths and preserves counts/relative paths: ok"
+        print -r -- "selftest: redaction masks private paths (space/Unicode/quotes/parens included) and preserves counts/relative paths: ok"
     else
         print -r -- "selftest: redaction check FAILED"
         failures=$((failures + 1))
@@ -1169,9 +1877,48 @@ run_selftest() {
 
     rm -rf -- "$tmp"
 
+    # --- xcodebuild missing/failing must never abort finalize_run: verified
+    # directly against collect_xcode_version, since actually spawning a
+    # whole runner subprocess just to prove this would be much slower and
+    # less precise than exercising the exact function this bug lived in. ---
+    local xcode_scratch_bin
+    xcode_scratch_bin="$(mktemp -d)"
+    local missing_result
+    missing_result="$( (PATH="$xcode_scratch_bin"; collect_xcode_version) )"
+    if [[ "$missing_result" == "unknown" ]]; then
+        print -r -- "selftest: collect_xcode_version with xcodebuild missing -> 'unknown' (expected): ok"
+    else
+        print -r -- "selftest: collect_xcode_version with xcodebuild missing -> '${missing_result}', expected 'unknown'"
+        failures=$((failures + 1))
+    fi
+    local fake_failing_xcodebuild="${xcode_scratch_bin}/xcodebuild"
+    {
+        print -r -- '#!/usr/bin/env zsh'
+        print -r -- 'exit 1'
+    } > "$fake_failing_xcodebuild"
+    chmod +x "$fake_failing_xcodebuild"
+    local failing_result
+    failing_result="$( (PATH="$xcode_scratch_bin"; collect_xcode_version) )"
+    if [[ "$failing_result" == "unknown" ]]; then
+        print -r -- "selftest: collect_xcode_version with xcodebuild failing -> 'unknown' (expected): ok"
+    else
+        print -r -- "selftest: collect_xcode_version with xcodebuild failing -> '${failing_result}', expected 'unknown'"
+        failures=$((failures + 1))
+    fi
+    rm -rf -- "$xcode_scratch_bin"
+
     # --- Fake step commands for the lifecycle/signal cases below. ---
     local helper_dir
     helper_dir="$(mktemp -d)"
+
+    # The child-mode marker step_command_for's override gate requires (see
+    # its own comment) — a file path fresh to this exact self-test
+    # invocation, threaded explicitly into every case's spawned child below.
+    # Deleted along with the rest of helper_dir the moment this self-test
+    # run ends.
+    SELFTEST_CHILD_MARKER="${helper_dir}/child-marker"
+    touch "$SELFTEST_CHILD_MARKER"
+
     local fake_swifttest_helper="${helper_dir}/fake-swifttest.zsh"
     {
         print -r -- '#!/usr/bin/env zsh'
@@ -1244,6 +1991,11 @@ run_selftest() {
     run_fakepass_selftest_case || failures=$((failures + 1))
     run_missinghelper_selftest_case || failures=$((failures + 1))
     run_ready_handshake_failure_selftest_case || failures=$((failures + 1))
+    run_override_rejected_outside_selftest_case || failures=$((failures + 1))
+    run_timeout_selftest_case || failures=$((failures + 1))
+    run_outside_step_signal_selftest_case || failures=$((failures + 1))
+    run_finalize_interrupt_selftest_case || failures=$((failures + 1))
+    run_concurrent_runs_selftest_case || failures=$((failures + 1))
 
     rm -rf -- "$helper_dir"
 
@@ -1280,13 +2032,41 @@ if [[ -n "${LUMAHARBOR_IPAD_STEP_TIMEOUT_SECONDS:-}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Per-run scratch directory.
+# Per-run scratch directory. Exclusive, not `mkdir -p`: two runners started
+# in the same UTC second used to collide on an identical directory name and
+# silently share (and clobber) each other's logs and summary.md. The
+# candidate name folds in this process's own PID and two random components
+# on top of the timestamp, and `mkdir` (no -p) on the leaf component fails
+# atomically if that exact path already exists — the loop below only exists
+# as a defensive retry for the astronomically unlikely case of a collision
+# even with that much entropy, never silently falling back to a shared dir.
 # ---------------------------------------------------------------------------
 
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_DIR="${ROOT_DIR}/.build/ipad-vertical-slice/${TIMESTAMP}"
-mkdir -p -- "$RUN_DIR"
+mkdir -p -- "${ROOT_DIR}/.build/ipad-vertical-slice"
+RUN_DIR=""
+run_dir_attempt=0
+while (( run_dir_attempt < 20 )); do
+    run_dir_candidate="${ROOT_DIR}/.build/ipad-vertical-slice/${TIMESTAMP}-$$-${RANDOM}${RANDOM}${RANDOM}"
+    if mkdir -- "$run_dir_candidate" 2>/dev/null; then
+        RUN_DIR="$run_dir_candidate"
+        break
+    fi
+    run_dir_attempt=$((run_dir_attempt + 1))
+done
+if [[ -z "$RUN_DIR" ]]; then
+    print -u2 -r -- "error: could not create a unique run directory after ${run_dir_attempt} attempts"
+    exit 1
+fi
+RUN_DIR_NAME="${RUN_DIR:t}"
 SUMMARY_FILE="${RUN_DIR}/summary.md"
+
+# Repo state at the moment the run starts — compared against the state at
+# finalize_run time (see finalize_run's own "## Repo state" section) so a
+# long-running build/test cannot silently get attributed to a different
+# commit than the one it actually ran against.
+START_HEAD="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || print -r -- unknown)"
+START_DIRTY="$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
 
 overall_ok=1
 RUNNER_PREFLIGHT_REASON=""
@@ -1336,7 +2116,22 @@ if ! runner_preflight; then
         STEP_STATE[$local_key]="SKIPPED (runner preflight failed: ${RUNNER_PREFLIGHT_REASON})"
     done
     finalize_run
+    if [[ -n "$DEFERRED_SIGNAL" ]]; then
+        exit_for_signal "$DEFERRED_SIGNAL"
+    fi
     exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Self-test-only inter-step pause, gated behind the same child-mode marker
+# every other self-test hook requires — a normal run can never stall here.
+# Lets a test deterministically land a signal in the gap between two steps
+# (CURRENT_STEP_KEY genuinely empty, not mid-step) instead of racing it.
+# ---------------------------------------------------------------------------
+
+selftest_child_mode_active=0
+if [[ -n "${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}" && -f "${LUMAHARBOR_IPAD_SELFTEST_CHILD_MARKER:-}" ]]; then
+    selftest_child_mode_active=1
 fi
 
 # ---------------------------------------------------------------------------
@@ -1352,7 +2147,16 @@ for step_key in "${STEP_ORDER[@]}"; do
         continue
     fi
     if run_step "$step_key"; then
-        :
+        if (( selftest_child_mode_active )) \
+            && [[ "${step_key}" == "${LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_PAUSE_AFTER:-}" ]] \
+            && [[ -n "${LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_READY_FILE:-}" ]]; then
+            touch "${LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_READY_FILE}"
+            interstep_pause_deadline=$((SECONDS + 30))
+            while (( SECONDS < interstep_pause_deadline )) \
+                && [[ ! -f "${LUMAHARBOR_IPAD_SELFTEST_INTERSTEP_GO_FILE:-}" ]]; do
+                sleep 0.02
+            done
+        fi
     else
         overall_ok=0
         blocked=1
@@ -1361,6 +2165,10 @@ for step_key in "${STEP_ORDER[@]}"; do
 done
 
 finalize_run
+
+if [[ -n "$DEFERRED_SIGNAL" ]]; then
+    exit_for_signal "$DEFERRED_SIGNAL"
+fi
 
 (( overall_ok )) || exit 1
 exit 0
