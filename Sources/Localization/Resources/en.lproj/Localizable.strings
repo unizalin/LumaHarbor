@@ -58,6 +58,7 @@
 "Delete the local index and rescan your folders to rebuild it." = "Delete the local index and rescan your folders to rebuild it.";
 "Delete" = "Delete";
 "Double-click the row to reset" = "Double-click the row to reset";
+"Drag to move this panel." = "Drag to move this panel.";
 "Edit in Place" = "Edit in Place";
 "Export a full-resolution JPEG" = "Export a full-resolution JPEG";
 "Export failed" = "Export failed";
@@ -74,6 +75,7 @@
 "Favorites" = "Favorites";
 "Fields included:" = "Fields included:";
 "Filter presets" = "Filter presets";
+"Focus Mode" = "Focus Mode";
 "found" = "found";
 "Free up space on the drive, then retry." = "Free up space on the drive, then retry.";
 "Free up space on your startup disk, or lower the cache limit in Settings." = "Free up space on your startup disk, or lower the cache limit in Settings.";
@@ -270,6 +272,7 @@
 "Wait for the current scan to finish, then try again." = "Wait for the current scan to finish, then try again.";
 "White Balance" = "White Balance";
 "Whites" = "Whites";
+"Work Mode" = "Work Mode";
 "Yellow" = "Yellow";
 "Your edits couldn't be saved." = "Your edits couldn't be saved.";
 "Your photos are still browsable." = "Your photos are still browsable.";
