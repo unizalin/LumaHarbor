@@ -623,7 +623,7 @@ public final class EditorSession: ObservableObject {
             // here, not just the preview-only path above.
             previewImage = nil
             decodeFailed = true
-            alert = EditorAlert(title: L10n.t("Couldn't show this photo"), error: error)
+            alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't show this photo"), for: error)
         }
     }
 
@@ -663,11 +663,8 @@ public final class EditorSession: ObservableObject {
             }
             onSaved?(photo.id, !adjustments.isNeutral)
         } catch {
-            saveState = .failed(
-                (error as? LocalizedError)?.errorDescription
-                    ?? (error as NSError).localizedDescription
-            )
-            alert = EditorAlert(title: L10n.t("Couldn't save your edits"), error: error)
+            saveState = .failed(SafeErrorPresentation.message(for: error))
+            alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't save your edits"), for: error)
         }
     }
 

@@ -1029,4 +1029,69 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents"))
         assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
     }
+
+    // MARK: - rollbackDocument / updateSourceBookmark (Task 6 hardening)
+
+    func testRollbackDocumentRemovesAnAppCopysRecordSidecarAndCopyButNeverTheSource() async throws {
+        let sourceURL = try makeSourceFile()
+        let originalSourceBytes = try Data(contentsOf: sourceURL)
+        let (store, rootURL) = makeStore()
+
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: document.workingURL.path))
+
+        let removed = await store.rollbackDocument(document)
+        XCTAssertTrue(removed)
+
+        do {
+            _ = try await store.loadDocument(id: document.id)
+            XCTFail("Expected the rolled-back document's record to be gone")
+        } catch PhotoDocumentError.documentNotFound(document.id) {
+            // expected
+        }
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Documents").appendingPathComponent(document.id.uuidString))
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Sidecars").appendingPathComponent(document.id.uuidString))
+        // The external source must never be touched by a rollback.
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalSourceBytes)
+    }
+
+    func testRollbackDocumentRemovesAnInPlaceRecordAndSidecarButNeverTheExternalRAW() async throws {
+        let sourceURL = try makeSourceFile()
+        let originalSourceBytes = try Data(contentsOf: sourceURL)
+        let (store, rootURL) = makeStore()
+
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
+
+        let removed = await store.rollbackDocument(document)
+        XCTAssertTrue(removed)
+
+        do {
+            _ = try await store.loadDocument(id: document.id)
+            XCTFail("Expected the rolled-back document's record to be gone")
+        } catch PhotoDocumentError.documentNotFound(document.id) {
+            // expected
+        }
+        assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Sidecars").appendingPathComponent(document.id.uuidString))
+        // The RAW at `workingURL` (== `sourceURL` in-place) must survive intact.
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalSourceBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path))
+    }
+
+    func testUpdateSourceBookmarkRewritesOnlyThatFieldAtomically() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+        let original = "original-bookmark".data(using: .utf8)!
+        let refreshed = "refreshed-bookmark".data(using: .utf8)!
+
+        let document = try await store.openInPlace(sourceURL, bookmarkData: original)
+        try await store.updateSourceBookmark(refreshed, documentID: document.id)
+
+        let reloaded = try await store.loadDocument(id: document.id)
+        XCTAssertEqual(reloaded.sourceBookmarkData, refreshed)
+        XCTAssertEqual(reloaded.workingURL, document.workingURL)
+        XCTAssertEqual(reloaded.storageMode, .inPlace)
+        XCTAssertEqual(reloaded.workingFingerprint, document.workingFingerprint)
+    }
 }

@@ -26,6 +26,7 @@ struct PadEditorView: View {
                 Button(L10n.t("Close")) {
                     Task { await model.closeCurrentDocument() }
                 }
+                .disabled(model.isPreparingDocument)
             }
         }
         .alert(item: $editor.alert) { alert in

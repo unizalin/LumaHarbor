@@ -39,6 +39,7 @@
 "Couldn't export this preset" = "Couldn't export this preset";
 "Couldn't find an unused filename for" = "Couldn't find an unused filename for";
 "Couldn't open this photo" = "Couldn't open this photo";
+"Couldn't reopen your last photo" = "Couldn't reopen your last photo";
 "Couldn't read saved edits" = "Couldn't read saved edits";
 "Couldn't read the file." = "Couldn't read the file.";
 "Couldn't read the local index" = "Couldn't read the local index";
@@ -97,7 +98,9 @@
 "LumaHarbor couldn't remember access to that folder." = "LumaHarbor couldn't remember access to that folder.";
 "LumaHarbor couldn't start up" = "LumaHarbor couldn't start up";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor is already importing or cleaning up another photo.";
+"LumaHarbor couldn't write your edits to disk." = "LumaHarbor couldn't write your edits to disk.";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor looks for camera RAW files such as Sony .ARW.";
+"LumaHarbor no longer has access to this file." = "LumaHarbor no longer has access to this file.";
 "LumaHarbor no longer has access to this photo folder." = "LumaHarbor no longer has access to this photo folder.";
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten.";
 "LumaHarbor's local index couldn't be opened." = "LumaHarbor's local index couldn't be opened.";
@@ -184,7 +187,9 @@
 "Show Original" = "Show Original";
 "Size" = "Size";
 "skipped" = "skipped";
+"Something went wrong." = "Something went wrong.";
 "Split Toning" = "Split Toning";
+"Startup cleanup incomplete" = "Startup cleanup incomplete";
 "Stop" = "Stop";
 "Temperature" = "Temperature";
 "That export location is read-only." = "That export location is read-only.";
@@ -205,6 +210,7 @@
 "The operation was cancelled." = "The operation was cancelled.";
 "The original file changed while LumaHarbor was copying it, so nothing was saved." = "The original file changed while LumaHarbor was copying it, so nothing was saved.";
 "The original file is not available at" = "The original file is not available at";
+"The original file isn't available right now." = "The original file isn't available right now.";
 "The RAW file couldn't be decoded." = "The RAW file couldn't be decoded.";
 "The RAW original is never modified." = "The RAW original is never modified.";
 "The saved edits for this photo are damaged." = "The saved edits for this photo are damaged.";
