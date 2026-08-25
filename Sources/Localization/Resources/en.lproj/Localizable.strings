@@ -37,8 +37,10 @@
 "Couldn't create this preset" = "Couldn't create this preset";
 "Couldn't delete this preset" = "Couldn't delete this preset";
 "Couldn't export this preset" = "Couldn't export this preset";
+"Couldn't close this photo" = "Couldn't close this photo";
 "Couldn't find an unused filename for" = "Couldn't find an unused filename for";
 "Couldn't open this photo" = "Couldn't open this photo";
+"Couldn't switch photos" = "Couldn't switch photos";
 "Couldn't reopen your last photo" = "Couldn't reopen your last photo";
 "Couldn't read saved edits" = "Couldn't read saved edits";
 "Couldn't read the file." = "Couldn't read the file.";
@@ -92,10 +94,16 @@
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor can show cached thumbnails, but editing needs the original file.";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor couldn't check for interrupted imports on launch.";
 "LumaHarbor couldn't find this photo's saved document." = "LumaHarbor couldn't find this photo's saved document.";
+"LumaHarbor couldn't finish cleaning up after a photo that failed to open." = "LumaHarbor couldn't finish cleaning up after a photo that failed to open.";
 "LumaHarbor couldn't finish cleaning up an earlier interrupted import." = "LumaHarbor couldn't finish cleaning up an earlier interrupted import.";
+"LumaHarbor couldn't finish saving the photo you had open." = "LumaHarbor couldn't finish saving the photo you had open.";
+"LumaHarbor couldn't finish saving this photo." = "LumaHarbor couldn't finish saving this photo.";
 "LumaHarbor couldn't get permission to read this file." = "LumaHarbor couldn't get permission to read this file.";
 "LumaHarbor couldn't open this photo." = "LumaHarbor couldn't open this photo.";
 "LumaHarbor couldn't remember access to that folder." = "LumaHarbor couldn't remember access to that folder.";
+"LumaHarbor couldn't remember access to this photo for next time." = "LumaHarbor couldn't remember access to this photo for next time.";
+"LumaHarbor couldn't remember that this photo was closed." = "LumaHarbor couldn't remember that this photo was closed.";
+"LumaHarbor couldn't remember this photo for next time." = "LumaHarbor couldn't remember this photo for next time.";
 "LumaHarbor couldn't start up" = "LumaHarbor couldn't start up";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor is already importing or cleaning up another photo.";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor looks for camera RAW files such as Sony .ARW.";
@@ -228,6 +236,7 @@
 "This drive is read-only, so edits can't be saved." = "This drive is read-only, so edits can't be saved.";
 "This drive is read-only, so LumaHarbor can't write next to your photos." = "This drive is read-only, so LumaHarbor can't write next to your photos.";
 "This drive isn't connected" = "This drive isn't connected";
+"This file changed while LumaHarbor was checking it." = "This file changed while LumaHarbor was checking it.";
 "This file couldn't be read" = "This file couldn't be read";
 "This Library" = "This Library";
 "This library's index file is damaged." = "This library's index file is damaged.";

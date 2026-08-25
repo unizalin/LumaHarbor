@@ -30,6 +30,15 @@ public struct PhotoDocument: Codable, Equatable, Sendable, Identifiable {
     /// on its own.
     public let sourceFingerprint: FileFingerprint
     public let workingFingerprint: FileFingerprint
+    /// Streaming SHA-256 over the *entire* working file, computed once when
+    /// the document is created (see `ContentDigestCalculator`) — unlike
+    /// `sourceFingerprint`/`workingFingerprint`, which only sample the first
+    /// and last MiB of a file over `FingerprintCalculator.wholeFileThreshold`.
+    /// This is what `relinkInPlaceDocument` compares against a relink
+    /// candidate, since a sampled fingerprint cannot prove full-file
+    /// identity for a large RAW. `nil` only for a document created before
+    /// this field existed; see `RelinkError` for how relink handles that.
+    public let contentDigestSHA256: String?
 
     public init(
         id: UUID = UUID(),
@@ -38,7 +47,8 @@ public struct PhotoDocument: Codable, Equatable, Sendable, Identifiable {
         sourceURL: URL,
         sourceBookmarkData: Data?,
         sourceFingerprint: FileFingerprint,
-        workingFingerprint: FileFingerprint
+        workingFingerprint: FileFingerprint,
+        contentDigestSHA256: String? = nil
     ) {
         self.id = id
         self.storageMode = storageMode
@@ -47,6 +57,7 @@ public struct PhotoDocument: Codable, Equatable, Sendable, Identifiable {
         self.sourceBookmarkData = sourceBookmarkData
         self.sourceFingerprint = sourceFingerprint
         self.workingFingerprint = workingFingerprint
+        self.contentDigestSHA256 = contentDigestSHA256
     }
 }
 
@@ -141,6 +152,28 @@ public struct PhotoDocumentRollbackReport: Equatable, Sendable {
     }
 }
 
+/// Result of `PhotoDocumentStore.finalizeCreation(_:)`.
+public enum PhotoDocumentFinalizeOutcome: Equatable, Sendable {
+    /// The record was durably written as `.committed`. The receipt is now
+    /// consumed and the creation's per-document lease has been released.
+    case committed
+    /// The durable write did not succeed (couldn't load the record, encode
+    /// it, or write it to disk). The record is still `.pending`, the
+    /// receipt is still valid, and the per-document lease is still held —
+    /// safe, and necessary, to call again once whatever's blocking the
+    /// write clears.
+    case retryRequired
+    /// This creation was already finalized by an earlier call; nothing was
+    /// touched.
+    case alreadyFinalized
+    /// This creation was already rolled back by an earlier call; nothing
+    /// was touched.
+    case alreadyRolledBack
+    /// The receipt isn't one this store instance recognizes at all. Should
+    /// be unreachable given `PhotoDocumentCreation`'s contract.
+    case unknownReceipt
+}
+
 public enum PhotoDocumentError: Error, Equatable, Sendable {
     /// The copy's bytes didn't match the source after copying. The partial
     /// copy and any document record have already been removed.
@@ -163,8 +196,19 @@ public enum RelinkError: Error, Equatable, Sendable {
     /// The document being relinked isn't `.inPlace` — an `.appCopy`
     /// document never loses access to its working file this way.
     case notInPlace
-    /// `candidateURL`'s content fingerprint doesn't match the document's
-    /// original `sourceFingerprint`. Nothing was changed — the existing
-    /// record, sidecar and adjustments are all still exactly as they were.
+    /// `candidateURL`'s full-content digest doesn't match the document's
+    /// stored `contentDigestSHA256`. Nothing was changed.
+    case contentMismatch
+    /// The document predates full-content digests (`contentDigestSHA256
+    /// == nil`) and `candidateURL`'s *sampled* fingprint doesn't match the
+    /// document's original `sourceFingerprint`. This legacy path is a
+    /// weaker guarantee than `.contentMismatch` — see
+    /// `PhotoDocumentStore.relinkInPlaceDocument` — but a mismatch here is
+    /// still conclusive: nothing was changed.
     case fingerprintMismatch
+    /// `candidateURL` changed (size, modification date, or resource
+    /// identifier) between the start and end of verifying it — the file
+    /// picked may no longer be the one that was actually checked. Nothing
+    /// was changed.
+    case sourceModifiedDuringRelink
 }

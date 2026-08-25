@@ -37,8 +37,10 @@
 "Couldn't create this preset" = "無法建立這個 Preset";
 "Couldn't delete this preset" = "無法刪除這個 Preset";
 "Couldn't export this preset" = "無法匯出這個 Preset";
+"Couldn't close this photo" = "無法關閉這張照片";
 "Couldn't find an unused filename for" = "找不到可用的檔名：";
 "Couldn't open this photo" = "無法開啟這張照片";
+"Couldn't switch photos" = "無法切換照片";
 "Couldn't reopen your last photo" = "無法重新開啟你上次的照片";
 "Couldn't read saved edits" = "無法讀取已儲存的編輯";
 "Couldn't read the file." = "無法讀取這個檔案。";
@@ -91,11 +93,17 @@
 "Keep the file in your library — support may arrive in a future macOS release." = "先把檔案留在相片庫中──未來的 macOS 版本可能會支援。";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor 可以顯示已快取的縮圖，但編輯需要原始檔案。";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor 啟動時無法檢查是否有中斷的匯入。";
+"LumaHarbor couldn't finish cleaning up after a photo that failed to open." = "LumaHarbor 無法完成清理一張開啟失敗的照片。";
+"LumaHarbor couldn't finish saving the photo you had open." = "LumaHarbor 無法完成儲存你原本開啟的照片。";
+"LumaHarbor couldn't finish saving this photo." = "LumaHarbor 無法完成儲存這張照片。";
 "LumaHarbor couldn't find this photo's saved document." = "LumaHarbor 找不到這張照片已儲存的文件。";
 "LumaHarbor couldn't finish cleaning up an earlier interrupted import." = "LumaHarbor 無法完成清理先前中斷的匯入。";
 "LumaHarbor couldn't get permission to read this file." = "LumaHarbor 沒有取得讀取這個檔案的權限。";
 "LumaHarbor couldn't open this photo." = "LumaHarbor 無法開啟這張照片。";
 "LumaHarbor couldn't remember access to that folder." = "LumaHarbor 無法記住這個資料夾的存取權限。";
+"LumaHarbor couldn't remember access to this photo for next time." = "LumaHarbor 無法記住下次存取這張照片所需的權限。";
+"LumaHarbor couldn't remember that this photo was closed." = "LumaHarbor 無法記住這張照片已經關閉。";
+"LumaHarbor couldn't remember this photo for next time." = "LumaHarbor 無法記住這張照片，供下次使用。";
 "LumaHarbor couldn't start up" = "LumaHarbor 無法啟動";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor 正在匯入或清理另一張照片。";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor 會尋找相機 RAW 檔案，例如 Sony .ARW。";
@@ -228,6 +236,7 @@
 "This drive is read-only, so edits can't be saved." = "這個磁碟是唯讀的，所以無法儲存編輯。";
 "This drive is read-only, so LumaHarbor can't write next to your photos." = "這個磁碟是唯讀的，所以 LumaHarbor 無法把檔案寫在照片旁邊。";
 "This drive isn't connected" = "這個磁碟未連接";
+"This file changed while LumaHarbor was checking it." = "這個檔案在 LumaHarbor 檢查時發生了變動。";
 "This file couldn't be read" = "這個檔案無法讀取";
 "This Library" = "此照片庫";
 "This library's index file is damaged." = "這個相片庫的索引檔案已經損壞。";
