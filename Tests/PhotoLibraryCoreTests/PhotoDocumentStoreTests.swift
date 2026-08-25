@@ -446,7 +446,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // Simulates a kill partway through the copy: only the staging file exists.
         try Data(repeating: 0x11, count: 128).write(to: orphanDirectory.appendingPathComponent(".importing"))
 
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertEqual(report.removedOrphanIDs, [orphanID])
         XCTAssertTrue(report.failures.isEmpty)
@@ -469,7 +469,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
             // expected
         }
 
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertEqual(report.removedOrphanIDs, [orphanID])
         XCTAssertFalse(FileManager.default.fileExists(atPath: orphanDirectory.path))
@@ -488,7 +488,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // No active document remembered at all: a committed record must
         // survive regardless, since only `.pending` records are ever
         // subject to the active-ID promote-or-rollback decision.
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
         XCTAssertFalse(report.removedOrphanIDs.contains(document.id))
         XCTAssertFalse(report.rolledBackPendingIDs.contains(document.id))
 
@@ -525,7 +525,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         await firstProcessStore.releaseAllPendingLeasesForTesting()
 
         let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
-        let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await secondProcessStore.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertTrue(report.rolledBackPendingIDs.contains(documentID))
         do {
@@ -553,7 +553,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         await firstProcessStore.releaseAllPendingLeasesForTesting()
 
         let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
-        let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await secondProcessStore.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertTrue(report.rolledBackPendingIDs.contains(documentID))
         do {
@@ -585,7 +585,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         await firstProcessStore.releaseAllPendingLeasesForTesting()
 
         let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
-        let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: documentID)
+        let report = try await secondProcessStore.reconcileOrphanedImports(activePointer: .active(documentID))
 
         XCTAssertTrue(report.promotedPendingIDs.contains(documentID))
         XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
@@ -597,7 +597,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // Now genuinely committed: a *later* launch with no (or a
         // different) active ID must no longer touch it.
         let thirdProcessStore = PhotoDocumentStore(rootURL: rootURL)
-        let laterReport = try await thirdProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
+        let laterReport = try await thirdProcessStore.reconcileOrphanedImports(activePointer: .noActiveDocument)
         XCTAssertFalse(laterReport.rolledBackPendingIDs.contains(documentID))
         _ = try await thirdProcessStore.loadDocument(id: documentID)
     }
@@ -627,7 +627,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // A mismatched (or absent) active ID would roll back a genuinely
         // `.pending` record -- proving this one survives is what shows it
         // was correctly read as `.committed`.
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
         XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
         XCTAssertFalse(report.promotedPendingIDs.contains(documentID), "a legacy record is already committed -- there is nothing to promote")
         _ = try await store.loadDocument(id: documentID)
@@ -707,7 +707,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertNil(RawPendingLockHandle(rootURL: rootURL, documentID: documentID), "the lease must still be held by storeA's in-flight creation")
 
         let storeB = PhotoDocumentStore(rootURL: rootURL)
-        let report = try await storeB.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await storeB.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID), "storeA's still-in-flight creation must not be rolled back out from under it")
         XCTAssertFalse(report.promotedPendingIDs.contains(documentID))
@@ -735,7 +735,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertNil(RawPendingLockHandle(rootURL: rootURL, documentID: documentID), "the lease must still be held by storeA's in-flight creation")
 
         let storeB = PhotoDocumentStore(rootURL: rootURL)
-        let report = try await storeB.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await storeB.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
         _ = try await storeB.loadDocument(id: documentID)
@@ -754,7 +754,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let documentID = creation.document.id
 
         let storeB = PhotoDocumentStore(rootURL: rootURL)
-        let tooEarly = try await storeB.reconcileOrphanedImports(activeDocumentID: documentID)
+        let tooEarly = try await storeB.reconcileOrphanedImports(activePointer: .active(documentID))
         XCTAssertFalse(tooEarly.promotedPendingIDs.contains(documentID), "must not promote while the lease is still held -- the creation might still be actively being worked on")
         XCTAssertTrue(tooEarly.rolledBackPendingIDs.isEmpty)
         XCTAssertTrue(tooEarly.failures.isEmpty, "a held lease is not a failure -- it is correctly and quietly skipped")
@@ -763,7 +763,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // -- see `releaseAllPendingLeasesForTesting()`.
         await storeA.releaseAllPendingLeasesForTesting()
 
-        let afterCrash = try await storeB.reconcileOrphanedImports(activeDocumentID: documentID)
+        let afterCrash = try await storeB.reconcileOrphanedImports(activePointer: .active(documentID))
         XCTAssertTrue(afterCrash.promotedPendingIDs.contains(documentID), "now that the lease is free, the still-matching active ID promotes it")
         _ = try await storeB.loadDocument(id: documentID)
     }
@@ -859,7 +859,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // `releaseAllPendingLeasesForTesting()`.
         await store.releaseAllPendingLeasesForTesting()
 
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: documentID)
+        let report = try await store.reconcileOrphanedImports(activePointer: .active(documentID))
         XCTAssertFalse(report.promotedPendingIDs.contains(documentID), "a record whose id doesn't match its filename must never be promoted")
         XCTAssertFalse(report.failures.isEmpty, "the mismatch must be surfaced, not silently ignored")
     }
@@ -882,7 +882,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // as "still alive" rather than actually validating it.
         await store.releaseAllPendingLeasesForTesting()
 
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: documentID)
+        let report = try await store.reconcileOrphanedImports(activePointer: .active(documentID))
         XCTAssertFalse(report.promotedPendingIDs.contains(documentID))
         XCTAssertFalse(report.failures.isEmpty)
     }
@@ -915,7 +915,9 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(candidateFingerprint, creation.document.sourceFingerprint, "premise: the sampled fingerprint alone cannot see mid-file corruption")
 
         do {
-            _ = try await store.relinkInPlaceDocument(documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data())
+            _ = try await store.relinkInPlaceDocument(
+                documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data(), resolvedBookmarkURL: candidateURL
+            )
             XCTFail("expected the full-content digest to catch what the sampled fingerprint could not")
         } catch RelinkError.contentMismatch {
             // expected
@@ -939,7 +941,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         try Data(contentsOf: sourceURL).write(to: candidateURL)
 
         let relinked = try await store.relinkInPlaceDocument(
-            documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data("bookmark".utf8)
+            documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data("bookmark".utf8), resolvedBookmarkURL: candidateURL
         )
         XCTAssertEqual(relinked.workingURL, candidateURL)
         XCTAssertEqual(relinked.contentDigestSHA256, creation.document.contentDigestSHA256)
@@ -966,7 +968,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         try Data(contentsOf: sourceURL).write(to: candidateURL)
 
         let relinked = try await store.relinkInPlaceDocument(
-            documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data("bookmark".utf8)
+            documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data("bookmark".utf8), resolvedBookmarkURL: candidateURL
         )
         XCTAssertEqual(relinked.workingURL, candidateURL)
         XCTAssertNotNil(relinked.contentDigestSHA256, "a successful relink must upgrade a legacy record with a real digest")
@@ -991,7 +993,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         }
 
         do {
-            _ = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+            _ = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
             XCTFail("Expected reconciliation to report the lock as busy rather than proceed")
         } catch {
             XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
@@ -1085,7 +1087,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         defer { externalLock.release() }
 
         do {
-            _ = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+            _ = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
             XCTFail("Expected reconciliation to defer while the lock is held, no matter how long")
         } catch {
             XCTAssertEqual(error as? PhotoDocumentError, .importInProgress)
@@ -1106,7 +1108,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         try setPosixPermissions(0o555, at: documentsDirectory)
         defer { try? setPosixPermissions(0o755, at: documentsDirectory) }
 
-        let report = try await store.reconcileOrphanedImports(activeDocumentID: nil)
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
 
         XCTAssertTrue(report.removedOrphanIDs.isEmpty)
         XCTAssertNotNil(report.failures[orphanID])
@@ -1771,5 +1773,283 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         // Content identity is untouched -- only where the file resolves changed.
         XCTAssertEqual(reloaded.workingFingerprint, document.workingFingerprint)
         XCTAssertEqual(reloaded.sourceFingerprint, document.sourceFingerprint)
+    }
+
+    // MARK: - 8. Relink identity transaction (Codex round-4 review)
+
+    /// Any diagnostic message a test asserts on must never carry a path
+    /// fragment -- an absolute path, this test run's own temp directory,
+    /// or any of the usual macOS path prefixes an `NSError
+    /// .localizedDescription` tends to embed.
+    private func assertMessageIsPathFree(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        for forbidden in ["/Users/", "/Volumes/", "/private/var/", temporaryDirectory.path] {
+            XCTAssertFalse(
+                message.contains(forbidden),
+                "diagnostic message leaked a path fragment (\(forbidden)): \(message)",
+                file: file, line: line
+            )
+        }
+    }
+
+    /// The exact TOCTOU window the review's identity-transaction report
+    /// targets: `candidateURL` is swapped for different bytes strictly
+    /// *after* it has already been opened, read, and hashed once (single
+    /// fd, per `relinkInPlaceDocument`'s design), but strictly *before*
+    /// the final pre-commit re-check. That re-check -- re-`stat`ing the
+    /// path and comparing against the identity captured from the open fd
+    /// -- is what must catch this; a naive pre/post-snapshot-of-attributes
+    /// design that never re-opens or never compares against the
+    /// originally-opened identity would not.
+    func testRelinkRejectsACandidateSwappedAfterItWasHashedButBeforeCommit() async throws {
+        let sourceURL = try makeSourceFile(byteCount: 4_096, pattern: 0x33)
+        let (creationStore, rootURL) = makeStore()
+        let creation = try await creationStore.openInPlace(sourceURL, bookmarkData: nil)
+        let originalAdjustments = PhotoAdjustments.neutral.setting(.contrast, to: 22)
+        try await creationStore.saveAdjustments(originalAdjustments, documentID: creation.document.id)
+
+        let candidateURL = temporaryDirectory.appendingPathComponent("candidate.ARW")
+        try Data(contentsOf: sourceURL).write(to: candidateURL)
+
+        // For a file this small: call #1 is the loop's one non-empty
+        // read, #2 is the loop's EOF read, and #3 is the single
+        // post-loop check right before the final re-stat -- exactly the
+        // window this test targets. A fresh store instance (same
+        // `rootURL`) is used for the relink attempt so this trigger's
+        // count isn't also perturbed by `openInPlace` above having its
+        // own `checkCancellation` calls.
+        let trigger = MutateSourceOnCallTrigger(mutateAtCall: 3) {
+            try Data(repeating: 0x77, count: 4_096).write(to: candidateURL)
+        }
+        let relinkStore = PhotoDocumentStore(rootURL: rootURL, checkCancellation: { try trigger.checkCancellation() })
+
+        do {
+            _ = try await relinkStore.relinkInPlaceDocument(
+                documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data(), resolvedBookmarkURL: candidateURL
+            )
+            XCTFail("expected a candidate swapped after being hashed to be rejected")
+        } catch RelinkError.sourceModifiedDuringRelink {
+            // expected
+        }
+
+        // Nothing changed -- verified from an entirely fresh store
+        // instance, the same way a real relaunch would see it.
+        let freshStore = PhotoDocumentStore(rootURL: rootURL)
+        let stillThere = try await freshStore.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillThere.workingURL, sourceURL)
+        XCTAssertEqual(stillThere.sourceURL, sourceURL)
+        let stillSavedAdjustments = try await freshStore.loadAdjustments(documentID: creation.document.id)
+        XCTAssertEqual(stillSavedAdjustments.contrast, 22)
+    }
+
+    /// The fresh bookmark's resolved URL is part of the identity
+    /// transaction too, not an afterthought -- a bookmark that resolves
+    /// to a *different* file than the one just opened and hashed must be
+    /// rejected exactly like a swapped candidate path would be.
+    func testRelinkRejectsWhenTheResolvedBookmarkURLIsADifferentFile() async throws {
+        let sourceURL = try makeSourceFile(byteCount: 4_096, pattern: 0x44)
+        let (store, _) = makeStore()
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+
+        let candidateURL = temporaryDirectory.appendingPathComponent("candidate.ARW")
+        try Data(contentsOf: sourceURL).write(to: candidateURL)
+        let decoyURL = temporaryDirectory.appendingPathComponent("decoy.ARW")
+        try Data(repeating: 0x55, count: 4_096).write(to: decoyURL)
+
+        do {
+            _ = try await store.relinkInPlaceDocument(
+                documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data(), resolvedBookmarkURL: decoyURL
+            )
+            XCTFail("expected a bookmark resolving to a different file than the picked candidate to be rejected")
+        } catch RelinkError.bookmarkIdentityMismatch {
+            // expected
+        }
+
+        let stillThere = try await store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillThere.workingURL, sourceURL)
+    }
+
+    // MARK: - 9. Legacy large RAW must be safely refused (Codex round-4 review)
+
+    /// A legacy record (no stored digest) whose candidate is *larger*
+    /// than `FingerprintCalculator.wholeFileThreshold` has no genuine
+    /// full-content guarantee available at all -- the sampled fingerprint
+    /// is edges-only at that size. Must refuse outright rather than
+    /// silently comparing the sample and calling that safe. Same size,
+    /// identical edges, corrupted middle: proves this isn't merely
+    /// falling back to (and passing) the weaker sampled check.
+    func testRelinkOfALegacyLargeRecordWithNoDigestIsRefusedOutright() async throws {
+        let byteCount = Int(FingerprintCalculator.wholeFileThreshold) + (4 << 20)
+        let sourceURL = try makeSourceFile(named: "large-legacy.ARW", byteCount: byteCount, pattern: 0x66)
+        let (store, rootURL) = makeStore()
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(creation.document.id.uuidString).json")
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        json?.removeValue(forKey: "contentDigestSHA256")
+        try JSONSerialization.data(withJSONObject: json as Any).write(to: recordURL)
+
+        var bytes = try Data(contentsOf: sourceURL)
+        let middle = bytes.count / 2
+        bytes[middle] = bytes[middle] &+ 1
+        let candidateURL = temporaryDirectory.appendingPathComponent("candidate-legacy.ARW")
+        try bytes.write(to: candidateURL)
+
+        do {
+            _ = try await store.relinkInPlaceDocument(
+                documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data(), resolvedBookmarkURL: candidateURL
+            )
+            XCTFail("expected a legacy record above the sampling threshold to refuse relink outright, not fall back to the sample")
+        } catch RelinkError.legacyFullDigestUnavailable {
+            // expected
+        }
+
+        let stillThere = try await store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillThere.workingURL, sourceURL)
+    }
+
+    // MARK: - 10. Orphan sidecar reconciliation (Codex round-4 review)
+
+    func testReconciliationRemovesAnOrphanedSidecarDirectoryWithNoRecordAtAll() async throws {
+        let (store, rootURL) = makeStore()
+        let orphanID = UUID()
+        let sidecarDirectory = rootURL.appendingPathComponent("Sidecars", isDirectory: true).appendingPathComponent(orphanID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: sidecarDirectory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: sidecarDirectory.appendingPathComponent("sidecar.json"))
+
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
+        XCTAssertTrue(report.removedOrphanSidecarIDs.contains(orphanID))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecarDirectory.path))
+    }
+
+    func testReconciliationReportsAFailedOrphanSidecarRemovalSafely() async throws {
+        let (store, rootURL) = makeStore()
+        let orphanID = UUID()
+        let sidecarDirectory = rootURL.appendingPathComponent("Sidecars", isDirectory: true).appendingPathComponent(orphanID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: sidecarDirectory, withIntermediateDirectories: true)
+        let blocker = sidecarDirectory.appendingPathComponent("blocker")
+        try Data([0x00]).write(to: blocker)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: blocker.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: blocker.path) }
+
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
+        XCTAssertFalse(report.removedOrphanSidecarIDs.contains(orphanID))
+        let message = try XCTUnwrap(report.failures[orphanID])
+        assertMessageIsPathFree(message)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sidecarDirectory.path))
+    }
+
+    /// A `Sidecars/` entry whose name isn't even a well-formed UUID might
+    /// not be this store's data at all -- must be left completely
+    /// untouched and surfaced only as a diagnostic, never deleted on a
+    /// guess.
+    func testReconciliationLeavesAMalformedSidecarEntryNameCompletelyUntouched() async throws {
+        let (store, rootURL) = makeStore()
+        let malformedDirectory = rootURL.appendingPathComponent("Sidecars", isDirectory: true).appendingPathComponent("not-a-uuid", isDirectory: true)
+        try FileManager.default.createDirectory(at: malformedDirectory, withIntermediateDirectories: true)
+        try Data("marker".utf8).write(to: malformedDirectory.appendingPathComponent("marker"))
+
+        let report = try await store.reconcileOrphanedImports(activePointer: .noActiveDocument)
+        XCTAssertTrue(report.ignoredSidecarEntries.contains("not-a-uuid"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: malformedDirectory.appendingPathComponent("marker").path), "must never delete something it can't positively identify as its own orphan")
+    }
+
+    /// A `Sidecars/` entry that *does* have a matching record must never
+    /// be touched by this pass, regardless of what else is going on --
+    /// the ordinary, overwhelmingly common case.
+    func testReconciliationNeverRemovesASidecarDirectoryWithAMatchingRecord() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        try await store.saveAdjustments(.neutral, documentID: creation.document.id)
+        await store.releaseAllPendingLeasesForTesting()
+
+        let report = try await store.reconcileOrphanedImports(activePointer: .active(creation.document.id))
+        XCTAssertFalse(report.removedOrphanSidecarIDs.contains(creation.document.id))
+        _ = try await store.loadAdjustments(documentID: creation.document.id)
+    }
+
+    // MARK: - 11. Active pointer corruption must block reconciliation entirely (Codex round-4 review)
+
+    /// A corrupt (not merely absent) active-pointer file must never be
+    /// treated as "no active document" -- doing so would let
+    /// reconciliation roll back a pending creation that might be exactly
+    /// the document the user was mid-handoff to, with no way to tell
+    /// since the pointer that would say so can't be read.
+    func testCorruptActivePointerBlocksAllPromotionAndRollbackAndIsReportedSafely() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        // Simulates the creating process having died -- see
+        // `releaseAllPendingLeasesForTesting()`. Without this, the
+        // pending creation would be correctly-but-uninterestingly skipped
+        // for the unrelated reason of its lease still being held, masking
+        // what this test is actually about.
+        await store.releaseAllPendingLeasesForTesting()
+
+        let pointerURL = rootURL.appendingPathComponent("ActiveDocument.json")
+        try Data("{ this is not valid JSON".utf8).write(to: pointerURL)
+
+        let pointerState = await store.loadActiveDocumentPointer()
+        XCTAssertEqual(pointerState, .corrupt)
+
+        let report = try await store.reconcileOrphanedImports(activePointer: pointerState)
+        XCTAssertTrue(report.activePointerWasUnreadable)
+        XCTAssertTrue(report.rolledBackPendingIDs.isEmpty, "nothing may be rolled back while the pointer's own content can't be trusted")
+        XCTAssertTrue(report.promotedPendingIDs.isEmpty, "nothing may be promoted either -- the pointer might have named exactly this document")
+
+        // The pending document -- record, copy, and adjustments -- is
+        // completely intact, from a fresh store instance.
+        let freshStore = PhotoDocumentStore(rootURL: rootURL)
+        let stillThere = try await freshStore.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillThere.id, creation.document.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
+    }
+
+    func testMissingAndExplicitNilActivePointerAreDistinctFromCorrupt() async throws {
+        let (store, rootURL) = makeStore()
+        let initial = await store.loadActiveDocumentPointer()
+        XCTAssertEqual(initial, .missing)
+
+        try await store.saveActiveDocumentID(nil)
+        let afterExplicitNil = await store.loadActiveDocumentPointer()
+        XCTAssertEqual(afterExplicitNil, .noActiveDocument)
+
+        let id = UUID()
+        try await store.saveActiveDocumentID(id)
+        let afterActive = await store.loadActiveDocumentPointer()
+        XCTAssertEqual(afterActive, .active(id))
+
+        try Data("not json at all".utf8).write(to: rootURL.appendingPathComponent("ActiveDocument.json"))
+        let afterCorruption = await store.loadActiveDocumentPointer()
+        XCTAssertEqual(afterCorruption, .corrupt)
+    }
+
+    // MARK: - 12. Promotion verifies app-copy content against its digest (Codex round-4 review)
+
+    /// Existence and shape alone (the pre-round-4 checks) would miss
+    /// silent corruption in the untouched middle of a large working copy.
+    /// When a digest was recorded, promotion must re-hash and require an
+    /// exact match.
+    func testReconciliationRefusesToPromoteAnAppCopyWhoseWorkingCopyContentDoesNotMatchItsDigest() async throws {
+        let sourceURL = try makeSourceFile(byteCount: 8_192, pattern: 0x11)
+        let (store, rootURL) = makeStore()
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        await store.releaseAllPendingLeasesForTesting()
+        XCTAssertNotNil(creation.document.contentDigestSHA256)
+
+        var bytes = try Data(contentsOf: creation.document.workingURL)
+        let middle = bytes.count / 2
+        bytes[middle] = bytes[middle] &+ 1
+        try bytes.write(to: creation.document.workingURL)
+
+        let report = try await store.reconcileOrphanedImports(activePointer: .active(creation.document.id))
+        XCTAssertFalse(report.promotedPendingIDs.contains(creation.document.id))
+        let message = try XCTUnwrap(report.failures[creation.document.id])
+        assertMessageIsPathFree(message)
+
+        // Left as `.pending`, retryable -- not silently dropped.
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(creation.document.id.uuidString).json")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        XCTAssertEqual(json?["lifecycleState"] as? String, "pending")
     }
 }

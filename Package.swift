@@ -79,6 +79,13 @@ let package = Package(
         // Thin launcher so the SwiftUI App type stays in a testable library target.
         .executableTarget(name: "LumaHarbor", dependencies: ["LumaHarborApp"]),
 
+        // Test-support only: a standalone process `PendingLeaseSubprocessTests`
+        // launches via `Process` to prove `PendingLock` (per-document
+        // pending-creation lease) contention across genuinely separate
+        // processes, including surviving a `SIGKILL`. Never referenced by
+        // any shipping target -- see `Sources/PendingLeaseHelper/main.swift`.
+        .executableTarget(name: "PendingLeaseHelper", dependencies: ["PhotoLibraryCore"]),
+
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
         .testTarget(
             name: "PresetCoreTests",

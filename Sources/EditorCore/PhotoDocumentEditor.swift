@@ -301,9 +301,9 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     private func reconcileOrphanedImports() async {
         do {
-            let activeID = await dependencies.store.loadActiveDocumentID()
-            let report = try await dependencies.store.reconcileOrphanedImports(activeDocumentID: activeID)
-            guard !report.failures.isEmpty else { return }
+            let pointer = await dependencies.store.loadActiveDocumentPointer()
+            let report = try await dependencies.store.reconcileOrphanedImports(activePointer: pointer)
+            guard !report.failures.isEmpty || report.activePointerWasUnreadable else { return }
             alert = EditorAlert(
                 title: L10n.t("Startup cleanup incomplete"),
                 message: L10n.t("LumaHarbor couldn't finish cleaning up an earlier interrupted import."),
@@ -609,8 +609,20 @@ public final class PhotoDocumentEditor: ObservableObject {
             }
             do {
                 let bookmarkData = try dependencies.makeBookmark(url)
+                // Resolved immediately, transiently, purely so the store
+                // can verify the fresh bookmark actually points at the
+                // exact file it was just minted from -- this scope is
+                // stopped right after the store call below, whether it
+                // succeeds or fails; the *ongoing* scope for the document,
+                // if this relink commits, is still `scope` from the
+                // picker, exactly as before.
+                let resolved = try dependencies.resolveScope(bookmarkData)
+                defer { resolved.resource.stop() }
                 let relinkedDocument = try await dependencies.store.relinkInPlaceDocument(
-                    documentID: relink.documentID, candidateURL: url, bookmarkData: bookmarkData
+                    documentID: relink.documentID,
+                    candidateURL: url,
+                    bookmarkData: bookmarkData,
+                    resolvedBookmarkURL: resolved.resource.url
                 )
                 guard !Task.isCancelled, self.isCurrent(token) else {
                     scope.stop()
@@ -622,7 +634,7 @@ public final class PhotoDocumentEditor: ObservableObject {
                     return
                 }
                 await self.commitDocument(token: token, document: relinkedDocument, scope: scope, photo: photo, adjustments: adjustments)
-            } catch RelinkError.fingerprintMismatch, RelinkError.contentMismatch {
+            } catch RelinkError.fingerprintMismatch, RelinkError.contentMismatch, RelinkError.bookmarkIdentityMismatch {
                 scope.stop()
                 guard self.isCurrent(token) else { return }
                 self.isPreparingDocument = false
@@ -644,6 +656,18 @@ public final class PhotoDocumentEditor: ObservableObject {
                     title: L10n.t("That's not the same photo"),
                     message: L10n.t("This file changed while LumaHarbor was checking it."),
                     nextStep: L10n.t("Choose the file again from Files.")
+                )
+            } catch RelinkError.legacyFullDigestUnavailable {
+                scope.stop()
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                // Also stays set: refusing this file is a safety decision,
+                // not proof the user picked the wrong one -- they still
+                // have nothing else to try if not this same prompt again.
+                self.alert = EditorAlert(
+                    title: L10n.t("Can't verify this photo"),
+                    message: L10n.t("This file is too large for LumaHarbor to safely confirm it's the same photo."),
+                    nextStep: nil
                 )
             } catch {
                 scope.stop()

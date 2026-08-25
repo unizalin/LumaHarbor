@@ -191,7 +191,7 @@ public enum PhotoDocumentError: Error, Equatable, Sendable {
     case documentNotFound(UUID)
 }
 
-/// Thrown by `PhotoDocumentStore.relinkInPlaceDocument(documentID:candidateURL:bookmarkData:)`.
+/// Thrown by `PhotoDocumentStore.relinkInPlaceDocument(documentID:candidateURL:bookmarkData:resolvedBookmarkURL:)`.
 public enum RelinkError: Error, Equatable, Sendable {
     /// The document being relinked isn't `.inPlace` — an `.appCopy`
     /// document never loses access to its working file this way.
@@ -200,15 +200,48 @@ public enum RelinkError: Error, Equatable, Sendable {
     /// stored `contentDigestSHA256`. Nothing was changed.
     case contentMismatch
     /// The document predates full-content digests (`contentDigestSHA256
-    /// == nil`) and `candidateURL`'s *sampled* fingprint doesn't match the
-    /// document's original `sourceFingerprint`. This legacy path is a
-    /// weaker guarantee than `.contentMismatch` — see
-    /// `PhotoDocumentStore.relinkInPlaceDocument` — but a mismatch here is
-    /// still conclusive: nothing was changed.
+    /// == nil`), `candidateURL` is small enough (at or under
+    /// `FingerprintCalculator.wholeFileThreshold`) that the sampled
+    /// fingerprint is actually a full-file hash, and it doesn't match the
+    /// document's original `sourceFingerprint`. Nothing was changed.
     case fingerprintMismatch
-    /// `candidateURL` changed (size, modification date, or resource
-    /// identifier) between the start and end of verifying it — the file
-    /// picked may no longer be the one that was actually checked. Nothing
-    /// was changed.
+    /// The document predates full-content digests, and `candidateURL` is
+    /// *larger* than `FingerprintCalculator.wholeFileThreshold` — meaning
+    /// the only identity this legacy record has (`sourceFingerprint`) is a
+    /// sampled edge hash, which cannot prove full-file identity for a file
+    /// this size. Relink is refused outright rather than silently
+    /// accepting a weaker guarantee than the user has any way to know
+    /// about. Nothing was changed.
+    case legacyFullDigestUnavailable
+    /// `candidateURL` changed (identity — device/inode — size, mtime, or
+    /// ctime) between opening it for the digest read and the final
+    /// pre-commit re-check. Nothing was changed.
     case sourceModifiedDuringRelink
+    /// The bookmark minted from `candidateURL` resolves to a *different*
+    /// file than `candidateURL` itself — device/inode, size, mtime, or
+    /// ctime disagree with what was actually opened and hashed. Nothing
+    /// was changed.
+    case bookmarkIdentityMismatch
+}
+
+/// The durably persisted active-document pointer's state — deliberately
+/// distinct from a plain `UUID?`, so `reconcileOrphanedImports(activePointer:)`
+/// can tell "there genuinely is no active document" apart from "the pointer
+/// file itself could not be read or decoded." Conflating those (as a bare
+/// `nil` would) risks reconciliation treating pointer *corruption* as
+/// "nothing is active" and rolling back a pending creation that is, in
+/// fact, exactly the document the user was mid-handoff to.
+public enum ActiveDocumentPointer: Equatable, Sendable {
+    /// The pointer file has never been written at all.
+    case missing
+    /// The pointer file exists, was read and decoded successfully, and
+    /// explicitly records that no document is active.
+    case noActiveDocument
+    /// The pointer file exists, was read and decoded successfully, and
+    /// names this document as active.
+    case active(UUID)
+    /// The pointer file exists but could not be read or decoded — its
+    /// content, not its mere presence or absence, is in question. Must
+    /// never be treated as equivalent to `.missing`/`.noActiveDocument`.
+    case corrupt
 }
