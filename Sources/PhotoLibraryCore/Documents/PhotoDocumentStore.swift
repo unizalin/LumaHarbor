@@ -443,7 +443,7 @@ private struct RootImportLock {
     static func acquire(at url: URL, fileManager: FileManager) throws -> RootImportLock {
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
-        let fileDescriptor = open(url.path, O_CREAT | O_RDWR, 0o600)
+        let fileDescriptor = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard fileDescriptor >= 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
