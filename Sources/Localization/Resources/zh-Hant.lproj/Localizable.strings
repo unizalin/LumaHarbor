@@ -58,6 +58,7 @@
 "Delete the local index and rescan your folders to rebuild it." = "刪除本機索引，然後重新掃描你的資料夾即可重建。";
 "Delete" = "刪除";
 "Double-click the row to reset" = "雙擊這一列可重設";
+"Drag to move this panel." = "拖曳可移動此面板。";
 "Edit in Place" = "原地編輯";
 "Export a full-resolution JPEG" = "匯出全解析度 JPEG";
 "Export failed" = "匯出失敗";
@@ -74,6 +75,7 @@
 "Favorites" = "收藏";
 "Fields included:" = "包含欄位數：";
 "Filter presets" = "篩選 Preset";
+"Focus Mode" = "專注模式";
 "found" = "張照片";
 "Free up space on the drive, then retry." = "騰出磁碟空間，然後重試。";
 "Free up space on your startup disk, or lower the cache limit in Settings." = "騰出開機磁碟的空間，或在設定中調低快取上限。";
@@ -270,6 +272,7 @@
 "Wait for the current scan to finish, then try again." = "等目前的掃描完成後再試一次。";
 "White Balance" = "白平衡";
 "Whites" = "白色";
+"Work Mode" = "工作模式";
 "Yellow" = "黃";
 "Your edits couldn't be saved." = "無法儲存你的編輯。";
 "Your photos are still browsable." = "你的照片仍然可以瀏覽。";
