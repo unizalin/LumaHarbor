@@ -516,6 +516,14 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let documentID = creation.document.id
         XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
 
+        // Releases the per-document lease `importCopy` is still holding --
+        // see `releaseAllPendingLeasesForTesting()` for why a real crash's
+        // *lease-release* side effect is simulated explicitly here, rather
+        // than by deallocating `firstProcessStore` and hoping its `deinit`
+        // (and the cascading `PendingLock.deinit`) has actually run before
+        // the "next launch" store below acts.
+        await firstProcessStore.releaseAllPendingLeasesForTesting()
+
         let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
         let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
 
@@ -538,6 +546,11 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
 
         let creation = try await firstProcessStore.openInPlace(sourceURL, bookmarkData: nil)
         let documentID = creation.document.id
+
+        // See the app-copy version of this test above for why this is
+        // necessary: it is what actually releases the per-document lease
+        // `openInPlace` holds, simulating the creating process dying.
+        await firstProcessStore.releaseAllPendingLeasesForTesting()
 
         let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
         let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: nil)
@@ -566,6 +579,10 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let creation = try await firstProcessStore.importCopy(of: sourceURL, bookmarkData: nil)
         let documentID = creation.document.id
         try await firstProcessStore.saveAdjustments(.neutral.setting(.exposure, to: 0.8), documentID: documentID)
+
+        // Releases the per-document lease `importCopy` is still holding --
+        // see the app-copy rollback test above for why this is necessary.
+        await firstProcessStore.releaseAllPendingLeasesForTesting()
 
         let secondProcessStore = PhotoDocumentStore(rootURL: rootURL)
         let report = try await secondProcessStore.reconcileOrphanedImports(activeDocumentID: documentID)
@@ -614,6 +631,345 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
         XCTAssertFalse(report.promotedPendingIDs.contains(documentID), "a legacy record is already committed -- there is nothing to promote")
         _ = try await store.loadDocument(id: documentID)
+    }
+
+    // MARK: - 3c. Per-document crash-released lease (Codex round-3 review)
+    //
+    // `importCopy`/`openInPlace` release the *root* lock as soon as they
+    // return -- but the calling `PhotoDocumentEditor` still has real work
+    // left (metadata decode, adjustments load, flushing whatever was open
+    // before) before it can finalize. These tests prove a *second*, real
+    // `PhotoDocumentStore` instance's `reconcileOrphanedImports` cannot
+    // delete a creation still mid-flight in a *first* instance -- the
+    // per-document lease (`PendingLocks/<id>.lock`) is what makes that
+    // true, independent of any timing or sleep.
+
+    /// Directly acquires the same per-document `flock` `PhotoDocumentStore`
+    /// holds via `pendingLeases` -- bypassing the store entirely, the same
+    /// way `RawImportLockHandle` above does for the root lock. Coupled to
+    /// the on-disk `PendingLocks/<id>.lock` path by construction -- see
+    /// `PendingLock`'s documentation.
+    private final class RawPendingLockHandle {
+        private let fileDescriptor: Int32
+
+        init?(rootURL: URL, documentID: UUID) {
+            let directory = rootURL.appendingPathComponent("PendingLocks", isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let lockURL = directory.appendingPathComponent("\(documentID.uuidString).lock")
+            let fileDescriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+            guard fileDescriptor >= 0 else { return nil }
+            guard flock(fileDescriptor, LOCK_EX | LOCK_NB) == 0 else {
+                close(fileDescriptor)
+                return nil
+            }
+            self.fileDescriptor = fileDescriptor
+        }
+
+        func release() {
+            flock(fileDescriptor, LOCK_UN)
+            close(fileDescriptor)
+        }
+    }
+
+    /// A thread-safe on/off switch for failure-injection closures passed to
+    /// `makeStore(writeRecordData:)`. Plain `var` capture doesn't compile
+    /// under Swift 6 concurrency checking once the closure is invoked from
+    /// the store's actor context (a different isolation domain than the
+    /// test body that toggles it), so this exists purely to give those
+    /// closures something `@Sendable`-safe to read.
+    private final class FailureToggle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _shouldFail = true
+        var shouldFail: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return _shouldFail }
+            set { lock.lock(); defer { lock.unlock() }; _shouldFail = newValue }
+        }
+    }
+
+    /// Store A creates an app-copy document and, per the type's contract,
+    /// is left holding its per-document lease (nothing has finalized or
+    /// rolled it back yet -- exactly the state a real `PhotoDocumentEditor`
+    /// leaves it in between `importCopy` returning and it finishing
+    /// metadata decode). A completely independent Store B instance's
+    /// reconciliation, with no matching active ID, must find the lease
+    /// still held and leave the creation completely untouched rather than
+    /// treating it as abandoned.
+    func testReconciliationNeverTouchesAnAppCopyCreationWhoseLeaseIsStillHeldByAnotherInstance() async throws {
+        let sourceURL = try makeSourceFile()
+        let (storeA, rootURL) = makeStore()
+
+        let creation = try await storeA.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+
+        // Proves the lease really is held right now, independent of
+        // `storeA`'s own bookkeeping -- the same direct-`flock` technique
+        // `RawImportLockHandle` uses for the root lock.
+        XCTAssertNil(RawPendingLockHandle(rootURL: rootURL, documentID: documentID), "the lease must still be held by storeA's in-flight creation")
+
+        let storeB = PhotoDocumentStore(rootURL: rootURL)
+        let report = try await storeB.reconcileOrphanedImports(activeDocumentID: nil)
+
+        XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID), "storeA's still-in-flight creation must not be rolled back out from under it")
+        XCTAssertFalse(report.promotedPendingIDs.contains(documentID))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path), "the copy must still be on disk")
+        _ = try await storeB.loadDocument(id: documentID) // does not throw -- the record is untouched
+
+        // Once storeA actually finalizes, the lease is released and a
+        // *later* reconciliation pass correctly leaves it alone because it
+        // is now `.committed`, not because the lease happened to still be
+        // held.
+        let outcome = await storeA.finalizeCreation(creation)
+        XCTAssertEqual(outcome, .committed)
+        XCTAssertNotNil(RawPendingLockHandle(rootURL: rootURL, documentID: documentID)?.release(), "the lease must be released once finalize durably succeeds")
+    }
+
+    /// Same guarantee for `.inPlace` -- the review explicitly called out
+    /// that in-place creations need this lease too, not just app-copy.
+    func testReconciliationNeverTouchesAnInPlaceCreationWhoseLeaseIsStillHeldByAnotherInstance() async throws {
+        let sourceURL = try makeSourceFile()
+        let (storeA, rootURL) = makeStore()
+
+        let creation = try await storeA.openInPlace(sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+
+        XCTAssertNil(RawPendingLockHandle(rootURL: rootURL, documentID: documentID), "the lease must still be held by storeA's in-flight creation")
+
+        let storeB = PhotoDocumentStore(rootURL: rootURL)
+        let report = try await storeB.reconcileOrphanedImports(activeDocumentID: nil)
+
+        XCTAssertFalse(report.rolledBackPendingIDs.contains(documentID))
+        _ = try await storeB.loadDocument(id: documentID)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path), "an in-place rollback must never touch the external RAW -- doubly true for one that must not even be attempted")
+    }
+
+    /// The interleaving the review specifically asked for: storeA's
+    /// creation is promoted (not rolled back) by storeB because it matches
+    /// the active ID -- but only *after* storeA's lease is actually
+    /// released, proving the lease -- not luck -- is what gates this.
+    func testReconciliationPromotesOnlyAfterTheCreatingInstancesLeaseIsReleased() async throws {
+        let sourceURL = try makeSourceFile()
+        let (storeA, rootURL) = makeStore()
+
+        let creation = try await storeA.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+
+        let storeB = PhotoDocumentStore(rootURL: rootURL)
+        let tooEarly = try await storeB.reconcileOrphanedImports(activeDocumentID: documentID)
+        XCTAssertFalse(tooEarly.promotedPendingIDs.contains(documentID), "must not promote while the lease is still held -- the creation might still be actively being worked on")
+        XCTAssertTrue(tooEarly.rolledBackPendingIDs.isEmpty)
+        XCTAssertTrue(tooEarly.failures.isEmpty, "a held lease is not a failure -- it is correctly and quietly skipped")
+
+        // Simulates storeA's process finally dying without ever finalizing
+        // -- see `releaseAllPendingLeasesForTesting()`.
+        await storeA.releaseAllPendingLeasesForTesting()
+
+        let afterCrash = try await storeB.reconcileOrphanedImports(activeDocumentID: documentID)
+        XCTAssertTrue(afterCrash.promotedPendingIDs.contains(documentID), "now that the lease is free, the still-matching active ID promotes it")
+        _ = try await storeB.loadDocument(id: documentID)
+    }
+
+    // MARK: - 3d. finalizeCreation is failure/retry-safe (Codex round-3 review)
+
+    /// A `finalizeCreation` whose durable write fails must not flip the
+    /// in-memory receipt to `.finalized` -- the record stays `.pending`,
+    /// the receipt (and lease) stay valid, and a later retry that actually
+    /// succeeds must still work.
+    func testFinalizeCreationReturnsRetryRequiredOnWriteFailureAndSucceedsOnRetry() async throws {
+        let sourceURL = try makeSourceFile()
+        let toggle = FailureToggle()
+        let (store, rootURL) = makeStore(writeRecordData: { data, url, fileManager in
+            // Only the *finalize* write is made to fail -- identified by
+            // its content (`lifecycleState: "committed"`), not merely its
+            // path, since the initial `.pending` record commit inside
+            // `importCopy` writes to the exact same path and must succeed
+            // normally, or there would be nothing here to retry finalizing.
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if toggle.shouldFail, object?["lifecycleState"] as? String == "committed" {
+                struct InjectedFailure: Error {}
+                throw InjectedFailure()
+            }
+            try AtomicFileWriter.write(data, to: url, fileManager: fileManager)
+        })
+
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+
+        let firstAttempt = await store.finalizeCreation(creation)
+        XCTAssertEqual(firstAttempt, .retryRequired)
+
+        // The record on disk is still `.pending` -- not silently advanced.
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(creation.document.id.uuidString).json")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        XCTAssertEqual(json?["lifecycleState"] as? String, "pending")
+
+        // The lease is still held -- a concurrent reconciliation pass must
+        // still treat this as alive, exactly as if finalize had never been
+        // attempted at all.
+        XCTAssertNil(RawPendingLockHandle(rootURL: rootURL, documentID: creation.document.id))
+
+        // Retrying after the transient failure clears now durably commits.
+        toggle.shouldFail = false
+        let secondAttempt = await store.finalizeCreation(creation)
+        XCTAssertEqual(secondAttempt, .committed)
+        let committedJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        XCTAssertEqual(committedJSON?["lifecycleState"] as? String, "committed")
+        XCTAssertNotNil(RawPendingLockHandle(rootURL: rootURL, documentID: creation.document.id)?.release(), "finalize succeeding must release the lease")
+    }
+
+    /// `finalizeCreation` on an unrecognized/already-consumed receipt must
+    /// report that explicitly rather than silently doing nothing that
+    /// looks like success.
+    func testFinalizeCreationOutcomesForAlreadyResolvedReceipts() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let firstOutcome = await store.finalizeCreation(creation)
+        XCTAssertEqual(firstOutcome, .committed)
+        let secondOutcome = await store.finalizeCreation(creation)
+        XCTAssertEqual(secondOutcome, .alreadyFinalized)
+
+        let rollbackCreation = try await store.openInPlace(try makeSourceFile(named: "second.ARW"), bookmarkData: nil)
+        _ = await store.rollbackNewDocument(rollbackCreation)
+        let rolledBackOutcome = await store.finalizeCreation(rollbackCreation)
+        XCTAssertEqual(rolledBackOutcome, .alreadyRolledBack)
+    }
+
+    // MARK: - 3e. Reconciliation validates before promoting (Codex round-3 review)
+
+    /// A pending record whose `id` field doesn't match its own filename is
+    /// too malformed to trust -- promotion must refuse it and surface it as
+    /// a diagnosed failure rather than silently promoting (or silently
+    /// dropping) it.
+    func testReconciliationRefusesToPromoteARecordWhoseIDDoesNotMatchItsFilename() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(documentID.uuidString).json")
+
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        json?["id"] = UUID().uuidString // corrupt: no longer matches the filename
+        try JSONSerialization.data(withJSONObject: json as Any).write(to: recordURL)
+
+        // Without this, `store`'s own still-held per-document lease (from
+        // its own `importCopy` above) would make its own reconciliation
+        // pass skip this record as "still alive" -- correct in general,
+        // but not what this test is about. See
+        // `releaseAllPendingLeasesForTesting()`.
+        await store.releaseAllPendingLeasesForTesting()
+
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: documentID)
+        XCTAssertFalse(report.promotedPendingIDs.contains(documentID), "a record whose id doesn't match its filename must never be promoted")
+        XCTAssertFalse(report.failures.isEmpty, "the mismatch must be surfaced, not silently ignored")
+    }
+
+    /// An app-copy pending record whose working file has actually gone
+    /// missing (disk corruption, manual tampering) must not be promoted --
+    /// promoting it would hand a caller a document whose bytes don't
+    /// exist.
+    func testReconciliationRefusesToPromoteAnAppCopyRecordWhoseWorkingFileIsMissing() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let documentID = creation.document.id
+        try FileManager.default.removeItem(at: creation.document.workingURL)
+
+        // See the id-mismatch test above for why this is necessary: without
+        // it, `store`'s own still-held lease from its own `importCopy`
+        // would make this same instance's reconciliation skip the record
+        // as "still alive" rather than actually validating it.
+        await store.releaseAllPendingLeasesForTesting()
+
+        let report = try await store.reconcileOrphanedImports(activeDocumentID: documentID)
+        XCTAssertFalse(report.promotedPendingIDs.contains(documentID))
+        XCTAssertFalse(report.failures.isEmpty)
+    }
+
+    // MARK: - 3f. Full-content digest for relink (Codex round-3 review)
+
+    /// A file over `FingerprintCalculator.wholeFileThreshold` with the
+    /// *same size* and *identical first/last MiB* as the original, but
+    /// different bytes in the untouched middle, is exactly what a sampled
+    /// `FileFingerprint` comparison cannot catch -- the whole reason
+    /// `contentDigestSHA256` exists. Relink must reject it.
+    func testRelinkRejectsMidFileCorruptionInvisibleToTheSampledFingerprint() async throws {
+        let byteCount = Int(FingerprintCalculator.wholeFileThreshold) + (4 << 20)
+        let sourceURL = try makeSourceFile(named: "large.ARW", byteCount: byteCount, pattern: 0x11)
+        let (store, _) = makeStore()
+
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        XCTAssertNotNil(creation.document.contentDigestSHA256, "a freshly created document must have a full digest")
+
+        // Same size, identical edges, corrupted middle.
+        var bytes = try Data(contentsOf: sourceURL)
+        let middle = bytes.count / 2
+        bytes[middle] = bytes[middle] &+ 1
+        let candidateURL = temporaryDirectory.appendingPathComponent("candidate.ARW")
+        try bytes.write(to: candidateURL)
+
+        // The sampled fingerprint alone would *not* catch this -- proving
+        // the premise before proving the fix.
+        let candidateFingerprint = try FingerprintCalculator.fingerprint(forFileAt: candidateURL)
+        XCTAssertEqual(candidateFingerprint, creation.document.sourceFingerprint, "premise: the sampled fingerprint alone cannot see mid-file corruption")
+
+        do {
+            _ = try await store.relinkInPlaceDocument(documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data())
+            XCTFail("expected the full-content digest to catch what the sampled fingerprint could not")
+        } catch RelinkError.contentMismatch {
+            // expected
+        }
+
+        // Nothing was changed.
+        let stillThere = try await store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillThere.workingURL, sourceURL)
+    }
+
+    /// The successful, positive-path counterpart: relinking to a byte-
+    /// identical candidate succeeds and upgrades the record's location.
+    func testRelinkAcceptsAByteIdenticalCandidateUsingTheFullDigest() async throws {
+        let byteCount = Int(FingerprintCalculator.wholeFileThreshold) + (1 << 20)
+        let sourceURL = try makeSourceFile(named: "large.ARW", byteCount: byteCount, pattern: 0x22)
+        let (store, _) = makeStore()
+
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+
+        let candidateURL = temporaryDirectory.appendingPathComponent("candidate.ARW")
+        try Data(contentsOf: sourceURL).write(to: candidateURL)
+
+        let relinked = try await store.relinkInPlaceDocument(
+            documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data("bookmark".utf8)
+        )
+        XCTAssertEqual(relinked.workingURL, candidateURL)
+        XCTAssertEqual(relinked.contentDigestSHA256, creation.document.contentDigestSHA256)
+    }
+
+    /// A legacy record with no stored digest at all must fall back to the
+    /// sampled fingerprint rather than refusing relink outright -- but a
+    /// successful relink must upgrade it with a real digest so the gap
+    /// does not persist for next time too.
+    func testRelinkOfALegacyRecordWithNoDigestFallsBackToTheSampledFingerprintAndUpgradesOnSuccess() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(creation.document.id.uuidString).json")
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        json?.removeValue(forKey: "contentDigestSHA256")
+        try JSONSerialization.data(withJSONObject: json as Any).write(to: recordURL)
+
+        let reloaded = try await store.loadDocument(id: creation.document.id)
+        XCTAssertNil(reloaded.contentDigestSHA256, "premise: this record has no digest, as a pre-digest-era record would not")
+
+        let candidateURL = temporaryDirectory.appendingPathComponent("candidate.ARW")
+        try Data(contentsOf: sourceURL).write(to: candidateURL)
+
+        let relinked = try await store.relinkInPlaceDocument(
+            documentID: creation.document.id, candidateURL: candidateURL, bookmarkData: Data("bookmark".utf8)
+        )
+        XCTAssertEqual(relinked.workingURL, candidateURL)
+        XCTAssertNotNil(relinked.contentDigestSHA256, "a successful relink must upgrade a legacy record with a real digest")
     }
 
     // MARK: - 3b. Root import lock: real cross-instance contention
@@ -1287,7 +1643,12 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
     }
 
     /// Sidecar removal failure must be visible in the report, not folded
-    /// into an overall "succeeded".
+    /// into an overall "succeeded" -- and, per the record-last deletion
+    /// ordering (Codex round-3 review), the record itself must not even be
+    /// attempted once an earlier step has already failed: as long as it
+    /// survives on disk (`.pending`), a retry -- or a later
+    /// `reconcileOrphanedImports`, after a real crash -- can still find and
+    /// finish this cleanup.
     func testRollbackNewDocumentReportsAFailedSidecarRemoval() async throws {
         let sourceURL = try makeSourceFile()
         let (store, rootURL) = makeStore()
@@ -1311,14 +1672,21 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(report.isFullyCleaned)
         XCTAssertEqual(report.lock, .succeeded, "the lock was actually available and acquired -- only the sidecar step itself failed")
         XCTAssertEqual(report.copy, .succeeded)
-        XCTAssertEqual(report.record, .succeeded)
         XCTAssertEqual(report.sidecar, .failed)
+        XCTAssertEqual(report.record, .failed, "the record must not be deleted once an earlier step (the sidecar) has failed -- it is what a retry finds")
+
+        // The record really is still on disk -- not merely reported as
+        // `.failed` -- which is what makes a retry (or a fresh store's
+        // reconciliation, after a real crash) possible at all.
+        let recordURL = rootURL.appendingPathComponent("Records").appendingPathComponent("\(creation.document.id.uuidString).json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordURL.path))
 
         // The receipt is still valid for a retry -- it was not consumed by
         // a partially-failed attempt.
         try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: blocker.path)
         let retried = await store.rollbackNewDocument(creation)
         XCTAssertEqual(retried.outcome, .cleaned)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recordURL.path))
     }
 
     /// Contention for the root import lock must not produce a half-done

@@ -36,10 +36,19 @@ public struct ResolvedSecurityScope {
 }
 
 /// Everything `PhotoDocumentEditor` needs from the outside world, seamed so
-/// every I/O-adjacent piece — the store, the decoder, security scopes,
-/// bookmarks, and where the active document ID is remembered — can be
-/// replaced with a test double. `.live(applicationSupportURL:)` below is
-/// the real, production dependency graph every app target uses.
+/// every I/O-adjacent piece — the store, the decoder, security scopes, and
+/// bookmarks — can be replaced with a test double. `.live
+/// (applicationSupportURL:)` below is the real, production dependency
+/// graph every app target uses.
+///
+/// The active-document pointer is deliberately *not* a seam here: it is
+/// read and written directly through `store.loadActiveDocumentID()`/
+/// `store.saveActiveDocumentID(_:)`, which persist it durably under the
+/// store's own `rootURL` — the same domain document records live in — so
+/// every caller, test included, observes the one real, crash-durable
+/// pointer rather than a separate in-memory or `UserDefaults`-backed
+/// stand-in that could drift from what `reconcileOrphanedImports` actually
+/// sees on the next launch.
 public struct PhotoDocumentEditorDependencies {
     public let store: PhotoDocumentStore
     public let decoder: any RawDecoding
@@ -54,8 +63,6 @@ public struct PhotoDocumentEditorDependencies {
     /// used only to restore an `.inPlace` document after a relaunch.
     public let resolveScope: (Data) throws -> ResolvedSecurityScope
     public let makeBookmark: (URL) throws -> Data
-    public let loadActiveDocumentID: () -> UUID?
-    public let saveActiveDocumentID: (UUID?) -> Void
 
     public init(
         store: PhotoDocumentStore,
@@ -64,9 +71,7 @@ public struct PhotoDocumentEditorDependencies {
         previewRenderer: any PreviewRendering,
         makeScope: @escaping (URL) -> any SecurityScopedResource,
         resolveScope: @escaping (Data) throws -> ResolvedSecurityScope,
-        makeBookmark: @escaping (URL) throws -> Data,
-        loadActiveDocumentID: @escaping () -> UUID?,
-        saveActiveDocumentID: @escaping (UUID?) -> Void
+        makeBookmark: @escaping (URL) throws -> Data
     ) {
         self.store = store
         self.decoder = decoder
@@ -75,17 +80,17 @@ public struct PhotoDocumentEditorDependencies {
         self.makeScope = makeScope
         self.resolveScope = resolveScope
         self.makeBookmark = makeBookmark
-        self.loadActiveDocumentID = loadActiveDocumentID
-        self.saveActiveDocumentID = saveActiveDocumentID
     }
 }
 
 extension PhotoDocumentEditorDependencies {
     /// The real dependency graph: a `PhotoDocumentStore` rooted under
     /// `applicationSupportURL`, the production Core Image decode/preview
-    /// pipeline, real security-scoped bookmarks (`ScopedFolderAccess`/
-    /// `SecurityScopedBookmark`), and `UserDefaults` for remembering the
-    /// active document across a relaunch.
+    /// pipeline, and real security-scoped bookmarks (`ScopedFolderAccess`/
+    /// `SecurityScopedBookmark`). `userDefaults` is accepted only for
+    /// source compatibility with callers that still pass one — it is
+    /// unused: the active-document pointer lives in `PhotoDocumentStore`
+    /// now, not `UserDefaults`.
     public static func live(
         applicationSupportURL: URL,
         userDefaults: UserDefaults = .standard
@@ -95,7 +100,6 @@ extension PhotoDocumentEditorDependencies {
         let pipeline = AdjustmentPipeline()
         let renderService = ImageRenderService()
         let renderer = CoreImagePreviewRenderer(decoder: decoder, pipeline: pipeline, renderService: renderService)
-        let activeDocumentDefaultsKey = "PhotoDocumentEditor.activeDocumentID"
 
         return PhotoDocumentEditorDependencies(
             store: PhotoDocumentStore(rootURL: storeRootURL),
@@ -107,18 +111,7 @@ extension PhotoDocumentEditorDependencies {
                 let access = try ScopedFolderAccess(resolving: data)
                 return ResolvedSecurityScope(resource: access, isStale: access.isStale)
             },
-            makeBookmark: { url in try SecurityScopedBookmark.makeBookmarkData(for: url) },
-            loadActiveDocumentID: {
-                guard let string = userDefaults.string(forKey: activeDocumentDefaultsKey) else { return nil }
-                return UUID(uuidString: string)
-            },
-            saveActiveDocumentID: { id in
-                if let id {
-                    userDefaults.set(id.uuidString, forKey: activeDocumentDefaultsKey)
-                } else {
-                    userDefaults.removeObject(forKey: activeDocumentDefaultsKey)
-                }
-            }
+            makeBookmark: { url in try SecurityScopedBookmark.makeBookmarkData(for: url) }
         )
     }
 }
@@ -215,6 +208,22 @@ public final class PhotoDocumentEditor: ObservableObject {
     /// `flushCurrentDocumentIfDirty()`.
     private var activeFlushTask: Task<Bool, Never>?
 
+    /// The currently-open document's creation, set the moment a fresh
+    /// open's atomic hand-off installs it as `document`, and cleared only
+    /// once `PhotoDocumentStore.finalizeCreation(_:)` durably succeeds.
+    /// While this is non-`nil`, the document showing on screen is not yet
+    /// proven durable on disk (still `.pending`, not `.committed`) — a
+    /// crash right now relies on the next launch's reconciliation finding
+    /// the durably-written active pointer already pointing at it (see
+    /// `openFreshSelection`) and promoting it. `closeCurrentDocument()` and
+    /// `openFreshSelection`'s own switch step both retry finalizing this
+    /// (via `retryFinalizeIfNeeded()`) *before* they are allowed to move
+    /// the active pointer away from this document — see those methods for
+    /// why letting the pointer move first would risk an already-shown,
+    /// possibly-edited document being deleted by a later reconciliation
+    /// pass that no longer sees it as the active one.
+    private var unfinalizedCreation: PhotoDocumentCreation?
+
     /// Identifies one lifecycle operation from the moment it is minted to
     /// the moment it either commits or discards itself.
     private struct OperationToken: Equatable {
@@ -292,9 +301,8 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     private func reconcileOrphanedImports() async {
         do {
-            let report = try await dependencies.store.reconcileOrphanedImports(
-                activeDocumentID: dependencies.loadActiveDocumentID()
-            )
+            let activeID = await dependencies.store.loadActiveDocumentID()
+            let report = try await dependencies.store.reconcileOrphanedImports(activeDocumentID: activeID)
             guard !report.failures.isEmpty else { return }
             alert = EditorAlert(
                 title: L10n.t("Startup cleanup incomplete"),
@@ -324,7 +332,7 @@ public final class PhotoDocumentEditor: ObservableObject {
     private func restoreActiveDocumentIfPossible(ifStillAtBaseline baselineGeneration: UInt64) async {
         guard document == nil else { return }
         guard currentGeneration == baselineGeneration else { return }
-        guard let activeID = dependencies.loadActiveDocumentID() else { return }
+        guard let activeID = await dependencies.store.loadActiveDocumentID() else { return }
 
         let token = mintToken()
         isPreparingDocument = true
@@ -369,7 +377,7 @@ public final class PhotoDocumentEditor: ObservableObject {
                 candidateScope?.stop()
                 return
             }
-            commitDocument(token: token, document: runtimeDocument, scope: candidateScope, photo: photo, adjustments: adjustments)
+            await commitDocument(token: token, document: runtimeDocument, scope: candidateScope, photo: photo, adjustments: adjustments)
         } catch RestoreError.missingBookmark {
             candidateScope?.stop()
             guard isCurrent(token) else { return }
@@ -388,7 +396,13 @@ public final class PhotoDocumentEditor: ObservableObject {
             guard isCurrent(token) else { return }
             isPreparingDocument = false
             if shouldClearActiveDocumentID(after: error) {
-                dependencies.saveActiveDocumentID(nil)
+                // Best-effort: this document is not durably `.pending`
+                // (restore never creates a fresh creation, only points at
+                // an existing, already-`.committed` one) — a failure to
+                // clear the pointer here risks nothing worse than the
+                // *next* launch retrying the same already-known-bad
+                // restore, which fails the same recoverable way again.
+                try? await dependencies.store.saveActiveDocumentID(nil)
             }
             alert = restoreFailureAlert(for: error)
         }
@@ -542,12 +556,18 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     // MARK: - Relinking a document with a missing bookmark
 
-    /// The user dismissed the relink prompt without picking a file. The
-    /// existing document (record, sidecar, active pointer) is completely
-    /// untouched — they can try again later from the same prompt.
-    public func cancelRelink() {
-        pendingRelink = nil
-    }
+    /// The user dismissed the file picker `beginRelinkSelection(_:)` needs,
+    /// without picking a file. The existing document (record, sidecar,
+    /// active pointer) is completely untouched — and so, deliberately, is
+    /// `pendingRelink` itself: for a single-photo UI, the relink prompt it
+    /// drives is the *only* way back to this document, so a plain cancel
+    /// must never tear it down. A caller that wants a way to actually give
+    /// up on recovering this specific document needs a distinctly named
+    /// action of its own that says so — conflating that with dismissing a
+    /// file picker is exactly the bug this method used to have (it cleared
+    /// `pendingRelink`, silently making the prompt itself the thing being
+    /// cancelled).
+    public func cancelRelink() {}
 
     /// The user picked a file in response to `pendingRelink`. Verifies
     /// `url`'s content fingerprint matches the document's original
@@ -576,7 +596,13 @@ public final class PhotoDocumentEditor: ObservableObject {
         isPreparingDocument = true
 
         openingTask = Task { [weak self, dependencies] in
-            guard let self else { return }
+            guard let self else {
+                // The controller itself is already gone -- nothing left to
+                // supersede-check against, but the scope this task is
+                // holding is still open and must not leak.
+                scope.stop()
+                return
+            }
             guard !Task.isCancelled, self.isCurrent(token) else {
                 scope.stop()
                 return
@@ -595,8 +621,8 @@ public final class PhotoDocumentEditor: ObservableObject {
                     scope.stop()
                     return
                 }
-                self.commitDocument(token: token, document: relinkedDocument, scope: scope, photo: photo, adjustments: adjustments)
-            } catch RelinkError.fingerprintMismatch {
+                await self.commitDocument(token: token, document: relinkedDocument, scope: scope, photo: photo, adjustments: adjustments)
+            } catch RelinkError.fingerprintMismatch, RelinkError.contentMismatch {
                 scope.stop()
                 guard self.isCurrent(token) else { return }
                 self.isPreparingDocument = false
@@ -605,6 +631,18 @@ public final class PhotoDocumentEditor: ObservableObject {
                 self.alert = EditorAlert(
                     title: L10n.t("That's not the same photo"),
                     message: L10n.t("This file doesn't match the photo LumaHarbor is trying to reconnect."),
+                    nextStep: L10n.t("Choose the file again from Files.")
+                )
+            } catch RelinkError.sourceModifiedDuringRelink {
+                scope.stop()
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                // `pendingRelink` deliberately stays set here too -- the
+                // file changed while it was being verified, so nothing was
+                // touched and the user can simply try again.
+                self.alert = EditorAlert(
+                    title: L10n.t("That's not the same photo"),
+                    message: L10n.t("This file changed while LumaHarbor was checking it."),
                     nextStep: L10n.t("Choose the file again from Files.")
                 )
             } catch {
@@ -656,7 +694,13 @@ public final class PhotoDocumentEditor: ObservableObject {
         isPreparingDocument = true
 
         openingTask = Task { [weak self, dependencies] in
-            guard let self else { return }
+            guard let self else {
+                // The controller itself is already gone -- nothing left to
+                // supersede-check against, but the scope this task is
+                // holding is still open and must not leak.
+                scope.stop()
+                return
+            }
             guard !Task.isCancelled, self.isCurrent(token) else {
                 // Superseded before this task's body got to run at all.
                 scope.stop()
@@ -734,10 +778,59 @@ public final class PhotoDocumentEditor: ObservableObject {
                     return
                 }
 
+                // The document about to be replaced must itself be
+                // durably `.committed` before the active pointer is
+                // allowed to move off it -- otherwise a crash right after
+                // this switch would leave it `.pending` with a pointer no
+                // longer pointing at it, and the next launch's
+                // reconciliation would roll it back even though the user
+                // had already been shown it (and may have edited it).
+                guard await self.retryFinalizeIfNeeded() else {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    guard self.isCurrent(token) else { return }
+                    self.isPreparingDocument = false
+                    self.alert = EditorAlert(
+                        title: L10n.t("Couldn't switch photos"),
+                        message: L10n.t("LumaHarbor couldn't finish saving the photo you had open."),
+                        nextStep: L10n.t("Try again.")
+                    )
+                    return
+                }
+                guard self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    return
+                }
+
+                // The active pointer is durably written to the *new*
+                // document *before* anything in-memory changes -- a write
+                // failure here must never be treated as though the
+                // hand-off became durable. If it fails, the switch is
+                // aborted exactly like a flush failure above: the old
+                // document remains open, valid and untouched, and the new
+                // one (never actually shown) is rolled back.
+                do {
+                    try await self.dependencies.store.saveActiveDocumentID(creation.document.id)
+                } catch {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    guard self.isCurrent(token) else { return }
+                    self.isPreparingDocument = false
+                    self.alert = EditorAlert(
+                        title: L10n.t("Couldn't switch photos"),
+                        message: L10n.t("LumaHarbor couldn't remember this photo for next time."),
+                        nextStep: L10n.t("Try again.")
+                    )
+                    return
+                }
+                guard self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: mode == .inPlace ? scope : nil)
+                    return
+                }
+
                 // Atomic hand-off: no `await` between here and the end of
                 // this block, so nothing else can run on the main actor in
-                // between. The active-document pointer moves directly from
-                // whatever it was to the new ID -- never through `nil`.
+                // between. The active-document pointer has already moved
+                // durably to the new ID above -- this is only the
+                // in-memory state catching up to what disk already says.
                 let previousScope = self.documentScope
                 self.documentScope = mode == .inPlace ? scope : nil
                 self.document = creation.document
@@ -745,15 +838,21 @@ public final class PhotoDocumentEditor: ObservableObject {
                     photo: photo, sourceURL: creation.document.workingURL,
                     adjustments: adjustments, isReadOnly: false
                 )
-                self.dependencies.saveActiveDocumentID(creation.document.id)
                 self.isPreparingDocument = false
                 self.pendingRelink = nil
                 previousScope?.stop()
-                // After the swap above, not part of it -- by this point
-                // `document`/`documentScope`/`editor` are already fully
-                // updated, so awaiting the actor here can't reopen any
-                // atomicity gap.
-                await dependencies.store.finalizeCreation(creation)
+                // After the swap above, not part of it. The creation shown
+                // is not yet proven durably `.committed` on disk -- only
+                // its active pointer is -- so it is tracked as this
+                // controller's `unfinalizedCreation` until finalize
+                // actually succeeds; `closeCurrentDocument()` and this same
+                // switch step, next time either runs, retry it before
+                // letting the pointer move again. This first attempt is
+                // best-effort: a failure here is not shown to the user (the
+                // document is already fully open and usable) and simply
+                // waits for the next such retry.
+                self.unfinalizedCreation = creation
+                await self.retryFinalizeIfNeeded()
             } catch is CancellationError {
                 // A newer selection or a close pre-empted this one before
                 // it could even reach its own checks above (e.g. while
@@ -794,6 +893,36 @@ public final class PhotoDocumentEditor: ObservableObject {
         cleanupDiagnostic = L10n.t("LumaHarbor couldn't finish cleaning up after a photo that failed to open.")
     }
 
+    /// Retries durably finalizing `unfinalizedCreation`, if there is one.
+    /// Returns `true` when there is nothing left to finalize (already
+    /// `nil`, or this call just succeeded) — the caller may safely proceed
+    /// to move the active pointer away from the current document. Returns
+    /// `false` when a durable commit still could not be produced — the
+    /// caller must *not* proceed: closing or switching away now would let
+    /// the active pointer move off a document that is still only
+    /// `.pending` on disk, which a future reconciliation pass (seeing it
+    /// no longer matches the active pointer) would roll back — deleting a
+    /// document already shown to, and possibly edited by, the user.
+    ///
+    /// `.alreadyRolledBack`/`.unknownReceipt` are treated as "nothing left
+    /// to do" too: both should be unreachable for a creation this instance
+    /// itself just committed and is still tracking, but neither leaves
+    /// anything for a retry to accomplish if it somehow occurs.
+    @discardableResult
+    private func retryFinalizeIfNeeded() async -> Bool {
+        guard let creation = unfinalizedCreation else { return true }
+        switch await dependencies.store.finalizeCreation(creation) {
+        case .committed, .alreadyFinalized:
+            unfinalizedCreation = nil
+            return true
+        case .retryRequired:
+            return false
+        case .alreadyRolledBack, .unknownReceipt:
+            unfinalizedCreation = nil
+            return false
+        }
+    }
+
     // MARK: - Shared open machinery
 
     private func loadEditorState(for document: PhotoDocument) async throws -> (photo: PhotoAsset, adjustments: PhotoAdjustments) {
@@ -818,20 +947,34 @@ public final class PhotoDocumentEditor: ObservableObject {
     }
 
     /// Commits an already-fully-prepared *existing* document (the restore
-    /// path only — a fresh open's own two-phase hand-off is inlined in
-    /// `openFreshSelection`, since it also needs to flush and replace
-    /// whatever was open first).
+    /// and relink paths only — a fresh open's own two-phase hand-off is
+    /// inlined in `openFreshSelection`, since it also needs to flush and
+    /// replace whatever was open first).
+    ///
+    /// Unlike a fresh open, `document` here is always already `.committed`
+    /// on disk — restore only ever points at an existing document, and
+    /// relink only updates an existing one's location — so there is no
+    /// pending creation at stake and no `unfinalizedCreation` bookkeeping
+    /// needed. The active-pointer write below is still attempted durably,
+    /// but only best-effort: a failure leaves the *previous* session's
+    /// pointer in place (or clears to nothing), which at worst costs a
+    /// future restore, never risks this already-safe document being
+    /// deleted.
     private func commitDocument(
         token: OperationToken,
         document: PhotoDocument,
         scope: (any SecurityScopedResource)?,
         photo: PhotoAsset,
         adjustments: PhotoAdjustments
-    ) {
+    ) async {
         documentScope = scope
         self.document = document
         editor.open(photo: photo, sourceURL: document.workingURL, adjustments: adjustments, isReadOnly: false)
-        dependencies.saveActiveDocumentID(document.id)
+        do {
+            try await dependencies.store.saveActiveDocumentID(document.id)
+        } catch {
+            cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember this photo for next time.")
+        }
         isPreparingDocument = false
         pendingRelink = nil
     }
@@ -871,11 +1014,51 @@ public final class PhotoDocumentEditor: ObservableObject {
             isPreparingDocument = false
             return false
         }
+
+        // The document being closed must be durably `.committed` before
+        // the active pointer can be cleared -- otherwise a crash right
+        // after this close, with the pointer already gone, would leave a
+        // still-`.pending` record that the next launch's reconciliation
+        // (seeing it no longer matches the, now cleared, active pointer)
+        // would roll back, even though the user closed it normally and it
+        // may hold edits. Leaves the document open (not closed) on
+        // failure -- the safest state, and the same choice a flush
+        // failure above already makes.
+        guard await retryFinalizeIfNeeded() else {
+            guard isCurrent(token) else { return false }
+            isPreparingDocument = false
+            alert = EditorAlert(
+                title: L10n.t("Couldn't close this photo"),
+                message: L10n.t("LumaHarbor couldn't finish saving this photo."),
+                nextStep: L10n.t("Try again.")
+            )
+            return false
+        }
+        guard isCurrent(token) else { return true }
+
+        // Clearing the active pointer must itself be durable -- a failed
+        // write here must not be treated as though the close became
+        // durable either. On failure, the document stays open rather than
+        // showing a "closed" UI backed by a pointer that, on disk, still
+        // points at it.
+        do {
+            try await dependencies.store.saveActiveDocumentID(nil)
+        } catch {
+            guard isCurrent(token) else { return false }
+            isPreparingDocument = false
+            alert = EditorAlert(
+                title: L10n.t("Couldn't close this photo"),
+                message: L10n.t("LumaHarbor couldn't remember that this photo was closed."),
+                nextStep: L10n.t("Try again.")
+            )
+            return false
+        }
+        guard isCurrent(token) else { return true }
+
         editor.close()
         let closedScope = documentScope
         document = nil
         documentScope = nil
-        dependencies.saveActiveDocumentID(nil)
         isPreparingDocument = false
         closedScope?.stop()
         return true

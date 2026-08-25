@@ -140,6 +140,76 @@ private struct NeverPreviewRenderer: PreviewRendering {
     }
 }
 
+/// Local mirror of `PhotoDocumentStore`'s private on-disk shape for the
+/// active-document pointer -- just enough to decode `documentID` back out
+/// of whatever `ActivePointerWriteRecorder` intercepts. Coupled to the
+/// store's `ActiveDocument.json` filename/format by construction: if that
+/// ever changes, this (and every test relying on it) should fail loudly
+/// rather than silently stop observing writes.
+private struct ActivePointerProbe: Decodable {
+    var documentID: UUID?
+}
+
+/// Thread-safe recorder that `Harness` wires into `PhotoDocumentStore`'s
+/// `writeRecordData` seam to observe every write to the active-document
+/// pointer file -- the real, durable one `PhotoDocumentEditor` now reads
+/// and writes directly via `store.loadActiveDocumentID()`/
+/// `saveActiveDocumentID(_:)`, not a separate in-memory or `UserDefaults`
+/// stand-in. `@unchecked Sendable` plus an `NSLock` because the actor
+/// invokes this closure from off the main actor, same reasoning as
+/// `GatedDecoder` above.
+private final class ActivePointerWriteRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var writes: [UUID?] = []
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    func record(_ id: UUID?) {
+        withLock { writes.append(id) }
+    }
+
+    var snapshot: [UUID?] {
+        withLock { writes }
+    }
+
+    func reset() {
+        withLock { writes = [] }
+    }
+}
+
+/// Lets a test make specific durable writes -- matched by a predicate on
+/// the destination `URL` -- fail on demand, to exercise
+/// `PhotoDocumentEditor`'s finalize-retry and durable-pointer-write gating
+/// without needing real filesystem permission games. Thread-safe for the
+/// same reason `ActivePointerWriteRecorder` is: the actor invokes the
+/// wrapping closure off the main actor.
+private final class WriteFailureInjector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var predicate: ((Data, URL) -> Bool)?
+
+    func shouldFail(_ data: Data, _ url: URL) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return predicate?(data, url) ?? false
+    }
+
+    /// Every subsequent write matching `predicate` fails until this is
+    /// called again (with `nil` to stop failing anything, or a new
+    /// predicate to fail something else). Takes the data being written,
+    /// not just the destination `URL`, since a document record's initial
+    /// `.pending` commit and its later finalize-to-`.committed` rewrite
+    /// share the exact same path -- only their content differs.
+    func setPredicate(_ predicate: ((Data, URL) -> Bool)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.predicate = predicate
+    }
+}
+
 /// A configurable, in-memory stand-in for every dependency
 /// `PhotoDocumentEditor` needs, so its lifecycle logic — restore,
 /// serialization, rollback — can be exercised without touching the sandbox
@@ -149,17 +219,12 @@ private final class Harness {
     let rootURL: URL
     let store: PhotoDocumentStore
     var decoder: any RawDecoding = SucceedingDecoder()
-    var activeDocumentID: UUID?
     var scopeAccessSucceeds = true
     var bookmarkCreationResult: Result<Data, Error> = .success(Data("bookmark".utf8))
     var resolveScopeResult: Result<ResolvedSecurityScope, Error>?
     private(set) var madeScopes: [FakeSecurityScopedResource] = []
     private(set) var resolvedScopes: [FakeSecurityScopedResource] = []
-    // `fileprivate(set)`, not `private(set)`: the test methods below reset
-    // this mid-test (`removeAll()`) to isolate the sequence a specific
-    // operation writes, and both `Harness` and the test class live in this
-    // one file.
-    fileprivate(set) var savedActiveDocumentIDs: [UUID?] = []
+    private let activePointerWrites: ActivePointerWriteRecorder
     /// The URL `makeBookmark` was last called with -- the default
     /// `resolveScope` echoes this back, so a test that doesn't explicitly
     /// override `resolveScopeResult` gets the realistic behavior ("the
@@ -167,12 +232,34 @@ private final class Harness {
     /// unrelated placeholder URL that would spuriously look like the
     /// document moved.
     private(set) var lastBookmarkedURL: URL?
+    /// Lets a test make a specific durable write fail transiently -- e.g.
+    /// "the next write to the active-pointer file" or "every write to this
+    /// document's record until told otherwise" -- to exercise the
+    /// finalize/pointer-write retry-gating `PhotoDocumentEditor` is
+    /// responsible for. `nil` (the default) never fails anything.
+    let writeFailureInjector = WriteFailureInjector()
 
     init() {
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("PhotoDocumentEditorTests-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        store = PhotoDocumentStore(rootURL: rootURL.appendingPathComponent("Store", isDirectory: true))
+        let recorder = ActivePointerWriteRecorder()
+        activePointerWrites = recorder
+        let injector = writeFailureInjector
+        store = PhotoDocumentStore(
+            rootURL: rootURL.appendingPathComponent("Store", isDirectory: true),
+            writeRecordData: { data, url, fileManager in
+                if injector.shouldFail(data, url) {
+                    struct InjectedWriteFailure: Error {}
+                    throw InjectedWriteFailure()
+                }
+                if url.lastPathComponent == "ActiveDocument.json" {
+                    let id = (try? JSONDecoder().decode(ActivePointerProbe.self, from: data))?.documentID
+                    recorder.record(id)
+                }
+                try AtomicFileWriter.write(data, to: url, fileManager: fileManager)
+            }
+        )
     }
 
     func makeSourceFile(named name: String = "fixture.ARW", pattern: UInt8 = 0x5A) -> URL {
@@ -207,17 +294,37 @@ private final class Harness {
             makeBookmark: { [weak self] url in
                 self?.lastBookmarkedURL = url
                 return try self?.bookmarkCreationResult.get() ?? Data()
-            },
-            loadActiveDocumentID: { [weak self] in self?.activeDocumentID },
-            saveActiveDocumentID: { [weak self] id in
-                self?.activeDocumentID = id
-                self?.savedActiveDocumentIDs.append(id)
             }
         )
     }
 
     func makeEditor() -> PhotoDocumentEditor {
         PhotoDocumentEditor(dependencies: dependencies)
+    }
+
+    /// Reads the real, durably persisted active-document pointer directly
+    /// from `store` -- never a separate in-memory stand-in -- so a test
+    /// observes exactly what the next launch's reconciliation would see.
+    func loadActiveDocumentID() async -> UUID? {
+        await store.loadActiveDocumentID()
+    }
+
+    /// Pre-seeds the durable active-document pointer before a test starts
+    /// an editor, e.g. to simulate "the previous launch left this document
+    /// active."
+    func setActiveDocumentID(_ id: UUID?) async throws {
+        try await store.saveActiveDocumentID(id)
+    }
+
+    /// Every write observed on the active-document pointer file since the
+    /// last `resetSavedActiveDocumentIDs()` (or since this `Harness` was
+    /// created), in order.
+    var savedActiveDocumentIDs: [UUID?] {
+        activePointerWrites.snapshot
+    }
+
+    func resetSavedActiveDocumentIDs() {
+        activePointerWrites.reset()
     }
 }
 
@@ -253,7 +360,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
         let flushed = await firstEditor.editor.flushPendingEdits()
         XCTAssertTrue(flushed)
         let documentID = try XCTUnwrap(firstEditor.document?.id)
-        XCTAssertEqual(harness.activeDocumentID, documentID)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, documentID)
 
         // A brand-new model, over the same store root -- simulating a relaunch.
         let secondEditor = harness.makeEditor()
@@ -337,7 +445,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertNil(secondEditor.document, "a failed restore must never fake success by opening something")
         XCTAssertNil(secondEditor.editor.photo, "no new/neutral document may be fabricated in EditorSession either")
         // Transient failure: the pointer must survive for a retry.
-        XCTAssertEqual(harness.activeDocumentID, documentID)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, documentID)
 
         // And the retry actually succeeds once the volume is back.
         harness.resolveScopeResult = nil
@@ -357,14 +466,15 @@ final class PhotoDocumentEditorTests: XCTestCase {
     /// broken pointer is not retried forever.
     func testRestoreClearsTheActiveIDOnlyWhenTheRecordIsDefinitivelyGone() async throws {
         let harness = Harness()
-        harness.activeDocumentID = UUID() // never actually created
+        try await harness.setActiveDocumentID(UUID()) // never actually created
         let editor = harness.makeEditor()
 
         editor.performStartupSequence()
         try await waitUntil { editor.alert != nil }
 
         XCTAssertNil(editor.document)
-        XCTAssertNil(harness.activeDocumentID, "documentNotFound is definitive -- the pointer must be cleared")
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertNil(activeID, "documentNotFound is definitive -- the pointer must be cleared")
     }
 
     /// A fresh user selection must win over startup restore even when both
@@ -624,7 +734,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertEqual(editor.document?.id, documentA.id, "A must still be the open document")
         XCTAssertEqual(editor.editor.photo?.id, PhotoID(documentA.id))
         XCTAssertEqual(editor.editor.adjustments.exposure, 0.4, "A's in-memory edit must survive")
-        XCTAssertEqual(harness.activeDocumentID, documentA.id, "the active pointer must still point at A, never nil in between")
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, documentA.id, "the active pointer must still point at A, never nil in between")
 
         // The failed switch to B must not have left an orphaned copy behind.
         let documentsDirectory = harness.rootURL
@@ -668,7 +779,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
         try await waitUntil { scope.stopCount == 1 }
 
         XCTAssertNil(editor.document, "the pending open must never commit after close cancelled it")
-        XCTAssertNil(harness.activeDocumentID)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertNil(activeID)
         XCTAssertFalse(editor.isPreparingDocument)
     }
 
@@ -757,7 +869,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         let sourceURL = harness.makeSourceFile()
         let edited = PhotoAdjustments.neutral.setting(.exposure, to: 0.65)
         let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let editor = harness.makeEditor()
         editor.performStartupSequence()
@@ -766,7 +878,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertNil(editor.document, "must not fake success by opening a neutral placeholder under a new ID")
         XCTAssertEqual(editor.pendingRelink?.documentID, creation.document.id)
         XCTAssertEqual(editor.pendingRelink?.sourceFingerprint, creation.document.sourceFingerprint)
-        XCTAssertEqual(harness.activeDocumentID, creation.document.id, "a missing bookmark must not clear the active pointer")
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, creation.document.id, "a missing bookmark must not clear the active pointer")
     }
 
     func testRelinkingToTheCorrectFileRestoresTheSameDocumentAndAdjustments() async throws {
@@ -774,7 +887,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         let sourceURL = harness.makeSourceFile()
         let edited = PhotoAdjustments.neutral.setting(.contrast, to: 15)
         let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let editor = harness.makeEditor()
         editor.performStartupSequence()
@@ -787,7 +900,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertEqual(editor.document?.id, creation.document.id, "relink must reuse the existing document ID, never mint a new one")
         XCTAssertNil(editor.pendingRelink)
         XCTAssertEqual(editor.editor.adjustments.contrast, 15, "the existing sidecar's adjustments must carry over")
-        XCTAssertEqual(harness.activeDocumentID, creation.document.id)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, creation.document.id)
     }
 
     func testRelinkingToTheWrongFileIsRejectedAndLeavesExistingDataUntouched() async throws {
@@ -796,7 +910,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         let wrongURL = harness.makeSourceFile(named: "different.ARW", pattern: 0xBB)
         let edited = PhotoAdjustments.neutral.setting(.contrast, to: 15)
         let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let editor = harness.makeEditor()
         editor.performStartupSequence()
@@ -807,7 +921,8 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         XCTAssertNil(editor.document, "a fingerprint-mismatched file must never be attached to the existing document")
         XCTAssertNotNil(editor.pendingRelink, "the prompt must stay so the user can try picking again")
-        XCTAssertEqual(harness.activeDocumentID, creation.document.id)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, creation.document.id)
 
         let stillSaved = try await harness.store.loadAdjustments(documentID: creation.document.id)
         XCTAssertEqual(stillSaved.contrast, 15)
@@ -815,12 +930,21 @@ final class PhotoDocumentEditorTests: XCTestCase {
         XCTAssertEqual(stillDocument.workingURL, sourceURL, "the record must still point at the original location")
     }
 
-    func testCancellingRelinkLeavesExistingDataUntouched() async throws {
+    /// Codex review: `cancelRelink()` must never permanently destroy the
+    /// *only* way back into recovering this document -- there is no other
+    /// affordance for a single-photo UI stuck on a missing bookmark than
+    /// the relink prompt itself. Dismissing the file picker without
+    /// picking a file leaves `pendingRelink` (and everything about the
+    /// document) exactly as it was, so the same prompt is still there to
+    /// try again -- matching what `cancelRelink()`'s own doc comment always
+    /// promised, which the old implementation (clearing `pendingRelink`)
+    /// silently broke.
+    func testCancellingRelinkKeepsThePromptAvailableToTryAgain() async throws {
         let harness = Harness()
         let sourceURL = harness.makeSourceFile()
         let edited = PhotoAdjustments.neutral.setting(.exposure, to: 0.3)
         let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL, adjustments: edited)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let editor = harness.makeEditor()
         editor.performStartupSequence()
@@ -828,11 +952,20 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         editor.cancelRelink()
 
-        XCTAssertNil(editor.pendingRelink)
+        XCTAssertNotNil(editor.pendingRelink, "the recovery prompt must survive a plain cancel, or it can never be reached again")
+        XCTAssertEqual(editor.pendingRelink?.documentID, creation.document.id)
         XCTAssertNil(editor.document)
-        XCTAssertEqual(harness.activeDocumentID, creation.document.id)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, creation.document.id)
         let stillSaved = try await harness.store.loadAdjustments(documentID: creation.document.id)
         XCTAssertEqual(stillSaved.exposure, 0.3)
+
+        // And the prompt genuinely still works -- relinking the right file
+        // after a cancel succeeds exactly as it would have without one.
+        editor.beginRelinkSelection(sourceURL)
+        try await waitUntil { editor.document != nil }
+        XCTAssertEqual(editor.document?.id, creation.document.id)
+        XCTAssertNil(editor.pendingRelink)
     }
 
     // MARK: 6. Restore scope ownership on every path
@@ -865,7 +998,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         // Give it a real bookmark this time -- this test is about a decode
         // failure, not a missing-bookmark relink.
         try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
         harness.decoder = FailingDecoder()
 
         let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
@@ -886,7 +1019,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
         try await harness.store.saveAdjustments(.neutral, documentID: creation.document.id)
         try corruptSidecar(for: creation.document.id, in: harness)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
         harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: restoredScope, isStale: false))
@@ -904,7 +1037,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         let sourceURL = harness.makeSourceFile(named: "a.ARW")
         let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL)
         try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let restoreGate = GatedDecoder(gatedURL: sourceURL)
         harness.decoder = restoreGate
@@ -933,7 +1066,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         let sourceURL = harness.makeSourceFile()
         let creation = try await makeUnbookmarkedInPlaceDocument(harness, sourceURL: sourceURL)
         try await harness.store.updateSourceBookmark(Data("bookmark".utf8), documentID: creation.document.id)
-        harness.activeDocumentID = creation.document.id
+        try await harness.setActiveDocumentID(creation.document.id)
 
         let restoredScope = FakeSecurityScopedResource(url: sourceURL, isAccessing: true)
         harness.resolveScopeResult = .success(ResolvedSecurityScope(resource: restoredScope, isStale: false))
@@ -974,7 +1107,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         editor.beginOpeningPendingSelection(mode: .inPlace)
         try await waitUntil { editor.document?.sourceURL == urlA }
         let documentAID = try XCTUnwrap(editor.document?.id)
-        harness.savedActiveDocumentIDs.removeAll()
+        harness.resetSavedActiveDocumentIDs()
 
         // Force the next save to fail without touching file permissions
         // (unreliable when running as root in CI): pre-write a
@@ -1015,7 +1148,7 @@ final class PhotoDocumentEditorTests: XCTestCase {
         editor.beginOpeningPendingSelection(mode: .inPlace)
         try await waitUntil { editor.document?.sourceURL == urlA }
         let documentAID = try XCTUnwrap(editor.document?.id)
-        harness.savedActiveDocumentIDs.removeAll()
+        harness.resetSavedActiveDocumentIDs()
 
         editor.beginSelecting(urlB)
         editor.beginOpeningPendingSelection(mode: .inPlace)
@@ -1041,5 +1174,128 @@ final class PhotoDocumentEditorTests: XCTestCase {
 
         let lastWrite = try XCTUnwrap(harness.savedActiveDocumentIDs.last, "expected at least one active-ID write")
         XCTAssertNil(lastWrite, "the last write on a successful close must be nil")
+    }
+
+    // MARK: 8. Finalize durability gates close/switch (Codex round-3 review)
+
+    /// If the durable commit write keeps failing, `closeCurrentDocument()`
+    /// must refuse to close -- the document stays open, the active pointer
+    /// is never cleared -- rather than letting the pointer move off a
+    /// document that is still only `.pending` on disk. Once the write
+    /// starts succeeding again, the very same close call this time
+    /// actually closes it.
+    func testCloseRefusesToProceedWhileTheCurrentDocumentsCommitCannotBeMadeDurable() async throws {
+        let harness = Harness()
+        let sourceURL = harness.makeSourceFile()
+
+        // Fails only the *finalize* (committed) record write, identified
+        // by content rather than path -- the initial `.pending` commit
+        // inside the open itself must still succeed, or the document would
+        // never open at all. This is what leaves `unfinalizedCreation` set
+        // once the fresh open's own best-effort finalize attempt fails.
+        harness.writeFailureInjector.setPredicate { data, url in
+            guard url.pathExtension == "json", url.deletingLastPathComponent().lastPathComponent == "Records" else { return false }
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return object?["lifecycleState"] as? String == "committed"
+        }
+
+        let editor = harness.makeEditor()
+        editor.beginSelecting(sourceURL)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document != nil }
+        let documentID = try XCTUnwrap(editor.document?.id)
+
+        let closed = await editor.closeCurrentDocument()
+        XCTAssertFalse(closed, "must not report success while the commit still cannot be made durable")
+        XCTAssertNotNil(editor.document, "the document must remain open")
+        XCTAssertEqual(editor.document?.id, documentID)
+        XCTAssertNotNil(editor.alert)
+
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, documentID, "the active pointer must not have been cleared while the commit is still undurable")
+
+        // The write starts succeeding again -- the very same close call
+        // now finishes, retrying finalize first.
+        harness.writeFailureInjector.setPredicate(nil)
+        let retriedClose = await editor.closeCurrentDocument()
+        XCTAssertTrue(retriedClose)
+        XCTAssertNil(editor.document)
+        let clearedID = await harness.loadActiveDocumentID()
+        XCTAssertNil(clearedID)
+    }
+
+    /// Same gate, but for switching to a *different* document: the
+    /// previously-open document's still-undurable commit must block the
+    /// switch entirely -- the new document is rolled back, the old one
+    /// stays open and untouched.
+    func testSwitchingAwayFromAnUndurableDocumentIsRefusedAndTheNewOneIsRolledBack() async throws {
+        let harness = Harness()
+        let urlA = harness.makeSourceFile(named: "a.ARW")
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+
+        // Same content-based targeting as above -- only A's finalize
+        // (committed) write fails, not its initial pending commit.
+        harness.writeFailureInjector.setPredicate { data, url in
+            guard url.pathExtension == "json", url.deletingLastPathComponent().lastPathComponent == "Records" else { return false }
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return object?["lifecycleState"] as? String == "committed"
+        }
+
+        let editor = harness.makeEditor()
+        editor.beginSelecting(urlA)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document != nil }
+        let documentAID = try XCTUnwrap(editor.document?.id)
+
+        editor.beginSelecting(urlB)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertEqual(editor.document?.id, documentAID, "A must still be the open document -- the switch to B must have been refused")
+        XCTAssertEqual(editor.document?.sourceURL, urlA)
+
+        // B's never-shown creation must have been rolled back -- no
+        // leftover record for it.
+        let recordsDirectory = harness.rootURL
+            .appendingPathComponent("Store", isDirectory: true)
+            .appendingPathComponent("Records", isDirectory: true)
+        let recordNames = (try? FileManager.default.contentsOfDirectory(atPath: recordsDirectory.path))?
+            .map { $0.replacingOccurrences(of: ".json", with: "") } ?? []
+        XCTAssertFalse(recordNames.contains { $0 != documentAID.uuidString }, "B's record must not have survived a refused switch")
+
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, documentAID)
+    }
+
+    /// If the *pointer* write specifically fails (independent of the
+    /// finalize write succeeding), a fresh switch must be aborted the same
+    /// way -- never treating a failed pointer write as though the hand-off
+    /// became durable.
+    func testSwitchAbortsWhenTheActivePointerWriteItselfFails() async throws {
+        let harness = Harness()
+        let urlA = harness.makeSourceFile(named: "a.ARW")
+        let urlB = harness.makeSourceFile(named: "b.ARW")
+
+        let editor = harness.makeEditor()
+        editor.beginSelecting(urlA)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.document != nil }
+        let documentAID = try XCTUnwrap(editor.document?.id)
+
+        // A's own commit is left to succeed normally; only the pointer
+        // write for B's switch is made to fail.
+        harness.writeFailureInjector.setPredicate { _, url in
+            url.lastPathComponent == "ActiveDocument.json"
+        }
+
+        editor.beginSelecting(urlB)
+        editor.beginOpeningPendingSelection(mode: .inPlace)
+        try await waitUntil { editor.alert != nil }
+
+        XCTAssertEqual(editor.document?.id, documentAID, "A must still be open -- the pointer write failure must abort the switch to B")
+
+        harness.writeFailureInjector.setPredicate(nil)
+        let activeID = await harness.loadActiveDocumentID()
+        XCTAssertEqual(activeID, documentAID, "the pointer must still durably say A -- it was never overwritten by the failed attempt to point at B")
     }
 }

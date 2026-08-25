@@ -87,8 +87,21 @@ struct PadRootView: View {
                     allowedContentTypes: [.image, .data],
                     allowsMultipleSelection: false
                 ) { result in
-                    guard let url = try? result.get().first else { return }
-                    model.beginRelinkSelection(url)
+                    switch result {
+                    case .success(let urls):
+                        guard let url = urls.first else { return }
+                        model.beginRelinkSelection(url)
+                    case .failure(let error):
+                        // Same distinction as the main fileImporter above:
+                        // a plain cancellation stays silent, but any other
+                        // provider failure needs a safe alert rather than
+                        // being swallowed by `try?`.
+                        let nsError = error as NSError
+                        guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
+                            model.reportFileImporterFailure(error)
+                            return
+                        }
+                    }
                 }
         }
         .task {
@@ -101,6 +114,12 @@ struct PadRootView: View {
         if model.document != nil {
             PadEditorView(model: model)
         } else if model.pendingRelink != nil {
+            // No "Cancel" here, deliberately: this prompt is the only way
+            // back to this specific document, and dismissing the file
+            // picker it opens (handled below) already leaves it exactly as
+            // it was, ready to try again. Opening a different photo from
+            // the toolbar above works too, and is what supersedes this
+            // prompt if the user doesn't want to deal with it right now.
             ContentUnavailableView {
                 Label(L10n.t("Couldn't reopen your last photo"), systemImage: "questionmark.folder")
             } description: {
@@ -108,9 +127,6 @@ struct PadRootView: View {
             } actions: {
                 Button(L10n.t("Choose the file again from Files.")) {
                     isRelinking = true
-                }
-                Button(L10n.t("Cancel"), role: .cancel) {
-                    model.cancelRelink()
                 }
             }
         } else if model.isPreparingDocument {
