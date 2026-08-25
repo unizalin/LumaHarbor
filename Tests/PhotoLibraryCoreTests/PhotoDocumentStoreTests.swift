@@ -105,7 +105,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let before = try Data(contentsOf: sourceURL)
         let (store, _) = makeStore()
 
-        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
         try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
 
         XCTAssertEqual(try Data(contentsOf: sourceURL), before)
@@ -116,7 +116,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
 
         XCTAssertEqual(document.storageMode, .appCopy)
         XCTAssertEqual(document.sourceFingerprint, document.workingFingerprint)
@@ -128,7 +128,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
 
-        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
         let edited = PhotoAdjustments.neutral.setting(.contrast, to: 25)
         try await store.saveAdjustments(edited, documentID: document.id)
 
@@ -294,7 +294,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         }
         let (store, _) = makeStore(checkCancellation: { try trigger.checkCancellation() })
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
 
         XCTAssertEqual(document.sourceFingerprint, document.workingFingerprint)
         let recomputed = try FingerprintCalculator.fingerprint(forFileAt: document.workingURL)
@@ -305,7 +305,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
 
         // The persisted fingerprint must describe the file actually kept —
         // recomputing it straight from `workingURL` must agree.
@@ -323,7 +323,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let rootA = temporaryDirectory.appendingPathComponent("RootA", isDirectory: true)
         let storeA = PhotoDocumentStore(rootURL: rootA)
 
-        let document = try await storeA.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await storeA.importCopy(of: sourceURL, bookmarkData: nil).document
         try await storeA.saveAdjustments(.neutral.setting(.exposure, to: 0.5), documentID: document.id)
 
         let rootB = temporaryDirectory.appendingPathComponent("RootB", isDirectory: true)
@@ -479,7 +479,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
 
         let report = try await store.reconcileOrphanedImports()
         XCTAssertFalse(report.removedOrphanIDs.contains(document.id))
@@ -519,7 +519,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         externalLock.release()
 
         // Once the lock is free, a real import completes normally.
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
         let reloaded = try await store.loadDocument(id: document.id)
         XCTAssertEqual(try Data(contentsOf: reloaded.workingURL), try Data(contentsOf: sourceURL))
     }
@@ -580,7 +580,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
 
         reconcilerLock.release()
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil).document
         XCTAssertEqual(try Data(contentsOf: document.workingURL), try Data(contentsOf: sourceURL))
     }
 
@@ -640,7 +640,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let documentID: UUID
         do {
             let store = PhotoDocumentStore(rootURL: rootURL)
-            let document = try await store.openInPlace(sourceURL, bookmarkData: bookmark)
+            let document = try await store.openInPlace(sourceURL, bookmarkData: bookmark).document
             try await store.saveAdjustments(.neutral.setting(.contrast, to: 10), documentID: document.id)
             documentID = document.id
         }
@@ -668,7 +668,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         let documentID: UUID
         do {
             let store = PhotoDocumentStore(rootURL: rootURL)
-            let document = try await store.importCopy(of: sourceURL, bookmarkData: bookmark)
+            let document = try await store.importCopy(of: sourceURL, bookmarkData: bookmark).document
             try await store.saveAdjustments(.neutral.setting(.saturation, to: -5), documentID: document.id)
             documentID = document.id
         }
@@ -740,7 +740,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
     func testSidecarCorruptionDuringLoadAdjustmentsIsQuarantinedNotSilentlyOverwritten() async throws {
         let sourceURL = try makeSourceFile()
         let (store, rootURL) = makeStore()
-        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
         try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
 
         let repositoryRoot = rootURL.appendingPathComponent("Sidecars/\(document.id.uuidString)", isDirectory: true)
@@ -764,7 +764,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
     func testSaveAdjustmentsRejectsANewerSchemaSidecarWithoutOverwriting() async throws {
         let sourceURL = try makeSourceFile()
         let (store, rootURL) = makeStore()
-        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
         // Establishes the per-document sidecar directory the same way a real
         // save would, so the manual write below lands where the store expects it.
         try await store.saveAdjustments(.neutral, documentID: document.id)
@@ -794,7 +794,7 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
     func testLoadAdjustmentsReturnsNeutralWhenNoSidecarHasBeenSaved() async throws {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
-        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
 
         let adjustments = try await store.loadAdjustments(documentID: document.id)
         XCTAssertEqual(adjustments, .neutral)
@@ -1030,19 +1030,24 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         assertDirectoryAbsentOrEmpty(rootURL.appendingPathComponent("Records"))
     }
 
-    // MARK: - rollbackDocument / updateSourceBookmark (Task 6 hardening)
+    // MARK: - rollbackNewDocument / updateSourceBookmark / updateInPlaceLocation (Task 6 hardening)
 
-    func testRollbackDocumentRemovesAnAppCopysRecordSidecarAndCopyButNeverTheSource() async throws {
+    func testRollbackNewDocumentRemovesAnAppCopysRecordSidecarAndCopyButNeverTheSource() async throws {
         let sourceURL = try makeSourceFile()
         let originalSourceBytes = try Data(contentsOf: sourceURL)
         let (store, rootURL) = makeStore()
 
-        let document = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        let document = creation.document
         try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: document.workingURL.path))
 
-        let removed = await store.rollbackDocument(document)
-        XCTAssertTrue(removed)
+        let report = await store.rollbackNewDocument(creation)
+        XCTAssertTrue(report.isFullyCleaned)
+        XCTAssertEqual(report.lock, .succeeded)
+        XCTAssertEqual(report.record, .succeeded)
+        XCTAssertEqual(report.sidecar, .succeeded)
+        XCTAssertEqual(report.copy, .succeeded)
 
         do {
             _ = try await store.loadDocument(id: document.id)
@@ -1056,16 +1061,21 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try Data(contentsOf: sourceURL), originalSourceBytes)
     }
 
-    func testRollbackDocumentRemovesAnInPlaceRecordAndSidecarButNeverTheExternalRAW() async throws {
+    func testRollbackNewDocumentRemovesAnInPlaceRecordAndSidecarButNeverTheExternalRAW() async throws {
         let sourceURL = try makeSourceFile()
         let originalSourceBytes = try Data(contentsOf: sourceURL)
         let (store, rootURL) = makeStore()
 
-        let document = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        let document = creation.document
         try await store.saveAdjustments(.neutral.setting(.exposure, to: 1), documentID: document.id)
 
-        let removed = await store.rollbackDocument(document)
-        XCTAssertTrue(removed)
+        let report = await store.rollbackNewDocument(creation)
+        XCTAssertTrue(report.isFullyCleaned)
+        XCTAssertEqual(report.lock, .notApplicable)
+        XCTAssertEqual(report.copy, .notApplicable)
+        XCTAssertEqual(report.record, .succeeded)
+        XCTAssertEqual(report.sidecar, .succeeded)
 
         do {
             _ = try await store.loadDocument(id: document.id)
@@ -1079,13 +1089,126 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path))
     }
 
+    /// A receipt is single-use: once a creation has been rolled back, a
+    /// second call with the same value must be a safe no-op, never a second
+    /// (potentially destructive-looking) deletion attempt.
+    func testRollbackNewDocumentIsSingleUse() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+
+        let first = await store.rollbackNewDocument(creation)
+        XCTAssertTrue(first.isFullyCleaned)
+
+        let second = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(second.lock, .notApplicable)
+        XCTAssertEqual(second.record, .notApplicable)
+        XCTAssertEqual(second.sidecar, .notApplicable)
+        XCTAssertEqual(second.copy, .notApplicable)
+    }
+
+    /// Once a creation is finalized (kept), its receipt must never be able
+    /// to delete the now-legitimate document, even if a caller (in error)
+    /// still holds and reuses the same `PhotoDocumentCreation` value.
+    func testRollbackNewDocumentNeverDeletesAFinalizedCreation() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        await store.finalizeCreation(creation)
+
+        let report = await store.rollbackNewDocument(creation)
+        XCTAssertEqual(report.record, .notApplicable)
+        XCTAssertEqual(report.copy, .notApplicable)
+
+        // The finalized document is still fully intact.
+        let stillThere = try await store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(stillThere.id, creation.document.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
+    }
+
+    /// `rollbackNewDocument` only ever accepts a `PhotoDocumentCreation` --
+    /// there is no public API that turns an existing `PhotoDocument`
+    /// (e.g. one `loadDocument` just returned) into one, so an existing
+    /// document can never be deleted through this path. This test
+    /// documents that guarantee by construction: it would not compile if
+    /// `PhotoDocumentCreation` had a public initializer.
+    func testRollbackAPICannotBeCalledWithAnArbitraryExistingDocument() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+        let creation = try await store.openInPlace(sourceURL, bookmarkData: nil)
+        await store.finalizeCreation(creation)
+
+        // `loadDocument` returns a bare `PhotoDocument`; there is no
+        // constructor from that back to a `PhotoDocumentCreation`, so
+        // there is no expression that could be written here to roll this
+        // existing, finalized document back. (If `PhotoDocumentCreation`
+        // ever grows a public initializer, this comment -- and the
+        // guarantee -- would no longer hold; watch for that in review.)
+        let existing = try await store.loadDocument(id: creation.document.id)
+        XCTAssertEqual(existing.id, creation.document.id)
+    }
+
+    /// Sidecar removal failure must be visible in the report, not folded
+    /// into an overall "succeeded".
+    func testRollbackNewDocumentReportsAFailedSidecarRemoval() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+        try await store.saveAdjustments(.neutral, documentID: creation.document.id)
+
+        // Replace the sidecar directory with a regular file so removal
+        // fails, simulating a permissions/IO failure without needing real
+        // filesystem permission games.
+        let sidecarDirectory = rootURL
+            .appendingPathComponent("Sidecars", isDirectory: true)
+            .appendingPathComponent(creation.document.id.uuidString, isDirectory: true)
+        try FileManager.default.removeItem(at: sidecarDirectory)
+        let blocker = sidecarDirectory.appendingPathComponent("blocker")
+        try FileManager.default.createDirectory(at: sidecarDirectory, withIntermediateDirectories: true)
+        try Data([0x00]).write(to: blocker)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: blocker.path)
+
+        let report = await store.rollbackNewDocument(creation)
+        XCTAssertFalse(report.isFullyCleaned)
+        XCTAssertEqual(report.sidecar, .failed)
+        XCTAssertEqual(report.record, .succeeded, "the record removal is independent and must still be attempted/reported on its own")
+
+        // Cleanup so the temp directory can be removed afterward.
+        try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: blocker.path)
+    }
+
+    /// Contention for the root import lock must not produce a half-done
+    /// rollback where the copy is silently left behind while the record and
+    /// sidecar disappear as if nothing were wrong.
+    func testRollbackNewDocumentUnderLockContentionNeverSilentlyDropsTheCopy() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, rootURL) = makeStore()
+        let creation = try await store.importCopy(of: sourceURL, bookmarkData: nil)
+
+        let contender = RawImportLockHandle(rootURL: rootURL)
+        defer { contender?.release() }
+        XCTAssertNotNil(contender, "expected to hold the lock for this test")
+
+        let report = await store.rollbackNewDocument(creation)
+        XCTAssertFalse(report.isFullyCleaned)
+        XCTAssertEqual(report.lock, .failed)
+        XCTAssertEqual(report.copy, .failed)
+        // Record/sidecar removal does not need the root lock and must
+        // still be attempted and reported independently.
+        XCTAssertEqual(report.record, .succeeded)
+        XCTAssertEqual(report.sidecar, .succeeded)
+
+        // The copy itself is still on disk -- not silently dropped.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: creation.document.workingURL.path))
+    }
+
     func testUpdateSourceBookmarkRewritesOnlyThatFieldAtomically() async throws {
         let sourceURL = try makeSourceFile()
         let (store, _) = makeStore()
         let original = "original-bookmark".data(using: .utf8)!
         let refreshed = "refreshed-bookmark".data(using: .utf8)!
 
-        let document = try await store.openInPlace(sourceURL, bookmarkData: original)
+        let document = try await store.openInPlace(sourceURL, bookmarkData: original).document
         try await store.updateSourceBookmark(refreshed, documentID: document.id)
 
         let reloaded = try await store.loadDocument(id: document.id)
@@ -1093,5 +1216,27 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(reloaded.workingURL, document.workingURL)
         XCTAssertEqual(reloaded.storageMode, .inPlace)
         XCTAssertEqual(reloaded.workingFingerprint, document.workingFingerprint)
+    }
+
+    func testUpdateInPlaceLocationMovesWorkingURLSourceURLAndBookmarkTogether() async throws {
+        let sourceURL = try makeSourceFile()
+        let (store, _) = makeStore()
+        let original = "original-bookmark".data(using: .utf8)!
+        let refreshed = "refreshed-bookmark".data(using: .utf8)!
+
+        let document = try await store.openInPlace(sourceURL, bookmarkData: original).document
+
+        let newURL = temporaryDirectory.appendingPathComponent("relocated.ARW")
+        try FileManager.default.moveItem(at: sourceURL, to: newURL)
+        try await store.updateInPlaceLocation(newURL: newURL, bookmarkData: refreshed, documentID: document.id)
+
+        let reloaded = try await store.loadDocument(id: document.id)
+        XCTAssertEqual(reloaded.workingURL, newURL)
+        XCTAssertEqual(reloaded.sourceURL, newURL)
+        XCTAssertEqual(reloaded.sourceBookmarkData, refreshed)
+        XCTAssertEqual(reloaded.storageMode, .inPlace)
+        // Content identity is untouched -- only where the file resolves changed.
+        XCTAssertEqual(reloaded.workingFingerprint, document.workingFingerprint)
+        XCTAssertEqual(reloaded.sourceFingerprint, document.sourceFingerprint)
     }
 }

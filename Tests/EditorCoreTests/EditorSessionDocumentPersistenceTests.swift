@@ -87,7 +87,7 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
         let original = try Data(contentsOf: rawURL)
 
         let store = PhotoDocumentStore(rootURL: root.appendingPathComponent("Store"))
-        let document = try await store.openInPlace(rawURL, bookmarkData: nil)
+        let document = try await store.openInPlace(rawURL, bookmarkData: nil).document
         let editor = makeEditor(store: store)
         editor.open(
             photo: photo(for: document),
@@ -116,7 +116,7 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
 
         let storeRoot = root.appendingPathComponent("Store")
         let store = PhotoDocumentStore(rootURL: storeRoot)
-        let document = try await store.openInPlace(rawURL, bookmarkData: nil)
+        let document = try await store.openInPlace(rawURL, bookmarkData: nil).document
         let editor = makeEditor(store: store)
         editor.open(
             photo: photo(for: document),
@@ -146,7 +146,7 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
         let originalSourceBytes = try Data(contentsOf: rawURL)
 
         let store = PhotoDocumentStore(rootURL: root.appendingPathComponent("Store"))
-        let document = try await store.importCopy(of: rawURL, bookmarkData: nil)
+        let document = try await store.importCopy(of: rawURL, bookmarkData: nil).document
         XCTAssertEqual(document.storageMode, .appCopy)
         XCTAssertNotEqual(document.workingURL, rawURL)
 
@@ -185,7 +185,7 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
         let original = try Data(contentsOf: rawURL)
 
         let store = PhotoDocumentStore(rootURL: root.appendingPathComponent("Store"))
-        let document = try await store.openInPlace(rawURL, bookmarkData: nil)
+        let document = try await store.openInPlace(rawURL, bookmarkData: nil).document
 
         let editor = EditorSession()
         let renderer = NeverPreviewRenderer()
