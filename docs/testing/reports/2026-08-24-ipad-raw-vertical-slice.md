@@ -34,10 +34,10 @@
 最新一次真實執行（三個 fixture 環境變數皆已匯出、exFAT 隨身碟已掛載）的 summary 相對路徑：
 
 ```
-.build/ipad-vertical-slice/20260825T161711Z-12638-4944641828667/summary.md
+.build/ipad-vertical-slice/20260825T174535Z-86090-2136186817170/summary.md
 ```
 
-（此次 run 的 summary 記錄 `Commit: c75ac623241ce7871569fd9324cf5eeac1583179`，與 §5.3 修正完成後的 HEAD 完全一致；目錄名稱已改為 timestamp+PID+random，見 §5.2 finding 5。）
+（此次 run 的 summary 記錄 `Commit: 0dde97112bed216fa2492d8590be6dd19a73876c`——即 §5.4 修正完成前的 HEAD，因為這次真實驗收是在修正 commit `52b88f4` 落地**之前**、對照著仍在工作目錄中的修改跑的，用來驗證修正本身；`Repo state` 一項仍正確回報 PASS，因為 runner 全程沒有再變動 working tree。§5.4 的架構修正本身不影響任何 Task 8 產品程式碼或這五個步驟的實際行為，因此沒有必要在 commit 落地後重新執行一次數十分鐘的完整編譯鏈；目錄名稱格式沿用 timestamp+PID+random，見 §5.2 finding 5。）
 
 摘要內容：
 
@@ -98,7 +98,7 @@ RawFixtureTests: FAIL (executed 9 tests, expected exactly 8)
 | `git diff --check` | 通過，無空白字元問題 |
 | `Scripts/run-ipad-vertical-slice-acceptance.zsh` self-test（`LUMAHARBOR_IPAD_RUNNER_SELFTEST=1`） | 連續 10 次前景執行全部通過，每次結束後皆確認無殘留子程序 |
 | `Scripts/run-mvp-acceptance.zsh` self-test（`LUMAHARBOR_RUNNER_SELFTEST=1`，含真實 signal tier） | 全部通過，含新的 under／exact／over 基準情境 |
-| summary／全部 log 隱私掃描（grep `/Users/`、`/Volumes/`、`/private/var/`、`/private/tmp/`） | 通過，無殘留 |
+| summary／全部 log 隱私掃描（grep `/Users/`、`/Volumes/`、`/private/var/`、`/private/tmp/`、`/var/`、`/tmp/`，以及 repo root／`$HOME`／三個 fixture 目錄的實際字串，見 §5.4 finding 3、4） | 通過，無殘留 |
 
 ### 5.1 Runner self-test 的第二輪修復（歷史紀錄，非目前限制）
 
@@ -140,6 +140,24 @@ RawFixtureTests: FAIL (executed 9 tests, expected exactly 8)
 4. **Repo state 只比較 `git status --porcelain` 的行數**：這個作法對「同一個 dirty 檔案內容又改變」「dirty A 換成 dirty B（檔案數不變）」「檔案在 tracked／untracked 之間切換」三種情境都是盲點，因為這些情境不一定會改變 porcelain 輸出的行數。修法：新增 `git_worktree_fingerprint()`，改成雜湊 `git diff HEAD --binary`（涵蓋所有 tracked 相對 HEAD 的差異，含 staged／unstaged 與實際內容）加上每個 untracked 檔案的路徑與內容。新增 self-test，針對一個獨立、用完即丟的 scratch git repo（完全不動到真正的專案 repo），驗證上述三種情境下 fingerprint 確實都會改變。
 
 修復後 self-test（本輪再新增 6 個案例，總計涵蓋前兩輪的 26 個既有案例）在前景連續執行 10 次，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身與所有 helper 的精確程序檢查都確認無殘留。`Scripts/run-mvp-acceptance.zsh` self-test（本輪未變動）重新驗證仍全數通過。真實 fixture 目錄下重跑完整 Task 8 自動驗收，`summary.md` 的 `Commit` 欄位（`c75ac623241ce7871569fd9324cf5eeac1583179`）與本輪修正完成的最終 HEAD 完全一致（見 §3 開頭）。
+
+### 5.4 Codex 第三輪 pre-landing review：BLOCKED → 架構修正（本輪：runner 修正，非產品程式碼）
+
+§5.3 的修正合併後，Codex 做了第三輪驗證並再次回報 **BLOCKED**，這次的核心批評不是某個個別缺陷，而是修法本身的方向：`selftest_child_authorized()` 這種「呼叫者可以自行偽造 marker＋token 憑證」的檢查，無論再怎麼加強驗證邏輯，本質上都無法真正堵住呼叫者本人偽造憑證——Codex 再次示範了這一點，自行建立一組彼此相符的 marker 檔案與 token，成功讓五個正式指令全部被 override 取代並產生 `Overall result: PASS`。這一輪不再修補憑證檢查本身，而是做架構修正：把「self-test 可以替換指令」這個能力，從正式執行路徑上徹底移除。
+
+1. **正式 runner 不得解析任何 self-test override 環境變數**：`step_command_for` 移除整段 `selftest_child_authorized` 檢查，變成完全純函式——五個步驟的指令永遠是寫死的正式指令，函式本體不再有任何一處讀取 `LUMAHARBOR_IPAD_SELFTEST_*` 這個變數名稱。self-test 需要替換指令的能力被移到一個結構上完全獨立的內部子指令 `__selftest_simulate_steps <5 個步驟指令> [--pause-at=／--pause-ready=／--pause-go=／--fake-mv= 旗標]`，只有明確以這個字串作為第一個 argv 呼叫本檔案時才會啟用，並透過 `selftest_simulated_command_for`（另一個獨立的 resolver 函式）與 `COMMAND_RESOLVER` 間接呼叫、`run_acceptance_flow()`（正式與 self-test 共用的執行骨架）串接起來。新增 self-test：即使呼叫者手動匯出全部五個 override 變數，外加一組彼此相符、自行捏造的 marker／token（完整重現 Codex 這次的攻擊手法），驗證 `step_command_for` 五個步驟仍然回傳真正的正式指令——因為現在已經沒有任何檢查分支可以被這組憑證通過。
+2. **消除 finalize signal race**：Codex 用一個可控制、會暫停的 `mv` 替身，示範在「最後一次 `DEFERRED_SIGNAL` 檢查」通過之後、`mv` 真正執行完成之前送出 TERM，仍能讓 `Overall result: PASS` 被發布出去——因為 trap 返回後不會重新執行呼叫端原本那個已經跑過的 `if` 檢查。修法：把單次「檢查→修正→mv」改成有上限（20 次）的發布保護迴圈——`mv` 之後立刻對照剛發布出去的正式檔案再檢查一次 `DEFERRED_SIGNAL`，如果這時才發現訊號已抵達且檔案仍寫著 PASS，就地修正成 FAIL 後重新發布，如此重複到確認一致為止；同時新增統一的 self-test 專用暫停點機制 `selftest_pause_at()`（純粹用 script 全域變數控制，不透過任何環境變數），涵蓋使用者要求的全部四個時間窗：(a) 最後一次檢查後、`mv` 前；(b) `mv` 執行期間（透過 `--fake-mv=` 替換成一個會先暫停、確認訊號送達後才真正執行 `mv` 的替身腳本）；(c) `mv` 後、`SUMMARY_STATE` 設為 `finalized` 前；(d) `finalized` 後、程式真正退出前。新增對應四個（加上原有的 finalize-start 共五個）self-test 案例，其中 (a)(b) 兩個窗口驗證最終發布的 summary 確實被修正為 FAIL，(c)(d) 兩個窗口驗證此時檔案早已正確發布，訊號只需要讓程式本身的結束碼正確反映（143／130／129），不需要也不應該再改動已經正確的檔案內容。
+3. **Privacy scan 檢查實際的 repo root、`$HOME`、三個 fixture 目錄，而非僅四個通用前綴**：Codex 重現 `/tmp/customer-secret/private-photo.ARW`（`/private/tmp/` 的裸 `/tmp/` 別名）留在 log 中，Privacy 與 Overall 仍雙雙回報 PASS，因為原本的偵測與遮蔽 regex 都只涵蓋 `/Users/`、`/Volumes/`、`/private/var/`、`/private/tmp/` 這四個前綴，既沒有把 `/tmp/`、`/var/` 這兩個 macOS 上會被系統符號連結解析掉的裸別名算進去，也沒有直接比對這次執行實際關心的那幾個具體字串。修法：`has_private_path` 與 `redact_file` 都新增 `/tmp/`、`/var/` 這兩個裸別名的偵測與遮蔽 pattern；`has_private_path` 另外用 `grep -qF` 直接比對 repo root、`$HOME`、三個 fixture 目錄的實際字串本身，不再只靠通用前綴間接涵蓋。
+4. **Privacy scanner 明確區分 grep 結束碼**：`grep` 回傳 0（找到洩漏）、1（確定乾淨）、2 以上（掃描本身失敗，例如檔案不存在、權限錯誤、或 `grep` 執行檔本身有問題）三種語意截然不同的結果，原本的實作只用 `grep -Eq ... ; return $?`，等於把「掃描失敗」與「乾淨」混為一談，掃描失敗時反而回報乾淨。修法：抽出 `_privacy_grep_result()`，明確只有結束碼 1 才算「這一項檢查乾淨、繼續看下一項」，0 與 2 以上一律視為「不乾淨」（fail closed）。新增 self-test：把一個永遠回傳結束碼 2 的假 `grep`放進 `PATH` 最前面，驗證 `has_private_path` 對一個內容完全乾淨的檔案仍正確回報「不乾淨」（因為掃描本身失敗，不能假裝乾淨）。
+5. **`git_worktree_fingerprint` 不再對任意 untracked 路徑天真地 `cat`**：改用 `git ls-files --others --exclude-standard -z` 搭配 zsh 的 `${(0)}` NUL-safe 陣列切割（不再用會把 `exit` 侷限在自己那層 pipeline subshell、無法讓外層察覺失敗的 `pipe | while read` 寫法），對每個 untracked 項目先確認型別再決定怎麼處理：symlink 只記錄 `readlink` 讀到的目標路徑、絕不 dereference；一般檔案才記錄型別／權限模式／大小並讀取內容；其他型別（FIFO、device、socket……）只記錄型別與權限模式、刻意完全不讀取內容——避免對一個沒有寫入端的 FIFO 執行 `cat` 導致整個函式（進而整個驗收流程）永久卡死。同時把 `git diff`／`git ls-files`／最終 `shasum` 的每一步都明確檢查結束碼，任一步失敗就回傳空字串加非零結束碼（fail closed），絕不產出一個「穩定但錯誤」、可能讓兩次失敗擷取被誤判為「沒有變化」的雜湊值。新增四個 self-test：FIFO（驗證不會卡死）、symlink（改變目標會改變雜湊）、檔名含換行字元（驗證 NUL-safe 切割不會被换行字元打斷列舉）、`git` 本身失敗（驗證雜湊確實回傳空字串而非一個看似合法的值）。
+6. **Self-test artifacts 與正式驗收證據完全隔離**：新增 `SELFTEST_RUN_TREE`（`.build/ipad-vertical-slice-selftest/`），與正式執行使用的 `PRODUCTION_RUN_TREE`（`.build/ipad-vertical-slice/`）在檔案系統上完全分開；`__selftest_simulate_steps` 產生的每一份 summary.md 額外在檔案最開頭強制加上「**Run mode: SELFTEST**」字樣，即使某個正式報表收集器只看檔案內容、不管它來自哪個路徑，也能單靠內容本身判斷並拒絕一份 self-test 產物。新增 self-test 直接驗證：跑一次完整的假通過模擬後，`PRODUCTION_RUN_TREE` 底下沒有出現任何新目錄，且新產生的目錄確實在 `SELFTEST_RUN_TREE` 底下、summary.md 確實帶有這個標記。
+
+修正過程中另外發現並修好兩個屬於這次重寫本身引入的新缺陷（皆由 runner 自己的 self-test 抓到，而非人工肉眼發現）：
+
+- `LUMAHARBOR_IPAD_RUNNER_SELFTEST=1` 這個環境變數在頂層執行時會被匯出，因此也會保留在 `spawn_simulated_run` 之後每一個透過 `exec` 啟動的巢狀模擬 child 的環境裡；`__selftest_simulate_steps` 的 argv 檢查如果排在這個環境變數檢查**之後**，每個巢狀 child 就會先撞到環境變數檢查、遞迴呼叫 `run_selftest()` 本身，完全忽略自己收到的 `__selftest_simulate_steps` argv，導致目標步驟的模擬指令永遠不會真正被執行——外顯症狀是每一個訊號類 self-test 案例都在 20 秒的 ready-handshake 逾時後回報「the interrupt-target helper never signalled ready」。修法：把 `__selftest_simulate_steps` 這個明確、無歧義的 argv 判斷移到 `LUMAHARBOR_IPAD_RUNNER_SELFTEST` 環境變數判斷**之前**，讓明確的呼叫方式永遠優先於行程繼承來的環境變數。
+- `git_worktree_fingerprint` 一開始的實作把整段多行邏輯包在一個 `out="$( ... )" || out=""` 裡；zsh（與 bash 相同）對「用 `||` 保護一個指令」的 errexit 豁免，會延伸進入該指令自己開的 subshell 內部——導致 `$( ... )` 內部真正呼叫 `git` 失敗時，`set -e` 並不會像沒有 `||` 保護時那樣讓這個 subshell 提前中止，後面的指令反而會繼續往下執行，最後仍拼湊出一個非空、看似合法的雜湊值，完全沒有真正 fail closed。修法：改成用 `if var="$(...)"; then ... else ...; fi` 的形式分別包住 `git diff`、`git ls-files`、內容彙整、`shasum` 四個階段——前兩者本來就只包一個指令，指令本身的結束碼就是 substitution 的結束碼，不受這個豁免延伸的影響；內容彙整階段內部改用明確的 `|| exit 1` 主動中止該層 subshell，不依賴 errexit 的隱性行為。新增的「`git` 本身失敗」self-test（見 finding 5）正是抓到這個回歸的案例。
+
+修復後 self-test（本輪再新增約 12 個案例，加上前三輪累計的既有案例）在前景連續執行 10 次，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身與所有 helper／`interrupt-root`／`interrupt-child`／`fake-swifttest`／`fail-with-7` 的精確程序檢查都確認無殘留。`Scripts/run-mvp-acceptance.zsh` self-test（本輪未變動）重新驗證仍全數通過。真實 fixture 目錄下重跑完整 Task 8 自動驗收，五個步驟、Repo state、Privacy scan 全部 PASS（見 §3 開頭；該次 run 是在本輪修正 commit 落地前、對照工作目錄中的修改執行，驗證的正是本節所述的架構修正本身）。本輪修正完成後的最終 HEAD 為 `52b88f4`（commit 訊息：「fix: eliminate forgeable self-test override channel, close finalize publish race, harden privacy scan and worktree fingerprint」）。
 
 ## 6. 實機五項 gate（NOT RUN）
 
