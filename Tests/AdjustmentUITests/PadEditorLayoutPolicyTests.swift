@@ -1,5 +1,6 @@
 import CoreGraphics
 import EditorCore
+import Foundation
 import PhotoLibraryCore
 import XCTest
 @testable import AdjustmentUI
@@ -175,5 +176,229 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(editor.canUndo, canUndoBefore)
         XCTAssertEqual(editor.adjustments, adjustmentsBefore)
         _ = mode
+    }
+
+    // MARK: - PadBottomDrawerPolicy (Codex round-2 review)
+    //
+    // The bottom drawer's real `@State` binding is driven entirely by
+    // this reducer -- these cases are exactly the presentation-state
+    // matrix `PadEditorView` needs to get right: which combinations of
+    // mode and inspector presentation must show the drawer, and which
+    // must not.
+
+    func testDrawerIsPresentedInWorkModeWithBottomDrawerPresentation() {
+        XCTAssertEqual(
+            PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .bottomDrawer),
+            .presented
+        )
+    }
+
+    func testDrawerIsDismissedInWorkModeWithTrailingDockPresentation() {
+        XCTAssertEqual(
+            PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .trailingDock),
+            .dismissed
+        )
+    }
+
+    func testDrawerIsDismissedInFocusModeRegardlessOfInspectorPresentation() {
+        XCTAssertEqual(
+            PadBottomDrawerPolicy.presentation(mode: .focus, inspectorPresentation: .bottomDrawer),
+            .dismissed,
+            "focus mode must reliably close the drawer even on a narrow window where the drawer would otherwise apply"
+        )
+        XCTAssertEqual(
+            PadBottomDrawerPolicy.presentation(mode: .focus, inspectorPresentation: .trailingDock),
+            .dismissed
+        )
+    }
+
+    func testDrawerReopensReturningToWorkModeWhileStillNarrow() {
+        // focus -> work, inspector presentation unchanged (still narrow):
+        // must come back to `.presented`, not stay dismissed just because
+        // it was dismissed a moment ago.
+        let whileFocused = PadBottomDrawerPolicy.presentation(mode: .focus, inspectorPresentation: .bottomDrawer)
+        XCTAssertEqual(whileFocused, .dismissed)
+        let afterReturningToWork = PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .bottomDrawer)
+        XCTAssertEqual(afterReturningToWork, .presented)
+    }
+
+    // MARK: - PadFloatingPanelLayout.clampedOffset (Codex round-2 review)
+
+    private let sampleAvailableSize = CGSize(width: 1_180, height: 820)
+    private let samplePanelOrigin = CGPoint(x: 24, y: 24)
+    private let samplePanelSize = CGSize(width: 320, height: 400)
+    private let sampleMinimumVisibleEdge: CGFloat = 44
+
+    func testUnclampedOffsetWithinBoundsIsReturnedUnchanged() {
+        let proposed = CGSize(width: 100, height: 60)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        XCTAssertEqual(result, proposed, "an offset that's already fully on-screen must not be altered")
+    }
+
+    func testClampsAPanelDraggedPastTheLeadingEdge() {
+        let proposed = CGSize(width: -10_000, height: 0)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        let resultingLeft = samplePanelOrigin.x + result.width
+        let resultingRight = resultingLeft + samplePanelSize.width
+        XCTAssertGreaterThanOrEqual(resultingRight, sampleMinimumVisibleEdge, "at least the minimum visible edge of the panel must remain on-screen from the left")
+    }
+
+    func testClampsAPanelDraggedPastTheTrailingEdge() {
+        let proposed = CGSize(width: 10_000, height: 0)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        let resultingLeft = samplePanelOrigin.x + result.width
+        XCTAssertLessThanOrEqual(resultingLeft, sampleAvailableSize.width - sampleMinimumVisibleEdge, "at least the minimum visible edge of the panel must remain on-screen from the right")
+    }
+
+    func testClampsAPanelDraggedPastTheTopEdge() {
+        let proposed = CGSize(width: 0, height: -10_000)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        let resultingTop = samplePanelOrigin.y + result.height
+        let resultingBottom = resultingTop + samplePanelSize.height
+        XCTAssertGreaterThanOrEqual(resultingBottom, sampleMinimumVisibleEdge, "at least the minimum visible edge of the panel (including its header) must remain on-screen from the top")
+    }
+
+    func testClampsAPanelDraggedPastTheBottomEdge() {
+        let proposed = CGSize(width: 0, height: 10_000)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        let resultingTop = samplePanelOrigin.y + result.height
+        XCTAssertLessThanOrEqual(resultingTop, sampleAvailableSize.height - sampleMinimumVisibleEdge, "at least the minimum visible edge of the panel's header must remain on-screen from the bottom")
+    }
+
+    /// All four directions at once (a diagonal drag far past the corner)
+    /// must still resolve to a single, fully-defined position — not NaN,
+    /// not an inverted range.
+    func testClampsADiagonalDragPastAllFourEdges() {
+        let proposed = CGSize(width: -10_000, height: -10_000)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        XCTAssertFalse(result.width.isNaN)
+        XCTAssertFalse(result.height.isNaN)
+        let resultingLeft = samplePanelOrigin.x + result.width
+        let resultingTop = samplePanelOrigin.y + result.height
+        XCTAssertGreaterThanOrEqual(resultingLeft + samplePanelSize.width, sampleMinimumVisibleEdge)
+        XCTAssertGreaterThanOrEqual(resultingTop + samplePanelSize.height, sampleMinimumVisibleEdge)
+    }
+
+    /// A panel wider (and taller) than the entire available area — e.g. a
+    /// Split View pane suddenly much smaller than the panel's own fixed
+    /// 320pt width — must still clamp to a single well-defined position
+    /// with some of the panel's header reachable, never an empty/inverted
+    /// range.
+    func testClampsWhenThePanelIsLargerThanTheAvailableArea() {
+        let tinyAvailableSize = CGSize(width: 200, height: 300)
+        let result = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: .zero,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: tinyAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        XCTAssertFalse(result.width.isNaN)
+        XCTAssertFalse(result.height.isNaN)
+        let resultingLeft = samplePanelOrigin.x + result.width
+        let resultingTop = samplePanelOrigin.y + result.height
+        // Some part of the panel must overlap the available rectangle.
+        XCTAssertLessThan(resultingLeft, tinyAvailableSize.width)
+        XCTAssertGreaterThan(resultingLeft + samplePanelSize.width, 0)
+        XCTAssertLessThan(resultingTop, tinyAvailableSize.height)
+        XCTAssertGreaterThan(resultingTop + samplePanelSize.height, 0)
+    }
+
+    /// Re-clamping after a size change (rotation/Split View resize): a
+    /// position that was valid for the old available size but is now out
+    /// of bounds must be pulled back in when re-clamped against the new,
+    /// smaller size.
+    func testRecampsAnAlreadyValidOffsetAfterTheAvailableAreaShrinks() {
+        let roomyOffset = CGSize(width: 700, height: 300)
+        let stillWithinTheOriginalSize = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: roomyOffset,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: sampleAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        XCTAssertEqual(stillWithinTheOriginalSize, roomyOffset, "premise: this offset is valid before the resize")
+
+        let shrunkAvailableSize = CGSize(width: 500, height: 400)
+        let reclamped = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: stillWithinTheOriginalSize,
+            panelOrigin: samplePanelOrigin,
+            panelSize: samplePanelSize,
+            availableSize: shrunkAvailableSize,
+            minimumVisibleEdge: sampleMinimumVisibleEdge
+        )
+        let resultingLeft = samplePanelOrigin.x + reclamped.width
+        XCTAssertLessThanOrEqual(resultingLeft, shrunkAvailableSize.width - sampleMinimumVisibleEdge, "the offset that was valid before the resize must be pulled back in for the new, smaller size")
+    }
+
+    // MARK: - PadDocumentScopedWorkspacePolicy (Codex round-2 review)
+
+    func testStateResetsToInitialWhenTheOpenDocumentChanges() {
+        let dirty = PadDocumentScopedWorkspaceState(
+            workspaceMode: .focus,
+            canvasScale: 3.5,
+            floatingPanelOffset: CGSize(width: 120, height: -40)
+        )
+        let idA = UUID()
+        let idB = UUID()
+        let result = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(dirty, previousDocumentID: idA, currentDocumentID: idB)
+        XCTAssertEqual(result, .initial)
+    }
+
+    func testStateIsUntouchedOnTheVeryFirstOpen() {
+        let alreadyInitial = PadDocumentScopedWorkspaceState.initial
+        let id = UUID()
+        let result = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(alreadyInitial, previousDocumentID: nil, currentDocumentID: id)
+        XCTAssertEqual(result, alreadyInitial)
+    }
+
+    func testStateIsUntouchedWhenClosingToNoDocument() {
+        let dirty = PadDocumentScopedWorkspaceState(workspaceMode: .focus, canvasScale: 2, floatingPanelOffset: CGSize(width: 10, height: 10))
+        let id = UUID()
+        let result = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(dirty, previousDocumentID: id, currentDocumentID: nil)
+        XCTAssertEqual(result, dirty, "closing tears the view down on its own -- this policy must not also reset state that's about to be discarded anyway")
+    }
+
+    func testStateIsUntouchedWhenTheDocumentIDIsUnchanged() {
+        let dirty = PadDocumentScopedWorkspaceState(workspaceMode: .focus, canvasScale: 2.2, floatingPanelOffset: CGSize(width: 5, height: 5))
+        let id = UUID()
+        let result = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(dirty, previousDocumentID: id, currentDocumentID: id)
+        XCTAssertEqual(result, dirty)
     }
 }
