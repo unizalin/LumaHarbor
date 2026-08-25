@@ -33,7 +33,8 @@ let package = Package(
                 .product(name: "EditorCore", package: "LumaHarbor"),
                 .product(name: "AdjustmentUI", package: "LumaHarbor"),
                 .product(name: "PhotoLibraryCore", package: "LumaHarbor"),
-                .product(name: "RawProcessingCore", package: "LumaHarbor")
+                .product(name: "RawProcessingCore", package: "LumaHarbor"),
+                .product(name: "Localization", package: "LumaHarbor")
             ],
             path: "Sources/LumaHarborPadApp"
         )

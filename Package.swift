@@ -18,7 +18,12 @@ let package = Package(
         .library(name: "RawProcessingCore", targets: ["RawProcessingCore"]),
         .library(name: "PresetCore", targets: ["PresetCore"]),
         .library(name: "EditorCore", targets: ["EditorCore"]),
-        .library(name: "AdjustmentUI", targets: ["AdjustmentUI"])
+        .library(name: "AdjustmentUI", targets: ["AdjustmentUI"]),
+        // Exposed as its own product so the iPad application package (a
+        // separate nested SwiftPM manifest, not a target of this package)
+        // can route its user-facing text through the same `L10n` lookup as
+        // every other target, instead of growing a second string system.
+        .library(name: "Localization", targets: ["Localization"])
     ],
     targets: [
         // Holds Localizable.strings and the L10n lookup that every other
