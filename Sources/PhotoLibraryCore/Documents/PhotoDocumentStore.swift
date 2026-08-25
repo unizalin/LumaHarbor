@@ -174,15 +174,76 @@ public actor PhotoDocumentStore {
     }
 
     public func loadDocument(id: UUID) throws -> PhotoDocument {
-        let url = recordURL(for: id)
-        guard fileManager.fileExists(atPath: url.path) else {
-            throw PhotoDocumentError.documentNotFound(id)
-        }
-        let record = try SidecarCoding.decode(PhotoDocumentRecord.self, from: Data(contentsOf: url))
+        let record = try loadRecord(id: id)
         if record.storageMode == .appCopy, record.workingPathComponents == nil {
             return try migrateLegacyAppCopyRecordIfPossible(record)
         }
         return resolvedDocument(from: record)
+    }
+
+    /// Atomically rewrites a document's `sourceBookmarkData` — used to
+    /// persist a refreshed bookmark after restoring an `.inPlace` document
+    /// finds the saved one stale (macOS/iOS ask for the bookmark to be
+    /// regenerated, but the old one still resolves for that one restore).
+    /// Every other field of the record, including the working location, is
+    /// left untouched.
+    public func updateSourceBookmark(_ bookmarkData: Data, documentID: UUID) throws {
+        var record = try loadRecord(id: documentID)
+        record.sourceBookmarkData = bookmarkData
+        try writeRecordData(try SidecarCoding.encode(record), recordURL(for: documentID), fileManager)
+    }
+
+    /// Removes a document this store itself created but that never
+    /// finished being shown to the user — e.g. `importCopy`/`openInPlace`
+    /// committed successfully, but reading the working file's metadata
+    /// right afterward failed. Removes only what this store wrote for
+    /// `document`: its record and sidecar always, and its App-storage copy
+    /// in `.appCopy` mode only. Never touches `sourceURL` — an `.inPlace`
+    /// document's `workingURL` *is* the external RAW, so rolling one back
+    /// only removes the record and sidecar this store created, never the
+    /// file itself.
+    ///
+    /// This is for a document *this call just created* — restoring an
+    /// *existing* document that then fails to open must never call this;
+    /// there is nothing here to roll back, and doing so would delete real
+    /// user data.
+    ///
+    /// Best-effort, like the cleanup path inside `importCopy` already is:
+    /// failures are swallowed rather than thrown, since there is nothing
+    /// more useful a caller could do with a rollback failure than what
+    /// `importCopy` already does with a copy failure. The returned `Bool`
+    /// reports whether every trace was actually removed, for callers (tests
+    /// included) that want to confirm cleanup succeeded.
+    @discardableResult
+    public func rollbackDocument(_ document: PhotoDocument) -> Bool {
+        if document.storageMode == .appCopy {
+            if let lock = try? RootImportLock.acquire(at: importLockURL, fileManager: fileManager) {
+                defer { lock.release() }
+                let directory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
+                try? fileManager.removeItem(at: directory)
+            }
+        }
+        try? fileManager.removeItem(at: recordURL(for: document.id))
+        try? fileManager.removeItem(at: sidecarsDirectoryURL(documentID: document.id))
+
+        let recordGone = !fileManager.fileExists(atPath: recordURL(for: document.id).path)
+        let copyDirectory = documentsDirectoryURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
+        let copyGone = document.storageMode != .appCopy || !fileManager.fileExists(atPath: copyDirectory.path)
+        return recordGone && copyGone
+    }
+
+    private func loadRecord(id: UUID) throws -> PhotoDocumentRecord {
+        let url = recordURL(for: id)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw PhotoDocumentError.documentNotFound(id)
+        }
+        return try SidecarCoding.decode(PhotoDocumentRecord.self, from: Data(contentsOf: url))
+    }
+
+    private func sidecarsDirectoryURL(documentID: UUID) -> URL {
+        rootURL
+            .appendingPathComponent(Self.sidecarsDirectoryName, isDirectory: true)
+            .appendingPathComponent(documentID.uuidString, isDirectory: true)
     }
 
     /// The currently saved adjustments for a document, or `.neutral` when no
@@ -362,9 +423,7 @@ public actor PhotoDocumentStore {
     }
 
     private func sidecarRepository(documentID: UUID) throws -> FileSidecarRepository {
-        let libraryRoot = rootURL
-            .appendingPathComponent(Self.sidecarsDirectoryName, isDirectory: true)
-            .appendingPathComponent(documentID.uuidString, isDirectory: true)
+        let libraryRoot = sidecarsDirectoryURL(documentID: documentID)
         try fileManager.createDirectory(at: libraryRoot, withIntermediateDirectories: true)
         return FileSidecarRepository(libraryRootURL: libraryRoot, fileManager: fileManager)
     }

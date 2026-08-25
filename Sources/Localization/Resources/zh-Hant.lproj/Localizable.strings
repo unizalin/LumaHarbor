@@ -39,6 +39,7 @@
 "Couldn't export this preset" = "無法匯出這個 Preset";
 "Couldn't find an unused filename for" = "找不到可用的檔名：";
 "Couldn't open this photo" = "無法開啟這張照片";
+"Couldn't reopen your last photo" = "無法重新開啟你上次的照片";
 "Couldn't read saved edits" = "無法讀取已儲存的編輯";
 "Couldn't read the file." = "無法讀取這個檔案。";
 "Couldn't read the local index" = "無法讀取本機索引";
@@ -97,7 +98,9 @@
 "LumaHarbor couldn't remember access to that folder." = "LumaHarbor 無法記住這個資料夾的存取權限。";
 "LumaHarbor couldn't start up" = "LumaHarbor 無法啟動";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor 正在匯入或清理另一張照片。";
+"LumaHarbor couldn't write your edits to disk." = "LumaHarbor 無法把你的編輯寫入磁碟。";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor 會尋找相機 RAW 檔案，例如 Sony .ARW。";
+"LumaHarbor no longer has access to this file." = "LumaHarbor 已經不再擁有這個檔案的存取權限。";
 "LumaHarbor no longer has access to this photo folder." = "LumaHarbor 已經不再擁有這個照片資料夾的存取權限。";
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor 會以完整解析度重新解碼原始 RAW，並將結果標記為 sRGB。如果目的地已有同名檔案，會自動加上流水號──不會覆蓋任何檔案。";
 "LumaHarbor's local index couldn't be opened." = "無法開啟 LumaHarbor 的本機索引。";
@@ -184,7 +187,9 @@
 "Show Original" = "顯示原圖";
 "Size" = "尺寸";
 "skipped" = "張跳過";
+"Something went wrong." = "發生了一些問題。";
 "Split Toning" = "分割色調";
+"Startup cleanup incomplete" = "啟動清理未完成";
 "Stop" = "停止";
 "Temperature" = "色溫";
 "That export location is read-only." = "這個匯出位置是唯讀的。";
@@ -205,6 +210,7 @@
 "The operation was cancelled." = "操作已取消。";
 "The original file changed while LumaHarbor was copying it, so nothing was saved." = "LumaHarbor 複製時原始檔案發生變動，因此沒有儲存任何內容。";
 "The original file is not available at" = "找不到原始檔案，路徑：";
+"The original file isn't available right now." = "目前無法取得原始檔案。";
 "The RAW file couldn't be decoded." = "無法解碼這個 RAW 檔案。";
 "The RAW original is never modified." = "原始 RAW 檔案永遠不會被修改。";
 "The saved edits for this photo are damaged." = "這張照片已儲存的編輯已經損壞。";

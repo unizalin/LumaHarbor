@@ -16,6 +16,13 @@ struct PadRootView: View {
                         Button(L10n.t("Open RAW…")) {
                             isImporting = true
                         }
+                        // A selection or restore already in flight owns
+                        // `document`/`editor` until it settles; starting a
+                        // second one here would just be immediately
+                        // pre-empted by the model's own generation check,
+                        // so disabling this is a UX nicety, not a
+                        // correctness requirement.
+                        .disabled(model.isPreparingDocument)
                     }
                 }
                 .fileImporter(
@@ -23,8 +30,20 @@ struct PadRootView: View {
                     allowedContentTypes: [.image, .data],
                     allowsMultipleSelection: false
                 ) { result in
-                    guard let url = try? result.get().first else { return }
-                    model.beginSelecting(url)
+                    switch result {
+                    case .success(let urls):
+                        guard let url = urls.first else { return }
+                        model.beginSelecting(url)
+                    case .failure(let error):
+                        // A plain user cancellation must stay silent; any
+                        // other provider failure needs a safe, actionable
+                        // alert instead of being swallowed.
+                        let nsError = error as NSError
+                        guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
+                            model.reportFileImporterFailure(error)
+                            return
+                        }
+                    }
                 }
                 .confirmationDialog(
                     L10n.t("How should LumaHarbor use this photo?"),
@@ -59,7 +78,7 @@ struct PadRootView: View {
                 }
         }
         .task {
-            model.reconcileOrphanedImportsOnLaunch()
+            model.performStartupSequence()
         }
     }
 
