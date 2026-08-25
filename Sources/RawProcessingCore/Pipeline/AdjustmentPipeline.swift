@@ -258,7 +258,7 @@ public struct AdjustmentPipeline: Sendable {
     }
 
     /// Loads both Core Image kernels used by this pipeline from the
-    /// `default.metallib` the `CompileMetalKernels` build plugin compiles
+    /// `CoreImageKernels.metallib` the `CompileMetalKernels` build plugin compiles
     /// from `Sources/RawProcessingCore/Kernels/AdjustmentKernels.metal`
     /// (spec §7 Gate B1). Both are declared `CIKernel`, not `CIColorKernel`:
     /// each needs a dependent texture read (the LUT lookup, the 8-band
@@ -267,7 +267,7 @@ public struct AdjustmentPipeline: Sendable {
     /// why the CIKL predecessor got away with this from a `CIColorKernel`
     /// property despite the same restriction.
     private static let kernelLibrary: Data? = {
-        guard let url = Bundle.module.url(forResource: "default", withExtension: "metallib") else { return nil }
+        guard let url = Bundle.module.url(forResource: "CoreImageKernels", withExtension: "metallib") else { return nil }
         return try? Data(contentsOf: url)
     }()
 
