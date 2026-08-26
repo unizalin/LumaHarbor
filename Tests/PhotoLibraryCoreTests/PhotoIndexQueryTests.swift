@@ -144,6 +144,217 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(actual.count, Set(actual).count)
     }
 
+    func testSourceScopeKeysetPagingAcrossMultiplePagesDoesNotLeakOtherLibraries() throws {
+        let libraryA = try makeLibrary(name: "A")
+        let libraryB = try makeLibrary(name: "B")
+
+        var photosA: [PhotoAsset] = (0..<45).map { index -> PhotoAsset in
+            var asset = PhotoAsset.stub(
+                libraryID: libraryA.id, relativePath: "A/dated\(index).ARW", fingerprint: .stub("a-dated-\(index)")
+            )
+            asset.metadata.captureDate = Date(timeIntervalSince1970: 1_700_000_000 + Double(index))
+            return asset
+        }
+        let undatedA = (0..<5).map { index in
+            PhotoAsset.stub(libraryID: libraryA.id, relativePath: "A/undated\(index).ARW", fingerprint: .stub("a-undated-\(index)"))
+        }
+        photosA.append(contentsOf: undatedA)
+        try store.upsert(photos: photosA)
+
+        // Library B interleaves dated rows across the same timestamps as A,
+        // plus its own undated rows — neither must ever surface in A's pages.
+        var photosB: [PhotoAsset] = (0..<45).map { index -> PhotoAsset in
+            var asset = PhotoAsset.stub(
+                libraryID: libraryB.id, relativePath: "B/dated\(index).ARW", fingerprint: .stub("b-dated-\(index)")
+            )
+            asset.metadata.captureDate = Date(timeIntervalSince1970: 1_700_000_000 + Double(index))
+            return asset
+        }
+        photosB.append(contentsOf: (0..<5).map { index in
+            PhotoAsset.stub(libraryID: libraryB.id, relativePath: "B/undated\(index).ARW", fingerprint: .stub("b-undated-\(index)"))
+        })
+        try store.upsert(photos: photosB)
+
+        let query = LibraryQuery(scope: .source(libraryA.id), sort: .captureDateDescending)
+        var cursor: PhotoPageCursor?
+        var actual: [PhotoID] = []
+        repeat {
+            let page = try store.page(matching: query, after: cursor, limit: 7)
+            actual.append(contentsOf: page.photos.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        let datedSorted = photosA.filter { $0.metadata.captureDate != nil }
+            .sorted { $0.metadata.captureDate! > $1.metadata.captureDate! }
+        let undatedSorted = photosA.filter { $0.metadata.captureDate == nil }
+            .sorted { $0.id.description < $1.id.description }
+        let expected = (datedSorted + undatedSorted).map(\.id)
+
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(Set(actual).count, actual.count)
+        XCTAssertTrue(Set(actual).isDisjoint(with: Set(photosB.map(\.id))))
+    }
+
+    func testFolderScopeKeysetPagingAcrossMultiplePagesDoesNotLeakSiblingsOrOtherLibraries() throws {
+        let library = try makeLibrary()
+        let otherLibrary = try makeLibrary(name: "Other")
+
+        let inScope: [PhotoAsset] = (0..<30).map { index -> PhotoAsset in
+            var asset = PhotoAsset.stub(
+                libraryID: library.id,
+                relativePath: index.isMultiple(of: 2) ? "TripA/dated\(index).ARW" : "TripA/Sub/dated\(index).ARW",
+                fingerprint: .stub("in-\(index)")
+            )
+            asset.metadata.captureDate = Date(timeIntervalSince1970: 1_700_000_000 + Double(index))
+            return asset
+        }
+        try store.upsert(photos: inScope)
+
+        let siblingPhotos = (0..<10).map { index in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "TripB/sibling\(index).ARW", fingerprint: .stub("sib-\(index)"))
+        }
+        try store.upsert(photos: siblingPhotos)
+
+        let otherLibraryPhotos = (0..<10).map { index in
+            PhotoAsset.stub(libraryID: otherLibrary.id, relativePath: "TripA/other\(index).ARW", fingerprint: .stub("other-\(index)"))
+        }
+        try store.upsert(photos: otherLibraryPhotos)
+
+        let query = LibraryQuery(
+            scope: .folder(libraryID: library.id, relativePath: "TripA"),
+            sort: .captureDateDescending
+        )
+        var cursor: PhotoPageCursor?
+        var actual: [PhotoID] = []
+        repeat {
+            let page = try store.page(matching: query, after: cursor, limit: 4)
+            actual.append(contentsOf: page.photos.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        let expected = inScope.sorted { $0.metadata.captureDate! > $1.metadata.captureDate! }.map(\.id)
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(Set(actual).count, actual.count)
+        XCTAssertTrue(Set(actual).isDisjoint(with: Set((siblingPhotos + otherLibraryPhotos).map(\.id))))
+    }
+
+    func testCaptureDateAscendingKeysetPagingWithTiedDatesAndUndatedTail() throws {
+        let library = try makeLibrary()
+        let tiedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let tied = (0..<20).map { index -> PhotoAsset in
+            var asset = PhotoAsset.stub(libraryID: library.id, relativePath: "tied\(index).ARW", fingerprint: .stub("asc-tied-\(index)"))
+            asset.metadata.captureDate = tiedDate
+            return asset
+        }
+        let laterDated = (0..<10).map { index -> PhotoAsset in
+            var asset = PhotoAsset.stub(libraryID: library.id, relativePath: "later\(index).ARW", fingerprint: .stub("asc-later-\(index)"))
+            asset.metadata.captureDate = Date(timeIntervalSince1970: 1_700_001_000 + Double(index))
+            return asset
+        }
+        let undated = (0..<10).map { index in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "undated\(index).ARW", fingerprint: .stub("asc-undated-\(index)"))
+        }
+        try store.upsert(photos: tied + laterDated + undated)
+
+        let query = LibraryQuery(scope: .all, sort: .captureDateAscending)
+        var cursor: PhotoPageCursor?
+        var actual: [PhotoID] = []
+        repeat {
+            let page = try store.page(matching: query, after: cursor, limit: 6)
+            actual.append(contentsOf: page.photos.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        let expectedTied = tied.sorted { $0.id.description < $1.id.description }.map(\.id)
+        let expectedLater = laterDated.sorted { $0.metadata.captureDate! < $1.metadata.captureDate! }.map(\.id)
+        let expectedUndated = undated.sorted { $0.id.description < $1.id.description }.map(\.id)
+        XCTAssertEqual(actual, expectedTied + expectedLater + expectedUndated)
+        XCTAssertEqual(Set(actual).count, actual.count)
+    }
+
+    func testFilenameAscendingKeysetPagingWithTiedNormalizedFilename() throws {
+        let library = try makeLibrary()
+        let alphaGroup = (0..<15).map { index -> PhotoAsset in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "DirA\(index)/Alpha.ARW", fingerprint: .stub("fn-asc-a-\(index)"))
+        }
+        let zuluGroup = (0..<15).map { index -> PhotoAsset in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "DirZ\(index)/Zulu.ARW", fingerprint: .stub("fn-asc-z-\(index)"))
+        }
+        try store.upsert(photos: alphaGroup + zuluGroup)
+
+        let query = LibraryQuery(scope: .all, sort: .filenameAscending)
+        var cursor: PhotoPageCursor?
+        var actual: [PhotoID] = []
+        repeat {
+            let page = try store.page(matching: query, after: cursor, limit: 6)
+            actual.append(contentsOf: page.photos.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        let expected = alphaGroup.sorted { $0.id.description < $1.id.description }.map(\.id)
+            + zuluGroup.sorted { $0.id.description < $1.id.description }.map(\.id)
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(Set(actual).count, actual.count)
+    }
+
+    func testFilenameDescendingKeysetPagingWithTiedNormalizedFilename() throws {
+        let library = try makeLibrary()
+        let alphaGroup = (0..<15).map { index -> PhotoAsset in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "DirA\(index)/Alpha.ARW", fingerprint: .stub("fn-desc-a-\(index)"))
+        }
+        let zuluGroup = (0..<15).map { index -> PhotoAsset in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "DirZ\(index)/Zulu.ARW", fingerprint: .stub("fn-desc-z-\(index)"))
+        }
+        try store.upsert(photos: alphaGroup + zuluGroup)
+
+        let query = LibraryQuery(scope: .all, sort: .filenameDescending)
+        var cursor: PhotoPageCursor?
+        var actual: [PhotoID] = []
+        repeat {
+            let page = try store.page(matching: query, after: cursor, limit: 6)
+            actual.append(contentsOf: page.photos.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        let expected = zuluGroup.sorted { $0.id.description < $1.id.description }.map(\.id)
+            + alphaGroup.sorted { $0.id.description < $1.id.description }.map(\.id)
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(Set(actual).count, actual.count)
+    }
+
+    func testRecentlyEditedKeysetPagingWithTiedLastEditDateIgnoresRequestedSort() throws {
+        let library = try makeLibrary()
+        let tiedEditDate = Date(timeIntervalSince1970: 1_700_000_500)
+        let edited = (0..<20).map { index -> PhotoAsset in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "edited\(index).ARW", fingerprint: .stub("re-\(index)"))
+        }
+        try store.upsert(photos: edited)
+        for photo in edited {
+            try store.setEditState(for: photo.id, hasEdits: true, lastEditAt: tiedEditDate)
+        }
+        let untouched = (0..<5).map { index in
+            PhotoAsset.stub(libraryID: library.id, relativePath: "untouched\(index).ARW", fingerprint: .stub("re-untouched-\(index)"))
+        }
+        try store.upsert(photos: untouched)
+
+        // Requested sort is filenameDescending; .recentlyEdited must ignore
+        // it and order by last_edit_at DESC / PhotoID ASC on ties, and must
+        // never surface the untouched photos.
+        let query = LibraryQuery(scope: .recentlyEdited, sort: .filenameDescending)
+        var cursor: PhotoPageCursor?
+        var actual: [PhotoID] = []
+        repeat {
+            let page = try store.page(matching: query, after: cursor, limit: 6)
+            actual.append(contentsOf: page.photos.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        let expected = edited.sorted { $0.id.description < $1.id.description }.map(\.id)
+        XCTAssertEqual(actual, expected)
+        XCTAssertEqual(Set(actual).count, actual.count)
+        XCTAssertTrue(Set(actual).isDisjoint(with: Set(untouched.map(\.id))))
+    }
+
     // MARK: - Scopes
 
     func testSourceScopeOnlyReturnsThatLibrarysPhotos() throws {
@@ -208,6 +419,33 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
             limit: 10
         )
         XCTAssertEqual(page.photos.map(\.relativePath), ["50%_off/keep.ARW"])
+    }
+
+    func testFolderScopeAndChildDirectoriesEscapeLiteralBackslashInDirectoryNames() throws {
+        let library = try makeLibrary()
+        try store.upsert(photos: [
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip\\A/keep.ARW", fingerprint: .stub("keep")),
+            // Without escaping, the unescaped LIKE pattern "Trip\A/%" would
+            // interpret `\A` as an (invalid) escape sequence rather than
+            // literal characters, and could spuriously match this decoy.
+            PhotoAsset.stub(libraryID: library.id, relativePath: "TripXA/decoy.ARW", fingerprint: .stub("decoy"))
+        ])
+
+        let page = try store.page(
+            matching: LibraryQuery(
+                scope: .folder(libraryID: library.id, relativePath: "Trip\\A"),
+                sort: .filenameAscending
+            ),
+            after: nil,
+            limit: 10
+        )
+        XCTAssertEqual(page.photos.map(\.relativePath), ["Trip\\A/keep.ARW"])
+
+        let children = try store.childDirectories(libraryID: library.id, parent: "")
+        XCTAssertEqual(Set(children.map(\.relativePath)), ["Trip\\A", "TripXA"])
+        let backslashChild = try XCTUnwrap(children.first { $0.relativePath == "Trip\\A" })
+        XCTAssertEqual(backslashChild.displayName, "Trip\\A")
+        XCTAssertEqual(backslashChild.childCount, 1)
     }
 
     func testAppStorageScopeOnlyReturnsAppStorageLibraries() throws {
@@ -400,6 +638,23 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(underscoreSearch.photos.map(\.relativePath), ["a_c.ARW"])
     }
 
+    func testFilenameSearchTreatsLiteralBackslashAsAnOrdinaryCharacter() throws {
+        let library = try makeLibrary()
+        try store.upsert(photos: [
+            PhotoAsset.stub(libraryID: library.id, relativePath: "a\\b.ARW", fingerprint: .stub("backslash")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "ab.ARW", fingerprint: .stub("no-backslash-decoy"))
+        ])
+
+        // The escape character itself, `\`, must be searchable as a literal
+        // character rather than being swallowed as a LIKE escape prefix.
+        let page = try store.page(
+            matching: LibraryQuery(scope: .all, filenameSearch: "a\\b", sort: .filenameAscending),
+            after: nil,
+            limit: 10
+        )
+        XCTAssertEqual(page.photos.map(\.relativePath), ["a\\b.ARW"])
+    }
+
     // MARK: - Limit validation
 
     func testPageLimitIsRejectedOutsideValidRange() throws {
@@ -441,6 +696,49 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(underSub.isEmpty)
     }
 
+    func testChildDirectoriesQueryDoesNotMaterializeEveryDescendantDirectory() throws {
+        // 6 immediate children at root, each with 30 distinct nested
+        // descendant directories two levels deep: 180 distinct
+        // `relative_directory` values total, but only 6 immediate children.
+        // A query that first fetches every descendant directory row and
+        // folds them in Swift would report a raw SQL row count of 180; the
+        // required immediate-child-bounded query reports 6.
+        let hookedURL = temporaryDirectory.appendingPathComponent("child-dirs-cardinality.sqlite")
+        var rawRowCount: Int?
+        let hookedStore = try PhotoIndexStore(
+            databaseURL: hookedURL,
+            migrationHook: {},
+            childDirectoriesRawRowCountHook: { rawRowCount = $0 }
+        )
+        defer { hookedStore.close() }
+
+        let library = LibraryFolder(
+            displayName: "Cardinality",
+            rootURL: URL(fileURLWithPath: "/Volumes/Cardinality", isDirectory: true)
+        )
+        try hookedStore.upsert(library: library)
+
+        var photos: [PhotoAsset] = []
+        for child in 0..<6 {
+            for nested in 0..<30 {
+                photos.append(PhotoAsset.stub(
+                    libraryID: library.id,
+                    relativePath: "Child\(child)/Nested\(nested)/leaf.ARW",
+                    fingerprint: .stub("c\(child)-n\(nested)")
+                ))
+            }
+        }
+        try hookedStore.upsert(photos: photos)
+
+        let atRoot = try hookedStore.childDirectories(libraryID: library.id, parent: "")
+
+        XCTAssertEqual(atRoot.count, 6)
+        XCTAssertEqual(
+            rawRowCount, 6,
+            "SQL must return one row per immediate child, not one per descendant directory"
+        )
+    }
+
     func testChildDirectoriesEscapesWildcardsAndHandlesUnicodeNames() throws {
         let library = try makeLibrary()
         try store.upsert(photos: [
@@ -475,6 +773,38 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
         // A neutral save clears both fields together.
         try store.setEditState(for: photo.id, hasEdits: false, lastEditAt: nil)
         loaded = try XCTUnwrap(try store.photo(id: photo.id))
+        XCTAssertEqual(loaded.hasEdits, false)
+        XCTAssertNil(loaded.lastEditAt)
+    }
+
+    func testSetEditStateThrowsWhenHasEditsTrueWithNoDate() throws {
+        let library = try makeLibrary()
+        let photo = PhotoAsset.stub(libraryID: library.id, relativePath: "invalid.ARW", fingerprint: .stub("invalid"))
+        try store.upsert(photo: photo)
+
+        XCTAssertThrowsError(try store.setEditState(for: photo.id, hasEdits: true, lastEditAt: nil)) { error in
+            XCTAssertEqual(error as? LibraryQueryError, .missingEditDate)
+        }
+
+        // The rejected write must not have touched the row at all.
+        let loaded = try XCTUnwrap(try store.photo(id: photo.id))
+        XCTAssertEqual(loaded.hasEdits, false)
+        XCTAssertNil(loaded.lastEditAt)
+    }
+
+    func testSetEditStateForcesLastEditAtNilWhenHasEditsIsFalseEvenIfCallerPassesADate() throws {
+        let library = try makeLibrary()
+        let photo = PhotoAsset.stub(
+            libraryID: library.id, relativePath: "contradictory.ARW", fingerprint: .stub("contradictory")
+        )
+        try store.upsert(photo: photo)
+
+        // A caller passing a stale non-nil date alongside hasEdits: false
+        // must not be able to write the contradictory (false, non-nil) row.
+        try store.setEditState(
+            for: photo.id, hasEdits: false, lastEditAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let loaded = try XCTUnwrap(try store.photo(id: photo.id))
         XCTAssertEqual(loaded.hasEdits, false)
         XCTAssertNil(loaded.lastEditAt)
     }

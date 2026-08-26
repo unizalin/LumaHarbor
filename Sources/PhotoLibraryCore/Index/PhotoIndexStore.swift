@@ -17,6 +17,12 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// Recursive because `transaction` re-enters through `upsertPhoto`.
     private let lock = NSRecursiveLock()
     public let databaseURL: URL
+    /// Test seam: when set, receives the exact row count the immediate-child
+    /// SQL query in `childDirectories` returned — the SQL/Swift boundary
+    /// cardinality — so a test can assert it's bounded by the number of
+    /// immediate children, not by however many distinct descendant
+    /// directories exist under `parent`.
+    private let childDirectoriesRawRowCountHook: ((Int) -> Void)?
 
     public convenience init(databaseURL: URL) throws {
         try self.init(databaseURL: databaseURL, migrationHook: {})
@@ -25,9 +31,14 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// Test seam: `migrationHook` runs inside the v1->v2 migration transaction,
     /// right before the schema-version record is updated, so a test can force
     /// a mid-migration failure and prove the whole transaction rolls back.
-    init(databaseURL: URL, migrationHook: @escaping () throws -> Void) throws {
+    init(
+        databaseURL: URL,
+        migrationHook: @escaping () throws -> Void,
+        childDirectoriesRawRowCountHook: ((Int) -> Void)? = nil
+    ) throws {
         self.databaseURL = databaseURL
         self.database = try SQLiteDatabase(url: databaseURL)
+        self.childDirectoriesRawRowCountHook = childDirectoriesRawRowCountHook
         try createBaseSchemaIfNeeded()
         try migrateToLatestSchemaIfNeeded(migrationHook: migrationHook)
     }
@@ -433,13 +444,23 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// `hasEdits: false, lastEditAt: nil` to clear both; a successful
     /// non-neutral save passes `hasEdits: true` with the sidecar's
     /// `modifiedAt` so `.recentlyEdited` has something to sort by.
+    ///
+    /// The two columns can never disagree: `hasEdits: false` always clears
+    /// `last_edit_at`, even if the caller passed a stale non-nil date, and
+    /// `hasEdits: true` with no date is rejected outright rather than
+    /// written as a row the edit badge and `.recentlyEdited` would read
+    /// differently.
     public func setEditState(for photoID: PhotoID, hasEdits: Bool, lastEditAt: Date?) throws {
+        if hasEdits, lastEditAt == nil {
+            throw LibraryQueryError.missingEditDate
+        }
+        let normalizedLastEditAt = hasEdits ? lastEditAt : nil
         try withLock {
             try database.run(
                 "UPDATE photo SET has_edits = ?, last_edit_at = ? WHERE photo_id = ?;",
                 [
                     .integer(hasEdits ? 1 : 0),
-                    lastEditAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                    normalizedLastEditAt.map { .real($0.timeIntervalSince1970) } ?? .null,
                     .text(photoID.description)
                 ]
             )
@@ -633,47 +654,66 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// indexed photo (directly or in a deeper descendant), for lazily
     /// expanding the folder sidebar one level at a time. `childCount` sums
     /// photos across the whole subtree under each child.
+    ///
+    /// The immediate-child segment is extracted and grouped entirely in
+    /// SQL — via `length`/`substr`/`instr` on `relative_directory`, bound
+    /// against the same `prefix` parameter used to compute their
+    /// lengths — so a deep, wide subtree never returns one row per
+    /// descendant directory to Swift, only one row per immediate child.
+    /// `prefix` and `relative_directory` are both plain `String`s (never
+    /// byte-sliced), and SQLite's `length`/`substr` count Unicode
+    /// characters, not bytes, so multi-byte names split correctly.
     public func childDirectories(
         libraryID: LibraryID,
         parent: String
     ) throws -> [LibraryDirectoryNode] {
         try withLock {
-            let escapedParent = Self.escapeForLike(parent)
+            let prefix = parent.isEmpty ? "" : parent + "/"
+            let likePattern = Self.escapeForLike(parent) + "/%"
+
             let rows = try database.query(
                 """
-                SELECT relative_directory, COUNT(*)
-                FROM photo
-                WHERE library_id = ?
-                  AND relative_directory <> ?
-                  AND (? = '' OR relative_directory LIKE ? ESCAPE '\\')
-                GROUP BY relative_directory;
+                WITH bounds AS (
+                    SELECT ? AS lib, ? AS excl_dir, ? AS prefix, ? AS like_pattern
+                ),
+                scored AS (
+                    SELECT
+                        CASE
+                            WHEN instr(substr(photo.relative_directory, length(bounds.prefix) + 1), '/') > 0
+                                THEN substr(
+                                    photo.relative_directory, 1,
+                                    length(bounds.prefix)
+                                        + instr(substr(photo.relative_directory, length(bounds.prefix) + 1), '/')
+                                        - 1
+                                )
+                            ELSE photo.relative_directory
+                        END AS child_path,
+                        bounds.prefix AS prefix
+                    FROM photo, bounds
+                    WHERE photo.library_id = bounds.lib
+                      AND photo.relative_directory <> bounds.excl_dir
+                      AND (bounds.prefix = '' OR photo.relative_directory LIKE bounds.like_pattern ESCAPE '\\')
+                )
+                SELECT child_path, substr(child_path, length(prefix) + 1), COUNT(*)
+                FROM scored
+                GROUP BY child_path
+                ORDER BY child_path;
                 """,
                 [
                     .text(libraryID.description),
                     .text(parent),
-                    .text(parent),
-                    .text(escapedParent + "/%")
+                    .text(prefix),
+                    .text(likePattern)
                 ]
-            ) { (directory: $0.string(0), count: Int($0.int(1))) }
+            ) { (path: $0.string(0), displayName: $0.string(1), count: Int($0.int(2))) }
+            childDirectoriesRawRowCountHook?(rows.count)
 
-            let prefix = parent.isEmpty ? "" : parent + "/"
-            var childCounts: [String: Int] = [:]
-            var childDisplayNames: [String: String] = [:]
-            for row in rows {
-                guard row.directory.hasPrefix(prefix), row.directory != parent else { continue }
-                let remainder = row.directory.dropFirst(prefix.count)
-                let firstSegment = remainder.split(separator: "/", maxSplits: 1).first.map(String.init) ?? String(remainder)
-                let childPath = prefix + firstSegment
-                childCounts[childPath, default: 0] += row.count
-                childDisplayNames[childPath] = firstSegment
-            }
-
-            return childCounts.keys.sorted().map { path in
+            return rows.map { row in
                 LibraryDirectoryNode(
                     libraryID: libraryID,
-                    relativePath: path,
-                    displayName: childDisplayNames[path] ?? path,
-                    childCount: childCounts[path] ?? 0
+                    relativePath: row.path,
+                    displayName: row.displayName,
+                    childCount: row.count
                 )
             }
         }
