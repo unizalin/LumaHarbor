@@ -35,6 +35,19 @@ public struct LibraryQuery: Sendable, Equatable {
 /// Opaque keyset position. Carries only the sort key actually in play for the
 /// query plus the tie-breaking `PhotoID` — never a URL or absolute path, so a
 /// stashed cursor can't be used to infer filesystem layout.
+///
+/// A cursor is only valid when passed back into the same `LibraryQuery`
+/// (scope, filename search, and sort direction) that produced it.
+/// `page(matching:after:limit:)` validates the cursor's key *shape* against
+/// the requested sort — e.g. rejecting a filename cursor reused against a
+/// capture-date sort — via `LibraryQueryError.invalidCursor`. It cannot,
+/// however, detect a cursor whose shape is compatible but whose position is
+/// semantically stale, such as a capture-date-ascending cursor replayed
+/// against capture-date-descending, or against a query whose scope or
+/// filename search changed since the cursor was minted. Callers are
+/// responsible for scoping a cursor to the exact query that produced it;
+/// binding cursor identity to a full query fingerprint is unscoped future
+/// work, not part of this contract.
 public struct PhotoPageCursor: Sendable, Equatable {
     public var dateKey: Date?
     public var filenameKey: String?

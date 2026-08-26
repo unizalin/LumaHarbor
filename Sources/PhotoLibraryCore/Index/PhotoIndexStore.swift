@@ -512,12 +512,18 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 conditions.append("p.library_id = ?")
                 parameters.append(.text(libraryID.description))
                 if !relativePath.isEmpty {
-                    let escapedPrefix = Self.escapeForLike(relativePath)
+                    // Exact, case-sensitive prefix equality — not LIKE — so
+                    // e.g. "Trip" never matches "trip/..." (SQLite's default
+                    // LIKE is ASCII case-insensitive) or "Trip2/..." (no
+                    // wildcard is involved at all). `length()`/`substr()`
+                    // count Unicode characters, matching `childDirectories`.
+                    let prefix = relativePath + "/"
                     conditions.append(
-                        "(p.relative_directory = ? OR p.relative_directory LIKE ? ESCAPE '\\')"
+                        "(p.relative_directory = ? OR substr(p.relative_directory, 1, length(?)) = ?)"
                     )
                     parameters.append(.text(relativePath))
-                    parameters.append(.text(escapedPrefix + "/%"))
+                    parameters.append(.text(prefix))
+                    parameters.append(.text(prefix))
                 }
             case .appStorage:
                 isRecentlyEdited = false
@@ -613,12 +619,21 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// always sort last (in both directions), so a cursor sitting on a dated
     /// row must also admit every NULL-dated row, while a cursor already on a
     /// NULL-dated row only admits later NULL-dated rows by `photo_id`.
+    ///
+    /// Every branch validates the cursor's key *shape* against `sortKey`
+    /// before touching its values: a capture-date cursor's `dateKey == nil`
+    /// is a legitimate "NULL-capture" position, so the capture branch can't
+    /// just pattern-match on `dateKey` the way the other two do — it must
+    /// also reject a non-nil `filenameKey`, or a filename cursor replayed
+    /// against a capture-date sort would be silently misread as a
+    /// NULL-capture cursor and skip every dated row instead of failing.
     private static func keysetPredicate(
         for sortKey: EffectiveSortKey,
         cursor: PhotoPageCursor
     ) throws -> (sql: String, parameters: [SQLiteValue]) {
         switch sortKey {
         case .captureDate(let descending):
+            guard cursor.filenameKey == nil else { throw LibraryQueryError.invalidCursor }
             let comparisonOperator = descending ? "<" : ">"
             if let dateKey = cursor.dateKey {
                 let value = dateKey.timeIntervalSince1970
@@ -635,7 +650,9 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 )
             }
         case .filename(let ascending):
-            guard let filenameKey = cursor.filenameKey else { throw LibraryQueryError.invalidCursor }
+            guard let filenameKey = cursor.filenameKey, cursor.dateKey == nil else {
+                throw LibraryQueryError.invalidCursor
+            }
             let comparisonOperator = ascending ? ">" : "<"
             let sql = """
                 p.filename_normalized \(comparisonOperator) ? \
@@ -643,7 +660,9 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 """
             return (sql, [.text(filenameKey), .text(filenameKey), .text(cursor.photoID.description)])
         case .lastEditDate:
-            guard let dateKey = cursor.dateKey else { throw LibraryQueryError.invalidCursor }
+            guard let dateKey = cursor.dateKey, cursor.filenameKey == nil else {
+                throw LibraryQueryError.invalidCursor
+            }
             let value = dateKey.timeIntervalSince1970
             let sql = "p.last_edit_at < ? OR (p.last_edit_at = ? AND p.photo_id > ?)"
             return (sql, [.real(value), .real(value), .text(cursor.photoID.description)])
@@ -669,12 +688,11 @@ public final class PhotoIndexStore: @unchecked Sendable {
     ) throws -> [LibraryDirectoryNode] {
         try withLock {
             let prefix = parent.isEmpty ? "" : parent + "/"
-            let likePattern = Self.escapeForLike(parent) + "/%"
 
             let rows = try database.query(
                 """
                 WITH bounds AS (
-                    SELECT ? AS lib, ? AS excl_dir, ? AS prefix, ? AS like_pattern
+                    SELECT ? AS lib, ? AS excl_dir, ? AS prefix
                 ),
                 scored AS (
                     SELECT
@@ -692,7 +710,10 @@ public final class PhotoIndexStore: @unchecked Sendable {
                     FROM photo, bounds
                     WHERE photo.library_id = bounds.lib
                       AND photo.relative_directory <> bounds.excl_dir
-                      AND (bounds.prefix = '' OR photo.relative_directory LIKE bounds.like_pattern ESCAPE '\\')
+                      AND (
+                        bounds.prefix = ''
+                        OR substr(photo.relative_directory, 1, length(bounds.prefix)) = bounds.prefix
+                      )
                 )
                 SELECT child_path, substr(child_path, length(prefix) + 1), COUNT(*)
                 FROM scored
@@ -702,8 +723,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 [
                     .text(libraryID.description),
                     .text(parent),
-                    .text(prefix),
-                    .text(likePattern)
+                    .text(prefix)
                 ]
             ) { (path: $0.string(0), displayName: $0.string(1), count: Int($0.int(2))) }
             childDirectoriesRawRowCountHook?(rows.count)
