@@ -11,17 +11,25 @@ import RawProcessingCore
 /// synchronous SQLite call, and making callers `await` each row would push
 /// suspension points into the middle of scan batches for no benefit.
 public final class PhotoIndexStore: @unchecked Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
 
     private let database: SQLiteDatabase
     /// Recursive because `transaction` re-enters through `upsertPhoto`.
     private let lock = NSRecursiveLock()
     public let databaseURL: URL
 
-    public init(databaseURL: URL) throws {
+    public convenience init(databaseURL: URL) throws {
+        try self.init(databaseURL: databaseURL, migrationHook: {})
+    }
+
+    /// Test seam: `migrationHook` runs inside the v1->v2 migration transaction,
+    /// right before the schema-version record is updated, so a test can force
+    /// a mid-migration failure and prove the whole transaction rolls back.
+    init(databaseURL: URL, migrationHook: @escaping () throws -> Void) throws {
         self.databaseURL = databaseURL
         self.database = try SQLiteDatabase(url: databaseURL)
-        try createSchema()
+        try createBaseSchemaIfNeeded()
+        try migrateToLatestSchemaIfNeeded(migrationHook: migrationHook)
     }
 
     private func withLock<T>(_ body: () throws -> T) rethrows -> T {
@@ -30,7 +38,11 @@ public final class PhotoIndexStore: @unchecked Sendable {
         return try body()
     }
 
-    private func createSchema() throws {
+    /// Creates the pre-v2 (schema v1) shape if it doesn't exist yet. Safe to
+    /// run against an already-migrated v2 database: every statement is
+    /// `IF NOT EXISTS`, and `schemaVersion` is seeded only when absent, so an
+    /// existing v1 or v2 database is left exactly as it was.
+    private func createBaseSchemaIfNeeded() throws {
         try database.execute("""
             CREATE TABLE IF NOT EXISTS schema_info (
                 key   TEXT PRIMARY KEY,
@@ -77,17 +89,123 @@ public final class PhotoIndexStore: @unchecked Sendable {
             """)
 
         try database.run(
-            "INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, ?);",
-            [.text("schemaVersion"), .text(String(Self.schemaVersion))]
+            "INSERT OR IGNORE INTO schema_info (key, value) VALUES ('schemaVersion', '1');"
         )
     }
 
-    private static let photoColumns = """
-        photo_id, library_id, relative_path, file_size, edge_digest,
-        capture_date, camera_make, camera_model, lens_model,
-        pixel_width, pixel_height, iso_speed, shutter_speed, aperture, orientation,
-        status, failure_reason, has_edits, last_seen_at
-        """
+    private func currentSchemaVersion() throws -> Int {
+        let rows = try database.query(
+            "SELECT value FROM schema_info WHERE key = 'schemaVersion';"
+        ) { Int($0.string(0)) ?? 1 }
+        return rows.first ?? 1
+    }
+
+    /// Spec §8: v1 -> v2 happens inside one transaction. `ALTER TABLE`,
+    /// `CREATE INDEX` and the backfill all run under the same `BEGIN
+    /// IMMEDIATE`/`COMMIT` pair as the version bump, so a thrown error at any
+    /// point — including from `migrationHook` — rolls every change back and
+    /// leaves the database exactly as it was opened.
+    private func migrateToLatestSchemaIfNeeded(migrationHook: () throws -> Void) throws {
+        let version = try currentSchemaVersion()
+        guard version < Self.schemaVersion else { return }
+
+        try withLock {
+            try database.transaction {
+                try database.execute("""
+                    ALTER TABLE library ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'externalFolder';
+                    ALTER TABLE library ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'ready';
+                    ALTER TABLE library ADD COLUMN scan_state TEXT NOT NULL DEFAULT 'idle';
+                    ALTER TABLE photo ADD COLUMN filename_normalized TEXT NOT NULL DEFAULT '';
+                    ALTER TABLE photo ADD COLUMN relative_directory TEXT NOT NULL DEFAULT '';
+                    ALTER TABLE photo ADD COLUMN last_edit_at REAL;
+                    """)
+
+                try backfillFilenameNormalizedAndDirectory()
+
+                try database.execute("""
+                    CREATE INDEX photo_all_capture_desc ON photo (capture_date DESC, photo_id);
+                    CREATE INDEX photo_library_capture_desc ON photo (library_id, capture_date DESC, photo_id);
+                    CREATE INDEX photo_library_directory_capture_desc
+                        ON photo (library_id, relative_directory, capture_date DESC, photo_id);
+                    CREATE INDEX photo_filename_normalized ON photo (filename_normalized, photo_id);
+                    CREATE INDEX photo_last_edit_desc ON photo (last_edit_at DESC, photo_id)
+                        WHERE last_edit_at IS NOT NULL;
+                    """)
+
+                try migrationHook()
+
+                try database.run(
+                    "UPDATE schema_info SET value = ? WHERE key = 'schemaVersion';",
+                    [.text(String(Self.schemaVersion))]
+                )
+            }
+        }
+    }
+
+    /// `filename_normalized`/`relative_directory` can't be computed in SQL —
+    /// NFC composition and locale-independent lowercasing need Foundation —
+    /// so existing v1 rows are backfilled here, one `UPDATE` per row, inside
+    /// the same migration transaction.
+    private func backfillFilenameNormalizedAndDirectory() throws {
+        let rows = try database.query(
+            "SELECT photo_id, relative_path FROM photo;"
+        ) { (id: $0.string(0), relativePath: $0.string(1)) }
+
+        for row in rows {
+            try database.run(
+                "UPDATE photo SET filename_normalized = ?, relative_directory = ? WHERE photo_id = ?;",
+                [
+                    .text(Self.normalizeForSearch(Self.filenameComponent(of: row.relativePath))),
+                    .text(Self.directoryComponent(of: row.relativePath)),
+                    .text(row.id)
+                ]
+            )
+        }
+    }
+
+    private static let photoColumnList = [
+        "photo_id", "library_id", "relative_path", "file_size", "edge_digest",
+        "capture_date", "camera_make", "camera_model", "lens_model",
+        "pixel_width", "pixel_height", "iso_speed", "shutter_speed", "aperture", "orientation",
+        "status", "failure_reason", "has_edits", "last_seen_at", "last_edit_at"
+    ]
+    private static let photoColumns = photoColumnList.joined(separator: ", ")
+    private static let qualifiedPhotoColumns = photoColumnList.map { "p.\($0)" }.joined(separator: ", ")
+
+    /// Directory portion of a `/`-separated relative path, or `""` for a file
+    /// directly under the library root.
+    private static func directoryComponent(of relativePath: String) -> String {
+        guard let slashIndex = relativePath.lastIndex(of: "/") else { return "" }
+        return String(relativePath[relativePath.startIndex..<slashIndex])
+    }
+
+    private static func filenameComponent(of relativePath: String) -> String {
+        relativePath.split(separator: "/").last.map(String.init) ?? relativePath
+    }
+
+    /// NFC composition plus `String.lowercased()` (Unicode default case
+    /// folding, not locale-sensitive) so "Café" matches whichever spelling —
+    /// precomposed or combining-mark — the search string uses.
+    private static func normalizeForSearch(_ value: String) -> String {
+        value.precomposedStringWithCanonicalMapping.lowercased()
+    }
+
+    /// Escapes `\`, `%` and `_` so a user-supplied string can be bound into a
+    /// `LIKE ... ESCAPE '\'` pattern and matched as literal text.
+    private static func escapeForLike(_ value: String) -> String {
+        var result = ""
+        result.reserveCapacity(value.count)
+        for character in value {
+            switch character {
+            case "\\", "%", "_":
+                result.append("\\")
+                result.append(character)
+            default:
+                result.append(character)
+            }
+        }
+        return result
+    }
 
     // MARK: - Libraries
 
@@ -183,27 +301,32 @@ public final class PhotoIndexStore: @unchecked Sendable {
 
     private func upsertPhoto(_ photo: PhotoAsset) throws {
         try database.run("""
-            INSERT INTO photo (\(Self.photoColumns))
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO photo (
+                \(Self.photoColumns), filename_normalized, relative_directory
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(photo_id) DO UPDATE SET
-                library_id     = excluded.library_id,
-                relative_path  = excluded.relative_path,
-                file_size      = excluded.file_size,
-                edge_digest    = excluded.edge_digest,
-                capture_date   = excluded.capture_date,
-                camera_make    = excluded.camera_make,
-                camera_model   = excluded.camera_model,
-                lens_model     = excluded.lens_model,
-                pixel_width    = excluded.pixel_width,
-                pixel_height   = excluded.pixel_height,
-                iso_speed      = excluded.iso_speed,
-                shutter_speed  = excluded.shutter_speed,
-                aperture       = excluded.aperture,
-                orientation    = excluded.orientation,
-                status         = excluded.status,
-                failure_reason = excluded.failure_reason,
-                has_edits      = excluded.has_edits,
-                last_seen_at   = excluded.last_seen_at;
+                library_id          = excluded.library_id,
+                relative_path       = excluded.relative_path,
+                file_size           = excluded.file_size,
+                edge_digest         = excluded.edge_digest,
+                capture_date        = excluded.capture_date,
+                camera_make         = excluded.camera_make,
+                camera_model        = excluded.camera_model,
+                lens_model          = excluded.lens_model,
+                pixel_width         = excluded.pixel_width,
+                pixel_height        = excluded.pixel_height,
+                iso_speed           = excluded.iso_speed,
+                shutter_speed       = excluded.shutter_speed,
+                aperture            = excluded.aperture,
+                orientation         = excluded.orientation,
+                status              = excluded.status,
+                failure_reason      = excluded.failure_reason,
+                has_edits           = excluded.has_edits,
+                last_seen_at        = excluded.last_seen_at,
+                last_edit_at        = excluded.last_edit_at,
+                filename_normalized = excluded.filename_normalized,
+                relative_directory  = excluded.relative_directory;
             """, [
                 .text(photo.id.description),
                 .text(photo.libraryID.description),
@@ -223,7 +346,10 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 .text(photo.status.rawValue),
                 photo.failureReason.map { .text($0) } ?? .null,
                 .integer(photo.hasEdits ? 1 : 0),
-                .real(photo.lastSeenAt.timeIntervalSince1970)
+                .real(photo.lastSeenAt.timeIntervalSince1970),
+                photo.lastEditAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                .text(Self.normalizeForSearch(Self.filenameComponent(of: photo.relativePath))),
+                .text(Self.directoryComponent(of: photo.relativePath))
             ])
     }
 
@@ -303,6 +429,256 @@ public final class PhotoIndexStore: @unchecked Sendable {
         }
     }
 
+    /// Sets both edit-state columns together. A neutral save passes
+    /// `hasEdits: false, lastEditAt: nil` to clear both; a successful
+    /// non-neutral save passes `hasEdits: true` with the sidecar's
+    /// `modifiedAt` so `.recentlyEdited` has something to sort by.
+    public func setEditState(for photoID: PhotoID, hasEdits: Bool, lastEditAt: Date?) throws {
+        try withLock {
+            try database.run(
+                "UPDATE photo SET has_edits = ?, last_edit_at = ? WHERE photo_id = ?;",
+                [
+                    .integer(hasEdits ? 1 : 0),
+                    lastEditAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                    .text(photoID.description)
+                ]
+            )
+        }
+    }
+
+    // MARK: - Paged multi-source queries
+
+    /// production page limit (spec §11): callers may request at most 200
+    /// rows so the browser never materialises an entire drive.
+    private static let maximumPageLimit = 200
+
+    /// Sort key actually driving `ORDER BY`/the keyset predicate for one
+    /// `page(matching:after:limit:)` call. `.recentlyEdited` overrides
+    /// whatever `PhotoSort` the query asked for.
+    private enum EffectiveSortKey {
+        case captureDate(descending: Bool)
+        case filename(ascending: Bool)
+        case lastEditDate
+    }
+
+    /// Stable, cross-source paging over the index. Filtering, ordering and
+    /// limiting all happen in SQL — no page ever loads more than
+    /// `limit + 1` rows into Swift.
+    public func page(
+        matching query: LibraryQuery,
+        after cursor: PhotoPageCursor?,
+        limit: Int
+    ) throws -> PhotoPage {
+        guard (1...Self.maximumPageLimit).contains(limit) else {
+            throw LibraryQueryError.invalidLimit(limit)
+        }
+
+        return try withLock {
+            var conditions: [String] = []
+            var parameters: [SQLiteValue] = []
+            var joinsLibrary = false
+            let isRecentlyEdited: Bool
+
+            switch query.scope {
+            case .all:
+                isRecentlyEdited = false
+            case .source(let libraryID):
+                isRecentlyEdited = false
+                conditions.append("p.library_id = ?")
+                parameters.append(.text(libraryID.description))
+            case .folder(let libraryID, let relativePath):
+                isRecentlyEdited = false
+                conditions.append("p.library_id = ?")
+                parameters.append(.text(libraryID.description))
+                if !relativePath.isEmpty {
+                    let escapedPrefix = Self.escapeForLike(relativePath)
+                    conditions.append(
+                        "(p.relative_directory = ? OR p.relative_directory LIKE ? ESCAPE '\\')"
+                    )
+                    parameters.append(.text(relativePath))
+                    parameters.append(.text(escapedPrefix + "/%"))
+                }
+            case .appStorage:
+                isRecentlyEdited = false
+                joinsLibrary = true
+                conditions.append("l.source_kind = 'appStorage'")
+            case .recentlyEdited:
+                isRecentlyEdited = true
+                conditions.append("p.last_edit_at IS NOT NULL")
+            }
+
+            if let search = query.filenameSearch, !search.isEmpty {
+                let escapedSearch = Self.escapeForLike(Self.normalizeForSearch(search))
+                conditions.append("p.filename_normalized LIKE ? ESCAPE '\\'")
+                parameters.append(.text("%" + escapedSearch + "%"))
+            }
+
+            let sortKey: EffectiveSortKey
+            if isRecentlyEdited {
+                sortKey = .lastEditDate
+            } else {
+                switch query.sort {
+                case .captureDateDescending: sortKey = .captureDate(descending: true)
+                case .captureDateAscending: sortKey = .captureDate(descending: false)
+                case .filenameAscending: sortKey = .filename(ascending: true)
+                case .filenameDescending: sortKey = .filename(ascending: false)
+                }
+            }
+
+            let orderClause: String
+            switch sortKey {
+            case .captureDate(let descending):
+                orderClause =
+                    "(p.capture_date IS NULL) ASC, p.capture_date \(descending ? "DESC" : "ASC"), p.photo_id ASC"
+            case .filename(let ascending):
+                orderClause = "p.filename_normalized \(ascending ? "ASC" : "DESC"), p.photo_id ASC"
+            case .lastEditDate:
+                orderClause = "p.last_edit_at DESC, p.photo_id ASC"
+            }
+
+            if let cursor {
+                let (predicate, cursorParameters) = try Self.keysetPredicate(
+                    for: sortKey, cursor: cursor
+                )
+                // The predicate contains a top-level OR (NULL dates always
+                // sort last), so it must be parenthesized before joining
+                // with the scope/search conditions via " AND " — otherwise
+                // AND's tighter precedence would let the OR branch escape
+                // the scope filter entirely.
+                conditions.append("(" + predicate + ")")
+                parameters.append(contentsOf: cursorParameters)
+            }
+
+            var sql = "SELECT \(Self.qualifiedPhotoColumns), p.filename_normalized FROM photo p"
+            if joinsLibrary {
+                sql += " JOIN library l ON p.library_id = l.id"
+            }
+            if !conditions.isEmpty {
+                sql += " WHERE " + conditions.joined(separator: " AND ")
+            }
+            sql += " ORDER BY \(orderClause) LIMIT ?;"
+            parameters.append(.integer(Int64(limit + 1)))
+
+            let rows = try database.query(sql, parameters) { row -> (asset: PhotoAsset, filenameNormalized: String) in
+                (Self.photoAsset(from: row), row.string(20))
+            }
+
+            let hasMore = rows.count > limit
+            let pageRows = Array(rows.prefix(limit))
+            var nextCursor: PhotoPageCursor?
+            if hasMore, let last = pageRows.last {
+                switch sortKey {
+                case .captureDate:
+                    nextCursor = PhotoPageCursor(
+                        dateKey: last.asset.metadata.captureDate, photoID: last.asset.id
+                    )
+                case .filename:
+                    nextCursor = PhotoPageCursor(
+                        filenameKey: last.filenameNormalized, photoID: last.asset.id
+                    )
+                case .lastEditDate:
+                    nextCursor = PhotoPageCursor(
+                        dateKey: last.asset.lastEditAt, photoID: last.asset.id
+                    )
+                }
+            }
+
+            return PhotoPage(photos: pageRows.map(\.asset), nextCursor: nextCursor)
+        }
+    }
+
+    /// Builds the keyset ("seek") predicate that selects exactly the rows
+    /// strictly after `cursor` in the ordering `sortKey` implies. NULL dates
+    /// always sort last (in both directions), so a cursor sitting on a dated
+    /// row must also admit every NULL-dated row, while a cursor already on a
+    /// NULL-dated row only admits later NULL-dated rows by `photo_id`.
+    private static func keysetPredicate(
+        for sortKey: EffectiveSortKey,
+        cursor: PhotoPageCursor
+    ) throws -> (sql: String, parameters: [SQLiteValue]) {
+        switch sortKey {
+        case .captureDate(let descending):
+            let comparisonOperator = descending ? "<" : ">"
+            if let dateKey = cursor.dateKey {
+                let value = dateKey.timeIntervalSince1970
+                let sql = """
+                    (p.capture_date IS NOT NULL AND \
+                    (p.capture_date \(comparisonOperator) ? OR (p.capture_date = ? AND p.photo_id > ?))) \
+                    OR p.capture_date IS NULL
+                    """
+                return (sql, [.real(value), .real(value), .text(cursor.photoID.description)])
+            } else {
+                return (
+                    "p.capture_date IS NULL AND p.photo_id > ?",
+                    [.text(cursor.photoID.description)]
+                )
+            }
+        case .filename(let ascending):
+            guard let filenameKey = cursor.filenameKey else { throw LibraryQueryError.invalidCursor }
+            let comparisonOperator = ascending ? ">" : "<"
+            let sql = """
+                p.filename_normalized \(comparisonOperator) ? \
+                OR (p.filename_normalized = ? AND p.photo_id > ?)
+                """
+            return (sql, [.text(filenameKey), .text(filenameKey), .text(cursor.photoID.description)])
+        case .lastEditDate:
+            guard let dateKey = cursor.dateKey else { throw LibraryQueryError.invalidCursor }
+            let value = dateKey.timeIntervalSince1970
+            let sql = "p.last_edit_at < ? OR (p.last_edit_at = ? AND p.photo_id > ?)"
+            return (sql, [.real(value), .real(value), .text(cursor.photoID.description)])
+        }
+    }
+
+    /// Immediate child directories of `parent` that contain at least one
+    /// indexed photo (directly or in a deeper descendant), for lazily
+    /// expanding the folder sidebar one level at a time. `childCount` sums
+    /// photos across the whole subtree under each child.
+    public func childDirectories(
+        libraryID: LibraryID,
+        parent: String
+    ) throws -> [LibraryDirectoryNode] {
+        try withLock {
+            let escapedParent = Self.escapeForLike(parent)
+            let rows = try database.query(
+                """
+                SELECT relative_directory, COUNT(*)
+                FROM photo
+                WHERE library_id = ?
+                  AND relative_directory <> ?
+                  AND (? = '' OR relative_directory LIKE ? ESCAPE '\\')
+                GROUP BY relative_directory;
+                """,
+                [
+                    .text(libraryID.description),
+                    .text(parent),
+                    .text(parent),
+                    .text(escapedParent + "/%")
+                ]
+            ) { (directory: $0.string(0), count: Int($0.int(1))) }
+
+            let prefix = parent.isEmpty ? "" : parent + "/"
+            var childCounts: [String: Int] = [:]
+            var childDisplayNames: [String: String] = [:]
+            for row in rows {
+                guard row.directory.hasPrefix(prefix), row.directory != parent else { continue }
+                let remainder = row.directory.dropFirst(prefix.count)
+                let firstSegment = remainder.split(separator: "/", maxSplits: 1).first.map(String.init) ?? String(remainder)
+                let childPath = prefix + firstSegment
+                childCounts[childPath, default: 0] += row.count
+                childDisplayNames[childPath] = firstSegment
+            }
+
+            return childCounts.keys.sorted().map { path in
+                LibraryDirectoryNode(
+                    libraryID: libraryID,
+                    relativePath: path,
+                    displayName: childDisplayNames[path] ?? path,
+                    childCount: childCounts[path] ?? 0
+                )
+            }
+        }
+    }
+
     /// Wipes indexed content but keeps the file. Used by the rebuild path.
     public func removeAllPhotos(inLibrary libraryID: LibraryID) throws {
         try withLock {
@@ -337,7 +713,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
             status: PhotoStatus(rawValue: row.string(15)) ?? .pending,
             failureReason: row.optionalString(16),
             lastSeenAt: row.date(18) ?? Date(),
-            hasEdits: row.bool(17)
+            hasEdits: row.bool(17),
+            lastEditAt: row.date(19)
         )
     }
 }
