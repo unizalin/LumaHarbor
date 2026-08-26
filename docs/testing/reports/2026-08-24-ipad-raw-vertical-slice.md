@@ -96,7 +96,7 @@ RawFixtureTests: FAIL (executed 9 tests, expected exactly 8)
 | `zsh -n Scripts/run-ipad-vertical-slice-acceptance.zsh` | 通過，無語法錯誤 |
 | `zsh -n Scripts/run-mvp-acceptance.zsh` | 通過，無語法錯誤 |
 | `git diff --check` | 通過，無空白字元問題 |
-| `Scripts/run-ipad-vertical-slice-acceptance.zsh` self-test（`LUMAHARBOR_IPAD_RUNNER_SELFTEST=1`） | 連續 10 次前景執行全部通過，每次結束後皆確認無殘留子程序 |
+| `Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest` | 連續 10 次前景執行全部通過，每次結束後皆確認無殘留子程序 |
 | `Scripts/run-mvp-acceptance.zsh` self-test（`LUMAHARBOR_RUNNER_SELFTEST=1`，含真實 signal tier） | 全部通過，含新的 under／exact／over 基準情境 |
 | summary／全部 log 隱私掃描（grep `/Users/`、`/Volumes/`、`/private/var/`、`/private/tmp/`、`/var/`、`/tmp/`，以及 repo root／`$HOME`／三個 fixture 目錄的實際字串，見 §5.4 finding 3、4） | 通過，無殘留 |
 
@@ -177,6 +177,29 @@ RawFixtureTests: FAIL (executed 9 tests, expected exactly 8)
 修復後 self-test（本輪新增 4 個發布失敗端到端案例，加上前四輪累計的既有案例，總計 132 個斷言）在前景連續執行 10 次，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身與所有 helper 的精確程序檢查都確認無殘留。`Scripts/run-mvp-acceptance.zsh` self-test（本輪未變動）重新驗證仍全數通過（含 timeout／hanging-command 案例；signal-interruption 分層因本次環境未匯出三個 fixture 目錄環境變數而 SKIPPED，非失敗）。
 
 **本輪未能重新執行真實 Task 8 自動驗收**：本次工作階段沒有可用的 exFAT 外接隨身碟（`/Volumes/` 下無對應磁碟區）、也沒有匯出 `LUMAHARBOR_RAW_FIXTURE_DIR`／`LUMAHARBOR_APFS_TEST_DIR`／`LUMAHARBOR_EXFAT_TEST_DIR` 三個環境變數，因此無法跑完整的 `strict build → swift test → iOS Simulator build → MVP preflight → MVP acceptance` 五步驟。本輪修正對「正常、無訊號、`mv` 未曾失敗」路徑的行為刻意保持不變（`run_fakepass_selftest_case` 與 `run_concurrent_runs_selftest_case` 這兩個既有案例正是用來守住這一點，見上方「兩個新回歸」說明），因此 §3 記錄的既有真實 PASS 證據理論上不受本輪修正影響；但既有規則要求 Task 8 自動驗收必須在真實 fixture 下重新執行才能視為本輪修正的最終確認，待使用者重新掛載 exFAT 隨身碟並匯出三個 fixture 目錄環境變數後補做。
+
+### 5.6 Codex 第五輪 pre-landing review：BLOCKED → 修正 evidence protocol 與平行隔離（本輪：runner 修正，非產品程式碼）
+
+§5.5 的修正合併後，Codex 做了第五輪驗證並再次回報 **BLOCKED**：架構本身方向正確，但 Codex 用一個「第一次呼叫成功、第二次起永遠 `exit 1`」的假 `mv`，精確在 `after-mv-before-finalized` 暫停點送出 TERM，示範了發布迴圈之後的三個 `force_summary_overall_fail || true`（兩個較晚暫停點各一次，加上 `handle_terminating_signal` 開頭那一次）全部把修正失敗吞掉，最終結果是 `RC=143`、`MV_COUNT=4`，但 `summary.md` 仍讀 `Overall result: PASS`——結束碼正確，但已發布的檔案內容仍然是假的 PASS，而 `publish_ok`／`SUMMARY_STATE` 對這個矛盾一無所知。
+
+1. **重新定義可驗證的 evidence protocol，不再宣稱無條件保證**：finalize_run 與 force_summary_overall_fail 上方的註解重寫為明確的三層保證——(1) **結束碼**：`exit_for_signal` 的訊號對應完全在行程記憶體內完成，不經過任何磁碟 I/O，是唯一無條件成立的保證，collector 必須把訊號範圍內的非零結束碼視為比 `summary.md` 內容本身更權威；(2) **`summary.md` 內容**：只有在修正真的成功寫回時才保證讀到 FAIL；(3) **`CORRECTION_MARKER_NAME`（`PUBLISH_CORRECTION_FAILED`）評估標記**：修正失敗時，用完全不經過 `PUBLISH_MV_CMD`（正是這個機制本身壞掉）的純 `print > file` 直接寫入 `$RUN_DIR`，代表「這次的 `summary.md` 內容不可信任，請以結束碼為準」；連這個純寫入都失敗時，才真正沒有任何磁碟層級的保證可言，此時只剩結束碼。
+2. **correction failure 不再被 `|| true` 吞掉**：新增 `recheck_late_checkpoint()`，在兩個較晚暫停點（`after-mv-before-finalized`、`after-finalized`）之後都會呼叫，各自重新執行 `force_summary_overall_fail` 並用新版 `verify_published_summary(..., "FAIL")` 重新驗證；驗證不過就呼叫 `record_publish_correction_failure()` 寫下 tier-3 標記，並回傳失敗，讓 `finalize_run` 把 `publish_ok`／`overall_ok` 清零、`SUMMARY_STATE` 保持（或改回）`finalizing`，絕不設成 `finalized`。`handle_terminating_signal` 開頭那個無條件呼叫也同步補上明確的失敗處理（原本同樣是 `|| true`），因為訊號精確落在 `after-finalized` 暫停點時，`SUMMARY_STATE` 已經是 `finalized`，會直接從 trap 內部呼叫 `exit_for_signal` 離開，`finalize_run` 自己的 `recheck_late_checkpoint` 永遠不會被執行到——這是這個修正必須留下 tier-3 標記的唯一機會，也是它必須放在這裡（而不只是 `finalize_run` 內部）的原因。新增 `_run_late_signal_mv_permanent_failure_selftest_case`（涵蓋 `after-mv-before-finalized` 與 `after-finalized` 兩個暫停點），精確重現 Codex 這次的手法：驗證結束碼 143、`mv` 至少被呼叫兩次（`after-mv-before-finalized` 實際觀察到 4 次、`after-finalized` 觀察到 2 次，因為後者的 bypass 路徑本來就少一次修正嘗試機會）、且 `PUBLISH_CORRECTION_FAILED` 標記確實存在。
+3. **`verify_published_summary` 改為接收明確的預期結果**：新增第二參數 `<expected: PASS|FAIL>`，`Overall result: ` 那一行必須逐字等於 `Overall result: ${expected}`；不再從 `DEFERRED_SIGNAL` 內部推斷，呼叫端自己決定這次應該預期什麼。新增 `run_verify_published_summary_selftest_case` 直接單元測試：PASS 檔案只能通過 PASS 預期、FAIL 檔案只能通過 FAIL 預期、`Overall result: UNKNOWN`／空值／完全沒有 Overall 行／重複兩行 Overall，以及非法的 `expected` 參數本身，全部必須被拒絕。
+4. **`find_selftest_run_dir_for_pid` 改回同時要求 before/after 差集與精確 PID 相符**：上一輪把「找自己的 run directory」從純 before/after 目錄差集改成純 PID 字串比對，解決了兩個獨立 `__selftest` suite 互相污染彼此偵測的問題（finding 3），但引入了另一個真實回歸——兩個 suite 同時跑、加上它們各自巢狀的 `run_concurrent_runs_selftest_case` 又各自再產生兩個子行程，這種密集的行程建立／回收速度，足以讓作業系統的 PID 配置在單次 self-test 執行期間就重複使用同一個號碼；純 PID 比對因此可能撈到一個「剛好重複用到同一個 PID、但其實是更早、已經結束的另一個案例」的舊目錄。這不是理論推測，而是實際重現：`run_concurrent_runs_selftest_case` 的「兩個 run 目錄各自都有 Overall PASS 的 summary.md」斷言，在兩個 `__selftest` suite 同時執行時間歇性失敗，追下去正是撈到了舊目錄。修法：`find_selftest_run_dir_for_pid` 現在要求同時符合「PID 字串比對」與「在呼叫者於 spawn 之前拍下的目錄快照裡不存在」兩個條件——前者排除其他 suite 這段時間內產生的目錄，後者排除任何在這次 spawn 之前就已存在的目錄（含被重複使用的舊 PID 目錄），單獨任何一個條件都不足以同時堵住兩種情境。新增 `run_parallel_selftest_suites_case`：兩個完整、獨立的 `Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest` 呼叫同時執行，只斷言兩者都 exit 0；用 `LUMAHARBOR_IPAD_SELFTEST_NESTED_PARALLEL_GUARD` 環境變數避免這兩個巢狀 suite 又各自再遞迴產生兩個，這個變數純粹是 self-test 內部防止遞迴爆炸的機制，只在已經透過明確 `__selftest` argv 進入 self-test 之後才會被檢查，與正式執行路徑的環境變數免疫保證無關、也不重新開啟它。
+
+同步完成的清理項目：
+
+5. **`runner-diagnostic.log` 拆成三個獨立欄位**：`Publish loop converged`（發布迴圈本身有沒有在上限內確認乾淨發布，0 可能是 `mv` 永久失敗、也可能是 `grep`／`sed` 永久失敗或說謊、也可能是真的把 20 次上限用完，三者外觀完全一樣）、`Late correction`（`not-needed`／`ok`／`failed` 三態，記錄「這一次提早的修正嘗試」——即發布迴圈之後、兩個較晚暫停點之前那一次——有沒有需要、有沒有成功；兩個較晚暫停點各自的修正結果改由 `PUBLISH_CORRECTION_FAILED` 標記檔案記錄，理由見上方 finding 2）、`Summary verified`（最終 `verify_published_summary` 的實際結果）。避免「`Publish loop converged: 0`」被誤讀成「一定是 20 次上限被用完」。
+6. **SELFTEST 標記移到 `summary.md` 真正的第一行**：原本的「**Run mode: SELFTEST**」粗體段落雖然在檔案很前面，但不是逐字的第一行；如果這個標記真的要當作 collector 的信任邊界（文件與註解一直是這樣宣稱的），就必須讓「只讀第一行」的 collector 也能可靠判斷。修法：在粗體說明段落之前，加印一行不含任何 Markdown 格式的裸字串 `Run mode: SELFTEST`，且保證是整個檔案的第一行；`run_isolation_selftest_case` 新增直接讀取第一行並逐字比對的斷言。
+7. **`run_checkpoint_signal_selftest_case` 移除已不可達的 `expect_fail=0` 分支**：§5.5 已經讓全部四個 finalize_run 訊號時窗與 interstep 時窗都只呼叫 `expect_fail=1`，原本的 `expect_fail=0`（「訊號來得太晚，PASS 保留」）分支從此沒有任何呼叫端會走到，整段連同這個參數一起移除，函式簽章從 5 個參數縮成 4 個。
+8. **移除 `finalize_run` 內未使用的 `commit` 區域變數**、**發布重試上限抽成具名常數 `PUBLISH_RETRY_LIMIT=20`**、**修正殘留的「finding 1 (see below)」review 對話式註解**（改成直接指向 `step_command_for` 自己的說明，不再依賴一個編號在檔案裡實際上並不存在的「finding 1」）。
+9. **§5 表格內目前的 self-test 指令更新為 `Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest`**（§5.1／§5.4 內的歷史敘述保持原樣，因為那些段落記錄的是各自當時真實使用的呼叫方式，不宜回溯改寫）。
+
+修正過程中另外發現並修好一個屬於這次修正本身引入的新回歸（由 finding 3 新增的 `run_parallel_selftest_suites_case` 間歇重現，見 finding 3 說明）：`find_selftest_run_dir_for_pid` 從純 before/after 目錄差集改成純 PID 比對後，在兩個 `__selftest` suite 同時執行的高密度行程情境下可能撈到因 PID 重複使用而產生的舊目錄；修法已併入 finding 3 描述的雙條件設計。
+
+修復後 self-test（本輪新增 12 個案例——4 個發布相關端到端／單元測試、2 個 Codex late-signal 重現、1 個平行 suite 驗證，加上為既有案例補上的 `before_dirs`／PID 雙條件比對——加上前五輪累計的既有案例，總計 151 個斷言）在前景連續執行 **10 次**，每次都是 Overall PASS、exit 0，每次結束後對 runner 本身與所有 helper 的精確程序檢查都確認無殘留（`run_parallel_selftest_suites_case` 本身會讓每次執行額外背景執行兩個完整的巢狀 `__selftest` suite，總執行時間因此明顯拉長，但仍在前景連續 10 次驗證的範圍內完成）。`Scripts/run-mvp-acceptance.zsh` self-test（本輪未變動）重新驗證仍全數通過。`git diff --check` 通過，無空白字元問題。
+
+**本輪同樣未能重新執行真實 Task 8 自動驗收**：原因與 §5.5 相同——本次工作階段沒有可用的 exFAT 外接隨身碟、也沒有匯出三個 fixture 目錄環境變數。待使用者重新掛載隨身碟並匯出環境變數後補做。
 
 ## 6. 實機五項 gate（NOT RUN）
 
