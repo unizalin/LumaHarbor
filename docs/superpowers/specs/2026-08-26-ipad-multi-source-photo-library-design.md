@@ -80,14 +80,14 @@
 3. iPad 內儲存
 4. 來源清單（依使用者顯示名稱本地化排序）
 
-每個來源顯示名稱、照片數、掃描狀態及 `ready／readOnly／offline／needsAuthorization／partialFailure`。來源可展開相對資料夾樹；私人絕對路徑不作為一般 UI label。
+每個來源顯示名稱、照片數、連線狀態（`ready／readOnly／offline／needsAuthorization`）及獨立掃描狀態（`idle／queued／scanning／partialFailure`）。來源可展開相對資料夾樹；私人絕對路徑不作為一般 UI label。
 
 ### 5.3 網格與工具列
 
 - 使用 lazy／virtualized grid；資料由固定大小 page 供應，不持有全部查詢結果。
 - toolbar 提供加入來源、重新掃描、搜尋、排序與縮圖尺寸。
 - 支援排序：拍攝時間新到舊、拍攝時間舊到新、檔名 A–Z、檔名 Z–A。
-- 搜尋只比對經 NFC 正規化及 locale-independent case folding 的檔名；第一版不搜尋 EXIF、資料夾或 sidecar 內容。
+- 搜尋採「檔名包含」語意，比對前對檔名與 query 做 NFC 正規化及 locale-independent case folding；`%`、`_` 與 escape 字元都當一般文字，不得改變 SQL pattern。第一版不搜尋 EXIF、資料夾或 sidecar 內容。
 - 縮圖先顯示中性 placeholder，再讀快取或背景解碼。狀態與編輯 badge 必須有文字／符號與 VoiceOver label，不能只靠顏色。
 - 第一版只允許單一選取，不顯示評分、旗標、色標或批次操作。
 
@@ -151,11 +151,17 @@ public enum LibraryConnectionState: String, Codable, Sendable {
     case readOnly
     case offline
     case needsAuthorization
+}
+
+public enum LibraryScanState: String, Codable, Sendable {
+    case idle
+    case queued
+    case scanning
     case partialFailure
 }
 ```
 
-`LibraryFolder` 增加 `sourceKind` 與 `connectionState`；`rootURL` 只存在 runtime model，不成為可攜身份。現有 `isOnline`／`isWritable` 在遷移期間可保留為 computed compatibility properties，所有新邏輯改讀 `connectionState`。
+`LibraryFolder` 增加 `sourceKind`、`connectionState` 與 `scanState`；連線能力與最近掃描結果不得塞進同一個 enum，`partialFailure` 不能意外停用仍在線且可寫的來源。`rootURL` 只存在 runtime model，不成為可攜身份。現有 `isOnline`／`isWritable` 在遷移期間可保留為 computed compatibility properties，所有新邏輯改讀 `connectionState`。SQLite 只持久化 `idle` 或 `partialFailure`；App 重啟時把中斷留下的 `queued`／`scanning` 正規化為 `idle`。
 
 身份優先序：
 
@@ -175,6 +181,7 @@ public enum LibraryConnectionState: String, Codable, Sendable {
 
 - `source_kind TEXT NOT NULL`
 - `connection_state TEXT NOT NULL`
+- `scan_state TEXT NOT NULL`
 
 `photo` 新增：
 
@@ -228,6 +235,7 @@ public struct PhotoPage: Sendable, Equatable {
 - `PhotoPageCursor` 只包含排序鍵與 `PhotoID`，不得包含絕對路徑。
 - `.folder` scope 包含該相對資料夾及其所有子資料夾；空相對路徑代表來源根目錄。
 - `.recentlyEdited` 固定依 `last_edit_at DESC, photo_id` 排序，不顯示其他排序選項；其他 scope 預設使用 `captureDateDescending`。
+- 沒有拍攝日期的照片在日期升冪與降冪都排在有日期照片之後，再以 `PhotoID` 穩定排序。
 
 ## 9. 多來源掃描與一致性
 
