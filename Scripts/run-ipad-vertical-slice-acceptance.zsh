@@ -781,6 +781,18 @@ SIM_PAUSE_READY_FILE=""
 SIM_PAUSE_GO_FILE=""
 PUBLISH_MV_CMD=(mv -f --)
 
+# PUBLISH_RETRY_LIMIT — the publish loop's retry cap (see finalize_run).
+# Purely defensive: the loop's own bookkeeping (publish_converged) already
+# treats hitting this cap as fail-closed regardless of the reason, so the
+# exact number mostly just bounds how long a pathological run (a
+# permanently failing mv, or a grep/sed that never confirms clean) can
+# spend retrying before giving up.
+PUBLISH_RETRY_LIMIT=20
+
+# CORRECTION_MARKER_NAME — see the "verifiable evidence protocol" comment
+# above finalize_run for what this file means and when it is written.
+CORRECTION_MARKER_NAME="PUBLISH_CORRECTION_FAILED"
+
 # selftest_pause_at <checkpoint-name> — a no-op unless SIMULATION_MODE=1 AND
 # this exact checkpoint name was requested via --pause-at=. Touches
 # SIM_PAUSE_READY_FILE and blocks (bounded) until SIM_PAUSE_GO_FILE
@@ -824,18 +836,54 @@ exit_for_signal() {
     esac
 }
 
-# force_summary_overall_fail — the authoritative, pure-zsh (no grep, no
-# sed, no dependence on any external binary's exit code) last-resort
-# correction: if $SUMMARY_FILE currently exists and its content contains
-# "Overall result: PASS", rewrites it to FAIL and republishes via
-# PUBLISH_MV_CMD. A missing file, or one that doesn't currently read PASS,
-# is not an error — this is meant to be called defensively, from anywhere a
-# terminating signal might legitimately require the already-published file
-# corrected, including well after finalize_run's own publish loop has
-# already run and returned. Returns 1 only when the file exists but the
-# correction itself could not be written (e.g. disk full) — callers that
-# need this to have actually succeeded must check the return value; callers
-# that are just taking a defensive extra pass may ignore it.
+# --- Verifiable evidence protocol (Codex round 5 finding 1) -----------------
+# What follows is the exact, honest, three-tier guarantee this runner makes
+# about a run that was interrupted by a terminating signal. Earlier wording
+# in this file claimed force_summary_overall_fail's correction as an
+# unconditional guarantee; Codex reproduced a case where it is not one — a
+# PUBLISH_MV_CMD that succeeds once and then fails on every subsequent call
+# (first publish succeeds; a signal then arrives; every correction attempt
+# from then on fails) leaves summary.md still reading Overall PASS no
+# matter how many times a correction is retried, because the underlying
+# storage operation the correction itself depends on is broken. No amount
+# of application-level retry logic can rewrite a file through a `mv` that
+# does not work. The three tiers, in order of how much they can depend on:
+#   1. EXIT CODE — unconditional, no disk I/O involved at all.
+#      exit_for_signal's HUP/INT/TERM -> 129/130/143 mapping is applied
+#      purely in-process; it can never be defeated by a broken filesystem,
+#      a broken `mv`, or anything else on disk. This is the one guarantee
+#      that always holds. A collector MUST treat a nonzero, signal-range
+#      exit code as authoritative over a summary.md that looks like PASS.
+#   2. SUMMARY.MD CONTENT — guaranteed correct (reads Overall FAIL) ONLY
+#      IF the corrective rewrite (force_summary_overall_fail, via
+#      PUBLISH_MV_CMD) actually succeeds. When it does, this is the
+#      primary, human-readable record.
+#   3. CORRECTION_MARKER_NAME — written directly (a plain redirect, NEVER
+#      through PUBLISH_MV_CMD — that is exactly the mechanism finding 1
+#      demonstrated can be broken) into $RUN_DIR whenever a correction
+#      attempt could not be confirmed to have fixed tier 2. Its presence
+#      means: do not trust this run's summary.md content even if it reads
+#      PASS; trust tier 1 (the exit code) instead. record_publish_correction_failure
+#      is the only writer. If even this plain write fails (a genuinely
+#      catastrophic, whole-filesystem failure), there is no further
+#      disk-based guarantee available — tier 1 remains the last resort and
+#      is still correct regardless.
+# publish_ok and overall_ok are ALWAYS forced to 0, and SUMMARY_STATE is
+# never left at "finalized", whenever tier 3 fires — see finalize_run's
+# recheck_late_checkpoint calls and the top of handle_terminating_signal.
+
+# force_summary_overall_fail — pure zsh (no grep, no sed, no dependence on
+# grep/sed's exit code — the one remaining external dependency is
+# PUBLISH_MV_CMD itself, which is exactly what tier 3 above exists to
+# detect the failure of): if $SUMMARY_FILE currently exists and its
+# content contains "Overall result: PASS", rewrites it to FAIL and
+# republishes via PUBLISH_MV_CMD. A missing file, or one that doesn't
+# currently read PASS, is not an error. Returns 1 only when the file
+# exists but the correction itself could not be written or republished —
+# every call site that needs the correction to have actually succeeded
+# checks this return value (directly, or via a subsequent
+# verify_published_summary call) and reacts per the evidence protocol
+# above; nothing may silently discard a nonzero return from this function.
 force_summary_overall_fail() {
     [[ -n "$SUMMARY_FILE" && -f "$SUMMARY_FILE" ]] || return 0
     local content
@@ -851,15 +899,42 @@ force_summary_overall_fail() {
     return 0
 }
 
-# verify_published_summary <file> — the postcondition gate for a publish
-# attempt, deliberately pure zsh throughout (never grep, never sed) so it
-# stays trustworthy even in every self-test scenario below where one of
-# those tools has been deliberately broken. Requires: the file exists, is a
-# regular file (never a symlink left behind by some unexpected mv target),
-# is readable, contains EXACTLY ONE "Overall result: " line, and — if
-# DEFERRED_SIGNAL is set — that line reads exactly "Overall result: FAIL".
+# record_publish_correction_failure <reason> — tier 3 of the evidence
+# protocol above: writes $RUN_DIR/$CORRECTION_MARKER_NAME via a plain `>`
+# redirect, deliberately NEVER through PUBLISH_MV_CMD (that is exactly the
+# mechanism this file's existence signals is broken) and never by editing
+# summary.md itself. Best-effort — if even this plain write fails, there
+# is no further disk-based guarantee this runner can make, and the
+# process's own signal-derived exit code (tier 1, independent of any disk
+# I/O) is the last resort.
+record_publish_correction_failure() {
+    local reason="$1"
+    [[ -n "$RUN_DIR" ]] || return 1
+    print -r -- "publish correction failed: ${reason}" > "${RUN_DIR}/${CORRECTION_MARKER_NAME}" 2>/dev/null || return 1
+    return 0
+}
+
+# verify_published_summary <file> <expected: PASS|FAIL> — the postcondition
+# gate for a publish attempt, deliberately pure zsh throughout (never grep,
+# never sed) so it stays trustworthy even in every self-test scenario below
+# where one of those tools has been deliberately broken. Requires: the
+# file exists, is a regular file (never a symlink left behind by some
+# unexpected mv target), is readable, contains EXACTLY ONE
+# "Overall result: " line, and that line reads EXACTLY
+# "Overall result: <expected>" — no other string (UNKNOWN, empty, a third
+# status, PASS when FAIL was expected or vice versa, ...) is ever accepted
+# for any value of <expected> (Codex round 5 finding 2: the caller, not
+# this function, decides what the correct result for this call ought to
+# be — DEFERRED_SIGNAL is no longer read internally here).
 verify_published_summary() {
-    local file="$1"
+    local file="$1" expected="$2"
+    case "$expected" in
+        PASS|FAIL) ;;
+        *)
+            print -u2 -r -- "internal error: verify_published_summary called with invalid expected result '${expected}'"
+            return 1
+            ;;
+    esac
     [[ -n "$file" && -f "$file" && ! -L "$file" && -r "$file" ]] || return 1
     local content
     content="$(<"$file")" 2>/dev/null || return 1
@@ -873,10 +948,30 @@ verify_published_summary() {
         fi
     done
     (( count == 1 )) || return 1
-    if [[ -n "$DEFERRED_SIGNAL" ]]; then
-        [[ "$last_overall" == "Overall result: FAIL" ]] || return 1
-    fi
+    [[ "$last_overall" == "Overall result: ${expected}" ]] || return 1
     return 0
+}
+
+# recheck_late_checkpoint <checkpoint-name> — called immediately after each
+# of finalize_run's two later pause points (after-mv-before-finalized,
+# after-finalized), which is the postcondition re-verification Codex round
+# 5 finding 1 requires at every late checkpoint, not just once right after
+# the main publish loop. A no-op (returns 0) if no signal has been
+# deferred. Otherwise: attempts force_summary_overall_fail, then demands
+# verify_published_summary confirm the published file now reads Overall
+# FAIL — if it cannot, drops the tier-3 evidence marker and returns 1 so
+# the caller (finalize_run) forces publish_ok/overall_ok to 0 and never
+# marks SUMMARY_STATE finalized, rather than the previous `|| true`
+# silently discarding the correction's own failure.
+recheck_late_checkpoint() {
+    local checkpoint_name="$1"
+    [[ -n "$DEFERRED_SIGNAL" ]] || return 0
+    force_summary_overall_fail || true
+    if verify_published_summary "$SUMMARY_FILE" "FAIL"; then
+        return 0
+    fi
+    record_publish_correction_failure "checkpoint ${checkpoint_name}: could not confirm summary.md reads Overall FAIL after signal ${DEFERRED_SIGNAL}" || true
+    return 1
 }
 
 # finalize_run — redacts every log that exists, writes summary.md (a
@@ -893,14 +988,22 @@ verify_published_summary() {
 # "SUMMARY_STATE=finalized") is itself guarded against a signal landing at
 # ANY of four points: before the atomic mv, DURING the mv (an external,
 # uninterruptible-by-our-trap command — see the publish loop below), after
-# the mv but before SUMMARY_STATE flips, and after it flips. All four must
-# leave the published file reading Overall FAIL, not just the process's own
-# exit code — force_summary_overall_fail is called after the publish loop
-# and again after each of the two later checkpoints (and, for a signal
-# landing strictly after SUMMARY_STATE="finalized", from the top of
-# handle_terminating_signal itself), so every one of the four windows gets
-# an explicit correction attempt regardless of how far finalize_run had
-# already progressed when the signal arrived.
+# the mv but before SUMMARY_STATE flips, and after it flips. All four
+# attempt to leave the published file reading Overall FAIL, not just the
+# process's own exit code — force_summary_overall_fail is called after the
+# publish loop and again (via recheck_late_checkpoint, which additionally
+# re-verifies and forces publish_ok/overall_ok to 0 and SUMMARY_STATE off
+# "finalized" if the correction cannot be confirmed) after each of the two
+# later checkpoints, and unconditionally from the top of
+# handle_terminating_signal for a signal landing strictly after
+# SUMMARY_STATE="finalized". See the "verifiable evidence protocol"
+# comment above force_summary_overall_fail for the precise, honest
+# three-tier guarantee this actually amounts to — the published file's
+# CONTENT is not unconditionally guaranteed (a permanently broken
+# PUBLISH_MV_CMD can defeat any number of retries), but the process's exit
+# code always is, and a failed correction always leaves the on-disk
+# CORRECTION_MARKER_NAME marker as authoritative evidence that the
+# content should not be trusted.
 finalize_run() {
     if [[ "$SUMMARY_STATE" == "finalized" || "$SUMMARY_STATE" == "finalizing" ]]; then
         return 0
@@ -914,8 +1017,7 @@ finalize_run() {
         redact_file "${RUN_DIR}/${STEP_LOGFILE[$key]}" || true
     done
 
-    local commit xcode_version arch
-    commit="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || print -r -- unknown)"
+    local xcode_version arch
     xcode_version="$(collect_xcode_version)"
     arch="$(uname -m)"
 
@@ -937,6 +1039,17 @@ finalize_run() {
 
     local tmp_summary="${SUMMARY_FILE}.tmp.$$"
     {
+        # The bare "Run mode: SELFTEST" line, if present, is DELIBERATELY
+        # the very first line of the file — this is the actual
+        # machine-checkable trust boundary a report collector should
+        # check (Codex round 5 finding 4b): reading only line 1 is enough
+        # to reject a self-test artifact, without needing to scan the
+        # whole file for the bolded paragraph below, which is written
+        # purely for a human reader. run_isolation_selftest_case asserts
+        # this is exactly line 1, not merely "present somewhere".
+        if (( SIMULATION_MODE )); then
+            print -r -- "Run mode: SELFTEST"
+        fi
         print -r -- "# iPad RAW editing vertical slice acceptance run ${TIMESTAMP}"
         print -r -- ""
         if (( SIMULATION_MODE )); then
@@ -1082,7 +1195,7 @@ finalize_run() {
     local publish_pass=0
     local publish_converged=0
     local grep_rc mv_rc
-    while (( publish_pass < 20 )); do
+    while (( publish_pass < PUBLISH_RETRY_LIMIT )); do
         publish_pass=$((publish_pass + 1))
 
         if [[ -n "$DEFERRED_SIGNAL" ]]; then
@@ -1122,36 +1235,65 @@ finalize_run() {
     # so it stays trustworthy even when the fast path above just exhausted
     # its cap because grep, sed, or mv itself is broken. Guarded on
     # DEFERRED_SIGNAL, unlike the unconditional call at the top of
-    # handle_terminating_signal: these three calls run on EVERY finalize_run
+    # handle_terminating_signal: this call runs on EVERY finalize_run
     # invocation, signal or not, and force_summary_overall_fail has no way
     # to tell "genuinely passed" apart from "PASS that needs correcting"
     # except via DEFERRED_SIGNAL — calling it unconditionally here would
     # wrongly flip an ordinary, uninterrupted PASS run to FAIL.
+    local expected_overall="PASS"
+    [[ -n "$DEFERRED_SIGNAL" ]] && expected_overall="FAIL"
     if [[ -n "$DEFERRED_SIGNAL" ]]; then
         force_summary_overall_fail || publish_converged=0
     fi
 
     local publish_ok=0
-    if (( publish_converged )) && verify_published_summary "$SUMMARY_FILE"; then
+    if (( publish_converged )) && verify_published_summary "$SUMMARY_FILE" "$expected_overall"; then
         publish_ok=1
     fi
 
+    # Three separately labeled, non-conflatable diagnostic fields (Codex
+    # round 5 finding 4a): "Publish loop converged: 0" alone must never be
+    # read as "the 20-pass cap was specifically exhausted" — a permanently
+    # failing mv, a permanently failing/lying grep or sed, AND genuine cap
+    # exhaustion all present identically as 0 here. "Late correction"
+    # records whether THIS EARLY correction attempt (the one just above,
+    # for a signal that arrived during or before the main loop) was even
+    # needed, and if so whether it succeeded; the two LATER checkpoints
+    # below make their own independent recheck_late_checkpoint calls and,
+    # if a correction fails there instead, that failure is recorded via
+    # the on-disk CORRECTION_MARKER_NAME marker (record_publish_correction_failure)
+    # rather than by rewriting this already-written diagnostic — see the
+    # evidence-protocol comment above force_summary_overall_fail for why a
+    # signal landing that late cannot always update this file itself.
+    local late_correction_status="not-needed"
+    if [[ -n "$DEFERRED_SIGNAL" ]]; then
+        late_correction_status="ok"
+        (( publish_ok )) || late_correction_status="failed"
+    fi
     {
-        print -r -- "Publish: $(( publish_converged )) (1 = the retry loop above confirmed a clean publish within its 20-pass cap, 0 = it did not and the cap was exhausted)"
-        print -r -- "Publish result: $(( publish_ok )) (1 = summary.md verified present, readable, exactly one Overall line, and FAIL if a signal was ever deferred; 0 = one of those checks failed)"
+        print -r -- "Publish loop converged: $(( publish_converged )) (1 = the retry loop confirmed a clean publish within its ${PUBLISH_RETRY_LIMIT}-pass cap; 0 = it did not, for ANY reason — do not assume this specifically means the cap was exhausted; see 'Late correction' on the next line for what actually happened during this early check)"
+        print -r -- "Late correction: ${late_correction_status} (not-needed = no signal had been deferred yet at this point in finalize_run; ok = a deferred signal required correcting an already-decided PASS and the correction was confirmed; failed = the correction could not be confirmed — see ${CORRECTION_MARKER_NAME} in this directory if this run is later interrupted at one of the two later checkpoints too)"
+        print -r -- "Summary verified: $(( publish_ok )) (1 = summary.md was confirmed to exist, be a regular readable file, contain exactly one Overall result line, and match the expected ${expected_overall} for this point in the run; 0 = one of those checks failed)"
     } >> "$diagnostic"
 
     overall_ok=$(( steps_ok && privacy_ok && publish_ok ))
 
     selftest_pause_at "after-mv-before-finalized"
-    [[ -n "$DEFERRED_SIGNAL" ]] && { force_summary_overall_fail || true }
+    if ! recheck_late_checkpoint "after-mv-before-finalized"; then
+        publish_ok=0
+        overall_ok=0
+    fi
 
     if (( publish_ok )); then
         SUMMARY_STATE="finalized"
     fi
 
     selftest_pause_at "after-finalized"
-    [[ -n "$DEFERRED_SIGNAL" ]] && { force_summary_overall_fail || true }
+    if ! recheck_late_checkpoint "after-finalized"; then
+        publish_ok=0
+        overall_ok=0
+        SUMMARY_STATE="finalizing"
+    fi
 
     if (( publish_ok )); then
         print -r -- ""
@@ -1186,14 +1328,24 @@ handle_terminating_signal() {
     # Unconditional and first thing, regardless of which branch below ends
     # up applying: every one of the four finalize_run publish-sequence
     # checkpoints (finalize-start, before-mv, after-mv-before-finalized,
-    # after-finalized) must leave the published summary reading Overall
-    # FAIL, including the two AFTER SUMMARY_STATE has already flipped to
-    # "finalized" — the earlier architecture treated the process's own exit
-    # code as sufficient once finalized, but a signal at any point up
-    # through process exit must never leave a PASS-marked artifact sitting
-    # on disk. A no-op if $SUMMARY_FILE doesn't exist yet or doesn't
-    # currently read PASS.
-    force_summary_overall_fail || true
+    # after-finalized) must attempt to leave the published summary reading
+    # Overall FAIL, including the two AFTER SUMMARY_STATE has already
+    # flipped to "finalized" — a signal at any point up through process
+    # exit must never leave a stale PASS artifact uncorrected when
+    # correction is possible. A no-op if $SUMMARY_FILE doesn't exist yet
+    # or doesn't currently read PASS. This is also the ONLY correction
+    # attempt reachable for a signal landing exactly during the
+    # "after-finalized" pause: SUMMARY_STATE is already "finalized" by
+    # then, so the branch below returns/exits without ever letting
+    # finalize_run's own recheck_late_checkpoint run — see the "after
+    # SUMMARY_STATE=finalized" arm a few lines down. If the correction
+    # fails, the tier-3 evidence marker is written directly here, since
+    # this may be the last chance to record it at all before the process
+    # exits (per the evidence-protocol comment above
+    # force_summary_overall_fail).
+    if ! force_summary_overall_fail; then
+        record_publish_correction_failure "handle_terminating_signal could not confirm summary.md reads Overall FAIL after signal ${sig}" || true
+    fi
 
     if [[ "$SUMMARY_STATE" == "finalizing" ]]; then
         [[ -z "$DEFERRED_SIGNAL" ]] && DEFERRED_SIGNAL="$sig"
@@ -1485,18 +1637,55 @@ cleanup_signal_case_helper() {
     (( ok ))
 }
 
-# new_selftest_run_dir <before-dirs-array-name>
-# Prints the one directory under SELFTEST_RUN_TREE that exists now but did
-# not exist in the array named by $1 (captured by the caller before
-# spawning), or nothing if none is found.
-new_selftest_run_dir() {
-    local -a before=("${(@P)1}")
+# find_selftest_run_dir_for_pid <child_pid> <before-dirs-array-name>
+# Prints the one directory under SELFTEST_RUN_TREE that BOTH (a) did not
+# exist in the array named by $2 (a directory listing the caller captures
+# immediately before spawning) AND (b) embeds <child_pid> as the PID
+# component of the TIMESTAMP-PID-RANDOM naming scheme run_acceptance_flow
+# uses to construct RUN_DIR. This function has gone through two prior,
+# each individually insufficient designs, and requires BOTH conditions
+# together for a reason each earlier attempt's own bug demonstrated:
+#   - A bare before/after diff (this function's original form) is exactly
+#     what two independent `__selftest` suites running at the same time
+#     against the SAME shared SELFTEST_RUN_TREE can cross-contaminate:
+#     suite A's "before" snapshot can miss a directory suite B's own
+#     child creates in the gap, making suite A's diff wrongly pick up
+#     suite B's directory (Codex round 5 finding 3).
+#   - A bare PID-substring match (this function's second form, adopted to
+#     fix the above) turned out to have its OWN failure mode: heavy,
+#     rapid process churn — many self-test cases spawning and reaping
+#     subprocesses in quick succession, sharply amplified by two full
+#     suites (and their own nested run_concurrent_runs_selftest_case
+#     cases) running at once — can cycle the OS's PID allocator back
+#     around fast enough within a single self-test run for a PID to be
+#     reused. A bare substring match could then return a STALE directory
+#     from an earlier, already-finished case that happened to reuse the
+#     same PID number, rather than the current spawn's own directory —
+#     reproduced directly: run_concurrent_runs_selftest_case's own
+#     "both run directories have their own Overall PASS summary.md"
+#     assertion failed intermittently under exactly this two-suites-at-once
+#     load, tracing back to a stale directory being returned.
+# Condition (a) rules out anything that existed before this spawn (any
+# stale reused-PID directory, and anything a different, already-running
+# suite had already created); condition (b) rules out anything a
+# different suite's own children create later, in the same window this
+# call is waiting in. Bounded-wait for the directory to appear (the child
+# creates it slightly after spawn_simulated_run's `exec`, not necessarily
+# by the time this is first called); prints nothing and returns 1 if it
+# never shows up satisfying both conditions within the deadline.
+find_selftest_run_dir_for_pid() {
+    local child_pid="$1"
+    local -a before=("${(@P)2}")
+    local deadline=$((SECONDS + 20))
     local d
-    for d in "${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N); do
-        if (( ${before[(Ie)$d]} == 0 )); then
+    while (( SECONDS < deadline )); do
+        for d in "${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N); do
+            [[ "${d:t}" == *-${child_pid}-* ]] || continue
+            (( ${before[(Ie)$d]} == 0 )) || continue
             print -r -- "$d"
             return 0
-        fi
+        done
+        sleep 0.05
     done
     return 1
 }
@@ -1526,9 +1715,6 @@ run_signal_selftest_case() {
     local child_pidfile="${case_tmp}/child.pid"
     local ready_file="${case_tmp}/ready"
 
-    local -a before_dirs
-    before_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
-
     local -a cmds
     local k
     for k in "${STEP_ORDER[@]}"; do
@@ -1538,6 +1724,9 @@ run_signal_selftest_case() {
             cmds+=("${FASTPASS_CMD[$k]}")
         fi
     done
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
+
     spawn_simulated_run "${cmds[@]}"
     local child_pid=$LAST_SPAWNED_PID
 
@@ -1579,7 +1768,7 @@ run_signal_selftest_case() {
     # summary.md afterward, not for timing (the ready-file wait above
     # already proves the target step is genuinely in flight).
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
 
     kill -s "$signal_name" "$child_pid" 2>/dev/null || true
     local rc=0
@@ -1739,7 +1928,7 @@ run_fastfail_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: non-signal failure -> no run directory was created"
         return 1
@@ -1780,7 +1969,7 @@ run_fakepass_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: fake successful run -> no run directory was created"
         return 1
@@ -1838,7 +2027,7 @@ run_missinghelper_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: missing helper -> no run directory was created"
         return 1
@@ -1960,7 +2149,7 @@ run_timeout_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
 
     # No signal sent here — the 1-second STEP_TIMEOUT_SECONDS override is
     # what must trip run_with_timeout's own TIMEOUT_HIT path on its own.
@@ -2022,15 +2211,21 @@ run_timeout_selftest_case() {
 }
 
 # run_checkpoint_signal_selftest_case <checkpoint> <signal> <expected-exit>
-#   <label-suffix> <expect-overall-fail(0/1)>
+#   <label-suffix>
 # Shared driver for every "signal lands at exactly this checkpoint" case
 # (interstep, and the four finalize_run publish-sequence checkpoints):
 # spawns a fakepass run with --pause-at=<checkpoint>, waits for the ready
 # handshake, signals, releases the pause, and checks exit code plus
 # summary.md content. Used by all the checkpoint-specific cases below so
-# each one only has to supply what differs.
+# each one only has to supply what differs. Always asserts Overall FAIL —
+# every one of the five checkpoints this is used against (interstep, and
+# all four finalize_run publish-sequence checkpoints) must leave the
+# published summary reading FAIL when interrupted; there is no longer a
+# checkpoint where "the signal landed too late to matter, PASS survives"
+# is the expected/reachable outcome (Codex round 5 finding 4: the previous
+# expect_fail=0 branch had become dead code no caller ever exercised).
 run_checkpoint_signal_selftest_case() {
-    local checkpoint="$1" signal_name="$2" expected_exit="$3" label="$4" expect_fail="$5"
+    local checkpoint="$1" signal_name="$2" expected_exit="$3" label="$4"
     local case_failures=0
 
     local case_tmp
@@ -2060,7 +2255,7 @@ run_checkpoint_signal_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
 
     kill -s "$signal_name" "$child_pid" 2>/dev/null || true
     sleep 0.3
@@ -2086,20 +2281,11 @@ run_checkpoint_signal_selftest_case() {
             case_failures=$((case_failures + 1))
         else
             print -r -- "selftest: ${label} -> summary.md was written (expected): ok"
-            if (( expect_fail )); then
-                if grep -q '^Overall result: FAIL$' "$summary"; then
-                    print -r -- "selftest: ${label} -> Overall result: FAIL (expected): ok"
-                else
-                    print -r -- "selftest: ${label} -> summary.md incorrectly published Overall PASS"
-                    case_failures=$((case_failures + 1))
-                fi
+            if grep -q '^Overall result: FAIL$' "$summary"; then
+                print -r -- "selftest: ${label} -> Overall result: FAIL (expected): ok"
             else
-                if grep -q '^Overall result: PASS$' "$summary"; then
-                    print -r -- "selftest: ${label} -> Overall result: PASS (expected — the signal landed too late to need to change an already-correct, already-published result): ok"
-                else
-                    print -r -- "selftest: ${label} -> summary.md unexpectedly does not read Overall PASS"
-                    case_failures=$((case_failures + 1))
-                fi
+                print -r -- "selftest: ${label} -> summary.md incorrectly published Overall PASS"
+                case_failures=$((case_failures + 1))
             fi
             if has_private_path "$summary"; then
                 print -r -- "selftest: ${label} -> summary.md leaked a private absolute path"
@@ -2161,7 +2347,7 @@ run_publish_during_mv_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
 
     kill -s TERM "$child_pid" 2>/dev/null || true
     sleep 0.3
@@ -2246,7 +2432,7 @@ run_publish_mv_permanent_failure_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: ${label} -> no run directory was found for this case"
         case_failures=$((case_failures + 1))
@@ -2263,7 +2449,7 @@ run_publish_mv_permanent_failure_selftest_case() {
             print -r -- "selftest: ${label} -> no summary.md was published (expected, since mv never once succeeded): ok"
         fi
         local diagnostic="${new_dir}/runner-diagnostic.log"
-        if [[ -f "$diagnostic" ]] && grep -q '^Publish result: 0' "$diagnostic"; then
+        if [[ -f "$diagnostic" ]] && grep -q '^Summary verified: 0' "$diagnostic"; then
             print -r -- "selftest: ${label} -> runner-diagnostic.log records the publish failure (expected): ok"
         else
             print -r -- "selftest: ${label} -> runner-diagnostic.log does not record the publish failure"
@@ -2349,7 +2535,7 @@ _run_publish_tool_failure_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: ${label} -> no run directory was found for this case"
         case_failures=$((case_failures + 1))
@@ -2385,13 +2571,13 @@ _run_publish_tool_failure_selftest_case() {
 # Overall line reads FAIL, purely via force_summary_overall_fail's pure-zsh
 # fallback, which never shells out to sed at all — and the publish loop's
 # own retry bookkeeping must never mistake the broken sed for success (see
-# the "Publish: 0" diagnostic assertion below).
+# the "Publish loop converged: 0" diagnostic assertion below).
 run_publish_sed_permanent_failure_selftest_case() {
     _run_publish_tool_failure_selftest_case \
         "signal + permanently-failing sed in the publish loop" \
         "sed" \
         $'for arg in "$@"; do\n    if [[ "$arg" == *"Overall result: PASS"* ]]; then\n        exit 1\n    fi\ndone\nexec /usr/bin/sed "$@"' \
-        "Publish: 0"
+        "Publish loop converged: 0"
 }
 
 # run_publish_grep_permanent_failure_selftest_case — a signal lands while
@@ -2409,7 +2595,7 @@ run_publish_grep_permanent_failure_selftest_case() {
         "signal + grep exit 2 in the publish loop" \
         "grep" \
         $'for arg in "$@"; do\n    if [[ "$arg" == \'^Overall result: PASS$\' ]]; then\n        exit 2\n    fi\ndone\nexec /usr/bin/grep "$@"' \
-        "Publish: 0"
+        "Publish loop converged: 0"
 }
 
 # run_publish_cap_exhausted_selftest_case — a signal lands while `grep`
@@ -2419,7 +2605,7 @@ run_publish_grep_permanent_failure_selftest_case() {
 # does get corrected to FAIL almost immediately — but the loop's own
 # bookkeeping can never confirm that through the lying grep, so it must
 # exhaust its full 20-pass cap and treat that exhaustion itself as
-# fail-closed (recorded as "Publish: 0" in the diagnostic), regardless of
+# fail-closed (recorded as "Publish loop converged: 0" in the diagnostic), regardless of
 # what the file happens to already say. force_summary_overall_fail and
 # verify_published_summary — both pure zsh, unaffected by the lying grep —
 # are what actually guarantee the published file is correct.
@@ -2428,7 +2614,261 @@ run_publish_cap_exhausted_selftest_case() {
         "signal + a permanently-lying grep exhausts the publish loop's 20-pass cap" \
         "grep" \
         $'for arg in "$@"; do\n    if [[ "$arg" == \'^Overall result: PASS$\' ]]; then\n        exit 0\n    fi\ndone\nexec /usr/bin/grep "$@"' \
-        "Publish: 0"
+        "Publish loop converged: 0"
+}
+
+# run_verify_published_summary_selftest_case — direct unit coverage for
+# verify_published_summary's stricter, caller-supplied-expectation contract
+# (Codex round 5 finding 2): the Overall line must match the EXACT expected
+# result the caller asks for. "Overall result: UNKNOWN", an empty Overall
+# line, no Overall line at all, and two Overall lines must all be rejected
+# regardless of which result (PASS or FAIL) was expected.
+run_verify_published_summary_selftest_case() {
+    local label="verify_published_summary requires an exact PASS/FAIL match, rejecting UNKNOWN/empty/duplicate/other"
+    local case_failures=0
+    local scratch
+    scratch="$(mktemp -d)"
+
+    local f="${scratch}/pass.md"
+    print -r -- "Overall result: PASS" > "$f"
+    if verify_published_summary "$f" "PASS"; then
+        print -r -- "selftest: ${label} -> a PASS file verified against expected PASS (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> a PASS file was NOT verified against expected PASS"
+        case_failures=$((case_failures + 1))
+    fi
+    if verify_published_summary "$f" "FAIL"; then
+        print -r -- "selftest: ${label} -> a PASS file incorrectly verified against expected FAIL"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> a PASS file correctly rejected against expected FAIL (expected): ok"
+    fi
+
+    f="${scratch}/fail.md"
+    print -r -- "Overall result: FAIL" > "$f"
+    if verify_published_summary "$f" "FAIL"; then
+        print -r -- "selftest: ${label} -> a FAIL file verified against expected FAIL (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> a FAIL file was NOT verified against expected FAIL"
+        case_failures=$((case_failures + 1))
+    fi
+    if verify_published_summary "$f" "PASS"; then
+        print -r -- "selftest: ${label} -> a FAIL file incorrectly verified against expected PASS"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> a FAIL file correctly rejected against expected PASS (expected): ok"
+    fi
+
+    f="${scratch}/unknown.md"
+    print -r -- "Overall result: UNKNOWN" > "$f"
+    if verify_published_summary "$f" "PASS" || verify_published_summary "$f" "FAIL"; then
+        print -r -- "selftest: ${label} -> Overall result: UNKNOWN incorrectly verified against PASS or FAIL"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> Overall result: UNKNOWN correctly rejected against both PASS and FAIL (expected): ok"
+    fi
+
+    f="${scratch}/empty-overall.md"
+    print -r -- "Overall result: " > "$f"
+    if verify_published_summary "$f" "PASS" || verify_published_summary "$f" "FAIL"; then
+        print -r -- "selftest: ${label} -> an empty Overall result incorrectly verified"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> an empty Overall result correctly rejected (expected): ok"
+    fi
+
+    f="${scratch}/no-overall.md"
+    print -r -- "nothing relevant in this file at all" > "$f"
+    if verify_published_summary "$f" "PASS" || verify_published_summary "$f" "FAIL"; then
+        print -r -- "selftest: ${label} -> a file with no Overall result line incorrectly verified"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> a file with no Overall result line correctly rejected (expected): ok"
+    fi
+
+    f="${scratch}/two-overall.md"
+    { print -r -- "Overall result: PASS"; print -r -- "Overall result: PASS"; } > "$f"
+    if verify_published_summary "$f" "PASS"; then
+        print -r -- "selftest: ${label} -> a file with two Overall result lines incorrectly verified"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> a file with two Overall result lines correctly rejected (expected): ok"
+    fi
+
+    if verify_published_summary "${scratch}/pass.md" "UNKNOWN" 2>/dev/null; then
+        print -r -- "selftest: ${label} -> an invalid expected argument ('UNKNOWN') incorrectly returned success"
+        case_failures=$((case_failures + 1))
+    else
+        print -r -- "selftest: ${label} -> an invalid expected argument is correctly rejected (expected): ok"
+    fi
+
+    rm -rf -- "$scratch"
+    (( case_failures == 0 ))
+}
+
+# _run_late_signal_mv_permanent_failure_selftest_case <checkpoint>
+# Codex round 5 finding 1's exact reproduction: PUBLISH_MV_CMD succeeds on
+# its first call — so the main publish loop converges completely normally
+# and summary.md is legitimately published reading Overall PASS — and
+# then fails on every subsequent call. A signal lands at <checkpoint>
+# (after-mv-before-finalized or after-finalized), by which point the ONLY
+# way left to correct the already-published PASS is a `mv` that no longer
+# works. Must: exit via the signal (143); make at least one real
+# correction attempt after the initial success (mv called at least twice
+# total); and leave the CORRECTION_MARKER_NAME evidence marker behind,
+# since the file's own content is honestly not guaranteed correctable here
+# (see the evidence-protocol comment above force_summary_overall_fail) —
+# this is the verifiable signal a collector must check instead.
+_run_late_signal_mv_permanent_failure_selftest_case() {
+    local checkpoint="$1"
+    local label="signal at ${checkpoint} + mv succeeds once then fails permanently (Codex round 5 repro)"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local counter_file="${case_tmp}/mv-call-count"
+    local fake_mv="${case_tmp}/fake-mv-succeeds-once.zsh"
+    {
+        print -r -- '#!/usr/bin/env zsh'
+        print -r -- "counter_file='${counter_file}'"
+        print -r -- 'count=0'
+        print -r -- '[[ -f "$counter_file" ]] && count="$(<"$counter_file")"'
+        print -r -- 'count=$((count + 1))'
+        print -r -- 'print -r -- "$count" > "$counter_file"'
+        print -r -- 'if (( count == 1 )); then'
+        print -r -- '    exec mv -f -- "$1" "$2"'
+        print -r -- 'else'
+        print -r -- '    exit 1'
+        print -r -- 'fi'
+    } > "$fake_mv"
+    chmod +x "$fake_mv"
+
+    local ready_file="${case_tmp}/ready"
+    local go_file="${case_tmp}/go"
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
+
+    spawn_simulated_run "${FASTPASS_CMD[strictbuild]}" "${FASTPASS_CMD[swifttest]}" "${FASTPASS_CMD[simbuild]}" "${FASTPASS_CMD[mvppreflight]}" "${FASTPASS_CMD[mvpacceptance]}" \
+        "--pause-at=${checkpoint}" "--pause-ready=${ready_file}" "--pause-go=${go_file}" "--fake-mv=${fake_mv}"
+    local child_pid=$LAST_SPAWNED_PID
+
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
+        sleep 0.02
+    done
+    if [[ ! -f "$ready_file" ]]; then
+        print -r -- "selftest: ${label} -> the runner never reached the ${checkpoint} pause"
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+        rm -rf -- "$case_tmp"
+        (( case_failures == 0 ))
+        return
+    fi
+
+    local new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
+
+    kill -s TERM "$child_pid" 2>/dev/null || true
+    sleep 0.3
+    touch "$go_file"
+
+    local rc=0
+    wait "$child_pid" 2>/dev/null || rc=$?
+
+    if (( rc == 143 )); then
+        print -r -- "selftest: ${label} -> exit code ${rc} (expected 143): ok"
+    else
+        print -r -- "selftest: ${label} -> exit code ${rc}, expected 143"
+        case_failures=$((case_failures + 1))
+    fi
+
+    local mv_calls=0
+    [[ -f "$counter_file" ]] && mv_calls="$(<"$counter_file")"
+    if (( mv_calls >= 2 )); then
+        print -r -- "selftest: ${label} -> mv was called ${mv_calls} times, at least one real correction attempt after the initial success (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> mv was only called ${mv_calls} time(s), expected at least 2"
+        case_failures=$((case_failures + 1))
+    fi
+
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
+        case_failures=$((case_failures + 1))
+    else
+        local marker="${new_dir}/${CORRECTION_MARKER_NAME}"
+        if [[ -f "$marker" ]]; then
+            print -r -- "selftest: ${label} -> the ${CORRECTION_MARKER_NAME} evidence marker was written (expected — the correction genuinely could not be confirmed): ok"
+        else
+            print -r -- "selftest: ${label} -> the ${CORRECTION_MARKER_NAME} evidence marker is missing despite the correction being unable to succeed"
+            case_failures=$((case_failures + 1))
+        fi
+        local summary="${new_dir}/summary.md"
+        if [[ -f "$summary" ]]; then
+            print -r -- "selftest: ${label} -> summary.md exists (expected — the first mv did succeed): ok"
+        else
+            print -r -- "selftest: ${label} -> summary.md is unexpectedly missing"
+            case_failures=$((case_failures + 1))
+        fi
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+run_late_signal_mv_permanent_failure_after_mv_selftest_case() {
+    _run_late_signal_mv_permanent_failure_selftest_case "after-mv-before-finalized"
+}
+
+run_late_signal_mv_permanent_failure_after_finalized_selftest_case() {
+    _run_late_signal_mv_permanent_failure_selftest_case "after-finalized"
+}
+
+# run_parallel_selftest_suites_case — Codex round 5 finding 3: two complete,
+# independent `Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest`
+# invocations running at the same time against the SAME shared
+# SELFTEST_RUN_TREE must not contaminate each other's run-directory
+# detection. Every individual case above now identifies its own run
+# directory via find_selftest_run_dir_for_pid, which requires BOTH a
+# before/after directory-listing diff AND an exact PID match embedded in
+# the TIMESTAMP-PID-RANDOM naming scheme — see that function's own
+# comment for why a bare PID match alone was not enough either (PID
+# reuse under exactly the process churn THIS case itself generates was
+# a real, reproduced failure, not just a theoretical one). This case is
+# the actual end-to-end proof, and does not inspect either nested
+# suite's own case-by-case output, only that BOTH exit 0.
+#
+# LUMAHARBOR_IPAD_SELFTEST_NESTED_PARALLEL_GUARD is exported onto the two
+# nested suites this spawns so THEY skip re-running this same case — an
+# unguarded recursive spawn would otherwise double at every nesting level
+# (2, 4, 8, ...) and never terminate. This is unrelated to (and does not
+# reopen) the production/self-test env-var-immunity guarantee: it is
+# checked only from inside run_selftest() itself, which is only ever
+# reached via the explicit `__selftest` argv subcommand in the first
+# place — it merely decides whether an ALREADY-explicit self-test
+# invocation also spawns this one expensive nested case.
+run_parallel_selftest_suites_case() {
+    local label="two full __selftest suites running in parallel both exit 0"
+    local case_failures=0
+
+    LUMAHARBOR_IPAD_SELFTEST_NESTED_PARALLEL_GUARD=1 "$SCRIPT_PATH" __selftest >/dev/null 2>&1 &
+    local pid_x=$!
+    LUMAHARBOR_IPAD_SELFTEST_NESTED_PARALLEL_GUARD=1 "$SCRIPT_PATH" __selftest >/dev/null 2>&1 &
+    local pid_y=$!
+
+    local rc_x=0 rc_y=0
+    wait "$pid_x" 2>/dev/null || rc_x=$?
+    wait "$pid_y" 2>/dev/null || rc_y=$?
+
+    if (( rc_x == 0 && rc_y == 0 )); then
+        print -r -- "selftest: ${label} -> both parallel suites exited 0 (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> exit codes were ${rc_x} and ${rc_y}, expected 0 and 0"
+        case_failures=$((case_failures + 1))
+    fi
+
+    (( case_failures == 0 ))
 }
 
 # run_concurrent_runs_selftest_case — two fastpass runners launched back to
@@ -2458,22 +2898,29 @@ run_concurrent_runs_selftest_case() {
         case_failures=$((case_failures + 1))
     fi
 
+    # Located by the exact PID each spawn produced AND not present in the
+    # before_dirs snapshot taken above (both conditions — see
+    # find_selftest_run_dir_for_pid's own comment for why a bare PID match
+    # alone is not enough: heavy process churn, especially from a THIRD,
+    # fully independent __selftest suite running at the same time — see
+    # run_parallel_selftest_suites_case — makes PID reuse within a single
+    # self-test run a real, reproduced possibility, not just a theoretical
+    # one).
     local -a new_dirs=()
-    local d
-    for d in "${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N); do
-        if (( ${before_dirs[(Ie)$d]} == 0 )); then
-            new_dirs+=("$d")
-        fi
-    done
+    local dir_a="" dir_b=""
+    dir_a="$(find_selftest_run_dir_for_pid "$pid_a" before_dirs)" || dir_a=""
+    dir_b="$(find_selftest_run_dir_for_pid "$pid_b" before_dirs)" || dir_b=""
+    [[ -n "$dir_a" ]] && new_dirs+=("$dir_a")
+    [[ -n "$dir_b" ]] && new_dirs+=("$dir_b")
 
-    if (( ${#new_dirs[@]} == 2 )); then
+    if [[ -n "$dir_a" && -n "$dir_b" && "$dir_a" != "$dir_b" ]]; then
         print -r -- "selftest: ${label} -> exactly two new, distinct run directories were created (expected): ok"
     else
-        print -r -- "selftest: ${label} -> found ${#new_dirs[@]} new run director(y/ies), expected 2 — a collision would show up as 1"
+        print -r -- "selftest: ${label} -> dir_a='${dir_a}' dir_b='${dir_b}' — expected two distinct, non-empty directories; a collision would show up as equal"
         case_failures=$((case_failures + 1))
     fi
 
-    local both_pass=1
+    local d both_pass=1
     for d in "${new_dirs[@]}"; do
         if [[ ! -f "${d}/summary.md" ]] || ! grep -q '^Overall result: PASS$' "${d}/summary.md"; then
             both_pass=0
@@ -2497,14 +2944,20 @@ run_isolation_selftest_case() {
 
     local -a before_prod_dirs
     before_prod_dirs=("${ROOT_DIR}/${PRODUCTION_RUN_TREE}"/*(N))
-    local -a before_selftest_dirs
-    before_selftest_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
 
     spawn_simulated_run "${FASTPASS_CMD[strictbuild]}" "${FASTPASS_CMD[swifttest]}" "${FASTPASS_CMD[simbuild]}" "${FASTPASS_CMD[mvppreflight]}" "${FASTPASS_CMD[mvpacceptance]}"
     local child_pid=$LAST_SPAWNED_PID
     local rc=0
     wait "$child_pid" 2>/dev/null || rc=$?
 
+    # PRODUCTION_RUN_TREE must stay empty of new entries regardless of how
+    # many self-test suites (this one, or others — see
+    # run_parallel_selftest_suites_case) happen to run at the same time,
+    # since self-test never writes there at all — a before/after diff on
+    # this tree specifically is safe under concurrency.
     local -a new_prod_dirs=()
     local d
     for d in "${ROOT_DIR}/${PRODUCTION_RUN_TREE}"/*(N); do
@@ -2520,7 +2973,7 @@ run_isolation_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_selftest_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: ${label} -> no run directory was found under ${SELFTEST_RUN_TREE}"
         case_failures=$((case_failures + 1))
@@ -2530,6 +2983,14 @@ run_isolation_selftest_case() {
             print -r -- "selftest: ${label} -> summary.md is stamped Run mode: SELFTEST (expected): ok"
         else
             print -r -- "selftest: ${label} -> summary.md is missing the SELFTEST run-mode stamp"
+            case_failures=$((case_failures + 1))
+        fi
+        local first_line=""
+        [[ -f "${new_dir}/summary.md" ]] && IFS= read -r first_line < "${new_dir}/summary.md"
+        if [[ "$first_line" == "Run mode: SELFTEST" ]]; then
+            print -r -- "selftest: ${label} -> the SELFTEST stamp is literally line 1 of summary.md (expected — this is the collector trust boundary, not merely 'somewhere in the file'): ok"
+        else
+            print -r -- "selftest: ${label} -> line 1 of summary.md was '${first_line}', expected exactly 'Run mode: SELFTEST'"
             case_failures=$((case_failures + 1))
         fi
     fi
@@ -2585,7 +3046,7 @@ run_redaction_failure_selftest_case() {
     fi
 
     local new_dir=""
-    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    new_dir="$(find_selftest_run_dir_for_pid "$child_pid" before_dirs)" || new_dir=""
     if [[ -z "$new_dir" ]]; then
         print -r -- "selftest: ${label} -> no run directory was found for this case"
         case_failures=$((case_failures + 1))
@@ -3091,20 +3552,23 @@ run_selftest() {
     run_timeout_selftest_case || failures=$((failures + 1))
 
     run_checkpoint_signal_selftest_case "interstep-after-strictbuild" TERM 143 \
-        "signal TERM between steps (after strictbuild)" 1 || failures=$((failures + 1))
+        "signal TERM between steps (after strictbuild)" || failures=$((failures + 1))
     run_checkpoint_signal_selftest_case "finalize-start" TERM 143 \
-        "signal TERM during finalize_run (right at the start)" 1 || failures=$((failures + 1))
+        "signal TERM during finalize_run (right at the start)" || failures=$((failures + 1))
     run_checkpoint_signal_selftest_case "before-mv" TERM 143 \
-        "signal TERM after Overall PASS is decided, before the atomic write" 1 || failures=$((failures + 1))
+        "signal TERM after Overall PASS is decided, before the atomic write" || failures=$((failures + 1))
     run_checkpoint_signal_selftest_case "after-mv-before-finalized" TERM 143 \
-        "signal TERM after the atomic write, before SUMMARY_STATE=finalized" 1 || failures=$((failures + 1))
+        "signal TERM after the atomic write, before SUMMARY_STATE=finalized" || failures=$((failures + 1))
     run_checkpoint_signal_selftest_case "after-finalized" TERM 143 \
-        "signal TERM after SUMMARY_STATE=finalized, before exit" 1 || failures=$((failures + 1))
+        "signal TERM after SUMMARY_STATE=finalized, before exit" || failures=$((failures + 1))
     run_publish_during_mv_selftest_case || failures=$((failures + 1))
     run_publish_mv_permanent_failure_selftest_case || failures=$((failures + 1))
     run_publish_sed_permanent_failure_selftest_case || failures=$((failures + 1))
     run_publish_grep_permanent_failure_selftest_case || failures=$((failures + 1))
     run_publish_cap_exhausted_selftest_case || failures=$((failures + 1))
+    run_verify_published_summary_selftest_case || failures=$((failures + 1))
+    run_late_signal_mv_permanent_failure_after_mv_selftest_case || failures=$((failures + 1))
+    run_late_signal_mv_permanent_failure_after_finalized_selftest_case || failures=$((failures + 1))
 
     run_concurrent_runs_selftest_case || failures=$((failures + 1))
     run_isolation_selftest_case || failures=$((failures + 1))
@@ -3113,6 +3577,10 @@ run_selftest() {
     run_worktree_fingerprint_selftest_case || failures=$((failures + 1))
     run_worktree_fingerprint_edge_cases_selftest_case || failures=$((failures + 1))
     run_worktree_fingerprint_tool_failure_selftest_case || failures=$((failures + 1))
+
+    if [[ -z "${LUMAHARBOR_IPAD_SELFTEST_NESTED_PARALLEL_GUARD:-}" ]]; then
+        run_parallel_selftest_suites_case || failures=$((failures + 1))
+    fi
 
     rm -rf -- "$helper_dir"
 
@@ -3132,9 +3600,9 @@ run_selftest() {
 # __selftest dispatch just below for the same reason __selftest itself must
 # be an explicit argv subcommand rather than an environment variable: an
 # unambiguous, first-argument check always wins over anything a process's
-# environment happens to still carry from its parent, the same
-# "explicit beats ambient/inherited" principle finding 1 (see below) applies
-# to production's own command resolution.
+# environment happens to still carry from its parent — the same
+# "explicit beats ambient/inherited" principle step_command_for's own
+# header comment describes for production's command resolution.
 # ---------------------------------------------------------------------------
 
 if [[ "${1:-}" == "__selftest_simulate_steps" ]]; then
