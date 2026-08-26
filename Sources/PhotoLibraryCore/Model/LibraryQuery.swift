@@ -80,4 +80,9 @@ public enum LibraryQueryError: Error, Equatable, Sendable {
     /// The supplied cursor doesn't carry the key the requested sort needs
     /// (e.g. a filename cursor reused against a capture-date sort).
     case invalidCursor
+    /// `setEditState` was asked to record `hasEdits: true` with no edit
+    /// date. Every non-neutral edit needs a timestamp for `.recentlyEdited`
+    /// to sort by, so this shape is rejected rather than silently written
+    /// as a contradictory row.
+    case missingEditDate
 }
