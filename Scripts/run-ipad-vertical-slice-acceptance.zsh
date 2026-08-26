@@ -35,9 +35,13 @@
 # ---------------------------------------------------------------------------
 # Self-test architecture (not a supported CLI flag for normal use):
 #
-#   LUMAHARBOR_IPAD_RUNNER_SELFTEST=1 Scripts/run-ipad-vertical-slice-acceptance.zsh
+#   Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest
 #
-# runs run_selftest, the self-test DRIVER. The driver spawns fresh
+# runs run_selftest, the self-test DRIVER — an explicit argv subcommand,
+# deliberately not an environment variable, so a self-test invocation can
+# never be triggered by (or accidentally leak into) a later zero-argument
+# production invocation via a stray inherited/exported shell variable. The
+# driver spawns fresh
 # subprocesses of THIS SAME FILE, but never as a normal (production)
 # invocation — always via a distinct, internal subcommand:
 #
@@ -291,7 +295,13 @@ collect_xcode_version() {
 #   - anything else (FIFO, device, socket, directory, ...) has only its
 #     type and mode recorded, content deliberately never read — `cat`-ing
 #     a FIFO with nothing writing to it would block forever, hanging this
-#     function and therefore the entire acceptance run.
+#     function and therefore the entire acceptance run. `stat` failing even
+#     for this mode-only read (permission error, the entry disappearing
+#     mid-scan, ...) fails the whole function closed (empty output, exit 1)
+#     rather than substituting a placeholder like "unknown" and continuing
+#     — a placeholder there would make two different failure states hash
+#     identically to two different real states, defeating the point of a
+#     fingerprint.
 # Tracked-vs-HEAD differences (staged and unstaged, content included) come
 # from `git diff HEAD --binary`, which git computes internally without
 # this function ever needing to open a tracked file itself.
@@ -350,7 +360,7 @@ git_worktree_fingerprint() {
                 cat -- "$full" || exit 1
             else
                 local mode
-                mode="$(stat -f '%p' -- "$full" 2>/dev/null)" || mode="unknown"
+                mode="$(stat -f '%p' -- "$full" 2>/dev/null)" || exit 1
                 print -r -- "==> ${f} type=other mode=${mode} (content intentionally not read)"
             fi
         done
@@ -814,6 +824,61 @@ exit_for_signal() {
     esac
 }
 
+# force_summary_overall_fail — the authoritative, pure-zsh (no grep, no
+# sed, no dependence on any external binary's exit code) last-resort
+# correction: if $SUMMARY_FILE currently exists and its content contains
+# "Overall result: PASS", rewrites it to FAIL and republishes via
+# PUBLISH_MV_CMD. A missing file, or one that doesn't currently read PASS,
+# is not an error — this is meant to be called defensively, from anywhere a
+# terminating signal might legitimately require the already-published file
+# corrected, including well after finalize_run's own publish loop has
+# already run and returned. Returns 1 only when the file exists but the
+# correction itself could not be written (e.g. disk full) — callers that
+# need this to have actually succeeded must check the return value; callers
+# that are just taking a defensive extra pass may ignore it.
+force_summary_overall_fail() {
+    [[ -n "$SUMMARY_FILE" && -f "$SUMMARY_FILE" ]] || return 0
+    local content
+    content="$(<"$SUMMARY_FILE")" 2>/dev/null || return 1
+    [[ "$content" == *'Overall result: PASS'* ]] || return 0
+    content="${content//Overall result: PASS/Overall result: FAIL}"
+    local fixed="${SUMMARY_FILE}.fix.$$.${RANDOM}"
+    print -r -- "$content" > "$fixed" 2>/dev/null || return 1
+    if ! "${PUBLISH_MV_CMD[@]}" "$fixed" "$SUMMARY_FILE" 2>/dev/null; then
+        rm -f -- "$fixed"
+        return 1
+    fi
+    return 0
+}
+
+# verify_published_summary <file> — the postcondition gate for a publish
+# attempt, deliberately pure zsh throughout (never grep, never sed) so it
+# stays trustworthy even in every self-test scenario below where one of
+# those tools has been deliberately broken. Requires: the file exists, is a
+# regular file (never a symlink left behind by some unexpected mv target),
+# is readable, contains EXACTLY ONE "Overall result: " line, and — if
+# DEFERRED_SIGNAL is set — that line reads exactly "Overall result: FAIL".
+verify_published_summary() {
+    local file="$1"
+    [[ -n "$file" && -f "$file" && ! -L "$file" && -r "$file" ]] || return 1
+    local content
+    content="$(<"$file")" 2>/dev/null || return 1
+    local -a lines
+    lines=("${(@f)content}")
+    local line count=0 last_overall=""
+    for line in "${lines[@]}"; do
+        if [[ "$line" == "Overall result: "* ]]; then
+            count=$((count + 1))
+            last_overall="$line"
+        fi
+    done
+    (( count == 1 )) || return 1
+    if [[ -n "$DEFERRED_SIGNAL" ]]; then
+        [[ "$last_overall" == "Overall result: FAIL" ]] || return 1
+    fi
+    return 0
+}
+
 # finalize_run — redacts every log that exists, writes summary.md (a
 # SELFTEST run-mode stamp when applicable, commit, timestamp, Xcode
 # version, architecture, per-step state/exit-code, the parsed swift-test
@@ -828,12 +893,14 @@ exit_for_signal() {
 # "SUMMARY_STATE=finalized") is itself guarded against a signal landing at
 # ANY of four points: before the atomic mv, DURING the mv (an external,
 # uninterruptible-by-our-trap command — see the publish loop below), after
-# the mv but before SUMMARY_STATE flips, and after it flips. The first
-# three can still cause the *published* file to be corrected; a signal
-# strictly after SUMMARY_STATE="finalized" only needs the process's own
-# exit code to be right, which handle_terminating_signal (or the
-# DEFERRED_SIGNAL check the caller performs after finalize_run returns)
-# already guarantees regardless of file content at that point.
+# the mv but before SUMMARY_STATE flips, and after it flips. All four must
+# leave the published file reading Overall FAIL, not just the process's own
+# exit code — force_summary_overall_fail is called after the publish loop
+# and again after each of the two later checkpoints (and, for a signal
+# landing strictly after SUMMARY_STATE="finalized", from the top of
+# handle_terminating_signal itself), so every one of the four windows gets
+# an explicit correction attempt regardless of how far finalize_run had
+# already progressed when the signal arrived.
 finalize_run() {
     if [[ "$SUMMARY_STATE" == "finalized" || "$SUMMARY_STATE" == "finalizing" ]]; then
         return 0
@@ -992,40 +1059,106 @@ finalize_run() {
     # arrives DURING the mv itself (an external command; our trap cannot
     # interrupt it mid-flight, only record DEFERRED_SIGNAL and resume once
     # it returns) previously left a stale "PASS" published with no further
-    # check ever running. Each pass: fix the file in place if a signal is
-    # already known and it still says PASS, publish (mv) it, then check
-    # again — if a signal arrived exactly during that mv (or during the fix
-    # itself, both external commands), the published file will still say
-    # PASS and the loop corrects it and publishes again. Converges in at
-    # most two real passes for any single signal-arrival timing (the first
-    # pass that successfully writes FAIL is never turned back to PASS by
-    # anything later); the cap below is purely defensive.
+    # check ever running. This loop is a best-effort FAST PATH ONLY — the
+    # actual fail-closed guarantee is force_summary_overall_fail plus
+    # verify_published_summary below, which never depend on grep, sed, or
+    # any external tool's exit code. Three things this loop must never do
+    # again (all three were real bugs Codex demonstrated):
+    #   - swallow a failing mv with `|| true` and carry on as if it had
+    #     published (Codex reproduced "five steps PASS, runner exit 0, no
+    #     summary.md" with a fake mv that always exits 1);
+    #   - treat a grep exit code of 1 (a real detection) the same as 2+ (the
+    #     scan itself failing) — `_privacy_grep_result` is reused here for
+    #     exactly the fail-closed interpretation already established for
+    #     the privacy scan: only exit 1 means "confirmed clean", 0 and 2+
+    #     both mean "must not skip the fix / must not treat as converged";
+    #   - call the loop "converged" just because it exited — publish_converged
+    #     is ONLY ever set true by the one path that actually confirmed a
+    #     clean, published result; a permanently-failing mv, a permanently
+    #     failing sed, or a grep that never confirms clean all exhaust the
+    #     20-pass cap with publish_converged left false, which is the
+    #     explicit fail-closed outcome the cap exists to produce.
     local publish_target="$tmp_summary"
     local publish_pass=0
+    local publish_converged=0
+    local grep_rc mv_rc
     while (( publish_pass < 20 )); do
         publish_pass=$((publish_pass + 1))
-        if [[ -n "$DEFERRED_SIGNAL" ]] && grep -q '^Overall result: PASS$' "$publish_target" 2>/dev/null; then
-            steps_ok=0
-            sed -i '' -e 's/^Overall result: PASS$/Overall result: FAIL/' "$publish_target" 2>/dev/null || true
+
+        if [[ -n "$DEFERRED_SIGNAL" ]]; then
+            # `cmd; rc=$?` on two lines does NOT shield `cmd` from `set -e`
+            # — errexit aborts as soon as the failing command returns,
+            # before the next line ever runs to inspect $?. The `&& rc=0
+            # || rc=$?` form keeps the whole thing a single `&&`/`||` list,
+            # which IS exempt from errexit, while still capturing the real
+            # exit code either way (this is exactly the class of bug this
+            # round is fixing — grep/mv failures must be observed, not
+            # silently abort the script before they can be handled).
+            grep -q '^Overall result: PASS$' "$publish_target" 2>/dev/null && grep_rc=0 || grep_rc=$?
+            if _privacy_grep_result "$grep_rc"; then
+                steps_ok=0
+                sed -i '' -e 's/^Overall result: PASS$/Overall result: FAIL/' "$publish_target" 2>/dev/null || true
+            fi
         fi
-        "${PUBLISH_MV_CMD[@]}" "$publish_target" "$SUMMARY_FILE" 2>/dev/null || true
-        publish_target="$SUMMARY_FILE"
-        if [[ -n "$DEFERRED_SIGNAL" ]] && grep -q '^Overall result: PASS$' "$SUMMARY_FILE" 2>/dev/null; then
+
+        "${PUBLISH_MV_CMD[@]}" "$publish_target" "$SUMMARY_FILE" 2>/dev/null && mv_rc=0 || mv_rc=$?
+        if (( mv_rc != 0 )); then
             continue
         fi
+        publish_target="$SUMMARY_FILE"
+
+        if [[ -n "$DEFERRED_SIGNAL" ]]; then
+            grep -q '^Overall result: PASS$' "$SUMMARY_FILE" 2>/dev/null && grep_rc=0 || grep_rc=$?
+            if _privacy_grep_result "$grep_rc"; then
+                continue
+            fi
+        fi
+
+        publish_converged=1
         break
     done
 
-    overall_ok=$(( steps_ok && privacy_ok ))
+    # Authoritative correction + postcondition check — pure zsh throughout,
+    # so it stays trustworthy even when the fast path above just exhausted
+    # its cap because grep, sed, or mv itself is broken. Guarded on
+    # DEFERRED_SIGNAL, unlike the unconditional call at the top of
+    # handle_terminating_signal: these three calls run on EVERY finalize_run
+    # invocation, signal or not, and force_summary_overall_fail has no way
+    # to tell "genuinely passed" apart from "PASS that needs correcting"
+    # except via DEFERRED_SIGNAL — calling it unconditionally here would
+    # wrongly flip an ordinary, uninterrupted PASS run to FAIL.
+    if [[ -n "$DEFERRED_SIGNAL" ]]; then
+        force_summary_overall_fail || publish_converged=0
+    fi
+
+    local publish_ok=0
+    if (( publish_converged )) && verify_published_summary "$SUMMARY_FILE"; then
+        publish_ok=1
+    fi
+
+    {
+        print -r -- "Publish: $(( publish_converged )) (1 = the retry loop above confirmed a clean publish within its 20-pass cap, 0 = it did not and the cap was exhausted)"
+        print -r -- "Publish result: $(( publish_ok )) (1 = summary.md verified present, readable, exactly one Overall line, and FAIL if a signal was ever deferred; 0 = one of those checks failed)"
+    } >> "$diagnostic"
+
+    overall_ok=$(( steps_ok && privacy_ok && publish_ok ))
 
     selftest_pause_at "after-mv-before-finalized"
+    [[ -n "$DEFERRED_SIGNAL" ]] && { force_summary_overall_fail || true }
 
-    SUMMARY_STATE="finalized"
+    if (( publish_ok )); then
+        SUMMARY_STATE="finalized"
+    fi
 
     selftest_pause_at "after-finalized"
+    [[ -n "$DEFERRED_SIGNAL" ]] && { force_summary_overall_fail || true }
 
-    print -r -- ""
-    print -r -- "Full logs and summary: ${RUN_TREE_NAME}/${RUN_DIR_NAME}"
+    if (( publish_ok )); then
+        print -r -- ""
+        print -r -- "Full logs and summary: ${RUN_TREE_NAME}/${RUN_DIR_NAME}"
+    else
+        print -u2 -r -- "error: failed to publish a valid summary.md after ${publish_pass} attempt(s) (run: ${RUN_TREE_NAME}/${RUN_DIR_NAME})"
+    fi
 }
 
 # handle_terminating_signal <SIGNAL>
@@ -1049,6 +1182,18 @@ finalize_run() {
 handle_terminating_signal() {
     local sig="$1"
     overall_ok=0
+
+    # Unconditional and first thing, regardless of which branch below ends
+    # up applying: every one of the four finalize_run publish-sequence
+    # checkpoints (finalize-start, before-mv, after-mv-before-finalized,
+    # after-finalized) must leave the published summary reading Overall
+    # FAIL, including the two AFTER SUMMARY_STATE has already flipped to
+    # "finalized" — the earlier architecture treated the process's own exit
+    # code as sufficient once finalized, but a signal at any point up
+    # through process exit must never leave a PASS-marked artifact sitting
+    # on disk. A no-op if $SUMMARY_FILE doesn't exist yet or doesn't
+    # currently read PASS.
+    force_summary_overall_fail || true
 
     if [[ "$SUMMARY_STATE" == "finalizing" ]]; then
         [[ -z "$DEFERRED_SIGNAL" ]] && DEFERRED_SIGNAL="$sig"
@@ -1241,12 +1386,12 @@ runner_preflight() {
 }
 
 # ===========================================================================
-# Self-test. Not a supported CLI flag — triggered only by
-# LUMAHARBOR_IPAD_RUNNER_SELFTEST=1. Every case below spawns its simulated
-# runs via spawn_simulated_run, which dispatches to __selftest_simulate_steps
-# — never a plain invocation of this script, and never via any
-# LUMAHARBOR_IPAD_SELFTEST_* environment variable (there is no such
-# mechanism left to use).
+# Self-test. Not a supported CLI flag for normal use — triggered only by
+# the explicit argv subcommand `__selftest`, never an environment variable.
+# Every case below spawns its simulated runs via spawn_simulated_run, which
+# dispatches to __selftest_simulate_steps — never a plain invocation of
+# this script, and never via any LUMAHARBOR_IPAD_SELFTEST_* environment
+# variable (there is no such mechanism left to use).
 # ===========================================================================
 
 typeset -A FASTPASS_CMD
@@ -2062,6 +2207,230 @@ run_publish_during_mv_selftest_case() {
     (( case_failures == 0 ))
 }
 
+# run_publish_mv_permanent_failure_selftest_case — Codex's exact
+# reproduction: a `mv` that always fails (disk full, permissions, ...)
+# during an otherwise completely normal, uninterrupted, all-five-steps-pass
+# run, no signal involved at all. The bug this guards: the old publish step
+# swallowed the mv's exit code with `|| true` and carried on as if it had
+# published, so the runner reported exit 0 and "all five steps PASS" even
+# though summary.md was never actually written anywhere. Must now: exit
+# non-zero, and never claim success — here, that means no summary.md at
+# all, since the publish never once succeeded.
+run_publish_mv_permanent_failure_selftest_case() {
+    local label="a permanently-failing mv must not be reported as success"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local fake_mv="${case_tmp}/fake-mv-always-fails.zsh"
+    {
+        print -r -- '#!/usr/bin/env zsh'
+        print -r -- 'exit 1'
+    } > "$fake_mv"
+    chmod +x "$fake_mv"
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
+
+    spawn_simulated_run "${FASTPASS_CMD[strictbuild]}" "${FASTPASS_CMD[swifttest]}" "${FASTPASS_CMD[simbuild]}" "${FASTPASS_CMD[mvppreflight]}" "${FASTPASS_CMD[mvpacceptance]}" \
+        "--fake-mv=${fake_mv}"
+    local child_pid=$LAST_SPAWNED_PID
+    local rc=0
+    wait "$child_pid" 2>/dev/null || rc=$?
+
+    if (( rc != 0 )); then
+        print -r -- "selftest: ${label} -> exit ${rc} (expected non-zero): ok"
+    else
+        print -r -- "selftest: ${label} -> exit 0, expected non-zero"
+        case_failures=$((case_failures + 1))
+    fi
+
+    local new_dir=""
+    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
+        case_failures=$((case_failures + 1))
+    else
+        local summary="${new_dir}/summary.md"
+        if [[ -f "$summary" ]]; then
+            if grep -q '^Overall result: PASS$' "$summary"; then
+                print -r -- "selftest: ${label} -> summary.md was published showing PASS despite mv never succeeding"
+                case_failures=$((case_failures + 1))
+            else
+                print -r -- "selftest: ${label} -> a summary.md exists but correctly does not read PASS: ok"
+            fi
+        else
+            print -r -- "selftest: ${label} -> no summary.md was published (expected, since mv never once succeeded): ok"
+        fi
+        local diagnostic="${new_dir}/runner-diagnostic.log"
+        if [[ -f "$diagnostic" ]] && grep -q '^Publish result: 0' "$diagnostic"; then
+            print -r -- "selftest: ${label} -> runner-diagnostic.log records the publish failure (expected): ok"
+        else
+            print -r -- "selftest: ${label} -> runner-diagnostic.log does not record the publish failure"
+            case_failures=$((case_failures + 1))
+        fi
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+# _run_publish_tool_failure_selftest_case <label> <fake-tool-name>
+#   <fake-tool-body-lines-as-one-string-with-\n> <diagnostic-publish-marker>
+# Shared driver for the three "signal lands, and one of the publish loop's
+# own tools (sed / grep / a lying grep) is broken" cases below: installs
+# the fake tool at the front of PATH for the spawned child only, pauses at
+# the "before-mv" checkpoint (Overall has already been decided as PASS,
+# nothing published yet), sends TERM once ready, and checks that the
+# process still exits via the signal and the eventually-published
+# summary.md still reads Overall FAIL — using verify_published_summary's
+# same pure-zsh logic indirectly (grep here is the REAL grep on this
+# harness process's own PATH, never the fake one, which is only prepended
+# for the spawned child).
+_run_publish_tool_failure_selftest_case() {
+    local label="$1" tool_name="$2" tool_body="$3" diagnostic_marker="$4"
+    local case_failures=0
+
+    local case_tmp
+    case_tmp="$(mktemp -d)"
+    local fake_bin="${case_tmp}/bin"
+    mkdir -p -- "$fake_bin"
+    {
+        print -r -- '#!/usr/bin/env zsh'
+        print -r -- "$tool_body"
+    } > "${fake_bin}/${tool_name}"
+    chmod +x "${fake_bin}/${tool_name}"
+
+    local ready_file="${case_tmp}/ready"
+    local go_file="${case_tmp}/go"
+
+    local -a before_dirs
+    before_dirs=("${ROOT_DIR}/${SELFTEST_RUN_TREE}"/*(N))
+
+    PATH="${fake_bin}:${PATH}" spawn_simulated_run "${FASTPASS_CMD[strictbuild]}" "${FASTPASS_CMD[swifttest]}" "${FASTPASS_CMD[simbuild]}" "${FASTPASS_CMD[mvppreflight]}" "${FASTPASS_CMD[mvpacceptance]}" \
+        "--pause-at=before-mv" "--pause-ready=${ready_file}" "--pause-go=${go_file}"
+    local child_pid=$LAST_SPAWNED_PID
+
+    local ready_deadline=$((SECONDS + 20))
+    while (( SECONDS < ready_deadline )) && [[ ! -f "$ready_file" ]]; do
+        sleep 0.02
+    done
+    if [[ ! -f "$ready_file" ]]; then
+        print -r -- "selftest: ${label} -> the runner never reached the before-mv pause"
+        case_failures=$((case_failures + 1))
+        cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+        rm -rf -- "$case_tmp"
+        (( case_failures == 0 ))
+        return
+    fi
+
+    kill -s TERM "$child_pid" 2>/dev/null || true
+    sleep 0.3
+    touch "$go_file"
+
+    local rc=0
+    local start=$SECONDS
+    wait "$child_pid" 2>/dev/null || rc=$?
+    local elapsed=$((SECONDS - start))
+
+    if (( rc == 143 )); then
+        print -r -- "selftest: ${label} -> exit code ${rc} (expected 143): ok"
+    else
+        print -r -- "selftest: ${label} -> exit code ${rc}, expected 143"
+        case_failures=$((case_failures + 1))
+    fi
+
+    if (( elapsed <= 10 )); then
+        print -r -- "selftest: ${label} -> finished within ${elapsed}s, not hung on the broken tool (expected): ok"
+    else
+        print -r -- "selftest: ${label} -> took ${elapsed}s — the publish loop may not be bounded correctly"
+        case_failures=$((case_failures + 1))
+    fi
+
+    local new_dir=""
+    new_dir="$(new_selftest_run_dir before_dirs)" || new_dir=""
+    if [[ -z "$new_dir" ]]; then
+        print -r -- "selftest: ${label} -> no run directory was found for this case"
+        case_failures=$((case_failures + 1))
+    else
+        local summary="${new_dir}/summary.md"
+        if [[ -f "$summary" ]] && grep -q '^Overall result: FAIL$' "$summary"; then
+            print -r -- "selftest: ${label} -> summary.md was published with Overall result: FAIL despite the broken ${tool_name} (expected): ok"
+        else
+            print -r -- "selftest: ${label} -> summary.md is missing or does not read Overall FAIL"
+            case_failures=$((case_failures + 1))
+        fi
+        local diagnostic="${new_dir}/runner-diagnostic.log"
+        if [[ -f "$diagnostic" ]] && grep -qF -- "$diagnostic_marker" "$diagnostic"; then
+            print -r -- "selftest: ${label} -> runner-diagnostic.log shows '${diagnostic_marker}' (expected): ok"
+        else
+            print -r -- "selftest: ${label} -> runner-diagnostic.log does not show '${diagnostic_marker}'"
+            case_failures=$((case_failures + 1))
+        fi
+    fi
+
+    cleanup_signal_case_helper "$child_pid" "" "" "$label" || case_failures=$((case_failures + 1))
+    rm -rf -- "$case_tmp"
+    (( case_failures == 0 ))
+}
+
+# run_publish_sed_permanent_failure_selftest_case — a signal lands
+# (DEFERRED_SIGNAL gets set) while `sed` — the publish loop's own tool for
+# correcting an already-decided PASS to FAIL — is permanently broken. The
+# fake only intercepts the exact invocation that touches the "Overall
+# result: PASS" line (delegating everything else, including redact_file's
+# unrelated calls, to the real /usr/bin/sed), isolating this from the
+# privacy scan. Must still converge on a published summary.md whose
+# Overall line reads FAIL, purely via force_summary_overall_fail's pure-zsh
+# fallback, which never shells out to sed at all — and the publish loop's
+# own retry bookkeeping must never mistake the broken sed for success (see
+# the "Publish: 0" diagnostic assertion below).
+run_publish_sed_permanent_failure_selftest_case() {
+    _run_publish_tool_failure_selftest_case \
+        "signal + permanently-failing sed in the publish loop" \
+        "sed" \
+        $'for arg in "$@"; do\n    if [[ "$arg" == *"Overall result: PASS"* ]]; then\n        exit 1\n    fi\ndone\nexec /usr/bin/sed "$@"' \
+        "Publish: 0"
+}
+
+# run_publish_grep_permanent_failure_selftest_case — a signal lands while
+# `grep` — used by the publish loop to check whether the file it's about to
+# publish (or just published) still says PASS — always returns exit code 2
+# (a scan failure, distinct from exit 1's definitive "no match") for
+# exactly that check. Exit 2 must never be treated the same as exit 1
+# ("confirmed clean"); _privacy_grep_result's fail-closed interpretation is
+# reused here for exactly that reason. The fake delegates every other
+# invocation (including the privacy scan's own grep calls) to the real
+# /usr/bin/grep, isolating this from the (separately, already covered)
+# privacy-scan-specific grep failure case.
+run_publish_grep_permanent_failure_selftest_case() {
+    _run_publish_tool_failure_selftest_case \
+        "signal + grep exit 2 in the publish loop" \
+        "grep" \
+        $'for arg in "$@"; do\n    if [[ "$arg" == \'^Overall result: PASS$\' ]]; then\n        exit 2\n    fi\ndone\nexec /usr/bin/grep "$@"' \
+        "Publish: 0"
+}
+
+# run_publish_cap_exhausted_selftest_case — a signal lands while `grep`
+# unconditionally lies and reports "Overall result: PASS still present"
+# (exit 0) for the publish loop's own check, no matter what the file
+# actually says. sed and mv are both real, so the file's actual content
+# does get corrected to FAIL almost immediately — but the loop's own
+# bookkeeping can never confirm that through the lying grep, so it must
+# exhaust its full 20-pass cap and treat that exhaustion itself as
+# fail-closed (recorded as "Publish: 0" in the diagnostic), regardless of
+# what the file happens to already say. force_summary_overall_fail and
+# verify_published_summary — both pure zsh, unaffected by the lying grep —
+# are what actually guarantee the published file is correct.
+run_publish_cap_exhausted_selftest_case() {
+    _run_publish_tool_failure_selftest_case \
+        "signal + a permanently-lying grep exhausts the publish loop's 20-pass cap" \
+        "grep" \
+        $'for arg in "$@"; do\n    if [[ "$arg" == \'^Overall result: PASS$\' ]]; then\n        exit 0\n    fi\ndone\nexec /usr/bin/grep "$@"' \
+        "Publish: 0"
+}
+
 # run_concurrent_runs_selftest_case — two fastpass runners launched back to
 # back, virtually guaranteed to land in the same UTC second: must get two
 # distinct, exclusively-created run directories, never share or clobber
@@ -2383,16 +2752,50 @@ run_worktree_fingerprint_edge_cases_selftest_case() {
         git commit -q -m init
     ) >/dev/null 2>&1
 
-    # --- FIFO: must not hang (cat-ing a FIFO with no writer blocks forever). ---
+    # --- FIFO: must not hang (cat-ing a FIFO with no writer blocks forever).
+    # Run in a background subprocess with a REAL deadline plus TERM/KILL
+    # (the same collect_descendant_pids/signal_pid_list machinery used
+    # elsewhere in this file), not just a post-hoc elapsed-time check in
+    # this process: if a future regression reintroduces the hang, a bare
+    # "$(...)" call here would wedge THIS self-test call forever and take
+    # the entire self-test suite down with it. Bounding it in a killable
+    # child means a regression fails only this one case.
     mkfifo -- "${scratch_repo}/a-fifo" 2>/dev/null
-    local fifo_fp="" fifo_rc=0
-    local fifo_start=$SECONDS
-    fifo_fp="$(git_worktree_fingerprint "$scratch_repo")" || fifo_rc=$?
-    local fifo_elapsed=$((SECONDS - fifo_start))
-    if (( fifo_elapsed <= 10 )) && [[ -n "$fifo_fp" ]]; then
-        print -r -- "selftest: ${label} -> an untracked FIFO did not hang the fingerprint (took ${fifo_elapsed}s, expected): ok"
+    local fifo_out="${scratch_repo}/.fifo-fingerprint-output"
+    (
+        git_worktree_fingerprint "$scratch_repo" > "$fifo_out" 2>/dev/null
+    ) &
+    local fifo_pid=$!
+    local fifo_deadline=$((SECONDS + 10))
+    while (( SECONDS < fifo_deadline )) && kill -0 "$fifo_pid" 2>/dev/null; do
+        sleep 0.1
+    done
+    local fifo_hung=0
+    if kill -0 "$fifo_pid" 2>/dev/null; then
+        fifo_hung=1
+        local -a fifo_victims
+        fifo_victims=("${(f)$(collect_descendant_pids "$fifo_pid")}")
+        signal_pid_list TERM "${fifo_victims[@]}"
+        local fifo_waited=0
+        while (( fifo_waited < 3 )) && ! all_pids_gone "${fifo_victims[@]}"; do
+            sleep 1
+            fifo_waited=$((fifo_waited + 1))
+        done
+        if kill -0 "$fifo_pid" 2>/dev/null; then
+            local -a fifo_fresh
+            fifo_fresh=("${(f)$(collect_descendant_pids "$fifo_pid")}")
+            fifo_victims=("${fifo_victims[@]}" "${fifo_fresh[@]}")
+        fi
+        signal_pid_list KILL "${fifo_victims[@]}"
+    fi
+    wait "$fifo_pid" 2>/dev/null || true
+    local fifo_fp=""
+    [[ -f "$fifo_out" ]] && fifo_fp="$(<"$fifo_out")"
+    rm -f -- "$fifo_out"
+    if (( ! fifo_hung )) && [[ -n "$fifo_fp" ]]; then
+        print -r -- "selftest: ${label} -> an untracked FIFO did not hang the fingerprint (expected): ok"
     else
-        print -r -- "selftest: ${label} -> untracked FIFO case took ${fifo_elapsed}s or produced no fingerprint"
+        print -r -- "selftest: ${label} -> untracked FIFO case hung (killed via TERM/KILL after a 10s deadline) or produced no fingerprint"
         case_failures=$((case_failures + 1))
     fi
     rm -f -- "${scratch_repo}/a-fifo"
@@ -2694,10 +3097,14 @@ run_selftest() {
     run_checkpoint_signal_selftest_case "before-mv" TERM 143 \
         "signal TERM after Overall PASS is decided, before the atomic write" 1 || failures=$((failures + 1))
     run_checkpoint_signal_selftest_case "after-mv-before-finalized" TERM 143 \
-        "signal TERM after the atomic write, before SUMMARY_STATE=finalized" 0 || failures=$((failures + 1))
+        "signal TERM after the atomic write, before SUMMARY_STATE=finalized" 1 || failures=$((failures + 1))
     run_checkpoint_signal_selftest_case "after-finalized" TERM 143 \
-        "signal TERM after SUMMARY_STATE=finalized, before exit" 0 || failures=$((failures + 1))
+        "signal TERM after SUMMARY_STATE=finalized, before exit" 1 || failures=$((failures + 1))
     run_publish_during_mv_selftest_case || failures=$((failures + 1))
+    run_publish_mv_permanent_failure_selftest_case || failures=$((failures + 1))
+    run_publish_sed_permanent_failure_selftest_case || failures=$((failures + 1))
+    run_publish_grep_permanent_failure_selftest_case || failures=$((failures + 1))
+    run_publish_cap_exhausted_selftest_case || failures=$((failures + 1))
 
     run_concurrent_runs_selftest_case || failures=$((failures + 1))
     run_isolation_selftest_case || failures=$((failures + 1))
@@ -2721,19 +3128,13 @@ run_selftest() {
 # ---------------------------------------------------------------------------
 # __selftest_simulate_steps — the dedicated, structurally separate self-test
 # simulation entry point (see the header comment for the full rationale).
-# Recognized ONLY as the literal first argument, and checked BEFORE the
-# LUMAHARBOR_IPAD_RUNNER_SELFTEST env-var dispatch just below — deliberately,
-# not incidentally: LUMAHARBOR_IPAD_RUNNER_SELFTEST=1 is exported by the
-# top-level self-test invocation and therefore remains set in the
-# environment of every nested child process spawn_simulated_run execs too.
-# If the env-var check ran first, every one of those nested simulated
-# children would immediately re-enter run_selftest() itself (recursively)
-# instead of ever executing its intended fake step command — silently
-# discarding its own __selftest_simulate_steps argv. Checking this explicit,
-# unambiguous argv signal first means it always wins over whatever the
-# process's environment happens to still carry from its parent, exactly the
-# same "explicit beats ambient/inherited" principle finding 1 applies to
-# production's own command resolution.
+# Recognized ONLY as the literal first argument. Checked before the
+# __selftest dispatch just below for the same reason __selftest itself must
+# be an explicit argv subcommand rather than an environment variable: an
+# unambiguous, first-argument check always wins over anything a process's
+# environment happens to still carry from its parent, the same
+# "explicit beats ambient/inherited" principle finding 1 (see below) applies
+# to production's own command resolution.
 # ---------------------------------------------------------------------------
 
 if [[ "${1:-}" == "__selftest_simulate_steps" ]]; then
@@ -2766,7 +3167,23 @@ if [[ "${1:-}" == "__selftest_simulate_steps" ]]; then
     exit $?
 fi
 
-if [[ -n "${LUMAHARBOR_IPAD_RUNNER_SELFTEST:-}" ]]; then
+# __selftest — the ONLY way to invoke run_selftest. Deliberately an
+# explicit argv subcommand, not an environment variable (this file used to
+# key off LUMAHARBOR_IPAD_RUNNER_SELFTEST=1): an env var set once in an
+# interactive debugging session — via `export`, a shell rc file, or simply
+# left behind in a long-lived terminal — silently survives into a LATER,
+# completely unrelated zero-argument invocation of this same script in that
+# same shell, turning what the caller believes is a real production
+# acceptance run into a self-test run instead, with no argv-visible sign of
+# why. A first-argument check has no such ambient-persistence failure mode:
+# every invocation's dispatch is fully determined by what was actually
+# typed on that command line.
+if [[ "${1:-}" == "__selftest" ]]; then
+    shift
+    if (( $# > 0 )); then
+        print -u2 -r -- "error: __selftest takes no arguments"
+        exit 2
+    fi
     run_selftest
     exit $?
 fi
@@ -2777,7 +3194,7 @@ fi
 
 if (( $# > 0 )); then
     print -u2 -r -- "error: unknown argument(s): $*"
-    print -u2 -r -- "usage: $0"
+    print -u2 -r -- "usage: $0 [__selftest]"
     exit 2
 fi
 
