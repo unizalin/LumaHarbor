@@ -421,6 +421,103 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(page.photos.map(\.relativePath), ["50%_off/keep.ARW"])
     }
 
+    func testFolderScopeIsCaseSensitiveAndDoesNotMatchSimilarPrefixes() throws {
+        let library = try makeLibrary()
+        try store.upsert(photos: [
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip/keep.ARW", fingerprint: .stub("keep")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip/Sub/keep2.ARW", fingerprint: .stub("keep2")),
+            // SQLite's default LIKE is ASCII case-insensitive, so a
+            // pre-fix `LIKE 'Trip/%'` prefix check would treat this nested
+            // "trip/Sub" directory as a descendant of "Trip" — it must not.
+            // (A direct, non-nested "trip/..." decoy wouldn't exercise this:
+            // its directory is just "trip", which lacks the trailing "/"
+            // the LIKE prefix requires, so it fails on length alone.)
+            PhotoAsset.stub(libraryID: library.id, relativePath: "trip/Sub/decoy.ARW", fingerprint: .stub("decoy-case")),
+            // A similar but distinct top-level name must not match either.
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip2/decoy.ARW", fingerprint: .stub("decoy-prefix"))
+        ])
+
+        let page = try store.page(
+            matching: LibraryQuery(
+                scope: .folder(libraryID: library.id, relativePath: "Trip"),
+                sort: .filenameAscending
+            ),
+            after: nil,
+            limit: 10
+        )
+        XCTAssertEqual(
+            Set(page.photos.map(\.relativePath)), ["Trip/keep.ARW", "Trip/Sub/keep2.ARW"]
+        )
+    }
+
+    func testChildDirectoriesIsCaseSensitiveAndDoesNotMatchSimilarPrefixes() throws {
+        let library = try makeLibrary()
+        try store.upsert(photos: [
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip/keep.ARW", fingerprint: .stub("keep")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip/Sub/keep2.ARW", fingerprint: .stub("keep2")),
+            // A pre-fix case-insensitive LIKE prefix check would fold this
+            // nested "trip/Sub" directory into "Trip"'s descendant set.
+            PhotoAsset.stub(libraryID: library.id, relativePath: "trip/Sub/decoy.ARW", fingerprint: .stub("decoy-case")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip2/decoy.ARW", fingerprint: .stub("decoy-prefix"))
+        ])
+
+        let atRoot = try store.childDirectories(libraryID: library.id, parent: "")
+        XCTAssertEqual(Set(atRoot.map(\.relativePath)), ["Trip", "trip", "Trip2"])
+
+        let underTrip = try store.childDirectories(libraryID: library.id, parent: "Trip")
+        XCTAssertEqual(underTrip.map(\.relativePath), ["Trip/Sub"])
+        XCTAssertEqual(underTrip.first?.childCount, 1)
+    }
+
+    func testChildDirectoriesHandlesSpecialCharactersInNestedParent() throws {
+        let library = try makeLibrary()
+        try store.upsert(photos: [
+            PhotoAsset.stub(libraryID: library.id, relativePath: "Trip\\A/Sub/keep.ARW", fingerprint: .stub("keep")),
+            PhotoAsset.stub(
+                libraryID: library.id, relativePath: "Trip\\A/decoy-direct.ARW", fingerprint: .stub("decoy-direct")
+            ),
+            // A sibling whose name is similar once the backslash is dropped
+            // must not be treated as a descendant of "Trip\A".
+            PhotoAsset.stub(libraryID: library.id, relativePath: "TripXA/decoy.ARW", fingerprint: .stub("decoy-sibling"))
+        ])
+
+        let children = try store.childDirectories(libraryID: library.id, parent: "Trip\\A")
+        XCTAssertEqual(children.map(\.relativePath), ["Trip\\A/Sub"])
+        XCTAssertEqual(children.first?.displayName, "Sub")
+        XCTAssertEqual(children.first?.childCount, 1)
+    }
+
+    func testChildDirectoriesHandlesSpecialCharactersAtNestedDepth() throws {
+        let library = try makeLibrary()
+        try store.upsert(photos: [
+            // "%"/"_" in a nested parent name must be treated as literal
+            // path characters, not LIKE wildcards, at every depth.
+            PhotoAsset.stub(libraryID: library.id, relativePath: "50%_off/Sub/keep.ARW", fingerprint: .stub("percent-keep")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "50XYZQoff/Sub/decoy.ARW", fingerprint: .stub("percent-decoy")),
+            // Multi-byte Unicode parent name.
+            PhotoAsset.stub(libraryID: library.id, relativePath: "資料夾/Sub/keep.ARW", fingerprint: .stub("unicode-keep")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "資料夾2/Sub/decoy.ARW", fingerprint: .stub("unicode-decoy")),
+            // ASCII case-distinct and similar-prefix decoys.
+            PhotoAsset.stub(libraryID: library.id, relativePath: "CaseTrip/Sub/keep.ARW", fingerprint: .stub("case-keep")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "casetrip/Sub/decoy.ARW", fingerprint: .stub("case-decoy")),
+            PhotoAsset.stub(libraryID: library.id, relativePath: "CaseTrip2/Sub/decoy.ARW", fingerprint: .stub("case-decoy2"))
+        ])
+
+        let cases: [(parent: String, expectedChild: String)] = [
+            ("50%_off", "50%_off/Sub"),
+            ("資料夾", "資料夾/Sub"),
+            ("CaseTrip", "CaseTrip/Sub")
+        ]
+        for testCase in cases {
+            let children = try store.childDirectories(libraryID: library.id, parent: testCase.parent)
+            XCTAssertEqual(
+                children.map(\.relativePath), [testCase.expectedChild],
+                "parent \(testCase.parent) leaked a decoy or missed its real child"
+            )
+            XCTAssertEqual(children.first?.childCount, 1)
+        }
+    }
+
     func testFolderScopeAndChildDirectoriesEscapeLiteralBackslashInDirectoryNames() throws {
         let library = try makeLibrary()
         try store.upsert(photos: [
@@ -653,6 +750,101 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
             limit: 10
         )
         XCTAssertEqual(page.photos.map(\.relativePath), ["a\\b.ARW"])
+    }
+
+    // MARK: - Cursor shape validation
+
+    func testFilenameCursorIsRejectedForCaptureDateSort() throws {
+        let library = try makeLibrary()
+        try store.upsert(photo: PhotoAsset.stub(libraryID: library.id, relativePath: "a.ARW", fingerprint: .stub("a")))
+
+        // Shape is dateKey == nil / filenameKey != nil. Before this fix the
+        // capture-date branch only checked dateKey, so this cursor was
+        // silently treated as a legitimate "NULL-capture" cursor and every
+        // dated row was skipped instead of the lookup being rejected.
+        let filenameCursor = PhotoPageCursor(filenameKey: "a.arw", photoID: PhotoID())
+        XCTAssertThrowsError(
+            try store.page(
+                matching: LibraryQuery(scope: .all, sort: .captureDateDescending),
+                after: filenameCursor,
+                limit: 10
+            )
+        ) { error in
+            XCTAssertEqual(error as? LibraryQueryError, .invalidCursor)
+        }
+        XCTAssertThrowsError(
+            try store.page(
+                matching: LibraryQuery(scope: .all, sort: .captureDateAscending),
+                after: filenameCursor,
+                limit: 10
+            )
+        ) { error in
+            XCTAssertEqual(error as? LibraryQueryError, .invalidCursor)
+        }
+    }
+
+    func testDatedCaptureCursorIsRejectedForFilenameSort() throws {
+        let library = try makeLibrary()
+        try store.upsert(photo: PhotoAsset.stub(libraryID: library.id, relativePath: "a.ARW", fingerprint: .stub("a")))
+
+        let captureCursor = PhotoPageCursor(
+            dateKey: Date(timeIntervalSince1970: 1_700_000_000), photoID: PhotoID()
+        )
+        XCTAssertThrowsError(
+            try store.page(
+                matching: LibraryQuery(scope: .all, sort: .filenameAscending),
+                after: captureCursor,
+                limit: 10
+            )
+        ) { error in
+            XCTAssertEqual(error as? LibraryQueryError, .invalidCursor)
+        }
+    }
+
+    func testFilenameCursorIsRejectedForRecentlyEditedSort() throws {
+        let library = try makeLibrary()
+        try store.upsert(photo: PhotoAsset.stub(libraryID: library.id, relativePath: "a.ARW", fingerprint: .stub("a")))
+
+        let filenameCursor = PhotoPageCursor(filenameKey: "a.arw", photoID: PhotoID())
+        XCTAssertThrowsError(
+            try store.page(
+                matching: LibraryQuery(scope: .recentlyEdited, sort: .filenameAscending),
+                after: filenameCursor,
+                limit: 10
+            )
+        ) { error in
+            XCTAssertEqual(error as? LibraryQueryError, .invalidCursor)
+        }
+    }
+
+    func testCursorCarryingBothDateAndFilenameKeysIsAlwaysRejected() throws {
+        let library = try makeLibrary()
+        try store.upsert(photo: PhotoAsset.stub(libraryID: library.id, relativePath: "a.ARW", fingerprint: .stub("a")))
+
+        let ambiguousCursor = PhotoPageCursor(
+            dateKey: Date(timeIntervalSince1970: 1_700_000_000), filenameKey: "a.arw", photoID: PhotoID()
+        )
+        let sorts: [PhotoSort] = [
+            .captureDateDescending, .captureDateAscending, .filenameAscending, .filenameDescending
+        ]
+        for sort in sorts {
+            XCTAssertThrowsError(
+                try store.page(
+                    matching: LibraryQuery(scope: .all, sort: sort), after: ambiguousCursor, limit: 10
+                )
+            ) { error in
+                XCTAssertEqual(error as? LibraryQueryError, .invalidCursor)
+            }
+        }
+        XCTAssertThrowsError(
+            try store.page(
+                matching: LibraryQuery(scope: .recentlyEdited, sort: .captureDateDescending),
+                after: ambiguousCursor,
+                limit: 10
+            )
+        ) { error in
+            XCTAssertEqual(error as? LibraryQueryError, .invalidCursor)
+        }
     }
 
     // MARK: - Limit validation
