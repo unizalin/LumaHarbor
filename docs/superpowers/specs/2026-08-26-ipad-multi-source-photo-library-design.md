@@ -103,11 +103,13 @@ Files／外接 SSD／App 儲存
       ├─ PhotoIndexStore schema v2
       └─ ThumbnailProvider + DiskCache
             ↓ paged query + events
-       PadLibraryModel @MainActor
+    LibraryBrowserSession @MainActor
       ├─ sidebar selection
       ├─ query generation
       ├─ page window／scroll anchor
       └─ per-source progress
+            ↓ iPad typealias／view adapter
+       PadLibraryModel
             ↓ selected PhotoDocument
      PadEditorModel／EditorSession
 ```
@@ -119,9 +121,10 @@ Files／外接 SSD／App 儲存
 - 平台 shell 負責取得 URL；core 負責 bookmark、identity、狀態與資料操作。
 - 現有 actor isolation、scan generation、transaction 與 bounded backpressure 契約不得放寬。
 
-### 6.2 `PadLibraryModel`
+### 6.2 `LibraryBrowserSession` 與 `PadLibraryModel`
 
-- 新增於 iPad App target，標記 `@MainActor`。
+- 可測的狀態機新增於 root package 的 `EditorCore`，命名為 `LibraryBrowserSession` 並標記 `@MainActor`；這延續既有 `PhotoDocumentEditor` 的邊界，讓 `swift test` 能真正執行 generation、paging 與 selection tests。
+- iPad App target 只用 `typealias PadLibraryModel = LibraryBrowserSession` 保留平台名稱，並在 composition root 注入 production dependencies；不得把另一份狀態機複製到 nested app package。
 - 持有 UI query state，不持有 SQLite handle、security scope 或解碼器。
 - 查詢變更遞增 generation；任何舊 page、舊縮圖或舊 scan event 晚到時不得覆寫目前畫面。
 - 導航到 editor 前保存 grid restoration state；editor 返回後以 `PhotoID` 為 anchor 恢復，不依賴可能已改變的整數 offset。
@@ -287,7 +290,7 @@ public struct PhotoPage: Sendable, Equatable {
 - `LibraryQuery` 四種 scope、四種排序、Unicode filename search、穩定 cursor 與同排序鍵 tie-break。
 - source identity 的 manifest、bookmark identity、唯讀 ambiguous 與同名磁碟拒絕案例。
 - connection state transition、移除來源不觸碰來源檔案。
-- `PadLibraryModel` generation、page merge、scroll anchor 與離線 command gate。
+- `LibraryBrowserSession` generation、page merge、scroll anchor 與離線 command gate；iPad `PadLibraryModel` typealias 必須編譯連到同一型別。
 
 ### 14.2 Integration
 
