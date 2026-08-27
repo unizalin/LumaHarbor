@@ -171,6 +171,44 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         }
     }
 
+    private func makeRestoreScopeFixture(
+        name: String,
+        withManifest: Bool = false
+    ) throws -> (
+        service: PhotoLibraryService,
+        bookmarkStore: FailableBookmarkStore,
+        resolver: FakeFolderAccessResolver,
+        root: URL,
+        libraryID: LibraryID,
+        token: String
+    ) {
+        let root = try makeSubdirectory("\(name)-Root")
+        let bookmarkStore = FailableBookmarkStore(
+            directoryURL: try makeSubdirectory("\(name)-Bookmarks")
+        )
+        let resolver = FakeFolderAccessResolver()
+        let libraryID = LibraryID()
+        if withManifest {
+            try FileSidecarRepository(libraryRootURL: root)
+                .write(manifest: LibraryManifest(libraryID: libraryID))
+        }
+        let token = "\(name)-token"
+        resolver.setCanned(.init(url: root), forToken: token)
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: name,
+            lastKnownPath: root.path,
+            bookmarkData: resolver.makeBookmarkData(token: token),
+            confirmedManifestLibraryID: withManifest ? libraryID : nil
+        ))
+        let service = try makeService(
+            supportName: "\(name)-Support",
+            bookmarkStore: bookmarkStore,
+            folderAccessResolver: resolver
+        )
+        return (service, bookmarkStore, resolver, root, libraryID, token)
+    }
+
     // MARK: - Critical 2, item 1: reachable restore safely backfills an unconfirmed manifest ID
 
     func testReachableRestoreSafelyBackfillsAnUnconfirmedManifestIDThatAgreesWithItself() async throws {
@@ -208,7 +246,7 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         )
     }
 
-    func testReachableRestoreNeverOverwritesAnAlreadyConfirmedIDEvenIfDiskDisagrees() async throws {
+    func testReachableRestoreBlocksAnAlreadyConfirmedIDWhenDiskDisagreesWithoutMutatingManifest() async throws {
         let bookmarksDirectory = try makeSubdirectory("Bookmarks")
         let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
         let service = try makeService(bookmarkStore: bookmarkStore)
@@ -218,8 +256,12 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
 
         let manifestDirectory = root.appendingPathComponent(".lumaharbor", isDirectory: true)
         try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
-        try SidecarCoding.encode(LibraryManifest(libraryID: diskID))
-            .write(to: manifestDirectory.appendingPathComponent("library.json"))
+        let manifestURL = manifestDirectory.appendingPathComponent("library.json")
+        try SidecarCoding.encode(LibraryManifest(libraryID: diskID)).write(to: manifestURL)
+        let bytesBefore = try Data(contentsOf: manifestURL)
+        let modifiedBefore = try XCTUnwrap(
+            try FileManager.default.attributesOfItem(atPath: manifestURL.path)[.modificationDate] as? Date
+        )
 
         guard let bookmarkData = try? SecurityScopedBookmark.makeBookmarkData(for: root) else {
             throw XCTSkip("This host can't create security-scoped bookmarks")
@@ -232,13 +274,203 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
             confirmedManifestLibraryID: confirmedID
         ))
 
-        _ = try await service.restoreLibraries()
+        let restored = try await service.restoreLibraries()
 
         let reloaded = try XCTUnwrap(try bookmarkStore.load(libraryID: confirmedID))
+        XCTAssertEqual(reloaded.confirmedManifestLibraryID, confirmedID)
+        XCTAssertEqual(restored.first?.connectionState, .needsAuthorization)
+        let diagnostic = await service.restoreDiagnostic(for: confirmedID)
+        XCTAssertEqual(diagnostic, .manifestConflict)
+
+        let refreshed = try await service.refreshAvailability(libraryID: confirmedID)
         XCTAssertEqual(
-            reloaded.confirmedManifestLibraryID, confirmedID,
-            "An already-confirmed value must never be silently overwritten by a disagreeing disk value"
+            refreshed.connectionState,
+            .needsAuthorization,
+            "Availability refresh must not bypass a blocked restore diagnostic"
         )
+
+        var scanStarted = false
+        var scanFailed = false
+        for await event in service.scan(libraryID: confirmedID) {
+            if case .started = event { scanStarted = true }
+            if case .failed = event { scanFailed = true }
+        }
+        XCTAssertFalse(scanStarted, "A blocked source must not start scanning")
+        XCTAssertTrue(scanFailed)
+
+        XCTAssertEqual(try Data(contentsOf: manifestURL), bytesBefore)
+        let modifiedAfter = try XCTUnwrap(
+            try FileManager.default.attributesOfItem(atPath: manifestURL.path)[.modificationDate] as? Date
+        )
+        XCTAssertEqual(modifiedAfter, modifiedBefore)
+    }
+
+    func testRestoreManifestValidationMatrixReportsPreciseDiagnostics() async throws {
+        enum DiskState {
+            case absent
+            case validOwn
+            case validForeign
+            case valid(LibraryID)
+            case corrupt
+            case unsupported
+            case unavailable
+        }
+        struct Case {
+            let name: String
+            let persistedID: (LibraryID) -> LibraryID?
+            let diskState: DiskState
+            let failSave: Bool
+            let expectedConnection: LibraryConnectionState
+            let expectedDiagnostic: LibraryRestoreDiagnostic?
+            let expectsBackfill: Bool
+        }
+
+        let sharedForeignID = LibraryID()
+        let cases: [Case] = [
+            Case(
+                name: "confirmed ID equals disk manifest",
+                persistedID: { _ in sharedForeignID }, diskState: .valid(sharedForeignID),
+                failSave: false, expectedConnection: .ready, expectedDiagnostic: nil,
+                expectsBackfill: false
+            ),
+            Case(
+                name: "unconfirmed manifest agrees with bookmark library ID",
+                persistedID: { _ in nil }, diskState: .validOwn,
+                failSave: false, expectedConnection: .ready, expectedDiagnostic: nil,
+                expectsBackfill: true
+            ),
+            Case(
+                name: "legacy source has no manifest",
+                persistedID: { _ in nil }, diskState: .absent,
+                failSave: false, expectedConnection: .ready, expectedDiagnostic: nil,
+                expectsBackfill: false
+            ),
+            Case(
+                name: "confirmed manifest disappeared",
+                persistedID: { id in id }, diskState: .absent,
+                failSave: false, expectedConnection: .needsAuthorization,
+                expectedDiagnostic: .manifestMissing, expectsBackfill: false
+            ),
+            Case(
+                name: "unconfirmed source presents foreign manifest",
+                persistedID: { _ in nil }, diskState: .validForeign,
+                failSave: false, expectedConnection: .needsAuthorization,
+                expectedDiagnostic: .manifestConflict, expectsBackfill: false
+            ),
+            Case(
+                name: "corrupt manifest",
+                persistedID: { _ in nil }, diskState: .corrupt,
+                failSave: false, expectedConnection: .needsAuthorization,
+                expectedDiagnostic: .corruptManifest, expectsBackfill: false
+            ),
+            Case(
+                name: "newer manifest",
+                persistedID: { _ in nil }, diskState: .unsupported,
+                failSave: false, expectedConnection: .needsAuthorization,
+                expectedDiagnostic: .unsupportedManifest, expectsBackfill: false
+            ),
+            Case(
+                name: "manifest probe unavailable",
+                persistedID: { _ in nil }, diskState: .unavailable,
+                failSave: false, expectedConnection: .needsAuthorization,
+                expectedDiagnostic: .manifestUnavailable, expectsBackfill: false
+            ),
+            Case(
+                name: "required backfill cannot be saved",
+                persistedID: { _ in nil }, diskState: .validOwn,
+                failSave: true, expectedConnection: .needsAuthorization,
+                expectedDiagnostic: .persistenceFailure, expectsBackfill: false
+            )
+        ]
+
+        for (caseIndex, testCase) in cases.enumerated() {
+            let root = try makeSubdirectory("RestoreMatrix-\(caseIndex)-Root")
+            let bookmarksDirectory = try makeSubdirectory("RestoreMatrix-\(caseIndex)-Bookmarks")
+            let bookmarkStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+            let resolver = FakeFolderAccessResolver()
+            let libraryID = LibraryID()
+            let manifestDirectory = root.appendingPathComponent(".lumaharbor", isDirectory: true)
+            let manifestURL = manifestDirectory.appendingPathComponent("library.json")
+
+            switch testCase.diskState {
+            case .absent:
+                break
+            case .validOwn:
+                try FileSidecarRepository(libraryRootURL: root)
+                    .write(manifest: LibraryManifest(libraryID: libraryID))
+            case .validForeign:
+                try FileSidecarRepository(libraryRootURL: root)
+                    .write(manifest: LibraryManifest(libraryID: LibraryID()))
+            case .valid(let diskID):
+                try FileSidecarRepository(libraryRootURL: root)
+                    .write(manifest: LibraryManifest(libraryID: diskID))
+            case .corrupt:
+                try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+                try Data("not-json".utf8).write(to: manifestURL)
+            case .unsupported:
+                try FileSidecarRepository(libraryRootURL: root).write(manifest: LibraryManifest(
+                    schemaVersion: LibraryManifest.currentSchemaVersion + 1,
+                    libraryID: libraryID
+                ))
+            case .unavailable:
+                try FileManager.default.createDirectory(at: manifestURL, withIntermediateDirectories: true)
+            }
+
+            var isManifestDirectory: ObjCBool = false
+            let hasManifestFile = FileManager.default.fileExists(
+                atPath: manifestURL.path,
+                isDirectory: &isManifestDirectory
+            ) && !isManifestDirectory.boolValue
+            let manifestBytesBefore = hasManifestFile ? try Data(contentsOf: manifestURL) : nil
+            let manifestModifiedBefore = hasManifestFile
+                ? try FileManager.default.attributesOfItem(atPath: manifestURL.path)[.modificationDate] as? Date
+                : nil
+
+            let token = "restore-matrix-\(caseIndex)"
+            resolver.setCanned(.init(url: root), forToken: token)
+            try bookmarkStore.save(StoredBookmark(
+                libraryID: libraryID,
+                displayName: testCase.name,
+                lastKnownPath: root.path,
+                bookmarkData: resolver.makeBookmarkData(token: token),
+                confirmedManifestLibraryID: testCase.persistedID(libraryID)
+            ))
+            if testCase.failSave {
+                bookmarkStore.saveInterceptor = { _ in true }
+            }
+
+            let service = try makeService(
+                supportName: "RestoreMatrix-\(caseIndex)-Support",
+                bookmarkStore: bookmarkStore,
+                folderAccessResolver: resolver
+            )
+            let restored = try await service.restoreLibraries()
+            let folder = try XCTUnwrap(restored.first, testCase.name)
+            XCTAssertEqual(folder.connectionState, testCase.expectedConnection, testCase.name)
+            let diagnostic = await service.restoreDiagnostic(for: libraryID)
+            XCTAssertEqual(diagnostic, testCase.expectedDiagnostic, testCase.name)
+
+            let handle = try XCTUnwrap(resolver.createdHandles.last, testCase.name)
+            XCTAssertEqual(
+                handle.stopCallCount,
+                testCase.expectedConnection == .needsAuthorization ? 1 : 0,
+                testCase.name
+            )
+
+            bookmarkStore.saveInterceptor = nil
+            let persisted = try XCTUnwrap(try bookmarkStore.load(libraryID: libraryID))
+            XCTAssertEqual(
+                persisted.confirmedManifestLibraryID,
+                testCase.expectsBackfill ? libraryID : testCase.persistedID(libraryID),
+                testCase.name
+            )
+            if let manifestBytesBefore, let manifestModifiedBefore {
+                XCTAssertEqual(try Data(contentsOf: manifestURL), manifestBytesBefore, testCase.name)
+                let manifestModifiedAfter = try FileManager.default
+                    .attributesOfItem(atPath: manifestURL.path)[.modificationDate] as? Date
+                XCTAssertEqual(manifestModifiedAfter, manifestModifiedBefore, testCase.name)
+            }
+        }
     }
 
     // MARK: - Critical 2, items 2-4: LibraryID collision, and restart-safe recovery
@@ -602,6 +834,8 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         let restored = try await service.restoreLibraries()
         let folder = try XCTUnwrap(restored.first)
         XCTAssertEqual(folder.connectionState, .needsAuthorization)
+        let diagnostic = await service.restoreDiagnostic(for: libraryID)
+        XCTAssertEqual(diagnostic, .authorizationFailure)
     }
 
     func testStaleReachableBookmarkRefreshesBookmarkAndIdentity() async throws {
@@ -666,5 +900,87 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(resolver.grantedHandles[1].stopCallCount, 0, "A failed focus must not stop the still-active handle")
 
         _ = first
+    }
+
+    func testRepeatedRestorePairsEveryStagedAndReplacedScopeExactlyOnce() async throws {
+        let success = try makeRestoreScopeFixture(name: "RepeatedSuccess")
+        _ = try await success.service.restoreLibraries()
+        _ = try await success.service.restoreLibraries()
+        XCTAssertEqual(success.resolver.createdHandles.count, 2)
+        XCTAssertEqual(success.resolver.createdHandles[0].stopCallCount, 1)
+        XCTAssertEqual(success.resolver.createdHandles[1].stopCallCount, 0)
+
+        let resolutionFailure = try makeRestoreScopeFixture(name: "ResolutionFailure")
+        _ = try await resolutionFailure.service.restoreLibraries()
+        resolutionFailure.resolver.setShouldFailResolve(forToken: resolutionFailure.token)
+        let resolutionBlocked = try await resolutionFailure.service.restoreLibraries()
+        XCTAssertEqual(resolutionBlocked.first?.connectionState, .needsAuthorization)
+        XCTAssertEqual(resolutionFailure.resolver.createdHandles[0].stopCallCount, 1)
+
+        let offline = try makeRestoreScopeFixture(name: "Offline")
+        _ = try await offline.service.restoreLibraries()
+        offline.resolver.setCanned(
+            .init(url: offline.root, isReachable: false),
+            forToken: offline.token
+        )
+        let offlineRestored = try await offline.service.restoreLibraries()
+        XCTAssertEqual(offlineRestored.first?.connectionState, .offline)
+        XCTAssertEqual(offline.resolver.createdHandles[0].stopCallCount, 1)
+        XCTAssertEqual(offline.resolver.createdHandles[1].stopCallCount, 1)
+        let offlineRefresh = try await offline.service.refreshAvailability(libraryID: offline.libraryID)
+        XCTAssertEqual(
+            offlineRefresh.connectionState,
+            .offline,
+            "A path becoming reachable cannot restore readiness without a committed access handle"
+        )
+
+        let conflict = try makeRestoreScopeFixture(name: "Conflict", withManifest: true)
+        _ = try await conflict.service.restoreLibraries()
+        try FileSidecarRepository(libraryRootURL: conflict.root)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        let conflictRestored = try await conflict.service.restoreLibraries()
+        XCTAssertEqual(conflictRestored.first?.connectionState, .needsAuthorization)
+        let conflictDiagnostic = await conflict.service.restoreDiagnostic(for: conflict.libraryID)
+        XCTAssertEqual(conflictDiagnostic, .manifestConflict)
+        XCTAssertEqual(conflict.resolver.createdHandles[0].stopCallCount, 1)
+        XCTAssertEqual(conflict.resolver.createdHandles[1].stopCallCount, 1)
+
+        let saveFailure = try makeRestoreScopeFixture(name: "SaveFailure")
+        _ = try await saveFailure.service.restoreLibraries()
+        saveFailure.resolver.setCanned(
+            .init(url: saveFailure.root, isStale: true),
+            forToken: saveFailure.token
+        )
+        saveFailure.bookmarkStore.saveInterceptor = { _ in true }
+        let saveBlocked = try await saveFailure.service.restoreLibraries()
+        XCTAssertEqual(saveBlocked.first?.connectionState, .needsAuthorization)
+        let saveDiagnostic = await saveFailure.service.restoreDiagnostic(for: saveFailure.libraryID)
+        XCTAssertEqual(saveDiagnostic, .persistenceFailure)
+        XCTAssertEqual(saveFailure.resolver.createdHandles[0].stopCallCount, 1)
+        XCTAssertEqual(saveFailure.resolver.createdHandles[1].stopCallCount, 1)
+
+        let indexFailure = try makeRestoreScopeFixture(name: "IndexFailure")
+        _ = try await indexFailure.service.restoreLibraries()
+        let indexStore = await indexFailure.service.indexStore
+        indexStore.close()
+        do {
+            _ = try await indexFailure.service.restoreLibraries()
+            XCTFail("Expected index persistence failure to propagate")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(indexFailure.resolver.createdHandles[0].stopCallCount, 0)
+        XCTAssertEqual(indexFailure.resolver.createdHandles[1].stopCallCount, 1)
+        let retained = await indexFailure.service.library(id: indexFailure.libraryID)
+        XCTAssertEqual(retained?.connectionState, .ready)
+
+        let removed = try makeRestoreScopeFixture(name: "RemovedBookmark")
+        _ = try await removed.service.restoreLibraries()
+        try removed.bookmarkStore.remove(libraryID: removed.libraryID)
+        let afterRemoval = try await removed.service.restoreLibraries()
+        XCTAssertTrue(afterRemoval.isEmpty)
+        XCTAssertEqual(removed.resolver.createdHandles[0].stopCallCount, 1)
+        let removedKnownCount = await removed.service.knownLibraries().count
+        XCTAssertEqual(removedKnownCount, 0)
     }
 }

@@ -161,9 +161,110 @@ final class LibrarySourceIdentityTests: XCTestCase {
         XCTAssertNotEqual(theirsWithVolume.relationship(to: mineNoVolume), .same)
 
         let neitherHasVolume = identity(resourceIdentifier: sharedResourceID, volumeIdentifier: nil)
-        // With no fingerprint either, there's nothing left to confirm or
-        // even suspect a relation from — the safe, uninformative answer.
-        XCTAssertEqual(mineNoVolume.relationship(to: neitherHasVolume), .distinct)
+        XCTAssertEqual(mineNoVolume.relationship(to: neitherHasVolume), .ambiguous)
+    }
+
+    func testFailClosedPhysicalRelationshipMatrix() {
+        let resourceID = Data([0xAA])
+        let knownManifestID = LibraryID()
+        let foreignManifestID = LibraryID()
+
+        struct Case {
+            let name: String
+            let existing: LibrarySourceIdentity
+            let candidate: LibrarySourceIdentity
+            let expected: SourceRelationship
+        }
+
+        let cases: [Case] = [
+            Case(
+                name: "missing volume with matching resource ID",
+                existing: identity(resourceIdentifier: resourceID),
+                candidate: identity(resourceIdentifier: resourceID, volumeIdentifier: "volume"),
+                expected: .ambiguous
+            ),
+            Case(
+                name: "missing volume with exact canonical path",
+                existing: identity(canonicalLivePath: "/Photos"),
+                candidate: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos"),
+                expected: .ambiguous
+            ),
+            Case(
+                name: "missing volume with possible containment",
+                existing: identity(canonicalLivePath: "/Photos"),
+                candidate: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos/Child"),
+                expected: .ambiguous
+            ),
+            Case(
+                name: "case-insensitive containment",
+                existing: identity(
+                    volumeIdentifier: "volume", canonicalLivePath: "/Photos",
+                    canonicalLivePathCaseSensitivity: .insensitive
+                ),
+                candidate: identity(
+                    volumeIdentifier: "volume", canonicalLivePath: "/photos/Child",
+                    canonicalLivePathCaseSensitivity: .insensitive
+                ),
+                expected: .ancestor
+            ),
+            Case(
+                name: "case-sensitive variants stay distinct",
+                existing: identity(
+                    volumeIdentifier: "volume", canonicalLivePath: "/Photos",
+                    canonicalLivePathCaseSensitivity: .sensitive
+                ),
+                candidate: identity(
+                    volumeIdentifier: "volume", canonicalLivePath: "/photos/Child",
+                    canonicalLivePathCaseSensitivity: .sensitive
+                ),
+                expected: .distinct
+            ),
+            Case(
+                name: "unknown sensitivity natural containment",
+                existing: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos"),
+                candidate: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos/Child"),
+                expected: .ancestor
+            ),
+            Case(
+                name: "unknown sensitivity case-fold containment",
+                existing: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos"),
+                candidate: identity(volumeIdentifier: "volume", canonicalLivePath: "/photos/Child"),
+                expected: .ambiguous
+            ),
+            Case(
+                name: "root contains a child",
+                existing: identity(volumeIdentifier: "volume", canonicalLivePath: "/"),
+                candidate: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos"),
+                expected: .ancestor
+            ),
+            Case(
+                name: "component prefix is not containment",
+                existing: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos"),
+                candidate: identity(volumeIdentifier: "volume", canonicalLivePath: "/Photos2"),
+                expected: .distinct
+            ),
+            Case(
+                name: "manifest mismatch cannot upgrade ambiguous physical evidence",
+                existing: identity(
+                    confirmedManifestLibraryID: knownManifestID,
+                    canonicalLivePath: "/Photos"
+                ),
+                candidate: identity(
+                    confirmedManifestLibraryID: foreignManifestID,
+                    volumeIdentifier: "volume",
+                    canonicalLivePath: "/Photos"
+                ),
+                expected: .ambiguous
+            )
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                testCase.existing.relationship(to: testCase.candidate),
+                testCase.expected,
+                testCase.name
+            )
+        }
     }
 
     // MARK: - Ancestor / descendant (live containment, confirmed shared volume)

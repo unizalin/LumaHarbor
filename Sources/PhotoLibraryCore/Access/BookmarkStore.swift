@@ -72,9 +72,8 @@ public struct StoredBookmark: Codable, Equatable, Sendable {
     /// `sourceKind`/`scanState` are decoded through their *raw string* first,
     /// not the enum's own `Decodable` conformance: a future, unrecognized raw
     /// value must fall back to a safe default and let the rest of the record
-    /// through, rather than throwing and — via `FileBookmarkStore.loadAll()`'s
-    /// `compactMap` — silently dropping the whole source (spec §7 fail-safe
-    /// requirement).
+    /// through. It is backward-compatible data, not corruption that should
+    /// fail the registry load (spec §7 fail-safe requirement).
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         libraryID = try container.decode(LibraryID.self, forKey: .libraryID)
@@ -126,8 +125,10 @@ public protocol BookmarkStoring: Sendable {
 
 /// One JSON file per library under `Application Support/LumaHarbor/bookmarks/`.
 ///
-/// A file each, rather than one combined plist, so a single unreadable bookmark
-/// can't cost the user access to their other folders.
+/// A file each, rather than one combined plist, so records can be replaced
+/// atomically and inspected independently. Registry reads still fail closed:
+/// silently dropping one unreadable record would make later mutation operate
+/// on an incomplete view of the user's sources.
 /// `FileManager` is not annotated `Sendable` by Foundation. This store only
 /// keeps an immutable instance and performs synchronous, non-delegate file
 /// operations, so sharing the value across an actor boundary is safe.
@@ -147,17 +148,17 @@ public struct FileBookmarkStore: BookmarkStoring, @unchecked Sendable {
     }
 
     public func loadAll() throws -> [StoredBookmark] {
-        guard let contents = try? fileManager.contentsOfDirectory(
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
+
+        let contents = try fileManager.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: nil
-        ) else {
-            return []
-        }
-        return contents
+        )
+        return try contents
             .filter { $0.pathExtension.lowercased() == "json" }
-            .compactMap { url in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? SidecarCoding.decode(StoredBookmark.self, from: data)
+            .map { url in
+                let data = try Data(contentsOf: url)
+                return try SidecarCoding.decode(StoredBookmark.self, from: data)
             }
             .sorted { $0.addedAt < $1.addedAt }
     }

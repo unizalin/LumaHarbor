@@ -8,6 +8,16 @@ import XCTest
 /// entirely: they drive the store with plain `StoredBookmark` values and
 /// synthetic `bookmarkData`, so they're deterministic on any host.
 final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
+    private final class DirectoryReadFailingFileManager: FileManager, @unchecked Sendable {
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []
+        ) throws -> [URL] {
+            throw CocoaError(.fileReadNoPermission)
+        }
+    }
+
     private func makeStore() -> FileBookmarkStore {
         FileBookmarkStore(directoryURL: temporaryDirectory)
     }
@@ -88,37 +98,34 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         try XCTAssertEqual(store.loadAll(), [])
     }
 
-    // MARK: - Corruption isolation
+    // MARK: - Fail-closed registry loading
 
-    func testACorruptBookmarkFileIsSkippedWhileOthersStillLoad() throws {
-        let store = makeStore()
-        let good1 = stubBookmark(displayName: "Good One", addedAt: Date(timeIntervalSince1970: 100))
-        let good2 = stubBookmark(displayName: "Good Two", addedAt: Date(timeIntervalSince1970: 200))
-        try store.save(good1)
-        try store.save(good2)
+    func testAnyInvalidJSONRecordMakesLoadAllThrow() throws {
+        let invalidRecords: [Data] = [
+            Data("{ not valid json".utf8),
+            Data(),
+            Data(#"{"unrelated":"shape"}"#.utf8)
+        ]
 
-        // Drop a malformed JSON file directly into the bookmarks directory —
-        // this is the "one unreadable bookmark can't cost the user access to
-        // their other folders" guarantee documented on the type.
-        let corruptURL = temporaryDirectory
-            .appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
-        try Data("{ not valid json".utf8).write(to: corruptURL)
+        for (index, invalidRecord) in invalidRecords.enumerated() {
+            let directory = try makeSubdirectory("Invalid-\(index)")
+            let store = FileBookmarkStore(directoryURL: directory)
+            try store.save(stubBookmark(displayName: "Good"))
+            try invalidRecord.write(
+                to: directory.appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
+            )
 
-        let all = try store.loadAll()
-        XCTAssertEqual(Set(all.map(\.displayName)), Set(["Good One", "Good Two"]))
+            XCTAssertThrowsError(try store.loadAll(), "Invalid record at index \(index) must fail the registry")
+        }
     }
 
-    func testAnEmptyFileIsSkippedWhileOthersStillLoad() throws {
-        let store = makeStore()
-        let good = stubBookmark(displayName: "Good")
-        try store.save(good)
+    func testDirectoryReadFailurePropagates() {
+        let store = FileBookmarkStore(
+            directoryURL: temporaryDirectory,
+            fileManager: DirectoryReadFailingFileManager()
+        )
 
-        let emptyURL = temporaryDirectory
-            .appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
-        try Data().write(to: emptyURL)
-
-        let all = try store.loadAll()
-        XCTAssertEqual(all.map(\.displayName), ["Good"])
+        XCTAssertThrowsError(try store.loadAll())
     }
 
     // MARK: - Ignoring unrelated files
@@ -133,18 +140,6 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         try Data([0x00]).write(
             to: temporaryDirectory.appendingPathComponent(".DS_Store")
         )
-
-        let all = try store.loadAll()
-        XCTAssertEqual(all.map(\.displayName), ["Good"])
-    }
-
-    func testLoadAllIgnoresAJSONFileThatDoesNotDecodeAsAStoredBookmark() throws {
-        let store = makeStore()
-        try store.save(stubBookmark(displayName: "Good"))
-
-        let unrelatedURL = temporaryDirectory
-            .appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
-        try Data(#"{"unrelated":"shape"}"#.utf8).write(to: unrelatedURL)
 
         let all = try store.loadAll()
         XCTAssertEqual(all.map(\.displayName), ["Good"])
