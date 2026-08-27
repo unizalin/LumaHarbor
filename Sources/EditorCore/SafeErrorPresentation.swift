@@ -183,6 +183,10 @@ public enum SafeErrorPresentation {
             return L10n.t("The local index can't be reset while a scan is in progress.")
         case .resetFailed:
             return L10n.t("The local index couldn't be reset.")
+        case .overlappingSource:
+            return L10n.t("This folder overlaps a photo library you already added.")
+        case .ambiguousSource:
+            return L10n.t("LumaHarbor can't confirm whether this is a source you already added.")
         }
     }
 

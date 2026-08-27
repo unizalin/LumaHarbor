@@ -9,19 +9,78 @@ public struct StoredBookmark: Codable, Equatable, Sendable {
     public var lastKnownPath: String
     public var bookmarkData: Data
     public var addedAt: Date
+    public var sourceKind: LibrarySourceKind
+    /// Only ever `.idle` or `.partialFailure` (spec §7) — enforced on both
+    /// write and read, so a `.queued`/`.scanning` value can never survive a
+    /// relaunch even if something upstream forgot to normalize it first.
+    public var scanState: LibraryScanState
+    /// Bookmark-resolved identity, captured the last time this source was
+    /// reachable (spec §7 step 2). Lets a re-add or overlap check recognise
+    /// this exact source even while it's offline, without ever needing its
+    /// runtime root URL.
+    public var resourceIdentifier: Data?
+    public var volumeIdentifier: Data?
 
     public init(
         libraryID: LibraryID,
         displayName: String,
         lastKnownPath: String,
         bookmarkData: Data,
-        addedAt: Date = Date()
+        addedAt: Date = Date(),
+        sourceKind: LibrarySourceKind = .externalFolder,
+        scanState: LibraryScanState = .idle,
+        resourceIdentifier: Data? = nil,
+        volumeIdentifier: Data? = nil
     ) {
         self.libraryID = libraryID
         self.displayName = displayName
         self.lastKnownPath = lastKnownPath
         self.bookmarkData = bookmarkData
         self.addedAt = addedAt
+        self.sourceKind = sourceKind
+        self.scanState = scanState.normalizedForRestore
+        self.resourceIdentifier = resourceIdentifier
+        self.volumeIdentifier = volumeIdentifier
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case libraryID, displayName, lastKnownPath, bookmarkData, addedAt
+        case sourceKind, scanState, resourceIdentifier, volumeIdentifier
+    }
+
+    /// Custom so a bookmark file written before Task 2 — with none of the
+    /// new keys — still decodes: every addition here is optional-with-a-
+    /// default, never a newly required field (spec §7: "existing bookmark
+    /// records must decode backward-compatibly as `.externalFolder`").
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        libraryID = try container.decode(LibraryID.self, forKey: .libraryID)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        lastKnownPath = try container.decode(String.self, forKey: .lastKnownPath)
+        bookmarkData = try container.decode(Data.self, forKey: .bookmarkData)
+        addedAt = try container.decode(Date.self, forKey: .addedAt)
+        sourceKind = try container.decodeIfPresent(
+            LibrarySourceKind.self, forKey: .sourceKind
+        ) ?? .externalFolder
+        let decodedScanState = try container.decodeIfPresent(
+            LibraryScanState.self, forKey: .scanState
+        ) ?? .idle
+        scanState = decodedScanState.normalizedForRestore
+        resourceIdentifier = try container.decodeIfPresent(Data.self, forKey: .resourceIdentifier)
+        volumeIdentifier = try container.decodeIfPresent(Data.self, forKey: .volumeIdentifier)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(libraryID, forKey: .libraryID)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(lastKnownPath, forKey: .lastKnownPath)
+        try container.encode(bookmarkData, forKey: .bookmarkData)
+        try container.encode(addedAt, forKey: .addedAt)
+        try container.encode(sourceKind, forKey: .sourceKind)
+        try container.encode(scanState.normalizedForRestore, forKey: .scanState)
+        try container.encodeIfPresent(resourceIdentifier, forKey: .resourceIdentifier)
+        try container.encodeIfPresent(volumeIdentifier, forKey: .volumeIdentifier)
     }
 }
 
