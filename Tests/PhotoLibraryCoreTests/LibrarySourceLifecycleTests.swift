@@ -280,6 +280,14 @@ final class LibrarySourceLifecycleTests: TemporaryDirectoryTestCase {
     /// manifest) and, on physical containment, nested inside a *different*
     /// known library must still be rejected — never silently focused on the
     /// `.same` match just because it happened to be found first.
+    /// Review fix round 2, Critical 1 + Minor: a candidate that confirms as
+    /// `.same` as one known library (via a planted, matching manifest) while
+    /// also being physically nested inside a *different* known library's
+    /// root must still be rejected as overlap — never silently focused on
+    /// the `.same` match just because that comparison happened to be found
+    /// (or visited) first. The parent/candidate manifest IDs disagree too,
+    /// but a live ancestor/descendant relationship reports as overlap, not
+    /// `.conflict` (spec §7: ancestor/descendant is never escalated).
     func testSameMatchFoundBeforeAConflictStillResultsInRejection() async throws {
         let (service, _) = try makeServiceWithExplicitBookmarkStore()
         let parentRoot = try makeSubdirectory("Photos")
@@ -296,15 +304,15 @@ final class LibrarySourceLifecycleTests: TemporaryDirectoryTestCase {
 
         do {
             _ = try await service.addLibrary(at: candidateRoot)
-            XCTFail("Expected .manifestConflict")
+            XCTFail("Expected .overlappingSource")
         } catch let error as LibraryError {
-            // The parent-library comparison is a manifest-ID conflict
-            // regardless of which known library the preflight visits first
-            // — this is the invariant under test: it never silently focuses
-            // on `elsewhereLibrary` just because that comparison is found
-            // (or visited) before the parent's.
-            guard case .manifestConflict = error else {
-                return XCTFail("Expected .manifestConflict, got \(error)")
+            // The parent-library comparison is a live ancestor/descendant
+            // overlap regardless of which known library the preflight
+            // visits first — this is the invariant under test: it never
+            // silently focuses on `elsewhereLibrary` just because that
+            // `.same` comparison is found before the parent's overlap.
+            guard case .overlappingSource = error else {
+                return XCTFail("Expected .overlappingSource, got \(error)")
             }
         }
 

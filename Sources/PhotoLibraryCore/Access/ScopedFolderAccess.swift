@@ -55,6 +55,53 @@ public final class ScopedFolderAccess {
     }
 }
 
+/// A held security-scoped access grant, narrowed to exactly the surface
+/// `PhotoLibraryService` needs (spec §7). Exists so tests can substitute a
+/// deterministic fake for `ScopedFolderAccess` — resolution success/failure,
+/// staleness and reachability all otherwise depend on real bookmark/volume
+/// behaviour that a unit test can't control.
+///
+/// `ScopedFolderAccess`'s only mutable state (`isAccessing`) is guarded by
+/// its own lock and never exposed by anything this protocol requires, so it
+/// is safe to treat as `Sendable` across the actor boundary.
+public protocol FolderAccessHandle: AnyObject, Sendable {
+    var url: URL { get }
+    var isStale: Bool { get }
+    var isReachable: Bool { get }
+    func stop()
+}
+
+extension ScopedFolderAccess: FolderAccessHandle, @unchecked Sendable {}
+
+/// Seam over resolving a bookmark into a held access grant, and over
+/// granting access to a URL the user just picked (spec §7). The real
+/// implementation is a thin pass-through to `ScopedFolderAccess`; a test
+/// substitutes a resolver whose success/failure, staleness and reachability
+/// are all explicitly controlled, so `PhotoLibraryService`'s
+/// offline/needsAuthorization/stale-refresh/scope-pairing behaviour is
+/// testable deterministically without a real disk-image or removable volume.
+public protocol FolderAccessResolving: Sendable {
+    /// Throws exactly when bookmark resolution itself fails (spec §7:
+    /// `.needsAuthorization`) — a resolved-but-unreachable result is a
+    /// successful return whose `isReachable` is `false` (spec §7: `.offline`).
+    func resolve(bookmarkData: Data) throws -> any FolderAccessHandle
+    /// For a folder the user just picked via a panel, where access is
+    /// already granted by the picker itself.
+    func grant(url: URL) -> any FolderAccessHandle
+}
+
+public struct SystemFolderAccessResolver: FolderAccessResolving {
+    public init() {}
+
+    public func resolve(bookmarkData: Data) throws -> any FolderAccessHandle {
+        try ScopedFolderAccess(resolving: bookmarkData)
+    }
+
+    public func grant(url: URL) -> any FolderAccessHandle {
+        ScopedFolderAccess(url: url)
+    }
+}
+
 /// `NSFileCoordinator` wrappers for external-volume I/O (spec §7.3).
 public enum FileCoordination {
     public static func read<T>(

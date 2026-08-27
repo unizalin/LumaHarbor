@@ -126,10 +126,15 @@ public actor PhotoLibraryService {
     private let decoder: any RawDecoding
     private let scanner: FolderScanner
 
-    /// Held for the app's lifetime: dropping a `ScopedFolderAccess` releases the
-    /// security scope, so these must outlive every read of the folder.
-    private var access: [LibraryID: ScopedFolderAccess] = [:]
+    /// Held for the app's lifetime: dropping a `FolderAccessHandle` releases
+    /// the security scope, so these must outlive every read of the folder.
+    private var access: [LibraryID: any FolderAccessHandle] = [:]
     private var libraries: [LibraryID: LibraryFolder] = [:]
+    /// Seam over resolving bookmarks/granting access (spec §7): the real
+    /// implementation is `SystemFolderAccessResolver`; tests inject a fake
+    /// so offline/needsAuthorization/stale-refresh/scope-pairing behaviour
+    /// is verifiable deterministically, without a real removable volume.
+    private let folderAccessResolver: any FolderAccessResolving
 
     /// How many `performScan` calls are currently running, across every
     /// library. Incremented at the top of `performScan` and decremented via
@@ -150,7 +155,8 @@ public actor PhotoLibraryService {
         locations: ApplicationSupportLocations,
         bookmarkStore: (any BookmarkStoring)? = nil,
         decoder: any RawDecoding = CoreImageRawDecoder(),
-        scanner: FolderScanner = FolderScanner()
+        scanner: FolderScanner = FolderScanner(),
+        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver()
     ) throws {
         try locations.createDirectories()
         self.locations = locations
@@ -159,6 +165,7 @@ public actor PhotoLibraryService {
         self.index = try PhotoIndexStore(databaseURL: locations.databaseURL)
         self.decoder = decoder
         self.scanner = scanner
+        self.folderAccessResolver = folderAccessResolver
     }
 
     public var indexStore: PhotoIndexStore { index }
@@ -200,7 +207,7 @@ public actor PhotoLibraryService {
             url: url, confirmedManifestLibraryID: confirmedManifestID
         )
 
-        switch preflightDecision(for: candidateIdentity) {
+        switch try preflightDecision(for: candidateIdentity) {
         case .reject(let error):
             throw error
         case .focus(let existing):
@@ -223,30 +230,47 @@ public actor PhotoLibraryService {
         case reject(LibraryError)
     }
 
-    /// Compares `candidate` against *every* currently-known library before
-    /// deciding anything (spec §7): the result must not depend on dictionary
-    /// iteration order, so a `.same` match found early never short-circuits
-    /// past an overlap/conflict/ambiguity that a later library would have
-    /// raised. Purely a read over `libraries`/the bookmark store — no
-    /// mutation happens here.
-    private func preflightDecision(for candidate: LibrarySourceIdentity) -> PreflightOutcome {
-        var sameMatches: [LibraryFolder] = []
-
-        for existing in libraries.values {
-            switch identity(for: existing).relationship(to: candidate) {
-            case .ancestor, .descendant:
-                return .reject(.overlappingSource)
-            case .conflict:
-                return .reject(.manifestConflict(existing.id))
-            case .ambiguous:
-                return .reject(.ambiguousSource(existing.id))
-            case .same:
-                sameMatches.append(existing)
-            case .distinct:
-                continue
-            }
+    /// Compares `candidate` against *every* currently-known library, then
+    /// decides using a fixed precedence over the whole collected set (spec
+    /// §7): nothing is decided — or mutated — while iterating, and the
+    /// specific error/outcome returned does not depend on `Dictionary`
+    /// iteration order, only on the (order-independent) set of
+    /// relationships found. Precedence, strongest first: any `.conflict`;
+    /// any `.ancestor`/`.descendant` overlap; any `.ambiguous`; more than one
+    /// `.same` match (itself a data inconsistency, treated as ambiguous);
+    /// exactly one `.same` match focuses it; otherwise every relationship is
+    /// `.distinct` and a fresh library is added.
+    ///
+    /// Propagates a `bookmarkStore.load` failure for any known library
+    /// rather than treating a lookup failure as "no identity" (spec §7):
+    /// an I/O or decode error must fail the whole preflight closed, never
+    /// silently read as `.distinct`.
+    private func preflightDecision(for candidate: LibrarySourceIdentity) throws -> PreflightOutcome {
+        struct Match {
+            let library: LibraryFolder
+            let relationship: SourceRelationship
         }
 
+        var matches: [Match] = []
+        for existing in libraries.values {
+            let relationship = try identity(for: existing).relationship(to: candidate)
+            matches.append(Match(library: existing, relationship: relationship))
+        }
+        // Stable, content-derived order so the specific error/library
+        // reported never depends on `Dictionary`'s iteration order.
+        matches.sort { $0.library.id.description < $1.library.id.description }
+
+        if let conflict = matches.first(where: { $0.relationship == .conflict }) {
+            return .reject(.manifestConflict(conflict.library.id))
+        }
+        if matches.contains(where: { $0.relationship == .ancestor || $0.relationship == .descendant }) {
+            return .reject(.overlappingSource)
+        }
+        if let ambiguous = matches.first(where: { $0.relationship == .ambiguous }) {
+            return .reject(.ambiguousSource(ambiguous.library.id))
+        }
+
+        let sameMatches = matches.filter { $0.relationship == .same }.map(\.library)
         switch sameMatches.count {
         case 0: return .addNew
         case 1: return .focus(sameMatches[0])
@@ -281,6 +305,26 @@ public actor PhotoLibraryService {
         }
     }
 
+    /// Reconciles a bookmark's persisted `confirmedManifestLibraryID`
+    /// against a fresh, read-only probe of the manifest actually on disk
+    /// (spec §7). Never silently overwrites: an already-confirmed value is
+    /// left exactly as it is even if the disk value disagrees (a
+    /// persisted-vs-disk conflict to leave alone, not resolve by guessing),
+    /// and a corrupt/unsupported/absent/unavailable probe never touches
+    /// whatever was already recorded. Only ever adopts a *new* confirmation
+    /// when nothing was confirmed yet and the disk manifest agrees with this
+    /// source's own already-known `LibraryID` — never a foreign identity
+    /// claim.
+    private static func reconciledConfirmedManifestLibraryID(
+        persisted: LibraryID?,
+        ownLibraryID: LibraryID,
+        probe: ManifestProbeResult
+    ) -> LibraryID? {
+        guard persisted == nil else { return persisted }
+        guard case .valid(let manifest) = probe else { return persisted }
+        return manifest.libraryID == ownLibraryID ? ownLibraryID : persisted
+    }
+
     private static func makeBookmarkData(for url: URL) throws -> Data {
         do {
             return try SecurityScopedBookmark.makeBookmarkData(for: url)
@@ -292,11 +336,23 @@ public actor PhotoLibraryService {
     /// Mints a brand-new `LibraryFolder` for a candidate the preflight found
     /// no relationship to any known library for.
     ///
-    /// Staged so a mid-way failure can never leave `access`/`libraries`
-    /// pointing at a source the persistent stores don't agree on (spec §7):
-    /// the bookmark is written first, the index second — an index failure
-    /// rolls the just-written bookmark back out — and only once both stores
-    /// agree does this touch the security scope or in-memory state at all.
+    /// Guards against a `LibraryID` collision before any mutation (spec §7):
+    /// even though the preflight found nothing matching, a drifted or
+    /// corrupted confirmed-ID record could in principle let two different
+    /// physical folders both claim the same `LibraryID` — this never
+    /// silently overwrites an existing `libraries` entry or bookmark record,
+    /// it rejects.
+    ///
+    /// Otherwise staged so a mid-way failure can never leave
+    /// `access`/`libraries` pointing at a source the persistent stores don't
+    /// agree on: for a folder with no manifest yet, the manifest is written
+    /// *before* anything is persisted, so a successful write and the
+    /// confirmed ID it establishes land in the exact same bookmark save —
+    /// never a separate best-effort backfill that could leave the disk
+    /// manifest and the local registry disagreeing. The bookmark is written
+    /// first, the index second — an index failure rolls the just-written
+    /// bookmark back out — and only once both stores agree does this touch
+    /// the security scope or in-memory state at all.
     private func createNewLibrary(
         at url: URL,
         displayName: String?,
@@ -305,8 +361,22 @@ public actor PhotoLibraryService {
         candidateIdentity: LibrarySourceIdentity,
         repository: FileSidecarRepository
     ) throws -> LibraryFolder {
-        let bookmarkData = try Self.makeBookmarkData(for: url)
         let libraryID = confirmedManifestID ?? LibraryID()
+
+        guard libraries[libraryID] == nil else {
+            throw LibraryError.manifestConflict(libraryID)
+        }
+        guard try bookmarkStore.load(libraryID: libraryID) == nil else {
+            throw LibraryError.manifestConflict(libraryID)
+        }
+
+        let bookmarkData = try Self.makeBookmarkData(for: url)
+
+        var confirmedID = confirmedManifestID
+        if confirmedID == nil, repository.isWritable,
+           (try? repository.write(manifest: LibraryManifest(libraryID: libraryID))) != nil {
+            confirmedID = libraryID
+        }
 
         let folder = LibraryFolder(
             id: libraryID,
@@ -324,7 +394,7 @@ public actor PhotoLibraryService {
             bookmarkData: bookmarkData,
             sourceKind: sourceKind,
             scanState: .idle,
-            confirmedManifestLibraryID: confirmedManifestID,
+            confirmedManifestLibraryID: confirmedID,
             resourceIdentifier: candidateIdentity.resourceIdentifier,
             volumeIdentifier: candidateIdentity.volumeIdentifier,
             rootFingerprint: candidateIdentity.rootFingerprint
@@ -342,19 +412,8 @@ public actor PhotoLibraryService {
 
         // COMMIT: only now touch the security scope and in-memory state,
         // now that both persistent stores agree.
-        access[libraryID] = ScopedFolderAccess(url: url)
+        access[libraryID] = folderAccessResolver.grant(url: url)
         libraries[libraryID] = folder
-
-        // Best-effort, as before: a failed manifest write leaves the folder
-        // fully usable, just without a portable identity yet. Backfilling
-        // `confirmedManifestLibraryID` only on a real, observed success
-        // keeps the stored record honest about what's actually on disk.
-        if confirmedManifestID == nil, repository.isWritable,
-           (try? repository.write(manifest: LibraryManifest(libraryID: libraryID))) != nil {
-            var confirmed = storedBookmark
-            confirmed.confirmedManifestLibraryID = libraryID
-            try? bookmarkStore.save(confirmed)
-        }
 
         return folder
     }
@@ -365,12 +424,22 @@ public actor PhotoLibraryService {
     /// branch and by `relink`; `displayName` is preserved when none is
     /// supplied, instead of being derived from the URL.
     ///
-    /// Staged identically to `createNewLibrary` (spec §7): bookmark, then
+    /// The baseline read must fail closed, not be swallowed into "no
+    /// previous bookmark" — that would make a later rollback *delete* a
+    /// perfectly good existing record instead of restoring it (spec §7).
+    /// Otherwise staged identically to `createNewLibrary`: bookmark, then
     /// index; a mid-way failure rolls the bookmark back to its previous
-    /// value (or removes it, if there wasn't one) and never touches the
-    /// security scope or in-memory state — so a failed focus/relink leaves
-    /// the old root, bookmark, index and access completely untouched, and
-    /// never opens a new security scope it would have to release.
+    /// value (or removes it, if there really wasn't one) and never touches
+    /// the security scope or in-memory state — so a failed focus/relink
+    /// leaves the old root, bookmark, index and access completely
+    /// untouched, and never opens a new security scope it would have to
+    /// release. If the rollback write itself also fails, the original
+    /// failure is still what's thrown (never silently swallowed) and
+    /// `access`/`libraries` remain the old, untouched values for the rest of
+    /// this run; the next `restoreLibraries()` call re-reads whichever
+    /// complete state the bookmark file (written atomically, so never torn)
+    /// actually ended up holding and re-syncs the index to match it, so a
+    /// restart always converges to one consistent, recognisable state.
     private func focusExistingLibrary(
         _ existing: LibraryFolder,
         at url: URL,
@@ -378,6 +447,8 @@ public actor PhotoLibraryService {
         candidateIdentity: LibrarySourceIdentity,
         repository: FileSidecarRepository
     ) throws -> LibraryFolder {
+        let previousStoredBookmark = try bookmarkStore.load(libraryID: existing.id)
+
         let bookmarkData = try Self.makeBookmarkData(for: url)
 
         var folder = existing
@@ -400,7 +471,6 @@ public actor PhotoLibraryService {
             volumeIdentifier: candidateIdentity.volumeIdentifier,
             rootFingerprint: candidateIdentity.rootFingerprint
         )
-        let previousStoredBookmark = try? bookmarkStore.load(libraryID: existing.id)
 
         try bookmarkStore.save(newStoredBookmark)
         do {
@@ -415,7 +485,7 @@ public actor PhotoLibraryService {
         }
 
         access[existing.id]?.stop()
-        access[existing.id] = ScopedFolderAccess(url: url)
+        access[existing.id] = folderAccessResolver.grant(url: url)
         libraries[existing.id] = folder
 
         return folder
@@ -429,11 +499,17 @@ public actor PhotoLibraryService {
     /// been confirmed. Live path/volume data is added only while the source
     /// is actually reachable right now, so ancestor/descendant detection
     /// never fires against an offline source's stale path.
-    private func identity(for folder: LibraryFolder) -> LibrarySourceIdentity {
-        let stored = try? bookmarkStore.load(libraryID: folder.id)
+    ///
+    /// Throws on a bookmark-store I/O or decode failure rather than
+    /// swallowing it (spec §7): a lookup that fails is not the same as a
+    /// source with no identity, and treating it as `.distinct` would let a
+    /// transient read glitch silently defeat overlap/conflict detection.
+    private func identity(for folder: LibraryFolder) throws -> LibrarySourceIdentity {
+        let stored = try bookmarkStore.load(libraryID: folder.id)
         var resourceIdentifier = stored?.resourceIdentifier
         var volumeIdentifier = stored?.volumeIdentifier
         var canonicalLivePath: String?
+        var caseSensitivity: PathCaseSensitivity = .unknown
 
         if folder.isOnline {
             let live = LibrarySourceIdentity.resolve(
@@ -443,6 +519,7 @@ public actor PhotoLibraryService {
             resourceIdentifier = resourceIdentifier ?? live.resourceIdentifier
             volumeIdentifier = volumeIdentifier ?? live.volumeIdentifier
             canonicalLivePath = live.canonicalLivePath
+            caseSensitivity = live.canonicalLivePathCaseSensitivity
         }
 
         return LibrarySourceIdentity(
@@ -450,7 +527,8 @@ public actor PhotoLibraryService {
             resourceIdentifier: resourceIdentifier,
             volumeIdentifier: volumeIdentifier,
             rootFingerprint: stored?.rootFingerprint,
-            canonicalLivePath: canonicalLivePath
+            canonicalLivePath: canonicalLivePath,
+            canonicalLivePathCaseSensitivity: caseSensitivity
         )
     }
 
@@ -476,7 +554,7 @@ public actor PhotoLibraryService {
             )
 
             do {
-                let scopedAccess = try ScopedFolderAccess(resolving: bookmark.bookmarkData)
+                let scopedAccess = try folderAccessResolver.resolve(bookmarkData: bookmark.bookmarkData)
                 access[bookmark.libraryID] = scopedAccess
 
                 if scopedAccess.isReachable {
@@ -485,19 +563,36 @@ public actor PhotoLibraryService {
                     folder.lastKnownPath = scopedAccess.url.path
                     folder.connectionState = repository.isWritable ? .ready : .readOnly
 
+                    // Read-only, safe reconciliation of the confirmed
+                    // manifest identity against what's actually on disk —
+                    // never a silent overwrite (spec §7).
+                    let probe = repository.probeManifest()
+                    let reconciledConfirmedID = Self.reconciledConfirmedManifestLibraryID(
+                        persisted: bookmark.confirmedManifestLibraryID,
+                        ownLibraryID: bookmark.libraryID,
+                        probe: probe
+                    )
+
+                    var updated = bookmark
+                    var needsSave = reconciledConfirmedID != bookmark.confirmedManifestLibraryID
+                    updated.confirmedManifestLibraryID = reconciledConfirmedID
+
                     // macOS asked for a fresh bookmark; write one back now while we
                     // still hold a live scope.
                     if scopedAccess.isStale,
                        let refreshed = try? SecurityScopedBookmark.makeBookmarkData(for: scopedAccess.url) {
                         let refreshedIdentity = LibrarySourceIdentity.resolve(
-                            url: scopedAccess.url, confirmedManifestLibraryID: bookmark.confirmedManifestLibraryID
+                            url: scopedAccess.url, confirmedManifestLibraryID: reconciledConfirmedID
                         )
-                        var updated = bookmark
                         updated.bookmarkData = refreshed
                         updated.lastKnownPath = scopedAccess.url.path
                         updated.resourceIdentifier = refreshedIdentity.resourceIdentifier
                         updated.volumeIdentifier = refreshedIdentity.volumeIdentifier
                         updated.rootFingerprint = refreshedIdentity.rootFingerprint
+                        needsSave = true
+                    }
+
+                    if needsSave {
                         try? bookmarkStore.save(updated)
                     }
                 } else {
@@ -550,7 +645,7 @@ public actor PhotoLibraryService {
             url: url, confirmedManifestLibraryID: confirmedManifestID
         )
 
-        let targetRelationship = identity(for: target).relationship(to: candidateIdentity)
+        let targetRelationship = try identity(for: target).relationship(to: candidateIdentity)
         guard targetRelationship == .same else {
             switch targetRelationship {
             case .ambiguous:
@@ -560,15 +655,25 @@ public actor PhotoLibraryService {
             }
         }
 
+        // Collected then decided with a fixed precedence, exactly like
+        // `preflightDecision` (spec §7): the specific rejection reported
+        // for the "other known libraries" check must not depend on
+        // `Dictionary` iteration order either.
+        var otherRelationships: [(other: LibraryFolder, relationship: SourceRelationship)] = []
         for other in libraries.values where other.id != libraryID {
-            switch identity(for: other).relationship(to: candidateIdentity) {
-            case .distinct:
-                continue
-            case .same, .ancestor, .descendant:
-                throw LibraryError.overlappingSource
-            case .conflict, .ambiguous:
-                throw LibraryError.ambiguousSource(other.id)
-            }
+            otherRelationships.append((other, try identity(for: other).relationship(to: candidateIdentity)))
+        }
+        otherRelationships.sort { $0.other.id.description < $1.other.id.description }
+
+        if otherRelationships.contains(where: {
+            $0.relationship == .same || $0.relationship == .ancestor || $0.relationship == .descendant
+        }) {
+            throw LibraryError.overlappingSource
+        }
+        if let ambiguous = otherRelationships.first(where: {
+            $0.relationship == .conflict || $0.relationship == .ambiguous
+        }) {
+            throw LibraryError.ambiguousSource(ambiguous.other.id)
         }
 
         return try focusExistingLibrary(

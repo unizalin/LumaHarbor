@@ -41,8 +41,14 @@ extension SidecarError: LocalizedError {
             return L10n.t(
                 "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings."
             )
-        case .corruptManifest:
-            return L10n.t("The damaged file has been set aside. Rescan the folder to rebuild it.")
+        case .corruptManifest(let quarantinedAt, _):
+            // A quarantining caller (a real scan/load) actually moved the
+            // file aside; a read-only identity preflight probe never does
+            // (spec §7) — the recovery text must not claim a move that
+            // didn't happen.
+            return quarantinedAt != nil
+                ? L10n.t("The damaged file has been set aside. Rescan the folder to rebuild it.")
+                : L10n.t("The file was left in place. Fix or remove the damaged manifest file, or choose a different folder, then try again.")
         case .libraryUnavailable:
             return L10n.t("Reconnect the drive, then retry.")
         case .notWritable:
@@ -196,6 +202,13 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
                     found: manifest.schemaVersion,
                     supported: LibraryManifest.currentSchemaVersion
                 )
+            }
+            // A schema version below 1 decodes structurally but is never a
+            // version this or any past build could have written — treat it
+            // as corrupt/invalid, the same as unparsable JSON, rather than
+            // trusting whatever `libraryID` happens to be inside it.
+            guard manifest.schemaVersion >= 1 else {
+                return .corrupt(reason: "Schema version \(manifest.schemaVersion) is not valid.")
             }
             return .valid(manifest)
         } catch {

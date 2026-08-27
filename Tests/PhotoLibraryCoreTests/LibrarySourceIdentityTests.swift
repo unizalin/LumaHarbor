@@ -12,14 +12,16 @@ final class LibrarySourceIdentityTests: XCTestCase {
         resourceIdentifier: Data? = nil,
         volumeIdentifier: String? = nil,
         rootFingerprint: RootFingerprint? = nil,
-        canonicalLivePath: String? = nil
+        canonicalLivePath: String? = nil,
+        canonicalLivePathCaseSensitivity: PathCaseSensitivity = .unknown
     ) -> LibrarySourceIdentity {
         LibrarySourceIdentity(
             confirmedManifestLibraryID: confirmedManifestLibraryID,
             resourceIdentifier: resourceIdentifier,
             volumeIdentifier: volumeIdentifier,
             rootFingerprint: rootFingerprint,
-            canonicalLivePath: canonicalLivePath
+            canonicalLivePath: canonicalLivePath,
+            canonicalLivePathCaseSensitivity: canonicalLivePathCaseSensitivity
         )
     }
 
@@ -41,11 +43,76 @@ final class LibrarySourceIdentityTests: XCTestCase {
         XCTAssertEqual(mine.relationship(to: theirs), .same)
     }
 
-    func testDifferentConfirmedManifestLibraryIDsAreConflictNotSame() {
+    /// Review fix round 2, Critical 1: two ordinary, independently-manifested
+    /// sources with no other relation to each other are simply `.distinct`
+    /// — a manifest-ID disagreement alone is not `.conflict`. `.conflict` is
+    /// reserved for when *physical* evidence (resource identifier or
+    /// canonical live path) says the same folder while the manifests
+    /// disagree — see `testDifferentConfirmedManifestLibraryIDsAreConflictEvenAtTheIdenticalLivePath`.
+    func testDifferentConfirmedManifestLibraryIDsWithNoPhysicalRelationAreDistinctNotConflict() {
         let mine = identity(confirmedManifestLibraryID: LibraryID())
         let theirs = identity(confirmedManifestLibraryID: LibraryID())
 
-        XCTAssertEqual(mine.relationship(to: theirs), .conflict)
+        XCTAssertEqual(mine.relationship(to: theirs), .distinct)
+    }
+
+    func testDifferentConfirmedManifestLibraryIDsOnDifferentVolumesAreDistinct() {
+        let mine = identity(
+            confirmedManifestLibraryID: LibraryID(),
+            volumeIdentifier: "aa",
+            canonicalLivePath: "/volumes/drivea/photos",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+        let theirs = identity(
+            confirmedManifestLibraryID: LibraryID(),
+            volumeIdentifier: "bb",
+            canonicalLivePath: "/volumes/driveb/photos",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+
+        XCTAssertEqual(mine.relationship(to: theirs), .distinct)
+    }
+
+    func testDifferentConfirmedManifestLibraryIDsOnTheSameVolumeAsSiblingsAreDistinct() {
+        let volume = "aa"
+        let mine = identity(
+            confirmedManifestLibraryID: LibraryID(),
+            resourceIdentifier: Data([0x01]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/volumes/ssd/photos/tripa",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+        let theirs = identity(
+            confirmedManifestLibraryID: LibraryID(),
+            resourceIdentifier: Data([0x02]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/volumes/ssd/photos/tripb",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+
+        XCTAssertEqual(mine.relationship(to: theirs), .distinct)
+    }
+
+    func testDifferentConfirmedManifestLibraryIDsWithAncestorLivePathIsOverlapNotConflict() {
+        // Spec §7 requirement: an ancestor/descendant relationship must
+        // still be reported as overlap (so the caller rejects it), even
+        // when the manifest IDs disagree — not escalated to `.conflict`.
+        let volume = "aa"
+        let parent = identity(
+            confirmedManifestLibraryID: LibraryID(),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/volumes/ssd/photos",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+        let child = identity(
+            confirmedManifestLibraryID: LibraryID(),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/volumes/ssd/photos/trip",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+
+        XCTAssertEqual(parent.relationship(to: child), .ancestor)
+        XCTAssertEqual(child.relationship(to: parent), .descendant)
     }
 
     func testDifferentConfirmedManifestLibraryIDsAreConflictEvenAtTheIdenticalLivePath() {
@@ -304,6 +371,47 @@ final class LibrarySourceIdentityTests: XCTestCase {
         XCTAssertEqual(original.volumeIdentifier, afterBookmarkRoundTrip.volumeIdentifier)
     }
 
+    /// Review fix round 2, Minor: canonicalization of the platform's opaque
+    /// resource/volume identifiers must fail closed (`nil`, never a
+    /// fabricated stand-in) when a provider can't supply `Data`-backed
+    /// values — exercised through `resolve()`'s real injectable seam
+    /// (`ResourceIdentityResolving`), not a hand-built `LibrarySourceIdentity`.
+    private struct ProviderShapedResourceIdentityResolver: ResourceIdentityResolving {
+        func resolvedIdentity(for url: URL) -> ResolvedResourceIdentity? {
+            // A Files-provider-like lookup that resolves successfully but
+            // has no stable, `Data`-backed identifier to offer at all — the
+            // opposite of the real, `Data`-backed system resolver.
+            ResolvedResourceIdentity(fileResourceIdentifier: nil, volumeIdentifier: nil, caseSensitivity: .unknown)
+        }
+    }
+
+    func testResolveWithANonDataProviderShapedFixtureFailsClosedRatherThanFabricatingIdentity() throws {
+        let tempDirectory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let resolved = LibrarySourceIdentity.resolve(
+            url: tempDirectory,
+            confirmedManifestLibraryID: nil,
+            resourceIdentityResolver: ProviderShapedResourceIdentityResolver()
+        )
+
+        XCTAssertNil(resolved.resourceIdentifier, "No Data-backed identifier was available; must never be invented")
+        XCTAssertNil(resolved.volumeIdentifier)
+        // Best-effort from whatever *did* resolve — the live path and
+        // bounded fingerprint are still populated from the real directory.
+        XCTAssertNotNil(resolved.canonicalLivePath)
+        XCTAssertNotNil(resolved.rootFingerprint)
+
+        let other = LibrarySourceIdentity.resolve(
+            url: tempDirectory,
+            confirmedManifestLibraryID: nil,
+            resourceIdentityResolver: ProviderShapedResourceIdentityResolver()
+        )
+        // Same fingerprint (the same real, empty directory), but no volume
+        // at all: `.ambiguous`, never a fabricated `.same`.
+        XCTAssertEqual(resolved.relationship(to: other), .ambiguous)
+    }
+
     /// Item 7 of the required regression coverage: a `RootFingerprint`
     /// recovered from a real `StoredBookmark` JSON round-trip (not just a
     /// hand-built value) still functions in `relationship(to:)`, and two
@@ -405,21 +513,56 @@ final class LibrarySourceIdentityTests: XCTestCase {
     func testCaseVariantSiblingFoldersOnACaseSensitiveVolumeAreNotMergedByLowercasing() {
         // Pure unit-level guard for the case-sensitive branch, independent of
         // this host's actual volume: two genuinely distinct, differently-cased
-        // canonical paths (as `resolve` would only ever produce on a
-        // case-sensitive volume, where it does not lowercase) must not compare
-        // equal.
+        // canonical paths, both sides *confirmed* case-sensitive, must not
+        // compare equal.
         let caseSensitiveVolume = "cs-volume"
         let lower = identity(
             resourceIdentifier: Data([0x01]),
             volumeIdentifier: caseSensitiveVolume,
-            canonicalLivePath: "/Volumes/SSD/trip"
+            canonicalLivePath: "/Volumes/SSD/trip",
+            canonicalLivePathCaseSensitivity: .sensitive
         )
         let upper = identity(
             resourceIdentifier: Data([0x02]),
             volumeIdentifier: caseSensitiveVolume,
-            canonicalLivePath: "/Volumes/SSD/Trip"
+            canonicalLivePath: "/Volumes/SSD/Trip",
+            canonicalLivePathCaseSensitivity: .sensitive
         )
 
         XCTAssertEqual(lower.relationship(to: upper), .distinct)
+    }
+
+    /// Review fix round 2, Important 2: an *unknown* case sensitivity on
+    /// either side must never be folded into "insensitive" and declared
+    /// `.same` — that could silently merge two genuinely distinct folders on
+    /// a case-sensitive volume this build simply couldn't get an answer
+    /// from. It must also never be folded into "sensitive" and declared
+    /// `.distinct` — that could miss a real alias. The only safe answer is
+    /// `.ambiguous`.
+    func testCaseVariantPathsWithUnknownSensitivityOnEitherSideAreAmbiguous() {
+        let volume = "unknown-sensitivity-volume"
+        let known = identity(
+            resourceIdentifier: Data([0x01]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/Provider/trip",
+            canonicalLivePathCaseSensitivity: .insensitive
+        )
+        let unknown = identity(
+            resourceIdentifier: Data([0x02]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/Provider/Trip",
+            canonicalLivePathCaseSensitivity: .unknown
+        )
+
+        XCTAssertEqual(known.relationship(to: unknown), .ambiguous)
+        XCTAssertEqual(unknown.relationship(to: known), .ambiguous)
+
+        let bothUnknown = identity(
+            resourceIdentifier: Data([0x03]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/Provider/TRIP",
+            canonicalLivePathCaseSensitivity: .unknown
+        )
+        XCTAssertEqual(unknown.relationship(to: bothUnknown), .ambiguous)
     }
 }
