@@ -110,3 +110,11 @@ All above are GREEN in `LibraryRegistryTransactionTests` (11/11).
   another mutation.
 - The index mutation hook is internal and exists only as a deterministic test
   seam; production never installs it.
+
+## Pre-review self-audit fix
+
+After the first commit, a new RED showed that `resetRebuildableLocalData()`
+could close/delete SQLite while an unrecovered journal was pending. The reset
+now runs the same fail-closed recovery gate before touching the index. The
+pending-recovery matrix directly covers reset along with add/focus/relink/
+restore/scan/edit, and the focused test is GREEN.
