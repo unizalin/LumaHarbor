@@ -159,6 +159,7 @@ public actor PhotoLibraryService {
     /// is verifiable deterministically, without a real removable volume.
     private let folderAccessResolver: any FolderAccessResolving
     private let resourceIdentityResolver: any ResourceIdentityResolving
+    private let bookmarkDataCreator: any BookmarkDataCreating
 
     /// How many `performScan` calls are currently running, across every
     /// library. Incremented at the top of `performScan` and decremented via
@@ -181,7 +182,8 @@ public actor PhotoLibraryService {
         decoder: any RawDecoding = CoreImageRawDecoder(),
         scanner: FolderScanner = FolderScanner(),
         folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
-        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver(),
+        bookmarkDataCreator: any BookmarkDataCreating = SystemBookmarkDataCreator()
     ) throws {
         try self.init(
             locations: locations,
@@ -190,6 +192,7 @@ public actor PhotoLibraryService {
             scanner: scanner,
             folderAccessResolver: folderAccessResolver,
             resourceIdentityResolver: resourceIdentityResolver,
+            bookmarkDataCreator: bookmarkDataCreator,
             registryTransactionStore: nil
         )
     }
@@ -201,6 +204,7 @@ public actor PhotoLibraryService {
         scanner: FolderScanner = FolderScanner(),
         folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
         resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver(),
+        bookmarkDataCreator: any BookmarkDataCreating = SystemBookmarkDataCreator(),
         registryTransactionStore: (any RegistryTransactionStoring)?
     ) throws {
         try locations.createDirectories()
@@ -214,6 +218,7 @@ public actor PhotoLibraryService {
         self.scanner = scanner
         self.folderAccessResolver = folderAccessResolver
         self.resourceIdentityResolver = resourceIdentityResolver
+        self.bookmarkDataCreator = bookmarkDataCreator
     }
 
     public var indexStore: PhotoIndexStore { index }
@@ -393,9 +398,9 @@ public actor PhotoLibraryService {
         }
     }
 
-    private static func makeBookmarkData(for url: URL) throws -> Data {
+    private func makeBookmarkData(for url: URL) throws -> Data {
         do {
-            return try SecurityScopedBookmark.makeBookmarkData(for: url)
+            return try bookmarkDataCreator.makeBookmarkData(for: url)
         } catch let error as BookmarkError {
             throw LibraryError.bookmark(error)
         }
@@ -442,7 +447,7 @@ public actor PhotoLibraryService {
             throw LibraryError.manifestConflict(libraryID)
         }
 
-        let bookmarkData = try Self.makeBookmarkData(for: url)
+        let bookmarkData = try makeBookmarkData(for: url)
 
         var confirmedID = confirmedManifestID
         if confirmedID == nil, repository.isWritable,
@@ -514,7 +519,7 @@ public actor PhotoLibraryService {
     ) throws -> LibraryFolder {
         let previousStoredBookmark = try bookmarkStore.load(libraryID: existing.id)
 
-        let bookmarkData = try Self.makeBookmarkData(for: url)
+        let bookmarkData = try makeBookmarkData(for: url)
 
         var folder = existing
         folder.rootURL = url
@@ -785,7 +790,7 @@ public actor PhotoLibraryService {
 
             if stagedAccess.isStale {
                 do {
-                    let refreshed = try Self.makeBookmarkData(for: stagedAccess.url)
+                    let refreshed = try makeBookmarkData(for: stagedAccess.url)
                     let refreshedIdentity = LibrarySourceIdentity.resolve(
                         url: stagedAccess.url,
                         confirmedManifestLibraryID: confirmedID,
@@ -798,11 +803,19 @@ public actor PhotoLibraryService {
                     updatedBookmark.rootFingerprint = refreshedIdentity.rootFingerprint
                     requiresSave = true
                 } catch {
+                    // `folder` was already re-pointed at the newly resolved
+                    // (uncommitted) root above, and no registry transaction
+                    // was ever prepared for this failure to roll back. Rebuild
+                    // the blocked result from the last known-good durable
+                    // projection so the uncommitted root can never reach
+                    // SQLite or actor-visible state.
+                    folder = try index.library(id: folder.id) ?? persistedFolder
                     folder.connectionState = .needsAuthorization
                     folder = try commitDisconnectedRestore(
                         folder: folder,
                         diagnostic: .persistenceFailure,
-                        stagedAccess: stagedAccess
+                        stagedAccess: stagedAccess,
+                        persistLibraryProjection: false
                     )
                     restored.append(folder)
                     continue

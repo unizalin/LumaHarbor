@@ -12,12 +12,14 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
     private func makeService(
         supportName: String = "AppSupport",
         bookmarkStore: (any BookmarkStoring)? = nil,
-        folderAccessResolver: (any FolderAccessResolving)? = nil
+        folderAccessResolver: (any FolderAccessResolving)? = nil,
+        bookmarkDataCreator: (any BookmarkDataCreating)? = nil
     ) throws -> PhotoLibraryService {
         try PhotoLibraryService(
             locations: ApplicationSupportLocations(baseURL: try makeSubdirectory(supportName)),
             bookmarkStore: bookmarkStore,
-            folderAccessResolver: folderAccessResolver ?? SystemFolderAccessResolver()
+            folderAccessResolver: folderAccessResolver ?? SystemFolderAccessResolver(),
+            bookmarkDataCreator: bookmarkDataCreator ?? SystemBookmarkDataCreator()
         )
     }
 
@@ -87,6 +89,30 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
 
     private enum FakeFolderAccessError: Error {
         case resolveFailed
+    }
+
+    /// A `BookmarkDataCreating` wrapper that lets a test make refreshed
+    /// bookmark-data creation fail deterministically for one specific URL,
+    /// without depending on the real security-scoped bookmark API's own
+    /// (unreliably reproducible) failure modes.
+    private final class FakeBookmarkDataCreator: BookmarkDataCreating, @unchecked Sendable {
+        private let wrapped = SystemBookmarkDataCreator()
+        private let lock = NSLock()
+        private var failingURLs: Set<URL> = []
+
+        func failBookmarkCreation(for url: URL) {
+            lock.lock(); failingURLs.insert(url); lock.unlock()
+        }
+
+        func makeBookmarkData(for url: URL) throws -> Data {
+            lock.lock()
+            let shouldFail = failingURLs.contains(url)
+            lock.unlock()
+            if shouldFail {
+                throw BookmarkError.couldNotCreate(path: url.path, reason: "injected test failure")
+            }
+            return try wrapped.makeBookmarkData(for: url)
+        }
     }
 
     private final class FakeFolderAccessHandle: FolderAccessHandle, @unchecked Sendable {
@@ -986,5 +1012,100 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(removed.resolver.createdHandles[0].stopCallCount, 1)
         let removedKnownCount = await removed.service.knownLibraries().count
         XCTAssertEqual(removedKnownCount, 0)
+    }
+
+    /// Independent review fix round 2: a stale bookmark resolves from the old
+    /// durable root A to a reachable root B with the identical manifest
+    /// identity, but *creating refreshed bookmark data for B itself fails* —
+    /// before any registry transaction is ever prepared, so there is nothing
+    /// for a journal to roll back. The fix must rebuild the blocked result
+    /// from the last known-good durable projection (A) instead of the
+    /// already-repointed-at-B in-memory `folder`, so B can never reach SQLite,
+    /// actor memory, or the bookmark record.
+    func testStaleBookmarkDataCreationFailureBeforeJournalPreparePreservesOldDurableState() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let bookmarkDataCreator = FakeBookmarkDataCreator()
+        let bookmarkStore = FileBookmarkStore(directoryURL: try makeSubdirectory("Bookmarks"))
+        let locations = ApplicationSupportLocations(baseURL: try makeSubdirectory("AppSupport"))
+        let service = try PhotoLibraryService(
+            locations: locations,
+            bookmarkStore: bookmarkStore,
+            folderAccessResolver: resolver,
+            bookmarkDataCreator: bookmarkDataCreator
+        )
+
+        let libraryID = LibraryID()
+        let rootA = try makeSubdirectory("RootA")
+        try FileSidecarRepository(libraryRootURL: rootA)
+            .write(manifest: LibraryManifest(libraryID: libraryID))
+
+        let token = "stale-creation-failure-token"
+        resolver.setCanned(.init(url: rootA), forToken: token)
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Stale Creation Failure",
+            lastKnownPath: rootA.path,
+            bookmarkData: resolver.makeBookmarkData(token: token),
+            confirmedManifestLibraryID: libraryID
+        ))
+
+        // Restore once so access ownership at A is real, not synthetic.
+        _ = try await service.restoreLibraries()
+        let indexStore = await service.indexStore
+        let oldBookmark = try XCTUnwrap(bookmarkStore.load(libraryID: libraryID))
+        let oldIndexedFolder = try XCTUnwrap(indexStore.library(id: libraryID))
+        XCTAssertEqual(resolver.createdHandles.count, 1)
+        XCTAssertEqual(resolver.createdHandles[0].stopCallCount, 0)
+
+        // Root B claims the identical manifest identity, so identity
+        // validation accepts it; the resolver reports it stale, and
+        // bookmark-data creation for B specifically is made to fail.
+        let rootB = try makeSubdirectory("RootB")
+        try FileSidecarRepository(libraryRootURL: rootB)
+            .write(manifest: LibraryManifest(libraryID: libraryID))
+        resolver.setCanned(.init(url: rootB, isStale: true), forToken: token)
+        bookmarkDataCreator.failBookmarkCreation(for: rootB)
+
+        let restored = try await service.restoreLibraries()
+        let folder = try XCTUnwrap(restored.first)
+
+        XCTAssertEqual(folder.connectionState, .needsAuthorization)
+        XCTAssertEqual(folder.rootURL, rootA, "The blocked result must stay based on old root A, never B")
+        let diagnostic = await service.restoreDiagnostic(for: libraryID)
+        XCTAssertEqual(diagnostic, .persistenceFailure)
+
+        XCTAssertEqual(
+            try bookmarkStore.load(libraryID: libraryID), oldBookmark,
+            "The bookmark record must remain exactly the old A record"
+        )
+        XCTAssertEqual(
+            try indexStore.library(id: libraryID), oldIndexedFolder,
+            "SQLite must remain exactly the old A projection; B must never be written"
+        )
+
+        XCTAssertEqual(resolver.createdHandles.count, 2)
+        XCTAssertEqual(
+            resolver.createdHandles[0].stopCallCount, 1,
+            "The previously retained A access must stop exactly once"
+        )
+        XCTAssertEqual(
+            resolver.createdHandles[1].stopCallCount, 1,
+            "The staged B access must stop exactly once"
+        )
+
+        let journalStore = FileRegistryTransactionStore(
+            directoryURL: locations.registryTransactionsDirectoryURL
+        )
+        XCTAssertNil(
+            try journalStore.load(),
+            "No journal may exist: failure occurred before prepare was ever reached"
+        )
+
+        let rootAManifest = FileSidecarRepository(libraryRootURL: rootA).probeManifest()
+        if case .valid(let manifest) = rootAManifest {
+            XCTAssertEqual(manifest.libraryID, libraryID, "Source manifests must remain untouched")
+        } else {
+            XCTFail("Root A's manifest must remain a valid, unchanged manifest")
+        }
     }
 }

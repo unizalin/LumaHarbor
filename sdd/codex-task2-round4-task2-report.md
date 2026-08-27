@@ -158,3 +158,143 @@ failed against `9842b0e`. GREEN: `LibraryRegistryTransactionTests` plus
 Post-fix verification: full `swift test` executes 965 tests with 9 skipped and
 0 failures; strict-concurrency warnings-as-errors build and `git diff --check`
 pass.
+
+---
+
+## Independent review fix round 2 — 2026-08-27
+
+### Status
+
+DONE
+
+- Starting HEAD: `60f270125fedc32da92d33851ad8fd015c7399d0`
+- Commit subject: `fix: preserve durable restore state when bookmark refresh creation fails`
+- Durable transaction journal redesign, Task 2 reimplementation, and product
+  Task 3 were not entered. The three untracked handoff documents
+  (`sdd/codex-task2-round4-task1-brief.md`, `sdd/codex-task2-round4-task2-brief.md`,
+  `sdd/lumaharbor-task2-claude-handoff.md`) were left exactly as found.
+
+### Remaining defect fixed
+
+In `PhotoLibraryService.restoreLibraries()`, when a stale bookmark resolved
+from old durable root A to a new reachable root B, the working `folder`
+projection was already re-pointed at B (`folder.rootURL`/`folder.lastKnownPath`
+set from `stagedAccess.url`) *before* the stale-refresh branch attempted to
+create refreshed bookmark data for B. If that bookmark-data creation itself
+threw — a failure that occurs strictly before any registry transaction is
+prepared, so there is no journal to roll back — the catch block still called
+`commitDisconnectedRestore` with that already-B-pointing `folder` and its
+default `persistLibraryProjection: true`. The bookmark store correctly stayed
+at A, but SQLite (and actor-visible state) was overwritten with B, producing
+exactly the same kind of half-updated durable registry the round 1 journal
+fix was meant to prevent — just one step earlier, outside the journal's
+coverage.
+
+### Design delivered
+
+- Added `BookmarkDataCreating` (`Sources/PhotoLibraryCore/Access/SecurityScopedBookmark.swift`):
+  a minimal `Sendable` protocol seam over creating security-scoped bookmark
+  data, with `SystemBookmarkDataCreator` as the production default that calls
+  `SecurityScopedBookmark.makeBookmarkData(for:)`. `PhotoLibraryService` now
+  takes a `bookmarkDataCreator: any BookmarkDataCreating = SystemBookmarkDataCreator()`
+  dependency (both the public and internal initializers), and the previously
+  `private static func makeBookmarkData(for:)` became an instance method
+  routed through this dependency. All three call sites (`createNewLibrary`,
+  `focusExistingLibrary`, and the stale-refresh branch of `restoreLibraries`)
+  now go through the same seam — none was left on a separate static helper.
+- Fixed the stale-refresh bookmark-data-creation catch block in
+  `restoreLibraries()`: instead of committing the already-mutated (B-pointing)
+  `folder`, it now rebuilds the blocked result from the last known-good
+  durable projection — `index.library(id: folder.id)` when present, otherwise
+  `persistedFolder` (the projection derived from the persisted bookmark,
+  captured before any mutation) — and calls `commitDisconnectedRestore` with
+  `persistLibraryProjection: false`, so B is never written to SQLite and
+  never exposed as committed actor state. No `try?` was introduced; the
+  `index.library(id:)` read propagates like every other index read in this
+  function.
+
+### Required RED test
+
+Added `testStaleBookmarkDataCreationFailureBeforeJournalPreparePreservesOldDurableState`
+in `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`, plus a
+`FakeBookmarkDataCreator` test double that fails bookmark-data creation
+deterministically for one selected URL (production always calls the real API
+for every other URL). The test:
+
+1. Establishes root A with a durable bookmark and SQLite projection, and
+   restores it successfully once first so access ownership is real, not
+   synthetic.
+2. Creates root B with the identical valid manifest identity.
+3. Makes the resolver report B as stale and reachable.
+4. Injects bookmark-data-creation failure specifically for B.
+5. Calls `restoreLibraries()` again and asserts: `.needsAuthorization` with
+   `.persistenceFailure`; the returned folder's `rootURL` is exactly A; the
+   bookmark record on disk is byte-for-byte the old A record; the SQLite
+   library projection is exactly the old A projection (no B path anywhere);
+   the previously retained A access handle and the newly staged B access
+   handle each stop exactly once; no pending registry transaction journal
+   exists (failure occurred before prepare); and root A's on-disk manifest is
+   unchanged.
+
+### TDD evidence
+
+1. RED
+   - Command: `swift test --filter 'LibrarySourceRecoveryTests.testStaleBookmarkDataCreationFailureBeforeJournalPreparePreservesOldDurableState'`
+   - Run with the `BookmarkDataCreating` seam wired in but the
+     `restoreLibraries()` catch-block fix *not yet applied* (verified by
+     temporarily reverting only that one catch block, keeping the seam so the
+     test could compile and exercise the actual production code path).
+   - Result: 1 test, 2 expected failures — both directly showing the A/B
+     divergence: the blocked folder's `rootURL` was root B instead of root A,
+     and the SQLite library projection was the B-rooted `LibraryFolder`
+     (`connectionState: .ready`, B's `rootURL`/`lastKnownPath`) instead of the
+     old A projection.
+
+2. GREEN
+   - Reapplied the catch-block fix.
+   - Same command: 1 test, 0 failures.
+
+### Verification
+
+- `swift test --filter 'LibrarySourceRecoveryTests'`
+  - PASS: 16 tests, 0 failures.
+- `swift test --filter 'LibraryRegistryTransactionTests|LibrarySourceRecoveryTests'`
+  - PASS: 30 tests, 0 failures.
+- `swift test --filter 'LibrarySource(Identity|Lifecycle|Recovery)Tests|FileBookmarkStoreTests|PhotoIndexStoreTests'`
+  - PASS: 110 tests, 0 failures.
+- `swift test --filter 'RelinkResolverTests|LibraryLifecycleTests'`
+  - PASS: 26 tests, 0 failures.
+- `swift test --filter PhotoLibraryCoreTests`
+  - PASS: 422 tests, 0 failures. (A first attempt at this exact command hung
+    for ~40 minutes with near-zero CPU usage, blocked inside the pre-existing,
+    unmodified `PendingLeaseSubprocessTests.testAProcessKilledWithSIGKILLReleasesItsLeaseForReconciliation`
+    at `Process.waitUntilExit()` after a `SIGKILL` — confirmed via `sample` on
+    the stuck `xctest` process. That single test passed in 0.08s when run in
+    isolation immediately afterward, and the full filtered re-run above
+    completed cleanly in 2.7s, so this was a one-off sandbox resource-
+    contention flake unrelated to this change, not a regression: the file is
+    untouched by this fix and its own history predates it.)
+- `swift test` (full suite)
+  - PASS: 966 tests, 9 skipped, 0 failures (up from 965 at the prior HEAD —
+    the one new test added here).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  - PASS: exit code 0.
+- `git diff --check`
+  - PASS: no whitespace errors.
+- `git status --short --branch`
+  - Only the three expected pre-existing untracked handoff documents plus
+    this change's tracked edits; nothing else.
+
+### Changed files
+
+- `Sources/PhotoLibraryCore/Access/SecurityScopedBookmark.swift`
+- `Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`
+- `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`
+- `sdd/codex-task2-round4-task2-report.md`
+
+### Concerns
+
+None within this review-fix scope. The full-suite hang described above is
+worth Codex/CI keeping an eye on if it recurs, but it reproduced as a clean
+pass twice in isolation/re-run and touches subprocess/lease code this fix
+never modified.
