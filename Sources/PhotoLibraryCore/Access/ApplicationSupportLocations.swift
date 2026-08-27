@@ -6,6 +6,7 @@ import Foundation
 ///   Application Support/LumaHarbor/
 ///   ├─ library.sqlite
 ///   ├─ bookmarks/
+///   ├─ registry-transactions/
 ///   └─ cache/{thumbnails,previews}
 ///
 /// Everything under here is rebuildable from the SSD, and the bookmark folder is
@@ -20,6 +21,13 @@ public struct ApplicationSupportLocations: Sendable, Equatable {
     public var databaseURL: URL { baseURL.appendingPathComponent("library.sqlite") }
     public var bookmarksDirectoryURL: URL {
         baseURL.appendingPathComponent("bookmarks", isDirectory: true)
+    }
+    /// Crash-recovery evidence for local source-registry mutations. Unlike
+    /// SQLite and caches, this is not rebuildable until its pending rollback
+    /// has completed, so `removeRebuildableData()` deliberately leaves it in
+    /// place.
+    public var registryTransactionsDirectoryURL: URL {
+        baseURL.appendingPathComponent("registry-transactions", isDirectory: true)
     }
     public var cacheDirectoryURL: URL {
         baseURL.appendingPathComponent("cache", isDirectory: true)
@@ -65,7 +73,14 @@ public struct ApplicationSupportLocations: Sendable, Equatable {
     }
 
     public func createDirectories(using fileManager: FileManager = .default) throws {
-        for url in [baseURL, bookmarksDirectoryURL, thumbnailCacheURL, previewCacheURL, presetsDirectoryURL] {
+        for url in [
+            baseURL,
+            bookmarksDirectoryURL,
+            registryTransactionsDirectoryURL,
+            thumbnailCacheURL,
+            previewCacheURL,
+            presetsDirectoryURL
+        ] {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
