@@ -4,12 +4,14 @@ import Foundation
 ///
 /// Only `.same` may reuse an existing `LibraryID`; `.ancestor`/`.descendant`
 /// must reject the add outright, before any mutation, so the same file is
-/// never scanned under two sources. `.conflict` — two sources whose manifests
-/// carry different confirmed `LibraryID`s but otherwise look like the same
-/// physical folder — is a stronger, terminal disagreement, never downgraded
-/// to `.same` by a matching path or resource identifier. `.ambiguous` must
-/// never auto-relink or auto-reuse — it exists purely so a caller can ask the
-/// user to confirm.
+/// never scanned under two sources. `.conflict` is reserved for physical
+/// evidence (a matching resource identifier or canonical live path) that
+/// says two sources are the same folder while their confirmed manifest
+/// `LibraryID`s actively disagree — a genuine contradiction, never silently
+/// resolved either way. Two sources that simply each carry their own,
+/// different, otherwise-unrelated manifest `LibraryID` are ordinary
+/// `.distinct` sources, not a conflict. `.ambiguous` must never auto-relink
+/// or auto-reuse — it exists purely so a caller can ask the user to confirm.
 public enum SourceRelationship: Sendable, Equatable {
     case same
     /// The known source contains the candidate.
@@ -18,7 +20,8 @@ public enum SourceRelationship: Sendable, Equatable {
     case descendant
     case distinct
     case ambiguous
-    /// Both sides have a confirmed manifest `LibraryID`, and they disagree.
+    /// Physical evidence indicates the same folder, but confirmed manifest
+    /// `LibraryID`s disagree.
     case conflict
 }
 
@@ -39,6 +42,80 @@ public struct RootFingerprint: Sendable, Equatable, Codable {
     }
 }
 
+/// Whether a volume treats differently-cased paths as the same file.
+/// `.unknown` is a real, distinct state — not something that may be folded
+/// into `.insensitive` by default — because guessing wrong in either
+/// direction is unsafe: guessing `.insensitive` can silently merge two
+/// genuinely distinct folders, and guessing `.sensitive` can miss a real
+/// alias (spec §7).
+public enum PathCaseSensitivity: Sendable, Equatable {
+    case sensitive
+    case insensitive
+    case unknown
+}
+
+/// One URL's raw, opaque platform identity, decoupled from `Foundation`'s
+/// `URLResourceValues` so it can be fabricated in tests — including a
+/// "provider-shaped" fixture whose identifiers aren't `Data`-backed at all —
+/// without needing a real, case-configurable, mountable volume.
+public struct ResolvedResourceIdentity: Sendable, Equatable {
+    public var fileResourceIdentifier: Data?
+    public var volumeIdentifier: Data?
+    public var caseSensitivity: PathCaseSensitivity
+
+    public init(
+        fileResourceIdentifier: Data?,
+        volumeIdentifier: Data?,
+        caseSensitivity: PathCaseSensitivity
+    ) {
+        self.fileResourceIdentifier = fileResourceIdentifier
+        self.volumeIdentifier = volumeIdentifier
+        self.caseSensitivity = caseSensitivity
+    }
+}
+
+/// Seam over the platform's URL resource-value lookup (spec §7), so
+/// `LibrarySourceIdentity.resolve(...)` can be exercised deterministically
+/// against real directories with a controlled, injected answer — including
+/// the "case sensitivity unknown" branch a real local volume never actually
+/// produces — rather than only against whatever this host's real volumes
+/// happen to report.
+public protocol ResourceIdentityResolving: Sendable {
+    /// `nil` means the lookup itself failed entirely (an unreachable URL) —
+    /// distinct from a lookup that succeeded but found no usable
+    /// identifiers, which is a non-`nil` result with `nil` fields.
+    func resolvedIdentity(for url: URL) -> ResolvedResourceIdentity?
+}
+
+/// The real, platform-backed resolver. If the platform can't reliably
+/// canonicalize an identifier (a `fileResourceIdentifier`/`volumeIdentifier`
+/// that isn't `Data`-backed, or the lookup fails outright), this returns
+/// `nil` fields rather than fabricating something — callers must fail closed
+/// on a missing identity, never invent one (spec §7).
+public struct SystemResourceIdentityResolver: ResourceIdentityResolving, Sendable {
+    public init() {}
+
+    public func resolvedIdentity(for url: URL) -> ResolvedResourceIdentity? {
+        let target = url
+        guard let values = try? target.resourceValues(forKeys: [
+            .fileResourceIdentifierKey, .volumeIdentifierKey, .volumeSupportsCaseSensitiveNamesKey
+        ]) else {
+            return nil
+        }
+        let sensitivity: PathCaseSensitivity
+        switch values.volumeSupportsCaseSensitiveNames {
+        case true?: sensitivity = .sensitive
+        case false?: sensitivity = .insensitive
+        case nil: sensitivity = .unknown
+        }
+        return ResolvedResourceIdentity(
+            fileResourceIdentifier: values.fileResourceIdentifier as? Data,
+            volumeIdentifier: values.volumeIdentifier as? Data,
+            caseSensitivity: sensitivity
+        )
+    }
+}
+
 /// What makes one authorised photo source the same physical location as
 /// another, across relaunches, relinks and re-adds (spec §7).
 ///
@@ -47,10 +124,10 @@ public struct RootFingerprint: Sendable, Equatable, Codable {
 /// `confirmedManifestLibraryID` is portable data read from an actual manifest
 /// on the source itself — never assumed from an in-memory `LibraryID` — so
 /// all three survive being persisted and compared while the source is
-/// offline. `canonicalLivePath` is the one exception — it exists only to
-/// detect parent/child/alias overlap between two *currently reachable*
-/// sources at add-time, is never persisted, and never taken as identity on
-/// its own.
+/// offline. `canonicalLivePath`/`canonicalLivePathCaseSensitivity` are the
+/// one exception — they exist only to detect parent/child/alias overlap
+/// between two *currently reachable* sources at add-time, are never
+/// persisted, and are never taken as identity on their own.
 public struct LibrarySourceIdentity: Sendable, Equatable {
     /// A manifest `LibraryID` actually read from `.lumaharbor/library.json`
     /// via a read-only probe — never a locally-minted `LibraryID` standing in
@@ -64,22 +141,29 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
     /// (already-base64) JSON representation unchanged.
     public var volumeIdentifier: String?
     public var rootFingerprint: RootFingerprint?
-    /// Symlink-resolved, filesystem-case-normalized path — only ever
-    /// populated for a URL that was actually reachable at resolve time.
+    /// Symlink-resolved, natural-case standardized path — only ever
+    /// populated for a URL that was actually reachable and resolvable at
+    /// resolve time. Kept in its natural case; whether two natural-case-
+    /// differing paths should be treated as the same file is decided at
+    /// comparison time using `canonicalLivePathCaseSensitivity` from both
+    /// sides, never folded here.
     public var canonicalLivePath: String?
+    public var canonicalLivePathCaseSensitivity: PathCaseSensitivity
 
     public init(
         confirmedManifestLibraryID: LibraryID? = nil,
         resourceIdentifier: Data? = nil,
         volumeIdentifier: String? = nil,
         rootFingerprint: RootFingerprint? = nil,
-        canonicalLivePath: String? = nil
+        canonicalLivePath: String? = nil,
+        canonicalLivePathCaseSensitivity: PathCaseSensitivity = .unknown
     ) {
         self.confirmedManifestLibraryID = confirmedManifestLibraryID
         self.resourceIdentifier = resourceIdentifier
         self.volumeIdentifier = volumeIdentifier
         self.rootFingerprint = rootFingerprint
         self.canonicalLivePath = canonicalLivePath
+        self.canonicalLivePathCaseSensitivity = canonicalLivePathCaseSensitivity
     }
 
     /// Reads the stable, bookmark-resolvable identity components for a
@@ -95,32 +179,31 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
     /// alias).
     ///
     /// Every component is best-effort: a read-only provider that can't
-    /// supply `fileResourceIdentifierKey`/`volumeIdentifierKey` still gets a
-    /// usable identity built from whatever did resolve, falling through to
-    /// `rootFingerprint` alone — which `relationship(to:)` only ever treats
-    /// as grounds to ask, never to auto-match.
+    /// supply stable identifiers still gets a usable identity built from
+    /// whatever did resolve, falling through to `rootFingerprint` alone —
+    /// which `relationship(to:)` only ever treats as grounds to ask, never to
+    /// auto-match. `resourceIdentityResolver` is the seam a test uses to
+    /// exercise the "case sensitivity unknown" and "no stable identifier"
+    /// branches deterministically, without a real provider or a
+    /// case-configurable volume.
     public static func resolve(
         url: URL,
         confirmedManifestLibraryID: LibraryID?,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
     ) -> LibrarySourceIdentity {
         let canonicalURL = url.resolvingSymlinksInPath()
 
         var resourceIdentifier: Data?
         var volumeIdentifier: String?
         var canonicalLivePath: String?
-        if let values = try? canonicalURL.resourceValues(forKeys: [
-            .fileResourceIdentifierKey, .volumeIdentifierKey, .volumeSupportsCaseSensitiveNamesKey
-        ]) {
-            resourceIdentifier = values.fileResourceIdentifier as? Data
-            volumeIdentifier = (values.volumeIdentifier as? Data)?.base64EncodedString()
-            // Only a volume that actually reports itself case-sensitive is
-            // treated as one; an unknown answer is folded case-insensitively
-            // to the safe side, since that's the direction that catches an
-            // alias rather than missing it.
-            let isCaseSensitive = values.volumeSupportsCaseSensitiveNames ?? false
-            let standardizedPath = canonicalURL.standardizedFileURL.path
-            canonicalLivePath = isCaseSensitive ? standardizedPath : standardizedPath.lowercased()
+        var caseSensitivity: PathCaseSensitivity = .unknown
+
+        if let resolved = resourceIdentityResolver.resolvedIdentity(for: canonicalURL) {
+            resourceIdentifier = resolved.fileResourceIdentifier
+            volumeIdentifier = resolved.volumeIdentifier?.base64EncodedString()
+            caseSensitivity = resolved.caseSensitivity
+            canonicalLivePath = canonicalURL.standardizedFileURL.path
         }
 
         return LibrarySourceIdentity(
@@ -128,7 +211,8 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
             resourceIdentifier: resourceIdentifier,
             volumeIdentifier: volumeIdentifier,
             rootFingerprint: try? boundedRootFingerprint(of: canonicalURL, fileManager: fileManager),
-            canonicalLivePath: canonicalLivePath
+            canonicalLivePath: canonicalLivePath,
+            canonicalLivePathCaseSensitivity: caseSensitivity
         )
     }
 
@@ -156,32 +240,65 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
         )
     }
 
+    private enum ManifestComparison {
+        case same, conflicting, unknown
+    }
+
+    private func compareManifestIDs(with other: LibrarySourceIdentity) -> ManifestComparison {
+        guard let mine = confirmedManifestLibraryID, let theirs = other.confirmedManifestLibraryID else {
+            return .unknown
+        }
+        return mine == theirs ? .same : .conflicting
+    }
+
     /// Decides how `self` (an existing known source) relates to `other` (a
     /// freshly resolved candidate).
     ///
     /// Evidence priority, per spec §7:
-    /// 1. Both sides have a confirmed manifest `LibraryID`: equal is `.same`,
-    ///    unequal is `.conflict` — terminal either way, never downgraded by
-    ///    a matching path or resource identifier.
-    /// 2. A known, differing volume is always `.distinct`.
-    /// 3. On a confirmed *shared* volume, a matching resource identifier is
+    /// 1. Matching confirmed manifest `LibraryID`s on both sides is `.same`
+    ///    outright, regardless of path (an approved contract: the same
+    ///    portable manifest at a different path is still the same source).
+    /// 2. Disagreeing confirmed manifest `LibraryID`s never *by themselves*
+    ///    produce `.conflict` — two ordinary, independently-manifested
+    ///    sources are simply `.distinct`. Physical evidence is still
+    ///    evaluated below; only if *that* evidence says `.same` does the
+    ///    manifest disagreement escalate the result to `.conflict`.
+    /// 3. A known, differing volume is always `.distinct`.
+    /// 4. On a confirmed *shared* volume, a matching resource identifier is
     ///    `.same`; a missing volume on either side never lets a resource
     ///    identifier alone confirm `.same`.
-    /// 4. On a confirmed shared volume, reliable canonical live-path
-    ///    containment (symlinks resolved, case-normalized per volume) decides
-    ///    `.same`/`.ancestor`/`.descendant`/`.distinct`.
-    /// 5. A bounded fingerprint match is the last resort, and only ever
+    /// 5. On a confirmed shared volume, reliable canonical live-path
+    ///    containment (symlinks resolved) decides `.same`/`.ancestor`/
+    ///    `.descendant`/`.distinct`; a case-fold-only match is `.same` only
+    ///    when both sides confirm the volume is case-*insensitive*,
+    ///    `.distinct` only when both confirm case-*sensitive*, and
+    ///    `.ambiguous` whenever either side's case sensitivity is unknown.
+    /// 6. A bounded fingerprint match is the last resort, and only ever
     ///    yields `.ambiguous` — never `.same`, never `.distinct` outright.
-    /// 6. Anything left unresolved on a *known-shared* volume — no reliable
+    /// 7. Anything left unresolved on a *known-shared* volume — no reliable
     ///    live path on one/both sides, no fingerprint match either — fails
     ///    closed to `.ambiguous` rather than guessing `.distinct` on a volume
     ///    known to be shared. With no shared-volume evidence at all, `.distinct`
     ///    is the safe default.
     public func relationship(to other: LibrarySourceIdentity) -> SourceRelationship {
-        if let mine = confirmedManifestLibraryID, let theirs = other.confirmedManifestLibraryID {
-            return mine == theirs ? .same : .conflict
+        let manifestComparison = compareManifestIDs(with: other)
+        if manifestComparison == .same {
+            return .same
         }
 
+        let physical = physicalRelationship(to: other)
+        if physical == .same, manifestComparison == .conflicting {
+            // Physical evidence says the same folder; confirmed manifest
+            // identity actively disagrees. A genuine contradiction, never
+            // silently resolved either way.
+            return .conflict
+        }
+        return physical
+    }
+
+    /// `relationship(to:)` minus the manifest-ID comparison: purely
+    /// volume/resource/path/fingerprint evidence.
+    private func physicalRelationship(to other: LibrarySourceIdentity) -> SourceRelationship {
         if let myVolume = volumeIdentifier, let theirVolume = other.volumeIdentifier {
             guard myVolume == theirVolume else { return .distinct }
             return relationshipOnConfirmedSharedVolume(with: other)
@@ -202,7 +319,10 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
         }
 
         if let minePath = canonicalLivePath, let theirsPath = other.canonicalLivePath {
-            return Self.pathRelationship(mine: minePath, theirs: theirsPath)
+            return Self.pathRelationship(
+                mine: minePath, mineSensitivity: canonicalLivePathCaseSensitivity,
+                theirs: theirsPath, theirsSensitivity: other.canonicalLivePathCaseSensitivity
+            )
         }
 
         // Same volume confirmed, but no reliable live-path comparison was
@@ -218,8 +338,36 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
         return .ambiguous
     }
 
-    private static func pathRelationship(mine: String, theirs: String) -> SourceRelationship {
+    private static func pathRelationship(
+        mine: String, mineSensitivity: PathCaseSensitivity,
+        theirs: String, theirsSensitivity: PathCaseSensitivity
+    ) -> SourceRelationship {
         if mine == theirs { return .same }
+
+        if let containment = containmentRelationship(mine: mine, theirs: theirs) {
+            return containment
+        }
+
+        // Not exactly equal on their natural case, and not a containment
+        // relationship either. If folding case would make them coincide,
+        // whether that means `.same` or genuinely `.distinct` depends on
+        // this volume's case sensitivity — an `.unknown` answer on either
+        // side must never guess (spec §7): it could silently merge two
+        // real, distinct folders on a case-sensitive volume.
+        if mine.lowercased() == theirs.lowercased() {
+            if mineSensitivity == .insensitive, theirsSensitivity == .insensitive {
+                return .same
+            }
+            if mineSensitivity == .sensitive, theirsSensitivity == .sensitive {
+                return .distinct
+            }
+            return .ambiguous
+        }
+
+        return .distinct
+    }
+
+    private static func containmentRelationship(mine: String, theirs: String) -> SourceRelationship? {
         let separator: Character = "/"
         if mine.count < theirs.count,
            theirs.hasPrefix(mine),
@@ -231,6 +379,6 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
            mine[mine.index(mine.startIndex, offsetBy: theirs.count)] == separator {
             return .descendant
         }
-        return .distinct
+        return nil
     }
 }

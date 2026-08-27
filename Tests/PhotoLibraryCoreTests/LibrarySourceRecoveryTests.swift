@@ -1,0 +1,670 @@
+import XCTest
+@testable import PhotoLibraryCore
+
+/// Review fix round 2: `PhotoLibraryService`'s confirmed-manifest-ID
+/// reconciliation, `LibraryID` collision guard, staged-persistence durability
+/// under compound (forward *and* rollback) failure, and the injectable
+/// `FolderAccessResolving` seam that replaces `hdiutil`/a real removable
+/// volume for offline/needsAuthorization/stale-refresh/scope-pairing
+/// coverage.
+final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
+    private func makeService(
+        supportName: String = "AppSupport",
+        bookmarkStore: (any BookmarkStoring)? = nil,
+        folderAccessResolver: (any FolderAccessResolving)? = nil
+    ) throws -> PhotoLibraryService {
+        try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: try makeSubdirectory(supportName)),
+            bookmarkStore: bookmarkStore,
+            folderAccessResolver: folderAccessResolver ?? SystemFolderAccessResolver()
+        )
+    }
+
+    private func addLibrary(
+        _ service: PhotoLibraryService,
+        at url: URL,
+        displayName: String? = nil
+    ) async throws -> LibraryFolder {
+        do {
+            return try await service.addLibrary(at: url, displayName: displayName)
+        } catch let error as LibraryError {
+            if case .bookmark = error {
+                throw XCTSkip("This host can't create security-scoped bookmarks: \(error)")
+            }
+            throw error
+        }
+    }
+
+    // MARK: - Test doubles
+
+    private enum InjectedTestFailure: Error {
+        case saveFailed, loadFailed, removeFailed
+    }
+
+    /// A `BookmarkStoring` wrapper whose save/load/remove can each be made to
+    /// fail on demand via a predicate over the call's own arguments, so a
+    /// test can distinguish "the forward write" from "the rollback write" to
+    /// the same `LibraryID` without needing separate stores.
+    private final class FailableBookmarkStore: BookmarkStoring, @unchecked Sendable {
+        private let wrapped: FileBookmarkStore
+        private let lock = NSLock()
+        private var _saveInterceptor: (@Sendable (StoredBookmark) -> Bool)?
+        private var _loadInterceptor: (@Sendable (LibraryID) -> Bool)?
+        private var _removeInterceptor: (@Sendable (LibraryID) -> Bool)?
+
+        init(directoryURL: URL) {
+            wrapped = FileBookmarkStore(directoryURL: directoryURL)
+        }
+
+        var saveInterceptor: (@Sendable (StoredBookmark) -> Bool)? {
+            get { lock.lock(); defer { lock.unlock() }; return _saveInterceptor }
+            set { lock.lock(); _saveInterceptor = newValue; lock.unlock() }
+        }
+        var loadInterceptor: (@Sendable (LibraryID) -> Bool)? {
+            get { lock.lock(); defer { lock.unlock() }; return _loadInterceptor }
+            set { lock.lock(); _loadInterceptor = newValue; lock.unlock() }
+        }
+        var removeInterceptor: (@Sendable (LibraryID) -> Bool)? {
+            get { lock.lock(); defer { lock.unlock() }; return _removeInterceptor }
+            set { lock.lock(); _removeInterceptor = newValue; lock.unlock() }
+        }
+
+        func save(_ bookmark: StoredBookmark) throws {
+            if saveInterceptor?(bookmark) == true { throw InjectedTestFailure.saveFailed }
+            try wrapped.save(bookmark)
+        }
+        func loadAll() throws -> [StoredBookmark] { try wrapped.loadAll() }
+        func load(libraryID: LibraryID) throws -> StoredBookmark? {
+            if loadInterceptor?(libraryID) == true { throw InjectedTestFailure.loadFailed }
+            return try wrapped.load(libraryID: libraryID)
+        }
+        func remove(libraryID: LibraryID) throws {
+            if removeInterceptor?(libraryID) == true { throw InjectedTestFailure.removeFailed }
+            try wrapped.remove(libraryID: libraryID)
+        }
+    }
+
+    private enum FakeFolderAccessError: Error {
+        case resolveFailed
+    }
+
+    private final class FakeFolderAccessHandle: FolderAccessHandle, @unchecked Sendable {
+        let url: URL
+        let isStale: Bool
+        let isReachable: Bool
+        private let lock = NSLock()
+        private var _stopCallCount = 0
+        var stopCallCount: Int {
+            lock.lock(); defer { lock.unlock() }; return _stopCallCount
+        }
+
+        init(url: URL, isStale: Bool, isReachable: Bool) {
+            self.url = url
+            self.isStale = isStale
+            self.isReachable = isReachable
+        }
+
+        func stop() {
+            lock.lock(); defer { lock.unlock() }
+            _stopCallCount += 1
+        }
+    }
+
+    /// Deterministic stand-in for the real bookmark/access system: a test
+    /// configures exactly what `resolve(bookmarkData:)` should do for a
+    /// given opaque "token" (encoded as the bookmark's raw bytes), so
+    /// resolve-throws, resolve-succeeds-but-unreachable and stale-but-
+    /// reachable are all reproducible without real hardware.
+    private final class FakeFolderAccessResolver: FolderAccessResolving, @unchecked Sendable {
+        struct Canned {
+            var url: URL
+            var isStale: Bool = false
+            var isReachable: Bool = true
+        }
+
+        private let lock = NSLock()
+        private var cannedByToken: [String: Canned] = [:]
+        private var failTokens: Set<String> = []
+        private var _createdHandles: [FakeFolderAccessHandle] = []
+        private var _grantedHandles: [FakeFolderAccessHandle] = []
+
+        var createdHandles: [FakeFolderAccessHandle] {
+            lock.lock(); defer { lock.unlock() }; return _createdHandles
+        }
+        var grantedHandles: [FakeFolderAccessHandle] {
+            lock.lock(); defer { lock.unlock() }; return _grantedHandles
+        }
+
+        func makeBookmarkData(token: String) -> Data { Data(token.utf8) }
+
+        func setCanned(_ canned: Canned, forToken token: String) {
+            lock.lock(); defer { lock.unlock() }
+            cannedByToken[token] = canned
+        }
+
+        func setShouldFailResolve(forToken token: String) {
+            lock.lock(); defer { lock.unlock() }
+            failTokens.insert(token)
+        }
+
+        func resolve(bookmarkData: Data) throws -> any FolderAccessHandle {
+            let token = String(decoding: bookmarkData, as: UTF8.self)
+            lock.lock()
+            let shouldFail = failTokens.contains(token)
+            let canned = cannedByToken[token]
+            lock.unlock()
+
+            if shouldFail || canned == nil {
+                throw FakeFolderAccessError.resolveFailed
+            }
+            let handle = FakeFolderAccessHandle(
+                url: canned!.url, isStale: canned!.isStale, isReachable: canned!.isReachable
+            )
+            lock.lock(); _createdHandles.append(handle); lock.unlock()
+            return handle
+        }
+
+        func grant(url: URL) -> any FolderAccessHandle {
+            let handle = FakeFolderAccessHandle(url: url, isStale: false, isReachable: true)
+            lock.lock(); _grantedHandles.append(handle); lock.unlock()
+            return handle
+        }
+    }
+
+    // MARK: - Critical 2, item 1: reachable restore safely backfills an unconfirmed manifest ID
+
+    func testReachableRestoreSafelyBackfillsAnUnconfirmedManifestIDThatAgreesWithItself() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: bookmarkStore)
+        let root = try makeSubdirectory("Photos")
+        let libraryID = LibraryID()
+
+        // A manifest already agreeing with this library's own LibraryID,
+        // written directly (not through `addLibrary`) to simulate a legacy
+        // bookmark record that predates `confirmedManifestLibraryID`.
+        let manifestDirectory = root.appendingPathComponent(".lumaharbor", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try SidecarCoding.encode(LibraryManifest(libraryID: libraryID))
+            .write(to: manifestDirectory.appendingPathComponent("library.json"))
+
+        guard let bookmarkData = try? SecurityScopedBookmark.makeBookmarkData(for: root) else {
+            throw XCTSkip("This host can't create security-scoped bookmarks")
+        }
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Legacy",
+            lastKnownPath: root.path,
+            bookmarkData: bookmarkData
+            // confirmedManifestLibraryID defaults to nil.
+        ))
+
+        _ = try await service.restoreLibraries()
+
+        let reloaded = try XCTUnwrap(try bookmarkStore.load(libraryID: libraryID))
+        XCTAssertEqual(
+            reloaded.confirmedManifestLibraryID, libraryID,
+            "A self-consistent, actually-on-disk manifest must be safely adopted on restore"
+        )
+    }
+
+    func testReachableRestoreNeverOverwritesAnAlreadyConfirmedIDEvenIfDiskDisagrees() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: bookmarkStore)
+        let root = try makeSubdirectory("Photos")
+        let confirmedID = LibraryID()
+        let diskID = LibraryID()
+
+        let manifestDirectory = root.appendingPathComponent(".lumaharbor", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try SidecarCoding.encode(LibraryManifest(libraryID: diskID))
+            .write(to: manifestDirectory.appendingPathComponent("library.json"))
+
+        guard let bookmarkData = try? SecurityScopedBookmark.makeBookmarkData(for: root) else {
+            throw XCTSkip("This host can't create security-scoped bookmarks")
+        }
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: confirmedID,
+            displayName: "Already Confirmed",
+            lastKnownPath: root.path,
+            bookmarkData: bookmarkData,
+            confirmedManifestLibraryID: confirmedID
+        ))
+
+        _ = try await service.restoreLibraries()
+
+        let reloaded = try XCTUnwrap(try bookmarkStore.load(libraryID: confirmedID))
+        XCTAssertEqual(
+            reloaded.confirmedManifestLibraryID, confirmedID,
+            "An already-confirmed value must never be silently overwritten by a disagreeing disk value"
+        )
+    }
+
+    // MARK: - Critical 2, items 2-4: LibraryID collision, and restart-safe recovery
+
+    /// Item 2: the local registry never reports success while it disagrees
+    /// with what's actually on disk. A bookmark-save failure — even after
+    /// the manifest write itself already succeeded — must propagate, must
+    /// not register a library, and a retry at the same URL must still work.
+    func testManifestWriteSucceedsButBookmarkPersistenceFailureDoesNotReportSuccess() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: failableStore)
+        let root = try makeSubdirectory("Photos")
+
+        failableStore.saveInterceptor = { _ in true }
+        do {
+            _ = try await addLibrary(service, at: root)
+            XCTFail("Expected the bookmark save failure to propagate")
+        } catch {
+            // expected
+        }
+        failableStore.saveInterceptor = nil
+
+        let knownCount = await service.knownLibraries().count
+        XCTAssertEqual(knownCount, 0, "A failed add must never report success by registering a library")
+
+        // A retry at the same URL, now unblocked, must succeed cleanly and
+        // register exactly one library — the earlier failed attempt must
+        // not have left anything behind that blocks or duplicates it.
+        _ = try await addLibrary(service, at: root)
+        let afterRetryCount = await service.knownLibraries().count
+        XCTAssertEqual(afterRetryCount, 1)
+    }
+
+    /// Item 3: a candidate whose (confirmed, on-disk) manifest ID collides
+    /// with an already-registered `LibraryID` — while the preflight found no
+    /// `.same` relationship proving it's really that same source — must be
+    /// rejected with zero mutation, never silently overwrite the existing
+    /// registration. This simulates a drifted confirmed-ID record (the
+    /// existing library's own stored confirmation never completed) plus a
+    /// duplicated/corrupted manifest at an unrelated physical location.
+    func testCandidateManifestIDCollisionWithRegistryKeyIsRejectedWithZeroMutation() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: bookmarkStore)
+
+        let existingLibraryID = LibraryID()
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: existingLibraryID,
+            displayName: "Original",
+            lastKnownPath: "/Volumes/Original/Photos",
+            // Deliberately unresolvable: the existing library restores
+            // offline/needsAuthorization, so no live evidence can rescue
+            // the comparison either way.
+            bookmarkData: Data([0x00, 0x01])
+            // confirmedManifestLibraryID left nil: the drift.
+        ))
+        _ = try await service.restoreLibraries()
+
+        let unrelatedRoot = try makeSubdirectory("Unrelated")
+        let manifestDirectory = unrelatedRoot.appendingPathComponent(".lumaharbor", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try SidecarCoding.encode(LibraryManifest(libraryID: existingLibraryID))
+            .write(to: manifestDirectory.appendingPathComponent("library.json"))
+
+        do {
+            _ = try await service.addLibrary(at: unrelatedRoot)
+            XCTFail("Expected rejection on LibraryID collision")
+        } catch let error as LibraryError {
+            guard case .manifestConflict(let collidingID) = error else {
+                return XCTFail("Expected .manifestConflict, got \(error)")
+            }
+            XCTAssertEqual(collidingID, existingLibraryID)
+        }
+
+        let afterCount = await service.knownLibraries().count
+        XCTAssertEqual(afterCount, 1, "No new library may be minted for the unrelated folder")
+        let stillOriginal = await service.library(id: existingLibraryID)
+        XCTAssertEqual(stillOriginal?.lastKnownPath, "/Volumes/Original/Photos")
+    }
+
+    /// Item 4: the same collision scenario, replayed after a simulated
+    /// restart (a fresh `PhotoLibraryService`/bookmark-store instance over
+    /// the same on-disk state), still rejects and still never overwrites
+    /// the original source.
+    func testRestartAndRetryOfTheCollisionScenarioStillDoesNotOverwriteTheOriginalSource() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let appSupportDirectory = try makeSubdirectory("AppSupport")
+        let existingLibraryID = LibraryID()
+
+        let bookmarkStoreA = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        try bookmarkStoreA.save(StoredBookmark(
+            libraryID: existingLibraryID,
+            displayName: "Original",
+            lastKnownPath: "/Volumes/Original/Photos",
+            bookmarkData: Data([0x00, 0x01])
+        ))
+
+        let unrelatedRoot = try makeSubdirectory("Unrelated")
+        let manifestDirectory = unrelatedRoot.appendingPathComponent(".lumaharbor", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try SidecarCoding.encode(LibraryManifest(libraryID: existingLibraryID))
+            .write(to: manifestDirectory.appendingPathComponent("library.json"))
+
+        let serviceA = try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: appSupportDirectory),
+            bookmarkStore: bookmarkStoreA
+        )
+        _ = try await serviceA.restoreLibraries()
+        do {
+            _ = try await serviceA.addLibrary(at: unrelatedRoot)
+            XCTFail("Expected rejection")
+        } catch is LibraryError {
+            // expected
+        }
+
+        // Simulated restart: fresh service, fresh bookmark-store handle,
+        // same on-disk state.
+        let bookmarkStoreB = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let serviceB = try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: appSupportDirectory),
+            bookmarkStore: bookmarkStoreB
+        )
+        let restoredB = try await serviceB.restoreLibraries()
+        XCTAssertEqual(restoredB.count, 1, "Only the original source may exist after restart")
+        XCTAssertEqual(restoredB.first?.id, existingLibraryID)
+        XCTAssertEqual(restoredB.first?.lastKnownPath, "/Volumes/Original/Photos")
+
+        do {
+            _ = try await serviceB.addLibrary(at: unrelatedRoot)
+            XCTFail("Expected rejection again after restart")
+        } catch let error as LibraryError {
+            guard case .manifestConflict(let collidingID) = error else {
+                return XCTFail("Expected .manifestConflict, got \(error)")
+            }
+            XCTAssertEqual(collidingID, existingLibraryID)
+        }
+
+        let finalCount = await serviceB.knownLibraries().count
+        XCTAssertEqual(finalCount, 1)
+        let stillOriginal = await serviceB.library(id: existingLibraryID)
+        XCTAssertEqual(stillOriginal?.lastKnownPath, "/Volumes/Original/Photos")
+    }
+
+    // MARK: - Critical 3: baseline-read and rollback failure durability
+
+    /// Item 1: a baseline `bookmarkStore.load` failure during preflight must
+    /// fail the whole operation closed immediately — never be swallowed and
+    /// read as "no identity"/`.distinct` — and must leave zero mutation.
+    /// `focusExistingLibrary`'s own baseline read shares this exact
+    /// `bookmarkStore.load` call for the same `LibraryID`, so this proves
+    /// the fail-closed guarantee for both call sites at once.
+    func testBaselineLoadFailureDuringPreflightFailsClosedWithZeroMutation() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: failableStore)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+
+        failableStore.loadInterceptor = { $0 == library.id }
+        do {
+            _ = try await service.addLibrary(at: root, displayName: "Should Not Apply")
+            XCTFail("Expected the load failure to propagate")
+        } catch {
+            // expected — a raw load error, not silently read as `.distinct`
+        }
+        failableStore.loadInterceptor = nil
+
+        let stillOriginal = await service.library(id: library.id)
+        XCTAssertEqual(stillOriginal?.displayName, library.displayName)
+        XCTAssertEqual(stillOriginal?.rootURL, root)
+        let knownCount = await service.knownLibraries().count
+        XCTAssertEqual(knownCount, 1)
+    }
+
+    /// Item 2: forward bookmark save succeeds, index upsert fails, and the
+    /// rollback save *also* fails. The original (index) failure must still
+    /// be what's thrown; in-memory state stays at the old value for the
+    /// rest of this run; and a simulated restart converges to one
+    /// consistent, recognisable state (the bookmark file is written
+    /// atomically, so it is never left torn — whichever complete value it
+    /// ends up holding, a fresh restore re-syncs the index to match it).
+    func testFocusForwardSaveSucceedsIndexFailsAndRollbackSaveAlsoFailsStillThrowsAndSelfHealsOnRestore() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: failableStore)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+
+        let indexStore = await service.indexStore
+        indexStore.close()
+
+        // Fail only the rollback save (restoring the ORIGINAL displayName);
+        // the forward save (the NEW displayName) must still succeed.
+        failableStore.saveInterceptor = { $0.displayName == library.displayName }
+
+        do {
+            _ = try await service.addLibrary(at: root, displayName: "New Name")
+            XCTFail("Expected the index failure to propagate")
+        } catch {
+            // expected: the original index error, not silently swallowed
+        }
+        failableStore.saveInterceptor = nil
+
+        let onDisk = try XCTUnwrap(try failableStore.load(libraryID: library.id))
+        XCTAssertEqual(onDisk.displayName, "New Name", "The forward write succeeded; the rollback did not")
+
+        let stillInMemory = await service.library(id: library.id)
+        XCTAssertEqual(
+            stillInMemory?.displayName, library.displayName,
+            "access/libraries must stay at the old value for the rest of this run"
+        )
+
+        // Simulated restart: a fresh service re-reads the bookmark file's
+        // one complete state and re-syncs the index to match it.
+        let bookmarkStoreB = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let serviceB = try makeService(supportName: "AppSupportB", bookmarkStore: bookmarkStoreB)
+        let restored = try await serviceB.restoreLibraries()
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(restored.first?.id, library.id)
+        XCTAssertEqual(restored.first?.displayName, "New Name")
+    }
+
+    /// Item 3: the fresh-add equivalent — forward bookmark save succeeds,
+    /// index upsert fails, and the rollback *remove* also fails, leaving an
+    /// orphaned-but-complete bookmark on disk. In-memory state never
+    /// registers it this run; a simulated restart picks it up like any
+    /// other bookmark and completes its registration — a safe, predictable
+    /// convergence, never a duplicate and never a crash.
+    func testFreshAddForwardSaveSucceedsIndexFailsAndRollbackRemoveAlsoFailsStillThrowsAndSelfHealsOnRestore() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: failableStore)
+        let root = try makeSubdirectory("Photos")
+
+        let indexStore = await service.indexStore
+        indexStore.close()
+        failableStore.removeInterceptor = { _ in true }
+
+        do {
+            _ = try await addLibrary(service, at: root)
+            XCTFail("Expected the index failure to propagate")
+        } catch {
+            // expected
+        }
+        failableStore.removeInterceptor = nil
+
+        let allBookmarks = try failableStore.loadAll()
+        XCTAssertEqual(allBookmarks.count, 1, "The orphaned bookmark is a complete record, never a torn one")
+        let orphanedID = try XCTUnwrap(allBookmarks.first?.libraryID)
+
+        let knownCount = await service.knownLibraries().count
+        XCTAssertEqual(knownCount, 0, "The failed add must not have registered anything this run")
+
+        let bookmarkStoreB = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let serviceB = try makeService(supportName: "AppSupportB", bookmarkStore: bookmarkStoreB)
+        let restored = try await serviceB.restoreLibraries()
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(restored.first?.id, orphanedID)
+    }
+
+    /// Item 5: `relink` must have its own end-to-end bookmark/index failure
+    /// coverage, not just inherited (untested) behaviour from
+    /// `focusExistingLibrary`.
+    func testRelinkBookmarkSaveFailureRollsBackWithZeroMutation() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: failableStore)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+        let newRoot = try makeSubdirectory("PhotosRelinked")
+        try FileManager.default.copyItem(
+            at: root.appendingPathComponent(".lumaharbor", isDirectory: true),
+            to: newRoot.appendingPathComponent(".lumaharbor", isDirectory: true)
+        )
+
+        let before = try XCTUnwrap(try failableStore.load(libraryID: library.id))
+        failableStore.saveInterceptor = { _ in true }
+
+        do {
+            _ = try await service.relink(libraryID: library.id, to: newRoot)
+            XCTFail("Expected the bookmark save failure to propagate")
+        } catch {
+            // expected
+        }
+        failableStore.saveInterceptor = nil
+
+        let after = try XCTUnwrap(try failableStore.load(libraryID: library.id))
+        XCTAssertEqual(after, before, "A rejected relink save must leave the bookmark record untouched")
+        let stillOriginal = await service.library(id: library.id)
+        XCTAssertEqual(stillOriginal?.rootURL, root)
+    }
+
+    func testRelinkIndexUpsertFailureRollsBackTheBookmark() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: bookmarkStore)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+        let newRoot = try makeSubdirectory("PhotosRelinked")
+        try FileManager.default.copyItem(
+            at: root.appendingPathComponent(".lumaharbor", isDirectory: true),
+            to: newRoot.appendingPathComponent(".lumaharbor", isDirectory: true)
+        )
+
+        let before = try XCTUnwrap(try bookmarkStore.load(libraryID: library.id))
+        let indexStore = await service.indexStore
+        indexStore.close()
+
+        do {
+            _ = try await service.relink(libraryID: library.id, to: newRoot)
+            XCTFail("Expected the index failure to propagate")
+        } catch {
+            // expected
+        }
+
+        let after = try XCTUnwrap(try bookmarkStore.load(libraryID: library.id))
+        XCTAssertEqual(after, before, "The bookmark must be rolled back to its previous value")
+    }
+
+    // MARK: - Important 4: deterministic offline/needsAuthorization/stale/scope-pairing seam
+
+    func testBookmarkResolveSuccessButUnreachableBecomesOffline() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let bookmarkStore = FileBookmarkStore(directoryURL: try makeSubdirectory("Bookmarks"))
+        let service = try makeService(bookmarkStore: bookmarkStore, folderAccessResolver: resolver)
+
+        let token = "unreachable-token"
+        let fakeURL = URL(fileURLWithPath: "/Volumes/NotMounted/Photos", isDirectory: true)
+        resolver.setCanned(.init(url: fakeURL, isStale: false, isReachable: false), forToken: token)
+
+        let libraryID = LibraryID()
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Unmounted Drive",
+            lastKnownPath: fakeURL.path,
+            bookmarkData: resolver.makeBookmarkData(token: token)
+        ))
+
+        let restored = try await service.restoreLibraries()
+        let folder = try XCTUnwrap(restored.first)
+        XCTAssertEqual(folder.connectionState, .offline)
+    }
+
+    func testBookmarkResolutionThrowBecomesNeedsAuthorization() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let bookmarkStore = FileBookmarkStore(directoryURL: try makeSubdirectory("Bookmarks"))
+        let service = try makeService(bookmarkStore: bookmarkStore, folderAccessResolver: resolver)
+
+        let token = "throwing-token"
+        resolver.setShouldFailResolve(forToken: token)
+
+        let libraryID = LibraryID()
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Revoked",
+            lastKnownPath: "/Volumes/Whatever",
+            bookmarkData: resolver.makeBookmarkData(token: token)
+        ))
+
+        let restored = try await service.restoreLibraries()
+        let folder = try XCTUnwrap(restored.first)
+        XCTAssertEqual(folder.connectionState, .needsAuthorization)
+    }
+
+    func testStaleReachableBookmarkRefreshesBookmarkAndIdentity() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let service = try makeService(bookmarkStore: bookmarkStore, folderAccessResolver: resolver)
+
+        // A real directory, so the identity/bookmark-refresh real system
+        // calls succeed; only resolve success/staleness/reachability are
+        // deterministically injected.
+        let realRoot = try makeSubdirectory("RealPhotos")
+        let token = "stale-token"
+        resolver.setCanned(.init(url: realRoot, isStale: true, isReachable: true), forToken: token)
+
+        let libraryID = LibraryID()
+        let originalBookmarkData = resolver.makeBookmarkData(token: token)
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Stale Bookmark",
+            lastKnownPath: realRoot.path,
+            bookmarkData: originalBookmarkData
+        ))
+
+        _ = try await service.restoreLibraries()
+
+        let reloaded = try XCTUnwrap(try bookmarkStore.load(libraryID: libraryID))
+        XCTAssertNotEqual(reloaded.bookmarkData, originalBookmarkData, "A stale bookmark must be refreshed")
+        XCTAssertNotNil(reloaded.resourceIdentifier, "The refresh must also recompute identity")
+        XCTAssertNotNil(reloaded.volumeIdentifier)
+    }
+
+    func testScopeStopStartPairingReplaceAndFailurePathsDoNotLeak() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let service = try makeService(folderAccessResolver: resolver)
+        let root = try makeSubdirectory("Photos")
+
+        let first = try await addLibrary(service, at: root)
+        XCTAssertEqual(resolver.grantedHandles.count, 1)
+        XCTAssertEqual(resolver.grantedHandles[0].stopCallCount, 0)
+
+        // Re-adding the same folder focuses it, replacing the access
+        // handle: the OLD one must be stopped exactly once, and a NEW one
+        // granted.
+        _ = try await service.addLibrary(at: root, displayName: "Renamed")
+        XCTAssertEqual(resolver.grantedHandles.count, 2)
+        XCTAssertEqual(resolver.grantedHandles[0].stopCallCount, 1, "The replaced handle must be stopped exactly once")
+        XCTAssertEqual(resolver.grantedHandles[1].stopCallCount, 0, "The new handle must still be live")
+
+        // Failure path: close the index so the next focus attempt fails
+        // after the bookmark save but before commit — no new handle may be
+        // granted, and the still-live handle must not be stopped either.
+        let indexStore = await service.indexStore
+        indexStore.close()
+        do {
+            _ = try await service.addLibrary(at: root, displayName: "Should Fail")
+            XCTFail("Expected the index failure to propagate")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(resolver.grantedHandles.count, 2, "A failed focus must not grant a new access handle")
+        XCTAssertEqual(resolver.grantedHandles[1].stopCallCount, 0, "A failed focus must not stop the still-active handle")
+
+        _ = first
+    }
+}
