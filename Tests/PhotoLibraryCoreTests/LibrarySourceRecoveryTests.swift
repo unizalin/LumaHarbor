@@ -935,8 +935,16 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
 
         let saveFailure = try makeRestoreScopeFixture(name: "SaveFailure")
         _ = try await saveFailure.service.restoreLibraries()
+        let saveIndex = await saveFailure.service.indexStore
+        let oldIndexedFolder = try XCTUnwrap(saveIndex.library(id: saveFailure.libraryID))
+        let oldBookmark = try XCTUnwrap(
+            saveFailure.bookmarkStore.load(libraryID: saveFailure.libraryID)
+        )
+        let relocatedRoot = try makeSubdirectory("SaveFailure-RelocatedRoot")
+        try FileSidecarRepository(libraryRootURL: relocatedRoot)
+            .write(manifest: LibraryManifest(libraryID: saveFailure.libraryID))
         saveFailure.resolver.setCanned(
-            .init(url: saveFailure.root, isStale: true),
+            .init(url: relocatedRoot, isStale: true),
             forToken: saveFailure.token
         )
         let originalBookmarkData = saveFailure.resolver.makeBookmarkData(token: saveFailure.token)
@@ -947,6 +955,11 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(saveBlocked.first?.connectionState, .needsAuthorization)
         let saveDiagnostic = await saveFailure.service.restoreDiagnostic(for: saveFailure.libraryID)
         XCTAssertEqual(saveDiagnostic, .persistenceFailure)
+        XCTAssertEqual(
+            try saveFailure.bookmarkStore.load(libraryID: saveFailure.libraryID),
+            oldBookmark
+        )
+        XCTAssertEqual(try saveIndex.library(id: saveFailure.libraryID), oldIndexedFolder)
         XCTAssertEqual(saveFailure.resolver.createdHandles[0].stopCallCount, 1)
         XCTAssertEqual(saveFailure.resolver.createdHandles[1].stopCallCount, 1)
 

@@ -53,6 +53,42 @@ struct RegistryTransactionRecord: Codable, Equatable, Sendable {
     var intendedBookmark: StoredBookmark
     var previousLibrary: LibraryFolderSnapshot?
     var intendedLibrary: LibraryFolderSnapshot
+
+    /// A decoded journal is executable recovery state, not merely data that
+    /// happened to parse. Reject cross-library IDs and impossible operation
+    /// shapes before either rollback store is touched.
+    func validate() throws {
+        guard intendedBookmark.libraryID == libraryID,
+              intendedLibrary.id == libraryID,
+              previousBookmark?.libraryID == nil || previousBookmark?.libraryID == libraryID,
+              previousLibrary?.id == nil || previousLibrary?.id == libraryID,
+              intendedBookmark.confirmedManifestLibraryID == nil
+                || intendedBookmark.confirmedManifestLibraryID == libraryID,
+              previousBookmark?.confirmedManifestLibraryID == nil
+                || previousBookmark?.confirmedManifestLibraryID == libraryID else {
+            throw RegistryTransactionValidationError.inconsistentLibraryIdentity
+        }
+
+        switch kind {
+        case .freshAdd:
+            guard previousBookmark == nil, previousLibrary == nil else {
+                throw RegistryTransactionValidationError.invalidOldState
+            }
+        case .focus, .relink:
+            guard previousBookmark != nil, previousLibrary != nil else {
+                throw RegistryTransactionValidationError.invalidOldState
+            }
+        case .restoreRefresh:
+            guard previousBookmark != nil else {
+                throw RegistryTransactionValidationError.invalidOldState
+            }
+        }
+    }
+}
+
+private enum RegistryTransactionValidationError: Error {
+    case inconsistentLibraryIdentity
+    case invalidOldState
 }
 
 protocol RegistryTransactionStoring: Sendable {
@@ -73,13 +109,16 @@ struct FileRegistryTransactionStore: RegistryTransactionStoring, @unchecked Send
     func load() throws -> RegistryTransactionRecord? {
         do {
             let data = try Data(contentsOf: recordURL)
-            return try SidecarCoding.decode(RegistryTransactionRecord.self, from: data)
+            let record = try SidecarCoding.decode(RegistryTransactionRecord.self, from: data)
+            try record.validate()
+            return record
         } catch where FileSystemError.isNoSuchFile(error) {
             return nil
         }
     }
 
     func save(_ record: RegistryTransactionRecord) throws {
+        try record.validate()
         let data = try SidecarCoding.encode(record)
         try AtomicFileWriter.write(data, to: recordURL, fileManager: fileManager)
     }
