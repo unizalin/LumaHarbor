@@ -75,14 +75,43 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
         }
     }
 
+    private final class CountingAccessHandle: FolderAccessHandle, @unchecked Sendable {
+        let url: URL
+        let isStale = false
+        let isReachable = true
+
+        init(url: URL) { self.url = url }
+        func stop() {}
+    }
+
+    private final class CountingAccessResolver: FolderAccessResolving, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _grantCount = 0
+
+        var grantCount: Int { lock.withLock { _grantCount } }
+
+        func resolve(bookmarkData: Data) throws -> any FolderAccessHandle {
+            CountingAccessHandle(url: URL(fileURLWithPath: "/unresolved", isDirectory: true))
+        }
+
+        func grant(url: URL) -> any FolderAccessHandle {
+            lock.withLock { _grantCount += 1 }
+            return CountingAccessHandle(url: url)
+        }
+    }
+
     private func makeService(
         at locations: ApplicationSupportLocations,
         bookmarkStore: (any BookmarkStoring)? = nil,
-        transactionStore: (any RegistryTransactionStoring)? = nil
+        transactionStore: (any RegistryTransactionStoring)? = nil,
+        scanner: FolderScanner = FolderScanner(),
+        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver()
     ) throws -> PhotoLibraryService {
         try PhotoLibraryService(
             locations: locations,
             bookmarkStore: bookmarkStore,
+            scanner: scanner,
+            folderAccessResolver: folderAccessResolver,
             registryTransactionStore: transactionStore
         )
     }
@@ -209,7 +238,12 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
             directoryURL: locations.registryTransactionsDirectoryURL
         )
         transactionStore.failSave = true
-        let service = try makeService(at: locations, transactionStore: transactionStore)
+        let resolver = CountingAccessResolver()
+        let service = try makeService(
+            at: locations,
+            transactionStore: transactionStore,
+            folderAccessResolver: resolver
+        )
         let root = try makeSubdirectory("PrepareFailureRoot")
 
         do {
@@ -225,6 +259,7 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(try FileBookmarkStore(directoryURL: locations.bookmarksDirectoryURL).loadAll().isEmpty)
         XCTAssertTrue(try indexAfterPrepareFailure.libraries().isEmpty)
         XCTAssertNil(try transactionStore.load())
+        XCTAssertEqual(resolver.grantCount, 0)
     }
 
     func testFreshAddRollbackFailureKeepsJournalThenSameSessionRecoveryRestoresAbsentState() async throws {
@@ -366,7 +401,9 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try bookmarkStore.load(libraryID: original.id)?.displayName, "New Name")
         XCTAssertNotNil(try transactionStore.load())
 
-        for operation in ["focus", "relink", "restore", "reset", "read edit", "write edit"] {
+        for operation in [
+            "focus", "relink", "restore", "remove", "refresh", "reset", "read edit", "write edit"
+        ] {
             do {
                 switch operation {
                 case "focus":
@@ -375,6 +412,10 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
                     _ = try await service.relink(libraryID: original.id, to: root)
                 case "restore":
                     _ = try await service.restoreLibraries()
+                case "remove":
+                    try await service.removeLibrary(id: original.id)
+                case "refresh":
+                    _ = try await service.refreshAvailability(libraryID: original.id)
                 case "reset":
                     try await service.resetRebuildableLocalData()
                 case "read edit":
@@ -404,6 +445,169 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try index.library(id: original.id)?.displayName, "Original")
         XCTAssertEqual(try index.photos(inLibrary: original.id), [photo])
         XCTAssertNil(try transactionStore.load())
+    }
+
+    func testScanRechecksRecoveryAfterActorReentrancyBeforeFinalMutations() async throws {
+        let locations = ApplicationSupportLocations(
+            baseURL: try makeSubdirectory("ScanReentrancySupport")
+        )
+        try locations.createDirectories()
+        let transactionStore = FailableTransactionStore(
+            directoryURL: locations.registryTransactionsDirectoryURL
+        )
+        let bookmarkStore = FailableBookmarkStore(directoryURL: locations.bookmarksDirectoryURL)
+        let gate = ScanCursorGate()
+        let cursor = InstrumentedScanCursor(
+            pages: [FolderScanPage(isAtEnd: true)],
+            gate: gate,
+            gateOnCall: 1
+        )
+        let scanner = FolderScanner(
+            supportedExtensions: ["arw"],
+            batchSize: 1,
+            cursorFactory: InstrumentedScanCursorFactory(cursor: cursor)
+        )
+        let service = try makeService(
+            at: locations,
+            bookmarkStore: bookmarkStore,
+            transactionStore: transactionStore,
+            scanner: scanner
+        )
+        let root = try makeSubdirectory("ScanReentrancyRoot")
+        let original = try await addLibrary(service, at: root, displayName: "Original")
+        let beforeManifest = try FileSidecarRepository(libraryRootURL: root).loadManifest()
+        let index = await service.indexStore
+        let beforeLibrary = try XCTUnwrap(index.library(id: original.id))
+
+        let scanTask = Task { () -> [LibraryScanEvent] in
+            var events: [LibraryScanEvent] = []
+            for await event in service.scan(libraryID: original.id) { events.append(event) }
+            return events
+        }
+        await waitUntilTrue("scan cursor to block after the initial recovery gate") {
+            gate.enteredCount == 1
+        }
+
+        bookmarkStore.failSavingDisplayName = "Original"
+        index.setLibraryMutationHook { mutation in
+            if case .upsert(let id) = mutation, id == original.id {
+                throw InjectedFailure.indexMutation
+            }
+        }
+        do {
+            _ = try await service.addLibrary(at: root, displayName: "New")
+            XCTFail("Expected the concurrent focus to leave recovery pending")
+        } catch let error as LibraryError {
+            XCTAssertEqual(error, .registryRecoveryRequired)
+        }
+        XCTAssertNotNil(try transactionStore.load())
+
+        gate.open()
+        let events = await scanTask.value
+        XCTAssertTrue(events.contains { event in
+            if case .failed(.registryRecoveryRequired) = event { return true }
+            return false
+        })
+        XCTAssertFalse(events.contains { event in
+            if case .finished = event { return true }
+            return false
+        })
+        XCTAssertEqual(try index.library(id: original.id), beforeLibrary)
+        XCTAssertEqual(
+            try FileSidecarRepository(libraryRootURL: root).loadManifest(),
+            beforeManifest
+        )
+
+        bookmarkStore.failSavingDisplayName = nil
+        index.setLibraryMutationHook(nil)
+        try await service.recoverPendingRegistryChanges()
+    }
+
+    func testSemanticJournalCorruptionFailsClosedBeforeMutatingEitherLibrary() async throws {
+        let locations = ApplicationSupportLocations(
+            baseURL: try makeSubdirectory("SemanticCorruptionSupport")
+        )
+        try locations.createDirectories()
+        let libraryID = LibraryID()
+        let otherID = LibraryID()
+        let currentBookmark = StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Current",
+            lastKnownPath: "/current",
+            bookmarkData: Data("current".utf8)
+        )
+        let previousOtherBookmark = StoredBookmark(
+            libraryID: otherID,
+            displayName: "Other",
+            lastKnownPath: "/other",
+            bookmarkData: Data("other".utf8)
+        )
+        let currentFolder = LibraryFolder(
+            id: libraryID,
+            displayName: "Current",
+            rootURL: URL(fileURLWithPath: "/current", isDirectory: true)
+        )
+        let previousOtherFolder = LibraryFolder(
+            id: otherID,
+            displayName: "Other",
+            rootURL: URL(fileURLWithPath: "/other", isDirectory: true)
+        )
+        let bookmarkStore = FileBookmarkStore(directoryURL: locations.bookmarksDirectoryURL)
+        try bookmarkStore.save(currentBookmark)
+        let index = try PhotoIndexStore(databaseURL: locations.databaseURL)
+        try index.upsert(library: currentFolder)
+        index.close()
+
+        let corruptRecord = RegistryTransactionRecord(
+            transactionID: UUID(),
+            libraryID: libraryID,
+            kind: .focus,
+            previousBookmark: previousOtherBookmark,
+            intendedBookmark: currentBookmark,
+            previousLibrary: LibraryFolderSnapshot(previousOtherFolder),
+            intendedLibrary: LibraryFolderSnapshot(currentFolder)
+        )
+        let recordURL = locations.registryTransactionsDirectoryURL
+            .appendingPathComponent("pending.json")
+        try AtomicFileWriter.write(try SidecarCoding.encode(corruptRecord), to: recordURL)
+
+        let service = try PhotoLibraryService(locations: locations)
+        do {
+            try await service.recoverPendingRegistryChanges()
+            XCTFail("Expected semantic journal corruption to fail closed")
+        } catch let error as LibraryError {
+            XCTAssertEqual(error, .registryRecoveryRequired)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordURL.path))
+        let retainedBookmark = try XCTUnwrap(bookmarkStore.load(libraryID: libraryID))
+        XCTAssertEqual(retainedBookmark.libraryID, currentBookmark.libraryID)
+        XCTAssertEqual(retainedBookmark.displayName, currentBookmark.displayName)
+        XCTAssertEqual(retainedBookmark.lastKnownPath, currentBookmark.lastKnownPath)
+        XCTAssertEqual(retainedBookmark.bookmarkData, currentBookmark.bookmarkData)
+        XCTAssertNil(try bookmarkStore.load(libraryID: otherID))
+        let restartedIndex = await service.indexStore
+        XCTAssertEqual(try restartedIndex.library(id: libraryID), currentFolder)
+        XCTAssertNil(try restartedIndex.library(id: otherID))
+    }
+
+    func testSyntacticallyCorruptJournalRemainsForDiagnosisAndBlocksRecovery() async throws {
+        let locations = ApplicationSupportLocations(
+            baseURL: try makeSubdirectory("SyntaxCorruptionSupport")
+        )
+        try locations.createDirectories()
+        let recordURL = locations.registryTransactionsDirectoryURL
+            .appendingPathComponent("pending.json")
+        try AtomicFileWriter.write(Data("{not-json".utf8), to: recordURL)
+        let service = try PhotoLibraryService(locations: locations)
+
+        do {
+            try await service.recoverPendingRegistryChanges()
+            XCTFail("Expected corrupt journal to block recovery")
+        } catch let error as LibraryError {
+            XCTAssertEqual(error, .registryRecoveryRequired)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recordURL.path))
     }
 
     func testJournalCleanupFailureRollsBackAndBlocksMutationsUntilRecovery() async throws {

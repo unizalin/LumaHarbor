@@ -579,6 +579,7 @@ public actor PhotoLibraryService {
             previousLibrary: previousLibrary.map(LibraryFolderSnapshot.init),
             intendedLibrary: LibraryFolderSnapshot(intendedLibrary)
         )
+        try record.validate()
 
         // PREPARE: no bookmark/index mutation is legal before this durable
         // record exists.
@@ -611,6 +612,7 @@ public actor PhotoLibraryService {
         guard let pending else { return }
 
         do {
+            try pending.validate()
             try rollbackRegistryTransaction(pending)
             try registryTransactionStore.remove()
         } catch {
@@ -622,6 +624,7 @@ public actor PhotoLibraryService {
     /// the first one fails, so a later retry can finish whichever half still
     /// differs. The journal is cleared only by the caller after both succeed.
     private func rollbackRegistryTransaction(_ record: RegistryTransactionRecord) throws {
+        try record.validate()
         var firstError: Error?
 
         do {
@@ -728,6 +731,7 @@ public actor PhotoLibraryService {
                 connectionState: .needsAuthorization,
                 scanState: bookmark.scanState.normalizedForRestore
             )
+            let persistedFolder = folder
 
             let stagedAccess: any FolderAccessHandle
             do {
@@ -806,8 +810,9 @@ public actor PhotoLibraryService {
             }
 
             folder.connectionState = repository.isWritable ? .ready : .readOnly
+            var previousLibrary: LibraryFolder?
             do {
-                let previousLibrary = try index.library(id: folder.id)
+                previousLibrary = try index.library(id: folder.id)
                 try populateRestoreProjection(&folder)
                 if requiresSave {
                     try applyRegistryTransaction(
@@ -825,11 +830,17 @@ public actor PhotoLibraryService {
                 throw LibraryError.registryRecoveryRequired
             } catch {
                 if requiresSave {
+                    // The journal already restored the old bookmark/index.
+                    // Keep the disconnected in-memory diagnostic, but base it
+                    // on the old projection and do not persist the uncommitted
+                    // resolved URL back over that rollback result.
+                    folder = previousLibrary ?? persistedFolder
                     folder.connectionState = .needsAuthorization
                     folder = try commitDisconnectedRestore(
                         folder: folder,
                         diagnostic: .persistenceFailure,
-                        stagedAccess: stagedAccess
+                        stagedAccess: stagedAccess,
+                        persistLibraryProjection: false
                     )
                     restored.append(folder)
                     continue
@@ -859,7 +870,8 @@ public actor PhotoLibraryService {
     private func commitDisconnectedRestore(
         folder initialFolder: LibraryFolder,
         diagnostic: LibraryRestoreDiagnostic?,
-        stagedAccess: (any FolderAccessHandle)?
+        stagedAccess: (any FolderAccessHandle)?,
+        persistLibraryProjection: Bool = true
     ) throws -> LibraryFolder {
         stagedAccess?.stop()
         access.removeValue(forKey: initialFolder.id)?.stop()
@@ -874,7 +886,9 @@ public actor PhotoLibraryService {
 
         try populateRestoreProjection(&folder)
         libraries[folder.id] = folder
-        try index.upsert(library: folder)
+        if persistLibraryProjection {
+            try index.upsert(library: folder)
+        }
         return folder
     }
 
@@ -1204,8 +1218,16 @@ public actor PhotoLibraryService {
                         break
                     }
                     do {
+                        // `emitter.isCancelled` suspended the actor. A
+                        // registry mutation may have failed and left a journal
+                        // while this scan was reentrant, so recovery must be
+                        // rechecked immediately before this synchronous write.
+                        try recoverPendingRegistryTransaction()
                         try index.upsert(photos: batch)
                         await emit(.photosIndexed(batch))
+                    } catch LibraryError.registryRecoveryRequired {
+                        await emit(.failed(.registryRecoveryRequired))
+                        return
                     } catch {
                         await emit(.failed(
                             .indexUnavailable((error as NSError).localizedDescription)
@@ -1246,6 +1268,16 @@ public actor PhotoLibraryService {
                 manifestWriteRecoverySuggestion: nil,
                 completedAt: Date()
             )))
+            return
+        }
+
+        // The scan loop and cancellation checks contain multiple suspension
+        // points. Keep the final index/manifest/memory commit in one actor-
+        // isolated synchronous region, preceded by a fresh recovery gate.
+        do {
+            try recoverPendingRegistryTransaction()
+        } catch {
+            await emit(.failed(.registryRecoveryRequired))
             return
         }
 

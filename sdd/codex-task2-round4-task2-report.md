@@ -118,3 +118,43 @@ could close/delete SQLite while an unrecovered journal was pending. The reset
 now runs the same fail-closed recovery gate before touching the index. The
 pending-recovery matrix directly covers reset along with add/focus/relink/
 restore/scan/edit, and the focused test is GREEN.
+
+## Independent review fix round 1
+
+The first independent landing review requested changes for three actor/
+evidence gaps and two test-coverage gaps. All were reproduced before the
+production fixes:
+
+- A scan blocked after its initial recovery check, while a concurrent focus
+  operation left an unrecoverable journal. Before the fix, the resumed scan
+  still wrote `lastSuccessfulScanAt` and emitted a normal terminal result.
+- A stale bookmark resolving from old root A to new root B, followed by a
+  refresh persistence failure, restored bookmark A but then overwrote SQLite
+  metadata with B through the disconnected-restore path.
+- A syntactically valid journal whose top-level ID was A but previous bookmark
+  and index snapshot IDs were B executed rollback against B and cleared itself.
+
+The production changes are:
+
+- Scan rechecks recovery after actor suspension immediately before each batch
+  upsert and once more before the final synchronous index/manifest/memory
+  commit region. Failed recovery emits `.registryRecoveryRequired` and returns
+  without a normal `.finished` event or later mutations.
+- Restore-refresh failure now builds its disconnected in-memory diagnostic
+  from the prior durable projection and skips the SQLite upsert, preserving the
+  journal's exact rollback-to-old metadata.
+- Every journal is validated before save and again before rollback mutation.
+  Bookmark/snapshot IDs and confirmed manifest IDs must match the top-level
+  `LibraryID`; operation kinds must contain the required old-state shape.
+  Semantic or syntax corruption remains on disk and fails closed.
+- The pending-operation matrix now directly covers removal and availability
+  refresh. The prepare-failure test uses an observable access resolver and
+  proves no access grant is created.
+
+RED: the new scan race, restore A-to-B rollback, and semantic corruption tests
+failed against `9842b0e`. GREEN: `LibraryRegistryTransactionTests` plus
+`LibrarySourceRecoveryTests` execute 29 tests with 0 failures.
+
+Post-fix verification: full `swift test` executes 965 tests with 9 skipped and
+0 failures; strict-concurrency warnings-as-errors build and `git diff --check`
+pass.
