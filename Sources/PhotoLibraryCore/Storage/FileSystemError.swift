@@ -14,12 +14,12 @@ enum FileSystemError {
             case .fileNoSuchFile, .fileReadNoSuchFile:
                 return true
             default:
-                break
+                return false
             }
         }
 
-        if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
-            return true
+        if error.domain == NSPOSIXErrorDomain {
+            return error.code == Int(ENOENT)
         }
 
         guard remainingUnderlyingDepth > 0,

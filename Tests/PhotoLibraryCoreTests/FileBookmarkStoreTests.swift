@@ -32,6 +32,20 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         }
     }
 
+    private final class WrappedPermissionDirectoryFileManager: FileManager, @unchecked Sendable {
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []
+        ) throws -> [URL] {
+            throw NSError(
+                domain: NSCocoaErrorDomain,
+                code: CocoaError.Code.fileReadNoPermission.rawValue,
+                userInfo: [NSUnderlyingErrorKey: POSIXError(.ENOENT)]
+            )
+        }
+    }
+
     private func makeStore() -> FileBookmarkStore {
         FileBookmarkStore(directoryURL: temporaryDirectory)
     }
@@ -164,6 +178,45 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         )
 
         XCTAssertThrowsError(try makeStore().loadAll())
+    }
+
+    func testNoSuchFileClassificationMatrixDoesNotLetKnownPermissionErrorsInheritENOENT() {
+        let cocoaNoSuchFile = CocoaError(.fileReadNoSuchFile)
+        let posixNoSuchFile = POSIXError(.ENOENT)
+        let unknownWrapper = NSError(
+            domain: "LumaHarborTests.UnknownWrapper",
+            code: 1,
+            userInfo: [NSUnderlyingErrorKey: posixNoSuchFile]
+        )
+        let cocoaPermissionWrappingENOENT = NSError(
+            domain: NSCocoaErrorDomain,
+            code: CocoaError.Code.fileReadNoPermission.rawValue,
+            userInfo: [NSUnderlyingErrorKey: posixNoSuchFile]
+        )
+        let posixPermissionWrappingENOENT = NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(EACCES),
+            userInfo: [NSUnderlyingErrorKey: posixNoSuchFile]
+        )
+
+        XCTAssertTrue(FileSystemError.isNoSuchFile(cocoaNoSuchFile))
+        XCTAssertTrue(FileSystemError.isNoSuchFile(posixNoSuchFile))
+        XCTAssertTrue(FileSystemError.isNoSuchFile(unknownWrapper))
+        XCTAssertFalse(FileSystemError.isNoSuchFile(cocoaPermissionWrappingENOENT))
+        XCTAssertFalse(FileSystemError.isNoSuchFile(posixPermissionWrappingENOENT))
+    }
+
+    func testWrappedCocoaPermissionErrorStillMakesLoadAllThrow() {
+        let store = FileBookmarkStore(
+            directoryURL: temporaryDirectory,
+            fileManager: WrappedPermissionDirectoryFileManager()
+        )
+
+        XCTAssertThrowsError(try store.loadAll()) { error in
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, NSCocoaErrorDomain)
+            XCTAssertEqual(nsError.code, CocoaError.Code.fileReadNoPermission.rawValue)
+        }
     }
 
     // MARK: - Ignoring unrelated files
