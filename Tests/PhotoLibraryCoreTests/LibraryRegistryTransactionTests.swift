@@ -366,7 +366,7 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try bookmarkStore.load(libraryID: original.id)?.displayName, "New Name")
         XCTAssertNotNil(try transactionStore.load())
 
-        for operation in ["focus", "relink", "restore", "read edit", "write edit"] {
+        for operation in ["focus", "relink", "restore", "reset", "read edit", "write edit"] {
             do {
                 switch operation {
                 case "focus":
@@ -375,6 +375,8 @@ final class LibraryRegistryTransactionTests: TemporaryDirectoryTestCase {
                     _ = try await service.relink(libraryID: original.id, to: root)
                 case "restore":
                     _ = try await service.restoreLibraries()
+                case "reset":
+                    try await service.resetRebuildableLocalData()
                 case "read edit":
                     _ = try await service.adjustments(for: photo)
                 default:

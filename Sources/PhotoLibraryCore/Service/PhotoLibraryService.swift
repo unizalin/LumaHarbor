@@ -1005,6 +1005,7 @@ public actor PhotoLibraryService {
     /// comes from a second connection opening the same path while this actor
     /// still holds the first one.
     public func resetRebuildableLocalData() throws {
+        try recoverPendingRegistryTransaction()
         guard activeScanCount == 0 else {
             throw LibraryError.resetRefusedWhileScanning
         }
