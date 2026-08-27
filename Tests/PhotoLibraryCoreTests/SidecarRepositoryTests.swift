@@ -6,6 +6,12 @@ import XCTest
 /// refused rather than half-read, and damaged JSON is set aside — never
 /// silently overwritten.
 final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
+    private final class FalseNegativeManifestFileManager: FileManager, @unchecked Sendable {
+        override func fileExists(atPath path: String) -> Bool {
+            false
+        }
+    }
+
     private var libraryRoot: URL!
     private var repository: FileSidecarRepository!
 
@@ -97,6 +103,27 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
             loaded.photos.map(\.relativePath),
             ["Trip/A.ARW", "Trip/B.ARW"],
             "Records are sorted so the file stays stable across scans"
+        )
+    }
+
+    func testProbeManifestReturnsAbsentForAGenuinelyMissingManifest() {
+        XCTAssertEqual(repository.probeManifest(), .absent)
+    }
+
+    func testProbeManifestDoesNotTreatAFileExistsFalseNegativeAsAbsent() throws {
+        try FileManager.default.createDirectory(
+            at: repository.manifestURL,
+            withIntermediateDirectories: true
+        )
+        let falseNegativeRepository = FileSidecarRepository(
+            libraryRootURL: libraryRoot,
+            fileManager: FalseNegativeManifestFileManager()
+        )
+
+        XCTAssertEqual(falseNegativeRepository.probeManifest(), .unavailable)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: repository.manifestURL.path),
+            "A read-only probe must not quarantine or otherwise mutate the failing manifest path"
         )
     }
 

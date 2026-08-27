@@ -186,13 +186,12 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     /// is opening `manifestURL` for reading.
     public func probeManifest() -> ManifestProbeResult {
         guard isAvailable else { return .unavailable }
-        guard fileManager.fileExists(atPath: manifestURL.path) else { return .absent }
 
         let data: Data
         do {
             data = try Data(contentsOf: manifestURL)
         } catch {
-            return .unavailable
+            return FileSystemError.isNoSuchFile(error) ? .absent : .unavailable
         }
 
         do {

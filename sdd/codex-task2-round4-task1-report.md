@@ -128,3 +128,63 @@ Each behavior group had an observed RED before its production change (the scope-
 ## Concerns
 
 None within this task's scope.
+
+---
+
+## Independent review fix round — 2026-08-27
+
+### Status
+
+DONE
+
+- Starting HEAD: `48234da5d3871bd275792baaf42925e289034352`
+- Commit subject: `Fix fail-closed source metadata reads`
+- Commit SHA: reported in the completion response; a commit cannot contain its own SHA without an additional commit or amend.
+- Durable transaction journal, product Task 3, and the untracked review brief were not modified.
+
+### Review findings fixed
+
+- `FileBookmarkStore.loadAll()` now attempts the directory listing directly. It returns `[]` only for explicit Cocoa no-such-file errors or POSIX `ENOENT`; permission, metadata, listing, record-read, and decoding failures throw.
+- `FileSidecarRepository.probeManifest()` now reads `library.json` directly. Only explicit no-such-file errors map to `.absent`; every other lookup/read failure maps to `.unavailable`, without quarantine or mutation.
+- Shared `FileSystemError.isNoSuchFile(_:)` narrowly recognizes Cocoa `.fileNoSuchFile`/`.fileReadNoSuchFile`, POSIX `ENOENT`, and a bounded underlying-error chain. Other I/O errors are never treated as absence.
+- Restore coverage now proves a source with `confirmedManifestLibraryID == nil` and an unavailable manifest becomes `.needsAuthorization` with `.manifestUnavailable`.
+- The same blocked-restore test directly verifies both `adjustments(for:)` and `saveAdjustments(_:for:)` reject access, while RAW bytes and the failing manifest path remain unchanged.
+- Bookmark coverage now verifies a single `*.json` record whose data cannot be read makes `loadAll()` throw.
+
+### TDD evidence
+
+1. RED
+   - Command: `swift test --filter 'FileBookmarkStoreTests.testFileExistsFalseDoesNotHideDirectoryListingPermissionFailure|SidecarRepositoryTests.testProbeManifestDoesNotTreatAFileExistsFalseNegativeAsAbsent|LibrarySourceRecoveryTests.testUnavailableManifestProbeBlocksRestoreAndBothEditAPIsWithoutTouchingRAWBytes|FileBookmarkStoreTests.testJSONRecordDataReadFailureMakesLoadAllThrow|SidecarRepositoryTests.testProbeManifestReturnsAbsentForAGenuinelyMissingManifest'`
+   - Result: 5 tests executed; 2 expected failures.
+   - Bookmark failure: injected `fileExists == false` hid `CocoaError.fileReadNoPermission` and returned `[]`.
+   - Manifest failure: injected `fileExists == false` hid a deterministic manifest data-read failure and returned `.absent` instead of `.unavailable`.
+   - Genuine missing-directory/manifest behavior, the JSON-record read failure, and service-level blocked restore already passed.
+
+2. GREEN
+   - Same command after the minimal production change.
+   - Result: 5 tests, 0 failures.
+
+### Changed files
+
+- `Sources/PhotoLibraryCore/Access/BookmarkStore.swift`
+- `Sources/PhotoLibraryCore/Sidecar/SidecarRepository.swift`
+- `Sources/PhotoLibraryCore/Storage/FileSystemError.swift`
+- `Tests/PhotoLibraryCoreTests/FileBookmarkStoreTests.swift`
+- `Tests/PhotoLibraryCoreTests/SidecarRepositoryTests.swift`
+- `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`
+- `sdd/codex-task2-round4-task1-report.md`
+
+### Verification
+
+- `swift test --filter 'LibrarySourceRecoveryTests|FileBookmarkStoreTests|SidecarRepositoryTests'`
+  - PASS: 52 tests, 0 failures.
+- `swift test --filter 'LibrarySource(Identity|Lifecycle|Recovery)Tests|FileBookmarkStoreTests|PhotoIndexStoreTests'`
+  - PASS: 109 tests, 0 failures.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  - PASS: exit code 0. The first sandboxed invocation could not write the user-level clang module cache; the identical approved invocation completed successfully.
+- `git diff --check`
+  - Run at the final pre-commit gate.
+
+### Concerns
+
+None within this review-fix scope.
