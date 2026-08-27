@@ -53,6 +53,24 @@ extension SidecarError: LocalizedError {
     }
 }
 
+/// Strictly read-only classification of a folder's manifest, for identity
+/// preflight (spec §7). Unlike `SidecarStoring.loadManifest()`, producing
+/// this value must never quarantine, move, write or otherwise touch
+/// anything on disk — an add/focus/relink preflight has to be able to
+/// inspect a candidate folder without risking any mutation before the
+/// caller has even decided whether the source is safe to use.
+public enum ManifestProbeResult: Sendable, Equatable {
+    /// No `.lumaharbor/library.json` exists yet.
+    case absent
+    case valid(LibraryManifest)
+    /// The file exists but isn't valid JSON, or doesn't decode as a manifest.
+    case corrupt(reason: String)
+    case unsupportedSchema(found: Int, supported: Int)
+    /// The drive isn't mounted, or the file couldn't be read for some other
+    /// reason (permissions, I/O error) — distinct from `.absent`.
+    case unavailable
+}
+
 public protocol SidecarStoring: Sendable {
     var libraryRootURL: URL { get }
     var isAvailable: Bool { get }
@@ -152,6 +170,36 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
                 quarantinedAt: quarantined?.path,
                 reason: (error as NSError).localizedDescription
             )
+        }
+    }
+
+    /// Read-only manifest inspection for identity preflight (spec §7): unlike
+    /// `loadManifest()`, a corrupt or unreadable file is never quarantined
+    /// and this never moves, writes or otherwise touches anything on disk.
+    /// Every branch is a plain read; the strongest side effect possible here
+    /// is opening `manifestURL` for reading.
+    public func probeManifest() -> ManifestProbeResult {
+        guard isAvailable else { return .unavailable }
+        guard fileManager.fileExists(atPath: manifestURL.path) else { return .absent }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: manifestURL)
+        } catch {
+            return .unavailable
+        }
+
+        do {
+            let manifest = try SidecarCoding.decode(LibraryManifest.self, from: data)
+            if manifest.isFromNewerSchema {
+                return .unsupportedSchema(
+                    found: manifest.schemaVersion,
+                    supported: LibraryManifest.currentSchemaVersion
+                )
+            }
+            return .valid(manifest)
+        } catch {
+            return .corrupt(reason: (error as NSError).localizedDescription)
         }
     }
 

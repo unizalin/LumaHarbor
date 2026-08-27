@@ -219,6 +219,63 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(rebuiltCount, 1)
     }
 
+    // MARK: - Review fix round 1: source kind / connection / scan state persistence
+
+    /// Item 17 of the fix-round regression list: `source_kind`,
+    /// `connection_state` and `scan_state` round-trip through a close and
+    /// reopen of the database, not just an in-memory `upsert`/read.
+    func testSourceKindConnectionAndScanStateRoundTripAcrossReopen() throws {
+        var custom = library!
+        custom.sourceKind = .filesProvider
+        custom.connectionState = .readOnly
+        custom.scanState = .partialFailure
+        try store.upsert(library: custom)
+        store.close()
+
+        let reopened = try PhotoIndexStore(databaseURL: databaseURL)
+        defer { reopened.close() }
+        let loaded = try XCTUnwrap(try reopened.library(id: custom.id))
+
+        XCTAssertEqual(loaded.sourceKind, .filesProvider)
+        XCTAssertEqual(loaded.connectionState, .readOnly)
+        XCTAssertEqual(loaded.scanState, .partialFailure)
+    }
+
+    /// Item 16 (SQLite half) of the fix-round regression list: a
+    /// `connection_state` value this build doesn't recognise (a future
+    /// case, or a corrupted row) must never be read back as `.ready` — the
+    /// safe default is `.offline`, since SQLite is a rebuildable cache, not
+    /// authoritative, and `.ready` would let editing/export proceed against
+    /// a source whose real state is unknown.
+    func testUnknownConnectionStateRawValueNeverDefaultsToReady() throws {
+        let raw = try SQLiteDatabase(url: databaseURL)
+        defer { raw.close() }
+        try raw.run(
+            "UPDATE library SET connection_state = ? WHERE id = ?;",
+            [.text("futureStateThisBuildDoesNotKnow"), .text(library.id.description)]
+        )
+
+        let loaded = try XCTUnwrap(try store.library(id: library.id))
+        XCTAssertEqual(loaded.connectionState, .offline)
+        XCTAssertNotEqual(loaded.connectionState, .ready)
+    }
+
+    /// An unrecognised `scan_state`/`source_kind` must likewise fail safe —
+    /// idle (nothing appears to be running) and externalFolder (the most
+    /// conservative display category) — rather than crash or drop the row.
+    func testUnknownScanStateAndSourceKindRawValuesFailSafeRatherThanCrash() throws {
+        let raw = try SQLiteDatabase(url: databaseURL)
+        defer { raw.close() }
+        try raw.run(
+            "UPDATE library SET scan_state = ?, source_kind = ? WHERE id = ?;",
+            [.text("futureScanState"), .text("futureSourceKind"), .text(library.id.description)]
+        )
+
+        let loaded = try XCTUnwrap(try store.library(id: library.id))
+        XCTAssertEqual(loaded.scanState, .idle)
+        XCTAssertEqual(loaded.sourceKind, .externalFolder)
+    }
+
     func testConcurrentWritesAreSerialisedSafely() async throws {
         let store = self.store!
         let libraryID = library.id

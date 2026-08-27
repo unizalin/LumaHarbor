@@ -53,6 +53,16 @@ public enum LibraryError: Error, Equatable, Sendable {
     /// auto-reused; the caller must ask the user to confirm before either
     /// adding it as new or reusing the named library.
     case ambiguousSource(LibraryID)
+    /// Spec §7: the folder being added has a confirmed manifest `LibraryID`
+    /// that disagrees with an already-known source's confirmed manifest
+    /// `LibraryID`, even though other evidence (path, resource identifier)
+    /// suggests they might be the same physical folder. A confirmed
+    /// disagreement is never downgraded to a silent reuse.
+    case manifestConflict(LibraryID)
+    /// Spec §7: `relink(libraryID:to:)` was pointed at a folder that doesn't
+    /// confirm as the same source being relinked. The bookmark, index and
+    /// access scope for `libraryID` are left completely untouched.
+    case relinkTargetMismatch(LibraryID)
 }
 
 extension LibraryError: LocalizedError {
@@ -72,6 +82,10 @@ extension LibraryError: LocalizedError {
             return L10n.t("This folder overlaps a photo library you already added.")
         case .ambiguousSource:
             return L10n.t("LumaHarbor can't confirm whether this is a source you already added.")
+        case .manifestConflict:
+            return L10n.t("This folder's saved identity doesn't match a library you already added.")
+        case .relinkTargetMismatch:
+            return L10n.t("This folder doesn't match the library you're reconnecting.")
         }
     }
 
@@ -89,6 +103,10 @@ extension LibraryError: LocalizedError {
             return L10n.t("Choose a folder that doesn't contain, or sit inside, an existing library.")
         case .ambiguousSource:
             return L10n.t("Confirm whether this is the same source, then try again.")
+        case .manifestConflict:
+            return L10n.t("Choose a different folder, or confirm which library this one belongs to.")
+        case .relinkTargetMismatch:
+            return L10n.t("Choose the folder that holds this exact library, then try again.")
         }
     }
 }
@@ -158,12 +176,16 @@ public actor PhotoLibraryService {
     /// Registers a folder the user just picked. The open panel has already
     /// granted access, so this only has to remember it (spec §7).
     ///
-    /// Identity is checked before any mutation: a reliably-detected exact
-    /// match focuses the existing source instead of duplicating it, a
-    /// reliably-detected parent/child overlap is rejected outright, and an
-    /// ambiguous match — no manifest ID or resource identifier agrees, only a
-    /// bounded fingerprint — is rejected pending explicit user confirmation
-    /// rather than silently guessed either way.
+    /// The whole decision is a strictly read-only, order-independent
+    /// preflight (spec §7): every currently-known library's relationship to
+    /// the candidate is collected up front — nothing is mutated while doing
+    /// so — before any bookmark, index, in-memory or source mutation
+    /// happens. A reliably-detected exact match focuses the existing source
+    /// instead of duplicating it; a reliably-detected parent/child overlap,
+    /// a confirmed manifest conflict, or an ambiguous match (no manifest ID
+    /// or resource identifier agrees, only a bounded fingerprint) is
+    /// rejected outright rather than silently guessed either way; more than
+    /// one confirmed match is itself treated as ambiguous.
     @discardableResult
     public func addLibrary(
         at url: URL,
@@ -171,36 +193,120 @@ public actor PhotoLibraryService {
         sourceKind: LibrarySourceKind = .externalFolder
     ) throws -> LibraryFolder {
         let repository = FileSidecarRepository(libraryRootURL: url)
-        // Reuse the identifier the folder already carries, so re-adding a drive
-        // on a second Mac doesn't fork the library into two.
-        let existingManifest = try? repository.loadManifest()
+        let confirmedManifestID = try Self.requireConfirmedManifestID(
+            from: repository.probeManifest(), path: url.path
+        )
         let candidateIdentity = LibrarySourceIdentity.resolve(
-            url: url, manifestLibraryID: existingManifest?.libraryID
+            url: url, confirmedManifestLibraryID: confirmedManifestID
         )
 
+        switch preflightDecision(for: candidateIdentity) {
+        case .reject(let error):
+            throw error
+        case .focus(let existing):
+            return try focusExistingLibrary(
+                existing, at: url, displayName: displayName,
+                candidateIdentity: candidateIdentity, repository: repository
+            )
+        case .addNew:
+            return try createNewLibrary(
+                at: url, displayName: displayName, sourceKind: sourceKind,
+                confirmedManifestID: confirmedManifestID,
+                candidateIdentity: candidateIdentity, repository: repository
+            )
+        }
+    }
+
+    private enum PreflightOutcome {
+        case addNew
+        case focus(LibraryFolder)
+        case reject(LibraryError)
+    }
+
+    /// Compares `candidate` against *every* currently-known library before
+    /// deciding anything (spec §7): the result must not depend on dictionary
+    /// iteration order, so a `.same` match found early never short-circuits
+    /// past an overlap/conflict/ambiguity that a later library would have
+    /// raised. Purely a read over `libraries`/the bookmark store — no
+    /// mutation happens here.
+    private func preflightDecision(for candidate: LibrarySourceIdentity) -> PreflightOutcome {
+        var sameMatches: [LibraryFolder] = []
+
         for existing in libraries.values {
-            switch identity(for: existing).relationship(to: candidateIdentity) {
-            case .same:
-                return try focusExistingLibrary(
-                    existing, at: url, displayName: displayName
-                )
+            switch identity(for: existing).relationship(to: candidate) {
             case .ancestor, .descendant:
-                throw LibraryError.overlappingSource
+                return .reject(.overlappingSource)
+            case .conflict:
+                return .reject(.manifestConflict(existing.id))
             case .ambiguous:
-                throw LibraryError.ambiguousSource(existing.id)
+                return .reject(.ambiguousSource(existing.id))
+            case .same:
+                sameMatches.append(existing)
             case .distinct:
                 continue
             }
         }
 
-        let bookmarkData: Data
+        switch sameMatches.count {
+        case 0: return .addNew
+        case 1: return .focus(sameMatches[0])
+        default:
+            // Two different known libraries both confirm as the same
+            // candidate: a data inconsistency, not a safe auto-pick between
+            // them (spec §7).
+            return .reject(.ambiguousSource(sameMatches[0].id))
+        }
+    }
+
+    /// Classifies a read-only manifest probe into either a confirmed
+    /// manifest `LibraryID` (or `nil` for a folder that simply has none yet)
+    /// or a thrown, safe error — corrupt/unsupported-schema/unavailable must
+    /// abort the add/focus/relink outright, never be silently treated as
+    /// "no manifest" (spec §7).
+    private static func requireConfirmedManifestID(
+        from probe: ManifestProbeResult,
+        path: String
+    ) throws -> LibraryID? {
+        switch probe {
+        case .absent:
+            return nil
+        case .valid(let manifest):
+            return manifest.libraryID
+        case .corrupt(let reason):
+            throw LibraryError.sidecar(.corruptManifest(quarantinedAt: nil, reason: reason))
+        case .unsupportedSchema(let found, let supported):
+            throw LibraryError.sidecar(.unsupportedSchemaVersion(found: found, supported: supported))
+        case .unavailable:
+            throw LibraryError.offline(path: path)
+        }
+    }
+
+    private static func makeBookmarkData(for url: URL) throws -> Data {
         do {
-            bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
+            return try SecurityScopedBookmark.makeBookmarkData(for: url)
         } catch let error as BookmarkError {
             throw LibraryError.bookmark(error)
         }
+    }
 
-        let libraryID = existingManifest?.libraryID ?? LibraryID()
+    /// Mints a brand-new `LibraryFolder` for a candidate the preflight found
+    /// no relationship to any known library for.
+    ///
+    /// Staged so a mid-way failure can never leave `access`/`libraries`
+    /// pointing at a source the persistent stores don't agree on (spec §7):
+    /// the bookmark is written first, the index second — an index failure
+    /// rolls the just-written bookmark back out — and only once both stores
+    /// agree does this touch the security scope or in-memory state at all.
+    private func createNewLibrary(
+        at url: URL,
+        displayName: String?,
+        sourceKind: LibrarySourceKind,
+        confirmedManifestID: LibraryID?,
+        candidateIdentity: LibrarySourceIdentity,
+        repository: FileSidecarRepository
+    ) throws -> LibraryFolder {
+        let bookmarkData = try Self.makeBookmarkData(for: url)
+        let libraryID = confirmedManifestID ?? LibraryID()
 
         let folder = LibraryFolder(
             id: libraryID,
@@ -211,51 +317,68 @@ public actor PhotoLibraryService {
             scanState: .idle
         )
 
-        try bookmarkStore.save(StoredBookmark(
+        let storedBookmark = StoredBookmark(
             libraryID: libraryID,
             displayName: folder.displayName,
             lastKnownPath: url.path,
             bookmarkData: bookmarkData,
             sourceKind: sourceKind,
             scanState: .idle,
+            confirmedManifestLibraryID: confirmedManifestID,
             resourceIdentifier: candidateIdentity.resourceIdentifier,
-            volumeIdentifier: candidateIdentity.volumeIdentifier
-        ))
+            volumeIdentifier: candidateIdentity.volumeIdentifier,
+            rootFingerprint: candidateIdentity.rootFingerprint
+        )
 
+        // PERSIST: bookmark, then index. A failure here has touched nothing
+        // that needs undoing except the bookmark this very call just wrote.
+        try bookmarkStore.save(storedBookmark)
+        do {
+            try index.upsert(library: folder)
+        } catch {
+            try? bookmarkStore.remove(libraryID: libraryID)
+            throw error
+        }
+
+        // COMMIT: only now touch the security scope and in-memory state,
+        // now that both persistent stores agree.
         access[libraryID] = ScopedFolderAccess(url: url)
         libraries[libraryID] = folder
-        try index.upsert(library: folder)
 
-        if existingManifest == nil, repository.isWritable {
-            try? repository.write(manifest: LibraryManifest(libraryID: libraryID))
+        // Best-effort, as before: a failed manifest write leaves the folder
+        // fully usable, just without a portable identity yet. Backfilling
+        // `confirmedManifestLibraryID` only on a real, observed success
+        // keeps the stored record honest about what's actually on disk.
+        if confirmedManifestID == nil, repository.isWritable,
+           (try? repository.write(manifest: LibraryManifest(libraryID: libraryID))) != nil {
+            var confirmed = storedBookmark
+            confirmed.confirmedManifestLibraryID = libraryID
+            try? bookmarkStore.save(confirmed)
         }
+
         return folder
     }
 
     /// Re-points an already-known library at the exact folder the user just
     /// picked again, rather than minting a second `LibraryFolder` for the
-    /// same physical location (spec §7). Shares its access/persist steps
-    /// with `relink`, but preserves the caller's chosen `displayName` when
-    /// none was supplied, instead of deriving one from the URL.
+    /// same physical location (spec §7). Shared by `addLibrary`'s `.same`
+    /// branch and by `relink`; `displayName` is preserved when none is
+    /// supplied, instead of being derived from the URL.
+    ///
+    /// Staged identically to `createNewLibrary` (spec §7): bookmark, then
+    /// index; a mid-way failure rolls the bookmark back to its previous
+    /// value (or removes it, if there wasn't one) and never touches the
+    /// security scope or in-memory state — so a failed focus/relink leaves
+    /// the old root, bookmark, index and access completely untouched, and
+    /// never opens a new security scope it would have to release.
     private func focusExistingLibrary(
         _ existing: LibraryFolder,
         at url: URL,
-        displayName: String?
+        displayName: String?,
+        candidateIdentity: LibrarySourceIdentity,
+        repository: FileSidecarRepository
     ) throws -> LibraryFolder {
-        let bookmarkData: Data
-        do {
-            bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
-        } catch let error as BookmarkError {
-            throw LibraryError.bookmark(error)
-        }
-
-        let repository = FileSidecarRepository(libraryRootURL: url)
-        let resolvedIdentity = LibrarySourceIdentity.resolve(
-            url: url, manifestLibraryID: existing.id
-        )
-
-        access[existing.id]?.stop()
-        access[existing.id] = ScopedFolderAccess(url: url)
+        let bookmarkData = try Self.makeBookmarkData(for: url)
 
         var folder = existing
         folder.rootURL = url
@@ -265,52 +388,69 @@ public actor PhotoLibraryService {
             folder.displayName = displayName
         }
 
-        try bookmarkStore.save(StoredBookmark(
+        let newStoredBookmark = StoredBookmark(
             libraryID: existing.id,
             displayName: folder.displayName,
             lastKnownPath: url.path,
             bookmarkData: bookmarkData,
             sourceKind: existing.sourceKind,
             scanState: folder.scanState,
-            resourceIdentifier: resolvedIdentity.resourceIdentifier,
-            volumeIdentifier: resolvedIdentity.volumeIdentifier
-        ))
+            confirmedManifestLibraryID: candidateIdentity.confirmedManifestLibraryID,
+            resourceIdentifier: candidateIdentity.resourceIdentifier,
+            volumeIdentifier: candidateIdentity.volumeIdentifier,
+            rootFingerprint: candidateIdentity.rootFingerprint
+        )
+        let previousStoredBookmark = try? bookmarkStore.load(libraryID: existing.id)
 
+        try bookmarkStore.save(newStoredBookmark)
+        do {
+            try index.upsert(library: folder)
+        } catch {
+            if let previousStoredBookmark {
+                try? bookmarkStore.save(previousStoredBookmark)
+            } else {
+                try? bookmarkStore.remove(libraryID: existing.id)
+            }
+            throw error
+        }
+
+        access[existing.id]?.stop()
+        access[existing.id] = ScopedFolderAccess(url: url)
         libraries[existing.id] = folder
-        try index.upsert(library: folder)
+
         return folder
     }
 
     /// The identity a currently-known library presents for overlap/reuse
-    /// comparison (spec §7): its own `LibraryID` always stands in for the
-    /// manifest check, its persisted bookmark identity carries across a
-    /// restart or offline period, and live path/volume data is added only
-    /// while the source is actually reachable right now — so ancestor/
-    /// descendant detection never fires against an offline source's stale
-    /// path.
+    /// comparison (spec §7): its confirmed manifest `LibraryID` (if any) and
+    /// resource/volume identity are read from its persisted bookmark record,
+    /// never assumed from its own in-memory `LibraryID` — so an offline or
+    /// never-manifested source compares only on evidence that's actually
+    /// been confirmed. Live path/volume data is added only while the source
+    /// is actually reachable right now, so ancestor/descendant detection
+    /// never fires against an offline source's stale path.
     private func identity(for folder: LibraryFolder) -> LibrarySourceIdentity {
         let stored = try? bookmarkStore.load(libraryID: folder.id)
         var resourceIdentifier = stored?.resourceIdentifier
         var volumeIdentifier = stored?.volumeIdentifier
-        var livePathComponents: [String]?
+        var canonicalLivePath: String?
 
         if folder.isOnline {
-            let liveURL = folder.rootURL
-            if let values = try? liveURL.resourceValues(
-                forKeys: [.fileResourceIdentifierKey, .volumeIdentifierKey]
-            ) {
-                resourceIdentifier = resourceIdentifier ?? (values.fileResourceIdentifier as? Data)
-                volumeIdentifier = volumeIdentifier ?? (values.volumeIdentifier as? Data)
-            }
-            livePathComponents = folder.rootURL.standardizedFileURL.pathComponents
+            let live = LibrarySourceIdentity.resolve(
+                url: folder.rootURL,
+                confirmedManifestLibraryID: stored?.confirmedManifestLibraryID
+            )
+            resourceIdentifier = resourceIdentifier ?? live.resourceIdentifier
+            volumeIdentifier = volumeIdentifier ?? live.volumeIdentifier
+            canonicalLivePath = live.canonicalLivePath
         }
 
         return LibrarySourceIdentity(
-            manifestLibraryID: folder.id,
+            confirmedManifestLibraryID: stored?.confirmedManifestLibraryID,
             resourceIdentifier: resourceIdentifier,
             volumeIdentifier: volumeIdentifier,
-            rootFingerprint: nil,
-            livePathComponents: livePathComponents
+            rootFingerprint: stored?.rootFingerprint,
+            canonicalLivePath: canonicalLivePath
         )
     }
 
@@ -350,13 +490,14 @@ public actor PhotoLibraryService {
                     if scopedAccess.isStale,
                        let refreshed = try? SecurityScopedBookmark.makeBookmarkData(for: scopedAccess.url) {
                         let refreshedIdentity = LibrarySourceIdentity.resolve(
-                            url: scopedAccess.url, manifestLibraryID: bookmark.libraryID
+                            url: scopedAccess.url, confirmedManifestLibraryID: bookmark.confirmedManifestLibraryID
                         )
                         var updated = bookmark
                         updated.bookmarkData = refreshed
                         updated.lastKnownPath = scopedAccess.url.path
                         updated.resourceIdentifier = refreshedIdentity.resourceIdentifier
                         updated.volumeIdentifier = refreshedIdentity.volumeIdentifier
+                        updated.rootFingerprint = refreshedIdentity.rootFingerprint
                         try? bookmarkStore.save(updated)
                     }
                 } else {
@@ -385,42 +526,55 @@ public actor PhotoLibraryService {
         return restored
     }
 
-    /// Re-points a library at a folder the user picked again after the bookmark
-    /// went stale. The `LibraryID` is preserved, so every sidecar still matches.
+    /// Re-points a library at a folder the user picked again after the
+    /// bookmark went stale. The `LibraryID` is preserved, so every sidecar
+    /// still matches.
+    ///
+    /// Runs the exact same read-only, order-independent identity preflight
+    /// as `addLibrary` (spec §7): the new target must confirm as `.same` as
+    /// the library being relinked — never merely `.distinct`,
+    /// `.ancestor`/`.descendant`, `.conflict`, or `.ambiguous` — and must not
+    /// overlap, match or conflict with any *other* known library either.
+    /// Nothing is mutated until every check passes.
     @discardableResult
     public func relink(libraryID: LibraryID, to url: URL) throws -> LibraryFolder {
-        guard var folder = libraries[libraryID] else {
+        guard let target = libraries[libraryID] else {
             throw LibraryError.notFound(libraryID)
         }
-        let bookmarkData: Data
-        do {
-            bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
-        } catch let error as BookmarkError {
-            throw LibraryError.bookmark(error)
-        }
-
-        access[libraryID]?.stop()
-        access[libraryID] = ScopedFolderAccess(url: url)
 
         let repository = FileSidecarRepository(libraryRootURL: url)
-        let identity = LibrarySourceIdentity.resolve(url: url, manifestLibraryID: libraryID)
-        folder.rootURL = url
-        folder.lastKnownPath = url.path
-        folder.connectionState = repository.isWritable ? .ready : .readOnly
+        let confirmedManifestID = try Self.requireConfirmedManifestID(
+            from: repository.probeManifest(), path: url.path
+        )
+        let candidateIdentity = LibrarySourceIdentity.resolve(
+            url: url, confirmedManifestLibraryID: confirmedManifestID
+        )
 
-        try bookmarkStore.save(StoredBookmark(
-            libraryID: libraryID,
-            displayName: folder.displayName,
-            lastKnownPath: url.path,
-            bookmarkData: bookmarkData,
-            sourceKind: folder.sourceKind,
-            scanState: folder.scanState,
-            resourceIdentifier: identity.resourceIdentifier,
-            volumeIdentifier: identity.volumeIdentifier
-        ))
-        libraries[libraryID] = folder
-        try index.upsert(library: folder)
-        return folder
+        let targetRelationship = identity(for: target).relationship(to: candidateIdentity)
+        guard targetRelationship == .same else {
+            switch targetRelationship {
+            case .ambiguous:
+                throw LibraryError.ambiguousSource(libraryID)
+            default:
+                throw LibraryError.relinkTargetMismatch(libraryID)
+            }
+        }
+
+        for other in libraries.values where other.id != libraryID {
+            switch identity(for: other).relationship(to: candidateIdentity) {
+            case .distinct:
+                continue
+            case .same, .ancestor, .descendant:
+                throw LibraryError.overlappingSource
+            case .conflict, .ambiguous:
+                throw LibraryError.ambiguousSource(other.id)
+            }
+        }
+
+        return try focusExistingLibrary(
+            target, at: url, displayName: nil,
+            candidateIdentity: candidateIdentity, repository: repository
+        )
     }
 
     /// Removes a source's *local* bookmark, index rows and progress state
