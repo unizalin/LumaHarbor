@@ -275,7 +275,12 @@ public final class PhotoIndexStore: @unchecked Sendable {
                     // `is_online`/`is_writable` predate `connection_state`
                     // (schema v1) and are kept only for readers of the raw
                     // table; a v2+ row's `connection_state` is authoritative.
-                    connectionState: LibraryConnectionState(rawValue: row.string(7)) ?? .ready,
+                    // An unrecognized raw value (a future case, or a
+                    // corrupted row) must never default to `.ready` — this
+                    // index is a rebuildable cache, not authoritative, so
+                    // the safe default is `.offline` until `restoreLibraries()`
+                    // re-derives the real state from the bookmark.
+                    connectionState: LibraryConnectionState(rawValue: row.string(7)) ?? .offline,
                     scanState: scanState.normalizedForRestore,
                     lastScanAt: row.date(5),
                     photoCount: Int(row.int(9))
