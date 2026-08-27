@@ -1,5 +1,6 @@
 import XCTest
 @testable import PhotoLibraryCore
+@testable import RawProcessingCore
 
 /// Review fix round 2: `PhotoLibraryService`'s confirmed-manifest-ID
 /// reconciliation, `LibraryID` collision guard, staged-persistence durability
@@ -471,6 +472,76 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
                 XCTAssertEqual(manifestModifiedAfter, manifestModifiedBefore, testCase.name)
             }
         }
+    }
+
+    func testUnavailableManifestProbeBlocksRestoreAndBothEditAPIsWithoutTouchingRAWBytes() async throws {
+        let root = try makeSubdirectory("UnavailableManifestRoot")
+        let rawURL = root.appendingPathComponent("DSC0001.ARW")
+        let originalRAW = Data([0x52, 0x41, 0x57, 0x00, 0xFF])
+        try originalRAW.write(to: rawURL)
+
+        let manifestURL = root
+            .appendingPathComponent(FileSidecarRepository.directoryName, isDirectory: true)
+            .appendingPathComponent(FileSidecarRepository.manifestFilename, isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestURL, withIntermediateDirectories: true)
+
+        let resolver = FakeFolderAccessResolver()
+        let token = "unavailable-manifest"
+        resolver.setCanned(.init(url: root), forToken: token)
+        let libraryID = LibraryID()
+        let bookmarkStore = FileBookmarkStore(
+            directoryURL: try makeSubdirectory("UnavailableManifestBookmarks")
+        )
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Unavailable Manifest",
+            lastKnownPath: root.path,
+            bookmarkData: resolver.makeBookmarkData(token: token),
+            confirmedManifestLibraryID: nil
+        ))
+        let service = try makeService(
+            supportName: "UnavailableManifestSupport",
+            bookmarkStore: bookmarkStore,
+            folderAccessResolver: resolver
+        )
+
+        let restored = try await service.restoreLibraries()
+        XCTAssertEqual(restored.first?.connectionState, .needsAuthorization)
+        let diagnostic = await service.restoreDiagnostic(for: libraryID)
+        XCTAssertEqual(diagnostic, .manifestUnavailable)
+
+        let photo = PhotoAsset.stub(
+            libraryID: libraryID,
+            relativePath: rawURL.lastPathComponent
+        )
+        do {
+            _ = try await service.adjustments(for: photo)
+            XCTFail("A manifest-blocked restore must reject adjustment reads")
+        } catch let error as LibraryError {
+            guard case .offline = error else {
+                return XCTFail("Expected blocked adjustment read to report .offline, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected LibraryError, got \(error)")
+        }
+        do {
+            try await service.saveAdjustments(PhotoAdjustments(exposure: 1), for: photo)
+            XCTFail("A manifest-blocked restore must reject adjustment writes")
+        } catch let error as LibraryError {
+            guard case .offline = error else {
+                return XCTFail("Expected blocked adjustment write to report .offline, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected LibraryError, got \(error)")
+        }
+
+        XCTAssertEqual(try Data(contentsOf: rawURL), originalRAW)
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: manifestURL.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue,
+            "The unavailable manifest path must remain untouched"
+        )
     }
 
     // MARK: - Critical 2, items 2-4: LibraryID collision, and restart-safe recovery

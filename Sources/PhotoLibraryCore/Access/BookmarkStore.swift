@@ -148,12 +148,16 @@ public struct FileBookmarkStore: BookmarkStoring, @unchecked Sendable {
     }
 
     public func loadAll() throws -> [StoredBookmark] {
-        guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
-
-        let contents = try fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: nil
-        )
+        let contents: [URL]
+        do {
+            contents = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil
+            )
+        } catch {
+            guard FileSystemError.isNoSuchFile(error) else { throw error }
+            return []
+        }
         return try contents
             .filter { $0.pathExtension.lowercased() == "json" }
             .map { url in

@@ -18,6 +18,20 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         }
     }
 
+    private final class FalseNegativeDirectoryFileManager: FileManager, @unchecked Sendable {
+        override func fileExists(atPath path: String) -> Bool {
+            false
+        }
+
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []
+        ) throws -> [URL] {
+            throw CocoaError(.fileReadNoPermission)
+        }
+    }
+
     private func makeStore() -> FileBookmarkStore {
         FileBookmarkStore(directoryURL: temporaryDirectory)
     }
@@ -126,6 +140,30 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         )
 
         XCTAssertThrowsError(try store.loadAll())
+    }
+
+    func testFileExistsFalseDoesNotHideDirectoryListingPermissionFailure() {
+        let store = FileBookmarkStore(
+            directoryURL: temporaryDirectory,
+            fileManager: FalseNegativeDirectoryFileManager()
+        )
+
+        XCTAssertThrowsError(try store.loadAll()) { error in
+            XCTAssertEqual((error as? CocoaError)?.code, .fileReadNoPermission)
+        }
+    }
+
+    func testJSONRecordDataReadFailureMakesLoadAllThrow() throws {
+        let recordDirectory = temporaryDirectory.appendingPathComponent(
+            "\(LibraryID().rawValue.uuidString).json",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: recordDirectory,
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertThrowsError(try makeStore().loadAll())
     }
 
     // MARK: - Ignoring unrelated files
