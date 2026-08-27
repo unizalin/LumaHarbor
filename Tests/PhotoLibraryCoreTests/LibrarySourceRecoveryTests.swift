@@ -135,14 +135,31 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
             lock.lock(); onFailureAttempt = callback; lock.unlock()
         }
 
+        /// Fixed synthetic values only -- never `url.path` or anything else
+        /// filesystem-derived. This fake stands in for a real bookmark-API
+        /// failure, and a real failure's payload can carry a private
+        /// absolute path; the injected test double must not.
+        static let injectedErrorPath = "<injected-test-path>"
+        static let injectedErrorReason = "injected bookmark creation failure"
+
         func makeBookmarkData(for url: URL) throws -> Data {
             lock.lock()
             let shouldFail = failingURLs.contains(url)
-            let callback = onFailureAttempt
+            var callback: (@Sendable (URL) -> Void)?
+            if shouldFail {
+                // Consumed exactly once: cleared under the same lock
+                // acquisition that reads it, so a second failing call for
+                // the same (or another) URL finds no callback left to fire.
+                callback = onFailureAttempt
+                onFailureAttempt = nil
+            }
             lock.unlock()
             if shouldFail {
                 callback?(url)
-                throw BookmarkError.couldNotCreate(path: url.path, reason: "injected test failure")
+                throw BookmarkError.couldNotCreate(
+                    path: Self.injectedErrorPath,
+                    reason: Self.injectedErrorReason
+                )
             }
             return try wrapped.makeBookmarkData(for: url)
         }
@@ -1242,8 +1259,22 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         do {
             _ = try await service.restoreLibraries()
             XCTFail("Expected the index read failure to propagate")
+        } catch let error as SQLiteError {
+            // The exact structural error from the deliberately closed
+            // database's `library(id:)` lookup -- not merely "some Error
+            // was thrown", which would also pass for a regression that
+            // rethrows the original (unrelated) `BookmarkError` instead.
+            guard case .prepareFailed(let sql, let message) = error else {
+                XCTFail("Expected SQLiteError.prepareFailed, got SQLiteError.\(error)")
+                return
+            }
+            XCTAssertEqual(message, "database is closed")
+            XCTAssertTrue(
+                sql.contains("FROM library"),
+                "The failing statement must be the library lookup, not some other query"
+            )
         } catch {
-            // expected
+            XCTFail("Expected SQLiteError.prepareFailed, got \(type(of: error))")
         }
 
         XCTAssertEqual(resolver.createdHandles.count, 2)
@@ -1297,5 +1328,75 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         try assertFileUnchanged(
             at: sentinelB, matches: sentinelBSnapshot, "Root B's source file must be byte-for-byte unchanged"
         )
+    }
+
+    /// Independent review evidence fix round 4, Important 2: the compound
+    /// test above never observes `FakeBookmarkDataCreator`'s thrown
+    /// `BookmarkError` directly (production catches and discards it, only
+    /// propagating the later `SQLiteError`), so this asserts against the
+    /// fake in isolation that its injected payload is the fixed synthetic
+    /// marker, never the real (private) URL passed to it.
+    func testFakeBookmarkDataCreatorInjectedFailurePayloadIsSyntheticAndPathFree() throws {
+        let creator = FakeBookmarkDataCreator()
+        let realURL = try makeSubdirectory("PathFreePayloadCheck")
+        creator.failBookmarkCreation(for: realURL)
+
+        do {
+            _ = try creator.makeBookmarkData(for: realURL)
+            XCTFail("Expected the injected failure to throw")
+        } catch let error as BookmarkError {
+            guard case .couldNotCreate(let path, let reason) = error else {
+                XCTFail("Expected BookmarkError.couldNotCreate, got BookmarkError.\(error)")
+                return
+            }
+            XCTAssertEqual(path, "<injected-test-path>")
+            XCTAssertEqual(reason, "injected bookmark creation failure")
+            XCTAssertFalse(path.contains(realURL.path), "The payload must never contain the real URL's path")
+            for forbiddenPrefix in ["/Users/", "/Volumes/", "/private/var/", "/private/tmp/"] {
+                XCTAssertFalse(
+                    path.hasPrefix(forbiddenPrefix),
+                    "The payload must never carry a real absolute path prefix (\(forbiddenPrefix))"
+                )
+            }
+        } catch {
+            XCTFail("Expected BookmarkError.couldNotCreate, got \(type(of: error))")
+        }
+    }
+
+    /// Independent review evidence fix round 4, Minor: proves
+    /// `onFailureAttempt` is genuinely one-shot -- two separate failing
+    /// `makeBookmarkData` calls for the same URL must invoke the installed
+    /// callback exactly once between them, not once per call.
+    func testFakeBookmarkDataCreatorOnFailureAttemptCallbackFiresExactlyOnceAcrossRepeatedFailingCalls() throws {
+        let creator = FakeBookmarkDataCreator()
+        let url = try makeSubdirectory("OneShotCallbackCheck")
+        creator.failBookmarkCreation(for: url)
+
+        let callbackCount = LockedCounter()
+        creator.setOnFailureAttempt { _ in callbackCount.increment() }
+
+        XCTAssertThrowsError(try creator.makeBookmarkData(for: url))
+        XCTAssertThrowsError(try creator.makeBookmarkData(for: url))
+
+        XCTAssertEqual(
+            callbackCount.value, 1,
+            "The callback must fire exactly once across two failing attempts, not once per attempt"
+        )
+    }
+
+    /// Plain `NSLock`-protected counter, so a test callback captured by an
+    /// `@Sendable` closure can record how many times it ran without
+    /// capturing a mutable `var` across a concurrency boundary.
+    private final class LockedCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+
+        func increment() {
+            lock.lock(); count += 1; lock.unlock()
+        }
+
+        var value: Int {
+            lock.lock(); defer { lock.unlock() }; return count
+        }
     }
 }

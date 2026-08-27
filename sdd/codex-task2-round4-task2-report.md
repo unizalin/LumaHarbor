@@ -359,11 +359,16 @@ are unchanged and remain the only bookmark-data-creation seam.
 
 Added `testCompoundBookmarkCreationAndIndexReadFailureStopsStagedHandleAndPreservesA`
 in `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`. Extended
-`FakeBookmarkDataCreator` with `setOnFailureAttempt(_:)`, a one-shot callback
-invoked immediately before the injected bookmark-creation failure is thrown
-for a given URL — so a test can prove the B access handle already exists at
-that point (asserted inline: `resolver.createdHandles.count == 2`) and inject
-a second, compound failure exactly there. The test:
+`FakeBookmarkDataCreator` with `setOnFailureAttempt(_:)`, a callback invoked
+immediately before the injected bookmark-creation failure is thrown for a
+given URL — so a test can prove the B access handle already exists at that
+point (asserted inline: `resolver.createdHandles.count == 2`) and inject a
+second, compound failure exactly there. **This section originally described
+the callback as one-shot, but the implementation at the time left it
+installed after firing — this test only ever triggered one failing call, so
+the mismatch had no effect here, but the claim was unverified; independent
+review evidence fix round 4 below makes the implementation genuinely
+one-shot and adds a dedicated test proving it.** The test:
 
 1. Restores root A successfully once (real access ownership).
 2. Creates root B with the identical manifest identity; the resolver reports
@@ -371,8 +376,13 @@ a second, compound failure exactly there. The test:
 3. The failure-attempt callback closes the service's live `PhotoIndexStore`
    at the exact moment B's bookmark-data creation is attempted — after the B
    handle already exists, not before.
-4. Asserts `restoreLibraries()` throws (the index error propagates); the old
-   A handle's `stopCallCount == 0` (never touched); the staged B handle's
+4. Asserts `restoreLibraries()` throws — **at the time this section was
+   written, via a broad `catch { }` that accepted any thrown `Error`, which
+   does not by itself distinguish the intended `SQLiteError` from a
+   regression that stopped B but rethrew the original `BookmarkError`
+   instead; independent review evidence fix round 4 below replaces this with
+   an exact `SQLiteError.prepareFailed` structural assertion** — the old A
+   handle's `stopCallCount == 0` (never touched); the staged B handle's
    `stopCallCount == 1` (stopped, not leaked); `service.library(id:)` is
    still the previous `.ready` A folder (actor state untouched); the restore
    diagnostic is `nil` (never changed — the failed restore never committed
@@ -469,3 +479,150 @@ reached.
 ### Concerns
 
 None within this review-fix scope. No hang or skip surfaced this round.
+
+---
+
+## Independent review evidence fix round 4 — 2026-08-28
+
+### Status
+
+DONE
+
+- Starting HEAD: `da885c2b321b07ca5dcda8fefdc14dff0502b874`
+- No file under `Sources/` was touched — the production scope-leak fix from
+  round 3 was verified correct and left exactly as committed. Only
+  `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift` and this
+  report changed. The five untracked handoff/review documents
+  (`sdd/codex-task2-round4-task1-brief.md`,
+  `sdd/codex-task2-round4-task2-brief.md`,
+  `sdd/codex-task2-round4-task2-review-fix-round3.md`,
+  `sdd/codex-task2-round4-task2-review-evidence-round4.md`,
+  `sdd/lumaharbor-task2-claude-handoff.md`) were left exactly as found. No
+  product source RED was fabricated and no committed production code was
+  temporarily broken — this round hardens test evidence for already-correct
+  production code, per the review's own evidence protocol.
+
+### Gaps closed
+
+**Important 1 — exact propagated-error assertion.** The compound test's
+`catch { }` accepted any thrown `Error`, which would also have passed for a
+regression that stopped the B handle but rethrew the original
+`BookmarkError` instead of the real `SQLiteError` — it never actually proved
+which error propagated. Replaced with:
+
+```swift
+} catch let error as SQLiteError {
+    guard case .prepareFailed(let sql, let message) = error else {
+        XCTFail("Expected SQLiteError.prepareFailed, got SQLiteError.\(error)")
+        return
+    }
+    XCTAssertEqual(message, "database is closed")
+    XCTAssertTrue(sql.contains("FROM library"), "…")
+} catch {
+    XCTFail("Expected SQLiteError.prepareFailed, got \(type(of: error))")
+}
+```
+
+This matches `PhotoIndexStore.libraries()` → `SQLiteDatabase.prepare(_:_:)`
+exactly: `PhotoLibraryService`'s recovery read calls `index.library(id:)` →
+`libraries()`, whose `SELECT … FROM library l …` query is prepared against
+the just-closed database, hitting the `guard let handle else { throw
+SQLiteError.prepareFailed(sql: sql, message: "database is closed") }` branch
+in `Sources/PhotoLibraryCore/Index/SQLiteDatabase.swift`. The SQL text is
+pattern-matched (`sql.contains("FROM library")`), not hard-coded, and no
+`localizedDescription` comparison is used — the structured case and its
+`message` field are compared directly. `SQLiteError` is `Equatable` in
+production, but the case is unwrapped explicitly (not `XCTAssertEqual(error,
+.prepareFailed(...))`) so a wrong-case mismatch reports its own case name
+via `XCTFail` rather than only a generic equality failure.
+
+**Important 2 — no real path in the injected error.** `FakeBookmarkDataCreator`
+previously threw `BookmarkError.couldNotCreate(path: url.path, reason:
+"injected test failure")`, embedding the real temporary directory's absolute
+path in the payload. Replaced with fixed synthetic constants:
+`path: "<injected-test-path>"`, `reason: "injected bookmark creation
+failure"` — never derived from the URL passed in. Added
+`testFakeBookmarkDataCreatorInjectedFailurePayloadIsSyntheticAndPathFree`,
+which calls the fake directly with a real on-disk `URL`, catches the thrown
+`BookmarkError.couldNotCreate`, and asserts: `path == "<injected-test-path>"`;
+`reason == "injected bookmark creation failure"`; the payload does not
+contain the real URL's path; and the payload does not start with any of
+`/Users/`, `/Volumes/`, `/private/var/`, `/private/tmp/`. The production
+`SafeErrorPresentation`/diagnostic-mapping code was not touched.
+
+**Minor — genuinely one-shot callback.** `onFailureAttempt` was read but
+never cleared, so a second failing call for the same URL would have re-fired
+it (this round 3 test only ever made one failing call, so the bug was latent
+there, not exercised). `makeBookmarkData(for:)` now copies the callback to a
+local and clears the stored one under the same lock acquisition that
+observes a failing URL, then releases the lock before invoking the callback
+— so the lock is never held across the callback body or, by construction,
+across any `XCTest` assertion or `indexStore.close()` a test's callback might
+perform. Added
+`testFakeBookmarkDataCreatorOnFailureAttemptCallbackFiresExactlyOnceAcrossRepeatedFailingCalls`,
+which fails the same URL twice via two separate `makeBookmarkData` calls and
+asserts a lock-protected counter (`LockedCounter`, a small `@unchecked
+Sendable` helper — a raw captured `var` mutated from the `@Sendable` callback
+triggered a real Swift 6 data-race warning under strict concurrency) is
+exactly `1`, not `2`, after both.
+
+### Evidence protocol checklist
+
+1. Original broad-catch weakness: documented above and in the corrected
+   Round 3 report text (this file).
+2. New exact-error assertion passing against unchanged `da885c2` production
+   code: confirmed below (RED/GREEN for this round is evidence-only, since
+   production was already correct — see next section).
+3. Fixed synthetic payload assertion: `testFakeBookmarkDataCreatorInjectedFailurePayloadIsSyntheticAndPathFree`
+   passes.
+4. One-shot callback count assertion:
+   `testFakeBookmarkDataCreatorOnFailureAttemptCallbackFiresExactlyOnceAcrossRepeatedFailingCalls`
+   passes.
+
+### Evidence-hardening verification (no product RED — production already correct)
+
+- `swift test --filter 'LibrarySourceRecoveryTests.testCompoundBookmarkCreationAndIndexReadFailureStopsStagedHandleAndPreservesA'`
+  - PASS: 1 test, 0 failures — the new exact `SQLiteError.prepareFailed`
+    assertion (message `"database is closed"`, SQL containing `"FROM
+    library"`) passes against unmodified `da885c2` production code, proving
+    the requirement the old broad catch could not.
+- `swift test --filter 'LibrarySourceRecoveryTests'`
+  - PASS: 19 tests, 0 failures (17 from round 3 + the 2 new
+    `FakeBookmarkDataCreator`-only tests added this round).
+- `swift test --filter 'LibraryRegistryTransactionTests|LibrarySourceRecoveryTests'`
+  - PASS: 33 tests, 0 failures.
+- `swift test --filter PhotoLibraryCoreTests`
+  - PASS: 425 tests, 0 failures, run under an 8-minute wrapper as a
+    precaution given the round 2 one-off hang. Completed cleanly in 3.4
+    seconds; `PendingLeaseSubprocessTests` did not hang. No hang to report
+    this round.
+- `swift test` (full suite)
+  - PASS: 969 tests, 9 skipped, 0 failures (up from 967 — the two new
+    evidence tests added here), run under the same timeout wrapper,
+    completed in 13.0 seconds with no hang.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  - PASS: exit code 0, per the spec's exact required command (which builds
+    only the main products, not test targets). Note for completeness: a
+    speculative `--build-tests` run under the same flags surfaces pre-existing
+    strict-concurrency errors in an unrelated, unmodified file
+    (`Tests/RawProcessingCoreTests/JPEGExportTests.swift`, `Task { … }`
+    closures flagged under `SendingClosureRisksDataRace`) — outside this
+    round's allowed-files list and not something this round introduced or is
+    scoped to fix; the spec's exact verification command does not exercise
+    this path and passes cleanly.
+- `git diff --check`
+  - PASS: no whitespace errors.
+- `git status --short --branch`
+  - Only `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift` and
+    this report changed; no file under `Sources/` touched; all five expected
+    untracked handoff/review documents preserved exactly.
+
+### Changed files
+
+- `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`
+- `sdd/codex-task2-round4-task2-report.md`
+
+### Concerns
+
+None. No hang, no skip beyond the pre-existing 9, and no `Sources/` file was
+modified.
