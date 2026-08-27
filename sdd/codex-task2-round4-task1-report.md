@@ -188,3 +188,61 @@ DONE
 ### Concerns
 
 None within this review-fix scope.
+
+---
+
+## Independent review fix round 2 — 2026-08-27
+
+### Status
+
+DONE
+
+- Starting HEAD: `00afc571dd1230f92cda1dd39fce95b82ba94f0d`
+- Commit subject: `Narrow missing-file error classification`
+- Commit SHA: reported in the completion response; a commit cannot contain its own SHA without an additional commit or amend.
+- The untracked review brief was not modified.
+
+### Review finding fixed
+
+- `FileSystemError.isNoSuchFile(_:)` now treats recognized Cocoa and POSIX domains as authoritative: Cocoa `.fileNoSuchFile`/`.fileReadNoSuchFile` and POSIX `ENOENT` return `true`; every other code in those domains returns `false` immediately.
+- Only an unknown/wrapper error domain may inherit a no-such-file classification from `NSUnderlyingErrorKey`.
+- A Cocoa permission error or POSIX `EACCES` can no longer be reclassified as missing merely because it wraps POSIX `ENOENT`.
+- `FileBookmarkStore.loadAll()` coverage proves a wrapped Cocoa permission error propagates instead of returning an empty registry. Existing manifest probe tests continue to exercise the same shared helper through `FileSidecarRepository`.
+
+### TDD evidence
+
+1. RED
+   - Command: `swift test --filter 'FileBookmarkStoreTests.testNoSuchFileClassificationMatrixDoesNotLetKnownPermissionErrorsInheritENOENT|FileBookmarkStoreTests.testWrappedCocoaPermissionErrorStillMakesLoadAllThrow'`
+   - Result: 2 tests, 3 expected failures.
+   - The direct matrix misclassified Cocoa permission→ENOENT and POSIX EACCES→ENOENT as missing; `loadAll()` consequently failed to throw the wrapped permission error.
+
+2. GREEN
+   - Same command after the two short-circuit changes.
+   - Result: 2 tests, 0 failures.
+
+### Direct helper matrix
+
+- Cocoa `.fileReadNoSuchFile` → `true`
+- POSIX `ENOENT` → `true`
+- Unknown wrapper → POSIX `ENOENT` → `true`
+- Cocoa `.fileReadNoPermission` → POSIX `ENOENT` → `false`
+- POSIX `EACCES` → POSIX `ENOENT` → `false`
+
+### Changed files
+
+- `Sources/PhotoLibraryCore/Storage/FileSystemError.swift`
+- `Tests/PhotoLibraryCoreTests/FileBookmarkStoreTests.swift`
+- `sdd/codex-task2-round4-task1-report.md`
+
+### Verification
+
+- `swift test --filter 'LibrarySourceRecoveryTests|FileBookmarkStoreTests|SidecarRepositoryTests'`
+  - PASS: 54 tests, 0 failures.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  - PASS: exit code 0.
+- `git diff --check`
+  - Run at the final pre-commit gate.
+
+### Concerns
+
+None within this review-fix scope.
