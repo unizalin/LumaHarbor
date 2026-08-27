@@ -809,7 +809,20 @@ public actor PhotoLibraryService {
                     // the blocked result from the last known-good durable
                     // projection so the uncommitted root can never reach
                     // SQLite or actor-visible state.
-                    folder = try index.library(id: folder.id) ?? persistedFolder
+                    let priorProjection: LibraryFolder?
+                    do {
+                        priorProjection = try index.library(id: folder.id)
+                    } catch {
+                        // The service cannot safely construct a blocked
+                        // projection either. The staged B handle must not be
+                        // leaked, but the old A actor/access state, bookmark,
+                        // SQLite and diagnostic must be left completely
+                        // untouched -- there is nothing safe to commit, so
+                        // this propagates rather than inventing a result.
+                        stagedAccess.stop()
+                        throw error
+                    }
+                    folder = priorProjection ?? persistedFolder
                     folder.connectionState = .needsAuthorization
                     folder = try commitDisconnectedRestore(
                         folder: folder,

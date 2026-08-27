@@ -23,6 +23,27 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         )
     }
 
+    private struct FileSnapshot: Equatable {
+        var data: Data
+        var modificationDate: Date?
+    }
+
+    private func fileSnapshot(at url: URL) throws -> FileSnapshot {
+        let data = try Data(contentsOf: url)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return FileSnapshot(data: data, modificationDate: attributes[.modificationDate] as? Date)
+    }
+
+    private func assertFileUnchanged(
+        at url: URL,
+        matches expected: FileSnapshot,
+        _ message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        XCTAssertEqual(try fileSnapshot(at: url), expected, message, file: file, line: line)
+    }
+
     private func addLibrary(
         _ service: PhotoLibraryService,
         at url: URL,
@@ -99,16 +120,28 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         private let wrapped = SystemBookmarkDataCreator()
         private let lock = NSLock()
         private var failingURLs: Set<URL> = []
+        /// Fires immediately before the injected failure is thrown for a
+        /// failing URL, so a test can prove the staged access handle for
+        /// that URL already exists (creation is only ever attempted after
+        /// resolving access) and can inject a second, compound failure —
+        /// e.g. closing the index — at that exact moment.
+        private var onFailureAttempt: (@Sendable (URL) -> Void)?
 
         func failBookmarkCreation(for url: URL) {
             lock.lock(); failingURLs.insert(url); lock.unlock()
         }
 
+        func setOnFailureAttempt(_ callback: @escaping @Sendable (URL) -> Void) {
+            lock.lock(); onFailureAttempt = callback; lock.unlock()
+        }
+
         func makeBookmarkData(for url: URL) throws -> Data {
             lock.lock()
             let shouldFail = failingURLs.contains(url)
+            let callback = onFailureAttempt
             lock.unlock()
             if shouldFail {
+                callback?(url)
                 throw BookmarkError.couldNotCreate(path: url.path, reason: "injected test failure")
             }
             return try wrapped.makeBookmarkData(for: url)
@@ -1038,6 +1071,8 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         let rootA = try makeSubdirectory("RootA")
         try FileSidecarRepository(libraryRootURL: rootA)
             .write(manifest: LibraryManifest(libraryID: libraryID))
+        let sentinelA = rootA.appendingPathComponent("sentinel-a.raw")
+        try Data("root A sentinel bytes".utf8).write(to: sentinelA)
 
         let token = "stale-creation-failure-token"
         resolver.setCanned(.init(url: rootA), forToken: token)
@@ -1063,6 +1098,14 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         let rootB = try makeSubdirectory("RootB")
         try FileSidecarRepository(libraryRootURL: rootB)
             .write(manifest: LibraryManifest(libraryID: libraryID))
+        let sentinelB = rootB.appendingPathComponent("sentinel-b.raw")
+        try Data("root B sentinel bytes".utf8).write(to: sentinelB)
+
+        let manifestASnapshot = try fileSnapshot(at: FileSidecarRepository(libraryRootURL: rootA).manifestURL)
+        let manifestBSnapshot = try fileSnapshot(at: FileSidecarRepository(libraryRootURL: rootB).manifestURL)
+        let sentinelASnapshot = try fileSnapshot(at: sentinelA)
+        let sentinelBSnapshot = try fileSnapshot(at: sentinelB)
+
         resolver.setCanned(.init(url: rootB, isStale: true), forToken: token)
         bookmarkDataCreator.failBookmarkCreation(for: rootB)
 
@@ -1073,6 +1116,10 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(folder.rootURL, rootA, "The blocked result must stay based on old root A, never B")
         let diagnostic = await service.restoreDiagnostic(for: libraryID)
         XCTAssertEqual(diagnostic, .persistenceFailure)
+
+        let actorVisible = await service.library(id: libraryID)
+        XCTAssertEqual(actorVisible?.rootURL, rootA, "The actor-visible folder must stay based on A, never B")
+        XCTAssertEqual(actorVisible?.connectionState, .needsAuthorization)
 
         XCTAssertEqual(
             try bookmarkStore.load(libraryID: libraryID), oldBookmark,
@@ -1107,5 +1154,148 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         } else {
             XCTFail("Root A's manifest must remain a valid, unchanged manifest")
         }
+        try assertFileUnchanged(
+            at: FileSidecarRepository(libraryRootURL: rootA).manifestURL, matches: manifestASnapshot,
+            "Root A's manifest bytes/mtime must be untouched"
+        )
+        try assertFileUnchanged(
+            at: FileSidecarRepository(libraryRootURL: rootB).manifestURL, matches: manifestBSnapshot,
+            "Root B's manifest bytes/mtime must be untouched"
+        )
+        try assertFileUnchanged(
+            at: sentinelA, matches: sentinelASnapshot, "Root A's source file must be byte-for-byte unchanged"
+        )
+        try assertFileUnchanged(
+            at: sentinelB, matches: sentinelBSnapshot, "Root B's source file must be byte-for-byte unchanged"
+        )
+    }
+
+    /// Independent review fix round 3: `index.library(id:)` — read to rebuild
+    /// the blocked-restore projection after bookmark-data creation for B
+    /// fails — can *itself* throw (e.g. the index becomes unavailable at
+    /// exactly that moment). At that point the staged B access handle
+    /// already exists. The service cannot safely construct a blocked
+    /// projection, so the index error must propagate untouched: the newly
+    /// staged B handle must still be stopped exactly once (never leaked),
+    /// but the previously valid A actor/access state, bookmark, SQLite,
+    /// journal and every source file must be left completely alone.
+    func testCompoundBookmarkCreationAndIndexReadFailureStopsStagedHandleAndPreservesA() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let bookmarkDataCreator = FakeBookmarkDataCreator()
+        let bookmarkStore = FileBookmarkStore(directoryURL: try makeSubdirectory("CompoundBookmarks"))
+        let locations = ApplicationSupportLocations(baseURL: try makeSubdirectory("CompoundAppSupport"))
+        let service = try PhotoLibraryService(
+            locations: locations,
+            bookmarkStore: bookmarkStore,
+            folderAccessResolver: resolver,
+            bookmarkDataCreator: bookmarkDataCreator
+        )
+
+        let libraryID = LibraryID()
+        let rootA = try makeSubdirectory("CompoundRootA")
+        try FileSidecarRepository(libraryRootURL: rootA)
+            .write(manifest: LibraryManifest(libraryID: libraryID))
+        let sentinelA = rootA.appendingPathComponent("sentinel-a.raw")
+        try Data("compound root A sentinel bytes".utf8).write(to: sentinelA)
+
+        let token = "compound-failure-token"
+        resolver.setCanned(.init(url: rootA), forToken: token)
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Compound Failure",
+            lastKnownPath: rootA.path,
+            bookmarkData: resolver.makeBookmarkData(token: token),
+            confirmedManifestLibraryID: libraryID
+        ))
+
+        // Restore once so access ownership at A is real, not synthetic.
+        _ = try await service.restoreLibraries()
+        let indexStore = await service.indexStore
+        let oldBookmark = try XCTUnwrap(bookmarkStore.load(libraryID: libraryID))
+        let oldIndexedFolder = try XCTUnwrap(indexStore.library(id: libraryID))
+        XCTAssertEqual(resolver.createdHandles.count, 1)
+        XCTAssertEqual(resolver.createdHandles[0].stopCallCount, 0)
+
+        let rootB = try makeSubdirectory("CompoundRootB")
+        try FileSidecarRepository(libraryRootURL: rootB)
+            .write(manifest: LibraryManifest(libraryID: libraryID))
+        let sentinelB = rootB.appendingPathComponent("sentinel-b.raw")
+        try Data("compound root B sentinel bytes".utf8).write(to: sentinelB)
+
+        let manifestASnapshot = try fileSnapshot(at: FileSidecarRepository(libraryRootURL: rootA).manifestURL)
+        let manifestBSnapshot = try fileSnapshot(at: FileSidecarRepository(libraryRootURL: rootB).manifestURL)
+        let sentinelASnapshot = try fileSnapshot(at: sentinelA)
+        let sentinelBSnapshot = try fileSnapshot(at: sentinelB)
+
+        resolver.setCanned(.init(url: rootB, isStale: true), forToken: token)
+        bookmarkDataCreator.failBookmarkCreation(for: rootB)
+        // Fires only once bookmark-data creation for B is actually
+        // attempted -- i.e. only after the B access handle already exists
+        // (it was resolved earlier in the same restore pass) -- and closes
+        // the index at that exact moment, so the service's own recovery
+        // read (`index.library(id:)`) is what fails, not the initial probe.
+        bookmarkDataCreator.setOnFailureAttempt { _ in
+            XCTAssertEqual(resolver.createdHandles.count, 2, "The B handle must already exist when creation is attempted")
+            indexStore.close()
+        }
+
+        do {
+            _ = try await service.restoreLibraries()
+            XCTFail("Expected the index read failure to propagate")
+        } catch {
+            // expected
+        }
+
+        XCTAssertEqual(resolver.createdHandles.count, 2)
+        XCTAssertEqual(
+            resolver.createdHandles[0].stopCallCount, 0,
+            "The previously retained A access must not be touched when the blocked projection can't be built"
+        )
+        XCTAssertEqual(
+            resolver.createdHandles[1].stopCallCount, 1,
+            "The newly staged B access must still be stopped exactly once, never leaked"
+        )
+
+        let actorVisible = await service.library(id: libraryID)
+        XCTAssertEqual(actorVisible?.rootURL, rootA, "Actor-visible state must remain the previous ready A folder")
+        XCTAssertEqual(actorVisible?.connectionState, .ready)
+        let diagnostic = await service.restoreDiagnostic(for: libraryID)
+        XCTAssertNil(diagnostic, "The restore diagnostic must not change: the failed restore never committed")
+
+        XCTAssertEqual(
+            try bookmarkStore.load(libraryID: libraryID), oldBookmark,
+            "The bookmark record must remain exactly the old A record"
+        )
+
+        // Reopen a fresh store against the same on-disk database, since the
+        // in-process `indexStore` was deliberately closed above.
+        let reopenedIndex = try PhotoIndexStore(databaseURL: locations.databaseURL)
+        XCTAssertEqual(
+            try reopenedIndex.library(id: libraryID), oldIndexedFolder,
+            "SQLite must remain exactly the old A projection; B must never be written"
+        )
+
+        let journalStore = FileRegistryTransactionStore(
+            directoryURL: locations.registryTransactionsDirectoryURL
+        )
+        XCTAssertNil(
+            try journalStore.load(),
+            "No journal may exist: failure occurred before prepare was ever reached"
+        )
+
+        try assertFileUnchanged(
+            at: FileSidecarRepository(libraryRootURL: rootA).manifestURL, matches: manifestASnapshot,
+            "Root A's manifest bytes/mtime must be untouched"
+        )
+        try assertFileUnchanged(
+            at: FileSidecarRepository(libraryRootURL: rootB).manifestURL, matches: manifestBSnapshot,
+            "Root B's manifest bytes/mtime must be untouched"
+        )
+        try assertFileUnchanged(
+            at: sentinelA, matches: sentinelASnapshot, "Root A's source file must be byte-for-byte unchanged"
+        )
+        try assertFileUnchanged(
+            at: sentinelB, matches: sentinelBSnapshot, "Root B's source file must be byte-for-byte unchanged"
+        )
     }
 }

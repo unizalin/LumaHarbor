@@ -298,3 +298,174 @@ None within this review-fix scope. The full-suite hang described above is
 worth Codex/CI keeping an eye on if it recurs, but it reproduced as a clean
 pass twice in isolation/re-run and touches subprocess/lease code this fix
 never modified.
+
+---
+
+## Independent review fix round 3 — 2026-08-27
+
+### Status
+
+DONE
+
+- Starting HEAD: `4c3545bf97b07b5fa5e85e89d6a53f4b35f0750c`
+- Commit subject: `fix: close stale bookmark compound-failure scope leak`
+- Journal redesign, Task 2 reimplementation, and product Task 3 were not
+  entered. The four untracked handoff/review documents
+  (`sdd/codex-task2-round4-task1-brief.md`, `sdd/codex-task2-round4-task2-brief.md`,
+  `sdd/lumaharbor-task2-claude-handoff.md`,
+  `sdd/codex-task2-round4-task2-review-fix-round3.md`) were left exactly as
+  found.
+
+### Verdict finding fixed
+
+`4c3545b`'s stale-refresh catch block rebuilt the blocked projection with
+`folder = try index.library(id: folder.id) ?? persistedFolder` *before*
+calling `commitDisconnectedRestore`, which is what actually calls
+`stagedAccess.stop()`. If that `index.library(id:)` read itself threw — the
+index becoming unavailable at exactly that moment — control exited the catch
+block before `commitDisconnectedRestore` ever ran, so the newly staged B
+access handle was never stopped: a genuine leak. The old A actor/access
+state was untouched in that case (the safe half), but the leak itself was
+real and unverified by any test, since the round 2 test's SQLite read always
+succeeded.
+
+### Design delivered
+
+Wrapped only the `index.library(id: folder.id)` read in its own `do/catch`
+inside the existing stale-refresh catch block (the narrowly-scoped
+alternative the spec allows, chosen over hoisting the durable-projection read
+above access resolution, since every other `commitDisconnectedRestore` call
+site in this function already reads the index later via
+`populateRestoreProjection` and was out of this round's scope to touch):
+
+- On success, behavior is unchanged from round 2: rebuild the blocked A
+  projection and call `commitDisconnectedRestore` (which stops both the old
+  A handle and the staged B handle exactly once, in that single call).
+- On failure, the inner catch stops `stagedAccess` (B) exactly once, then
+  rethrows the original index error unchanged. `commitDisconnectedRestore`
+  is never called on this path, so `access[folder.id]` (the old A handle),
+  `libraries[folder.id]` (the old A actor state), `restoreDiagnostics`, the
+  bookmark record, SQLite and the registry-transaction journal are all left
+  completely untouched — not because they're defensively preserved, but
+  because nothing on this path ever writes to them. No `try?`, and no
+  `defer` that could double-stop a handle already stopped by
+  `commitDisconnectedRestore` on the success path.
+
+No production call site or dependency signature changed beyond this one
+`do/catch`; `BookmarkDataCreating`/`SystemBookmarkDataCreator` from round 2
+are unchanged and remain the only bookmark-data-creation seam.
+
+### Required RED test
+
+Added `testCompoundBookmarkCreationAndIndexReadFailureStopsStagedHandleAndPreservesA`
+in `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`. Extended
+`FakeBookmarkDataCreator` with `setOnFailureAttempt(_:)`, a one-shot callback
+invoked immediately before the injected bookmark-creation failure is thrown
+for a given URL — so a test can prove the B access handle already exists at
+that point (asserted inline: `resolver.createdHandles.count == 2`) and inject
+a second, compound failure exactly there. The test:
+
+1. Restores root A successfully once (real access ownership).
+2. Creates root B with the identical manifest identity; the resolver reports
+   it stale and reachable; bookmark-data creation for B is set to fail.
+3. The failure-attempt callback closes the service's live `PhotoIndexStore`
+   at the exact moment B's bookmark-data creation is attempted — after the B
+   handle already exists, not before.
+4. Asserts `restoreLibraries()` throws (the index error propagates); the old
+   A handle's `stopCallCount == 0` (never touched); the staged B handle's
+   `stopCallCount == 1` (stopped, not leaked); `service.library(id:)` is
+   still the previous `.ready` A folder (actor state untouched); the restore
+   diagnostic is `nil` (never changed — the failed restore never committed
+   anything); the bookmark record is unchanged; reopening a fresh
+   `PhotoIndexStore` against the same on-disk database shows the exact old A
+   projection; no registry-transaction journal exists; and both roots'
+   manifest bytes/modification dates and a sentinel source file in each root
+   are byte-for-byte unchanged.
+
+### Strengthened existing test
+
+`testStaleBookmarkDataCreationFailureBeforeJournalPreparePreservesOldDurableState`
+(the round 2 single-failure test) now additionally asserts: `await
+service.library(id:)` — not only the returned array — is based on root A and
+is `.needsAuthorization`; both root A's and root B's manifest bytes and
+modification dates are captured before the failed restore and compared
+unchanged after; and a sentinel source file in each root is captured and
+compared byte-for-byte unchanged. No production behavior changed to satisfy
+this — only test coverage.
+
+### TDD evidence
+
+1. RED
+   - Command: `swift test --filter 'LibrarySourceRecoveryTests.testCompoundBookmarkCreationAndIndexReadFailureStopsStagedHandleAndPreservesA'`
+   - Run against unmodified `4c3545b` production code (only the test file and
+     the `FakeBookmarkDataCreator` extension were in place).
+   - Result: 1 test, 1 failure — `resolver.createdHandles[1].stopCallCount`
+     was `0`, expected `1` ("The newly staged B access must still be stopped
+     exactly once, never leaked"). Every other assertion in the test already
+     passed against unmodified `4c3545b` — confirming the finding's own
+     framing that the old A state was already safe and the leak was
+     precisely, and only, the missing B `stop()`.
+
+2. GREEN
+   - Applied the inner `do/catch` fix.
+   - Same command: 1 test, 0 failures.
+
+### Verification
+
+- `swift test --filter 'LibrarySourceRecoveryTests'`
+  - PASS: 17 tests, 0 failures.
+- `swift test --filter 'LibraryRegistryTransactionTests|LibrarySourceRecoveryTests'`
+  - PASS: 31 tests, 0 failures.
+- `swift test --filter 'LibrarySource(Identity|Lifecycle|Recovery)Tests|FileBookmarkStoreTests|PhotoIndexStoreTests'`
+  - PASS: 111 tests, 0 failures.
+- `swift test --filter 'RelinkResolverTests|LibraryLifecycleTests'`
+  - PASS: 26 tests, 0 failures.
+- `swift test --filter PhotoLibraryCoreTests`
+  - PASS: 423 tests, 0 failures, run under an 8-minute wrapper as a
+    precaution after the round 2 report's one-off hang. It completed cleanly
+    in 3.4 seconds; `PendingLeaseSubprocessTests` did not hang this time, so
+    there is nothing further to capture beyond what round 2 already
+    recorded.
+- `swift test` (full suite)
+  - PASS: 967 tests, 9 skipped, 0 failures (up from 966 — the one new
+    compound-failure test added here), run under the same timeout wrapper,
+    completed in 13.2 seconds with no hang.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  - PASS: exit code 0.
+- `git diff --check`
+  - PASS: no whitespace errors.
+- `git status --short --branch`
+  - Only this change's tracked edits, plus the four expected pre-existing
+    untracked handoff/review documents; nothing else.
+
+### Access-handle stop-count results
+
+- Simple failure (bookmark-data creation fails, index read succeeds — round
+  2 scenario, still covered): old A handle stops exactly once, staged B
+  handle stops exactly once, both via the single `commitDisconnectedRestore`
+  call.
+- Compound failure (bookmark-data creation fails, then the recovery
+  `index.library(id:)` read also fails — new round 3 scenario): old A handle
+  stops zero times (untouched, retained), staged B handle stops exactly once
+  (via the new inner `do/catch`, not via `commitDisconnectedRestore`, which
+  is never reached on this path).
+
+### Bookmark/index/journal invariants
+
+Both scenarios above leave the bookmark record, the on-disk SQLite
+projection (verified in the compound case via a freshly reopened
+`PhotoIndexStore`, since the in-process one was deliberately closed), and the
+registry-transaction journal directory exactly as they were before the
+failed restore — the journal is absent in both, since failure in either case
+occurs strictly before `applyRegistryTransaction`/journal prepare is ever
+reached.
+
+### Changed files
+
+- `Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`
+- `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`
+- `sdd/codex-task2-round4-task2-report.md`
+
+### Concerns
+
+None within this review-fix scope. No hang or skip surfaced this round.
