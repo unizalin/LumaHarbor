@@ -221,23 +221,37 @@ public final class PhotoIndexStore: @unchecked Sendable {
     // MARK: - Libraries
 
     public func upsert(library: LibraryFolder) throws {
+        // SQLite is a rebuildable cache of what the bookmark store already
+        // knows (spec §8.3), so an in-flight `.queued`/`.scanning` value
+        // must never land here — only `.idle`/`.partialFailure` survive a
+        // reopen (spec §7).
+        let persistedScanState = library.scanState.normalizedForRestore
         try withLock {
             try database.run("""
-                INSERT INTO library (id, display_name, root_path, is_online, is_writable, last_scan_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO library (
+                    id, display_name, root_path, is_online, is_writable, last_scan_at,
+                    source_kind, connection_state, scan_state
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
-                    display_name = excluded.display_name,
-                    root_path    = excluded.root_path,
-                    is_online    = excluded.is_online,
-                    is_writable  = excluded.is_writable,
-                    last_scan_at = excluded.last_scan_at;
+                    display_name     = excluded.display_name,
+                    root_path        = excluded.root_path,
+                    is_online        = excluded.is_online,
+                    is_writable      = excluded.is_writable,
+                    last_scan_at     = excluded.last_scan_at,
+                    source_kind      = excluded.source_kind,
+                    connection_state = excluded.connection_state,
+                    scan_state       = excluded.scan_state;
                 """, [
                     .text(library.id.description),
                     .text(library.displayName),
                     .text(library.rootURL.path),
                     .integer(library.isOnline ? 1 : 0),
                     .integer(library.isWritable ? 1 : 0),
-                    library.lastScanAt.map { .real($0.timeIntervalSince1970) } ?? .null
+                    library.lastScanAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                    .text(library.sourceKind.rawValue),
+                    .text(library.connectionState.rawValue),
+                    .text(persistedScanState.rawValue)
                 ])
         }
     }
@@ -246,19 +260,25 @@ public final class PhotoIndexStore: @unchecked Sendable {
         try withLock {
             try database.query("""
                 SELECT l.id, l.display_name, l.root_path, l.is_online, l.is_writable, l.last_scan_at,
+                       l.source_kind, l.connection_state, l.scan_state,
                        (SELECT COUNT(*) FROM photo p WHERE p.library_id = l.id)
                 FROM library l
                 ORDER BY l.display_name COLLATE NOCASE;
                 """) { row in
-                LibraryFolder(
+                let scanState = LibraryScanState(rawValue: row.string(8)) ?? .idle
+                return LibraryFolder(
                     id: LibraryID(uuidString: row.string(0)) ?? LibraryID(),
                     displayName: row.string(1),
                     rootURL: URL(fileURLWithPath: row.string(2), isDirectory: true),
                     lastKnownPath: row.string(2),
-                    isOnline: row.bool(3),
-                    isWritable: row.bool(4),
+                    sourceKind: LibrarySourceKind(rawValue: row.string(6)) ?? .externalFolder,
+                    // `is_online`/`is_writable` predate `connection_state`
+                    // (schema v1) and are kept only for readers of the raw
+                    // table; a v2+ row's `connection_state` is authoritative.
+                    connectionState: LibraryConnectionState(rawValue: row.string(7)) ?? .ready,
+                    scanState: scanState.normalizedForRestore,
                     lastScanAt: row.date(5),
-                    photoCount: Int(row.int(6))
+                    photoCount: Int(row.int(9))
                 )
             }
         }
@@ -279,15 +299,33 @@ public final class PhotoIndexStore: @unchecked Sendable {
         }
     }
 
+    /// Legacy two-bool availability update, predating `LibraryConnectionState`
+    /// (spec §7). Kept for callers that only know online/writable; derives and
+    /// writes `connection_state` too, so `LibraryFolder.availability` — now
+    /// computed purely from `connectionState` — still reflects the change.
+    /// This path can only ever produce `.ready`/`.readOnly`/`.offline`, never
+    /// `.needsAuthorization`; callers that need to report a revoked
+    /// authorization must go through the source lifecycle APIs instead.
     public func setLibraryAvailability(
         id: LibraryID,
         isOnline: Bool,
         isWritable: Bool
     ) throws {
+        let connectionState: LibraryConnectionState
+        switch (isOnline, isWritable) {
+        case (false, _): connectionState = .offline
+        case (true, false): connectionState = .readOnly
+        case (true, true): connectionState = .ready
+        }
         try withLock {
             try database.run(
-                "UPDATE library SET is_online = ?, is_writable = ? WHERE id = ?;",
-                [.integer(isOnline ? 1 : 0), .integer(isWritable ? 1 : 0), .text(id.description)]
+                "UPDATE library SET is_online = ?, is_writable = ?, connection_state = ? WHERE id = ?;",
+                [
+                    .integer(isOnline ? 1 : 0),
+                    .integer(isWritable ? 1 : 0),
+                    .text(connectionState.rawValue),
+                    .text(id.description)
+                ]
             )
         }
     }

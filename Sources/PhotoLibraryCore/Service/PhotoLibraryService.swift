@@ -42,6 +42,17 @@ public enum LibraryError: Error, Equatable, Sendable {
     /// which an active scan is still writing through.
     case resetRefusedWhileScanning
     case resetFailed(String)
+    /// Spec §7: the folder being added is a reliably-detected ancestor or
+    /// descendant of an already-known source. Rejected before any bookmark,
+    /// in-memory, index, manifest, or source mutation, so nothing needs to be
+    /// rolled back.
+    case overlappingSource
+    /// Spec §7 step 3: the folder being added shares only a bounded root
+    /// fingerprint with an existing source — never a manifest `LibraryID` or
+    /// a bookmark-resolved resource identifier. Never auto-relinked or
+    /// auto-reused; the caller must ask the user to confirm before either
+    /// adding it as new or reusing the named library.
+    case ambiguousSource(LibraryID)
 }
 
 extension LibraryError: LocalizedError {
@@ -57,6 +68,10 @@ extension LibraryError: LocalizedError {
             return L10n.t("The local index can't be reset while a scan is in progress.")
         case .resetFailed(let message):
             return "\(L10n.t("The local index couldn't be reset.")) \(message)"
+        case .overlappingSource:
+            return L10n.t("This folder overlaps a photo library you already added.")
+        case .ambiguousSource:
+            return L10n.t("LumaHarbor can't confirm whether this is a source you already added.")
         }
     }
 
@@ -70,6 +85,10 @@ extension LibraryError: LocalizedError {
         case .resetRefusedWhileScanning:
             return L10n.t("Wait for the current scan to finish, then try again.")
         case .resetFailed: return L10n.t("Quit and reopen LumaHarbor, then try again.")
+        case .overlappingSource:
+            return L10n.t("Choose a folder that doesn't contain, or sit inside, an existing library.")
+        case .ambiguousSource:
+            return L10n.t("Confirm whether this is the same source, then try again.")
         }
     }
 }
@@ -138,8 +157,42 @@ public actor PhotoLibraryService {
 
     /// Registers a folder the user just picked. The open panel has already
     /// granted access, so this only has to remember it (spec §7).
+    ///
+    /// Identity is checked before any mutation: a reliably-detected exact
+    /// match focuses the existing source instead of duplicating it, a
+    /// reliably-detected parent/child overlap is rejected outright, and an
+    /// ambiguous match — no manifest ID or resource identifier agrees, only a
+    /// bounded fingerprint — is rejected pending explicit user confirmation
+    /// rather than silently guessed either way.
     @discardableResult
-    public func addLibrary(at url: URL, displayName: String? = nil) throws -> LibraryFolder {
+    public func addLibrary(
+        at url: URL,
+        displayName: String? = nil,
+        sourceKind: LibrarySourceKind = .externalFolder
+    ) throws -> LibraryFolder {
+        let repository = FileSidecarRepository(libraryRootURL: url)
+        // Reuse the identifier the folder already carries, so re-adding a drive
+        // on a second Mac doesn't fork the library into two.
+        let existingManifest = try? repository.loadManifest()
+        let candidateIdentity = LibrarySourceIdentity.resolve(
+            url: url, manifestLibraryID: existingManifest?.libraryID
+        )
+
+        for existing in libraries.values {
+            switch identity(for: existing).relationship(to: candidateIdentity) {
+            case .same:
+                return try focusExistingLibrary(
+                    existing, at: url, displayName: displayName
+                )
+            case .ancestor, .descendant:
+                throw LibraryError.overlappingSource
+            case .ambiguous:
+                throw LibraryError.ambiguousSource(existing.id)
+            case .distinct:
+                continue
+            }
+        }
+
         let bookmarkData: Data
         do {
             bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
@@ -147,25 +200,26 @@ public actor PhotoLibraryService {
             throw LibraryError.bookmark(error)
         }
 
-        let repository = FileSidecarRepository(libraryRootURL: url)
-        // Reuse the identifier the folder already carries, so re-adding a drive
-        // on a second Mac doesn't fork the library into two.
-        let existingManifest = try? repository.loadManifest()
         let libraryID = existingManifest?.libraryID ?? LibraryID()
 
         let folder = LibraryFolder(
             id: libraryID,
             displayName: displayName ?? url.lastPathComponent,
             rootURL: url,
-            isOnline: true,
-            isWritable: repository.isWritable
+            sourceKind: sourceKind,
+            connectionState: repository.isWritable ? .ready : .readOnly,
+            scanState: .idle
         )
 
         try bookmarkStore.save(StoredBookmark(
             libraryID: libraryID,
             displayName: folder.displayName,
             lastKnownPath: url.path,
-            bookmarkData: bookmarkData
+            bookmarkData: bookmarkData,
+            sourceKind: sourceKind,
+            scanState: .idle,
+            resourceIdentifier: candidateIdentity.resourceIdentifier,
+            volumeIdentifier: candidateIdentity.volumeIdentifier
         ))
 
         access[libraryID] = ScopedFolderAccess(url: url)
@@ -176,6 +230,88 @@ public actor PhotoLibraryService {
             try? repository.write(manifest: LibraryManifest(libraryID: libraryID))
         }
         return folder
+    }
+
+    /// Re-points an already-known library at the exact folder the user just
+    /// picked again, rather than minting a second `LibraryFolder` for the
+    /// same physical location (spec §7). Shares its access/persist steps
+    /// with `relink`, but preserves the caller's chosen `displayName` when
+    /// none was supplied, instead of deriving one from the URL.
+    private func focusExistingLibrary(
+        _ existing: LibraryFolder,
+        at url: URL,
+        displayName: String?
+    ) throws -> LibraryFolder {
+        let bookmarkData: Data
+        do {
+            bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
+        } catch let error as BookmarkError {
+            throw LibraryError.bookmark(error)
+        }
+
+        let repository = FileSidecarRepository(libraryRootURL: url)
+        let resolvedIdentity = LibrarySourceIdentity.resolve(
+            url: url, manifestLibraryID: existing.id
+        )
+
+        access[existing.id]?.stop()
+        access[existing.id] = ScopedFolderAccess(url: url)
+
+        var folder = existing
+        folder.rootURL = url
+        folder.lastKnownPath = url.path
+        folder.connectionState = repository.isWritable ? .ready : .readOnly
+        if let displayName {
+            folder.displayName = displayName
+        }
+
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: existing.id,
+            displayName: folder.displayName,
+            lastKnownPath: url.path,
+            bookmarkData: bookmarkData,
+            sourceKind: existing.sourceKind,
+            scanState: folder.scanState,
+            resourceIdentifier: resolvedIdentity.resourceIdentifier,
+            volumeIdentifier: resolvedIdentity.volumeIdentifier
+        ))
+
+        libraries[existing.id] = folder
+        try index.upsert(library: folder)
+        return folder
+    }
+
+    /// The identity a currently-known library presents for overlap/reuse
+    /// comparison (spec §7): its own `LibraryID` always stands in for the
+    /// manifest check, its persisted bookmark identity carries across a
+    /// restart or offline period, and live path/volume data is added only
+    /// while the source is actually reachable right now — so ancestor/
+    /// descendant detection never fires against an offline source's stale
+    /// path.
+    private func identity(for folder: LibraryFolder) -> LibrarySourceIdentity {
+        let stored = try? bookmarkStore.load(libraryID: folder.id)
+        var resourceIdentifier = stored?.resourceIdentifier
+        var volumeIdentifier = stored?.volumeIdentifier
+        var livePathComponents: [String]?
+
+        if folder.isOnline {
+            let liveURL = folder.rootURL
+            if let values = try? liveURL.resourceValues(
+                forKeys: [.fileResourceIdentifierKey, .volumeIdentifierKey]
+            ) {
+                resourceIdentifier = resourceIdentifier ?? (values.fileResourceIdentifier as? Data)
+                volumeIdentifier = volumeIdentifier ?? (values.volumeIdentifier as? Data)
+            }
+            livePathComponents = folder.rootURL.standardizedFileURL.pathComponents
+        }
+
+        return LibrarySourceIdentity(
+            manifestLibraryID: folder.id,
+            resourceIdentifier: resourceIdentifier,
+            volumeIdentifier: volumeIdentifier,
+            rootFingerprint: nil,
+            livePathComponents: livePathComponents
+        )
     }
 
     /// Restores every remembered folder at launch (spec §7).
@@ -194,27 +330,46 @@ public actor PhotoLibraryService {
                 displayName: bookmark.displayName,
                 rootURL: URL(fileURLWithPath: bookmark.lastKnownPath, isDirectory: true),
                 lastKnownPath: bookmark.lastKnownPath,
-                isOnline: false,
-                isWritable: false
+                sourceKind: bookmark.sourceKind,
+                connectionState: .needsAuthorization,
+                scanState: bookmark.scanState.normalizedForRestore
             )
 
-            if let scopedAccess = try? ScopedFolderAccess(resolving: bookmark.bookmarkData),
-               scopedAccess.isReachable {
+            do {
+                let scopedAccess = try ScopedFolderAccess(resolving: bookmark.bookmarkData)
                 access[bookmark.libraryID] = scopedAccess
-                let repository = FileSidecarRepository(libraryRootURL: scopedAccess.url)
-                folder.rootURL = scopedAccess.url
-                folder.isOnline = true
-                folder.isWritable = repository.isWritable
 
-                // macOS asked for a fresh bookmark; write one back now while we
-                // still hold a live scope.
-                if scopedAccess.isStale,
-                   let refreshed = try? SecurityScopedBookmark.makeBookmarkData(for: scopedAccess.url) {
-                    var updated = bookmark
-                    updated.bookmarkData = refreshed
-                    updated.lastKnownPath = scopedAccess.url.path
-                    try? bookmarkStore.save(updated)
+                if scopedAccess.isReachable {
+                    let repository = FileSidecarRepository(libraryRootURL: scopedAccess.url)
+                    folder.rootURL = scopedAccess.url
+                    folder.lastKnownPath = scopedAccess.url.path
+                    folder.connectionState = repository.isWritable ? .ready : .readOnly
+
+                    // macOS asked for a fresh bookmark; write one back now while we
+                    // still hold a live scope.
+                    if scopedAccess.isStale,
+                       let refreshed = try? SecurityScopedBookmark.makeBookmarkData(for: scopedAccess.url) {
+                        let refreshedIdentity = LibrarySourceIdentity.resolve(
+                            url: scopedAccess.url, manifestLibraryID: bookmark.libraryID
+                        )
+                        var updated = bookmark
+                        updated.bookmarkData = refreshed
+                        updated.lastKnownPath = scopedAccess.url.path
+                        updated.resourceIdentifier = refreshedIdentity.resourceIdentifier
+                        updated.volumeIdentifier = refreshedIdentity.volumeIdentifier
+                        try? bookmarkStore.save(updated)
+                    }
+                } else {
+                    // Resolved to a real bookmark, but the volume it points at
+                    // isn't mounted right now — distinct from a revoked or
+                    // corrupt bookmark, which never resolves at all (spec §7).
+                    folder.connectionState = .offline
                 }
+            } catch {
+                // Resolution itself failed: authorization was revoked, or the
+                // bookmark data is unreadable. The user must re-pick the
+                // folder, not just reconnect a drive (spec §7).
+                folder.connectionState = .needsAuthorization
             }
 
             folder.photoCount = (try? index.photoCount(inLibrary: folder.id)) ?? 0
@@ -248,22 +403,31 @@ public actor PhotoLibraryService {
         access[libraryID] = ScopedFolderAccess(url: url)
 
         let repository = FileSidecarRepository(libraryRootURL: url)
+        let identity = LibrarySourceIdentity.resolve(url: url, manifestLibraryID: libraryID)
         folder.rootURL = url
         folder.lastKnownPath = url.path
-        folder.isOnline = true
-        folder.isWritable = repository.isWritable
+        folder.connectionState = repository.isWritable ? .ready : .readOnly
 
         try bookmarkStore.save(StoredBookmark(
             libraryID: libraryID,
             displayName: folder.displayName,
             lastKnownPath: url.path,
-            bookmarkData: bookmarkData
+            bookmarkData: bookmarkData,
+            sourceKind: folder.sourceKind,
+            scanState: folder.scanState,
+            resourceIdentifier: identity.resourceIdentifier,
+            volumeIdentifier: identity.volumeIdentifier
         ))
         libraries[libraryID] = folder
         try index.upsert(library: folder)
         return folder
     }
 
+    /// Removes a source's *local* bookmark, index rows and progress state
+    /// only. Must never touch the source root itself — RAW, sidecar and
+    /// manifest content all stay exactly where they are (spec §7, §11): this
+    /// intentionally never constructs a `FileSidecarRepository` or otherwise
+    /// calls a source-file remover.
     public func removeLibrary(id: LibraryID) throws {
         access[id]?.stop()
         access[id] = nil
@@ -279,8 +443,9 @@ public actor PhotoLibraryService {
             throw LibraryError.notFound(libraryID)
         }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
-        folder.isOnline = repository.isAvailable
-        folder.isWritable = repository.isWritable
+        folder.connectionState = !repository.isAvailable
+            ? .offline
+            : (repository.isWritable ? .ready : .readOnly)
         libraries[libraryID] = folder
         try index.setLibraryAvailability(
             id: libraryID,
@@ -467,9 +632,9 @@ public actor PhotoLibraryService {
                     case .success(var asset, let record, let decision):
                         if case .ambiguous = decision { ambiguous += 1 }
                         if case .moved = decision { moved += 1 }
-                        asset.hasEdits = Self.hasStoredEdits(
-                            photoID: asset.id, repository: repository
-                        )
+                        let editState = Self.editState(photoID: asset.id, repository: repository)
+                        asset.hasEdits = editState.hasEdits
+                        asset.lastEditAt = editState.lastEditAt
                         manifest.upsert(record)
                         batch.append(asset)
                         indexed += 1
@@ -568,7 +733,10 @@ public actor PhotoLibraryService {
                 updated.lastScanAt = Date()
             }
             updated.photoCount = (try? index.photoCount(inLibrary: libraryID)) ?? indexed
-            updated.isWritable = repository.isWritable
+            // The scan only got this far because the source was reachable
+            // (checked before it started), so writability is the only thing
+            // that can have changed.
+            updated.connectionState = repository.isWritable ? .ready : .readOnly
             libraries[libraryID] = updated
             try? index.upsert(library: updated)
         }
@@ -723,12 +891,19 @@ public actor PhotoLibraryService {
         }
     }
 
-    private static func hasStoredEdits(
+    /// Reconstructs both edit-state columns from the sidecar during a
+    /// rescan: the sidecar is authoritative, SQLite is a rebuildable
+    /// projection of it (spec §8.1). A neutral or absent sidecar maps to
+    /// `(false, nil)`; a non-neutral one carries its own `modifiedAt`
+    /// forward as `lastEditAt`, matching what `saveAdjustments` would have
+    /// projected at save time.
+    private static func editState(
         photoID: PhotoID,
         repository: FileSidecarRepository
-    ) -> Bool {
-        guard let sidecar = try? repository.loadSidecar(for: photoID) else { return false }
-        return !sidecar.adjustments.isNeutral
+    ) -> (hasEdits: Bool, lastEditAt: Date?) {
+        guard let sidecar = try? repository.loadSidecar(for: photoID) else { return (false, nil) }
+        let hasEdits = !sidecar.adjustments.isNeutral
+        return (hasEdits, hasEdits ? sidecar.modifiedAt : nil)
     }
 
     // MARK: - Edits
@@ -776,7 +951,17 @@ public actor PhotoLibraryService {
                 modifiedAt: now
             )
             try repository.write(sidecar: sidecar)
-            try? index.setHasEdits(!adjustments.isNeutral, for: photo.id)
+            // Best-effort by design (spec §8.1): the sidecar write above is
+            // what makes the save real, and SQLite is only a rebuildable
+            // projection of it. A failure here must never turn a
+            // successfully persisted sidecar into an apparently-unsaved
+            // photo, so this doesn't throw and doesn't get folded into the
+            // `catch` below.
+            try? index.setEditState(
+                for: photo.id,
+                hasEdits: !adjustments.isNeutral,
+                lastEditAt: adjustments.isNeutral ? nil : sidecar.modifiedAt
+            )
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
         }
