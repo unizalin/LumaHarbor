@@ -65,6 +65,19 @@ public enum LibraryError: Error, Equatable, Sendable {
     case relinkTargetMismatch(LibraryID)
 }
 
+/// Safe, structured reason a remembered source could not be restored. These
+/// values deliberately carry no paths or underlying error strings, so callers
+/// can present them without exposing private filesystem details.
+public enum LibraryRestoreDiagnostic: Equatable, Sendable {
+    case authorizationFailure
+    case manifestConflict
+    case manifestMissing
+    case corruptManifest
+    case unsupportedManifest
+    case manifestUnavailable
+    case persistenceFailure
+}
+
 extension LibraryError: LocalizedError {
     public var errorDescription: String? {
         switch self {
@@ -130,11 +143,13 @@ public actor PhotoLibraryService {
     /// the security scope, so these must outlive every read of the folder.
     private var access: [LibraryID: any FolderAccessHandle] = [:]
     private var libraries: [LibraryID: LibraryFolder] = [:]
+    private var restoreDiagnostics: [LibraryID: LibraryRestoreDiagnostic] = [:]
     /// Seam over resolving bookmarks/granting access (spec §7): the real
     /// implementation is `SystemFolderAccessResolver`; tests inject a fake
     /// so offline/needsAuthorization/stale-refresh/scope-pairing behaviour
     /// is verifiable deterministically, without a real removable volume.
     private let folderAccessResolver: any FolderAccessResolving
+    private let resourceIdentityResolver: any ResourceIdentityResolving
 
     /// How many `performScan` calls are currently running, across every
     /// library. Incremented at the top of `performScan` and decremented via
@@ -156,7 +171,8 @@ public actor PhotoLibraryService {
         bookmarkStore: (any BookmarkStoring)? = nil,
         decoder: any RawDecoding = CoreImageRawDecoder(),
         scanner: FolderScanner = FolderScanner(),
-        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver()
+        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
     ) throws {
         try locations.createDirectories()
         self.locations = locations
@@ -166,6 +182,7 @@ public actor PhotoLibraryService {
         self.decoder = decoder
         self.scanner = scanner
         self.folderAccessResolver = folderAccessResolver
+        self.resourceIdentityResolver = resourceIdentityResolver
     }
 
     public var indexStore: PhotoIndexStore { index }
@@ -178,6 +195,10 @@ public actor PhotoLibraryService {
 
     public func library(id: LibraryID) -> LibraryFolder? {
         libraries[id]
+    }
+
+    public func restoreDiagnostic(for libraryID: LibraryID) -> LibraryRestoreDiagnostic? {
+        restoreDiagnostics[libraryID]
     }
 
     /// Registers a folder the user just picked. The open panel has already
@@ -204,7 +225,9 @@ public actor PhotoLibraryService {
             from: repository.probeManifest(), path: url.path
         )
         let candidateIdentity = LibrarySourceIdentity.resolve(
-            url: url, confirmedManifestLibraryID: confirmedManifestID
+            url: url,
+            confirmedManifestLibraryID: confirmedManifestID,
+            resourceIdentityResolver: resourceIdentityResolver
         )
 
         switch try preflightDecision(for: candidateIdentity) {
@@ -305,24 +328,37 @@ public actor PhotoLibraryService {
         }
     }
 
-    /// Reconciles a bookmark's persisted `confirmedManifestLibraryID`
-    /// against a fresh, read-only probe of the manifest actually on disk
-    /// (spec §7). Never silently overwrites: an already-confirmed value is
-    /// left exactly as it is even if the disk value disagrees (a
-    /// persisted-vs-disk conflict to leave alone, not resolve by guessing),
-    /// and a corrupt/unsupported/absent/unavailable probe never touches
-    /// whatever was already recorded. Only ever adopts a *new* confirmation
-    /// when nothing was confirmed yet and the disk manifest agrees with this
-    /// source's own already-known `LibraryID` — never a foreign identity
-    /// claim.
-    private static func reconciledConfirmedManifestLibraryID(
+    private enum RestoreManifestValidation {
+        case accepted(confirmedID: LibraryID?, requiresBackfill: Bool)
+        case blocked(LibraryRestoreDiagnostic)
+    }
+
+    private static func validateManifestForRestore(
         persisted: LibraryID?,
         ownLibraryID: LibraryID,
         probe: ManifestProbeResult
-    ) -> LibraryID? {
-        guard persisted == nil else { return persisted }
-        guard case .valid(let manifest) = probe else { return persisted }
-        return manifest.libraryID == ownLibraryID ? ownLibraryID : persisted
+    ) -> RestoreManifestValidation {
+        switch probe {
+        case .valid(let manifest):
+            if let persisted {
+                return persisted == manifest.libraryID
+                    ? .accepted(confirmedID: persisted, requiresBackfill: false)
+                    : .blocked(.manifestConflict)
+            }
+            return manifest.libraryID == ownLibraryID
+                ? .accepted(confirmedID: ownLibraryID, requiresBackfill: true)
+                : .blocked(.manifestConflict)
+        case .absent:
+            return persisted == nil
+                ? .accepted(confirmedID: nil, requiresBackfill: false)
+                : .blocked(.manifestMissing)
+        case .corrupt:
+            return .blocked(.corruptManifest)
+        case .unsupportedSchema:
+            return .blocked(.unsupportedManifest)
+        case .unavailable:
+            return .blocked(.manifestUnavailable)
+        }
     }
 
     private static func makeBookmarkData(for url: URL) throws -> Data {
@@ -414,6 +450,7 @@ public actor PhotoLibraryService {
         // now that both persistent stores agree.
         access[libraryID] = folderAccessResolver.grant(url: url)
         libraries[libraryID] = folder
+        restoreDiagnostics.removeValue(forKey: libraryID)
 
         return folder
     }
@@ -487,6 +524,7 @@ public actor PhotoLibraryService {
         access[existing.id]?.stop()
         access[existing.id] = folderAccessResolver.grant(url: url)
         libraries[existing.id] = folder
+        restoreDiagnostics.removeValue(forKey: existing.id)
 
         return folder
     }
@@ -514,7 +552,8 @@ public actor PhotoLibraryService {
         if folder.isOnline {
             let live = LibrarySourceIdentity.resolve(
                 url: folder.rootURL,
-                confirmedManifestLibraryID: stored?.confirmedManifestLibraryID
+                confirmedManifestLibraryID: stored?.confirmedManifestLibraryID,
+                resourceIdentityResolver: resourceIdentityResolver
             )
             resourceIdentifier = resourceIdentifier ?? live.resourceIdentifier
             volumeIdentifier = volumeIdentifier ?? live.volumeIdentifier
@@ -542,6 +581,13 @@ public actor PhotoLibraryService {
         let stored = try bookmarkStore.loadAll()
         var restored: [LibraryFolder] = []
 
+        let storedIDs = Set(stored.map(\.libraryID))
+        for libraryID in Array(libraries.keys) where !storedIDs.contains(libraryID) {
+            access.removeValue(forKey: libraryID)?.stop()
+            libraries.removeValue(forKey: libraryID)
+            restoreDiagnostics.removeValue(forKey: libraryID)
+        }
+
         for bookmark in stored {
             var folder = LibraryFolder(
                 id: bookmark.libraryID,
@@ -553,72 +599,143 @@ public actor PhotoLibraryService {
                 scanState: bookmark.scanState.normalizedForRestore
             )
 
+            let stagedAccess: any FolderAccessHandle
             do {
-                let scopedAccess = try folderAccessResolver.resolve(bookmarkData: bookmark.bookmarkData)
-                access[bookmark.libraryID] = scopedAccess
-
-                if scopedAccess.isReachable {
-                    let repository = FileSidecarRepository(libraryRootURL: scopedAccess.url)
-                    folder.rootURL = scopedAccess.url
-                    folder.lastKnownPath = scopedAccess.url.path
-                    folder.connectionState = repository.isWritable ? .ready : .readOnly
-
-                    // Read-only, safe reconciliation of the confirmed
-                    // manifest identity against what's actually on disk —
-                    // never a silent overwrite (spec §7).
-                    let probe = repository.probeManifest()
-                    let reconciledConfirmedID = Self.reconciledConfirmedManifestLibraryID(
-                        persisted: bookmark.confirmedManifestLibraryID,
-                        ownLibraryID: bookmark.libraryID,
-                        probe: probe
-                    )
-
-                    var updated = bookmark
-                    var needsSave = reconciledConfirmedID != bookmark.confirmedManifestLibraryID
-                    updated.confirmedManifestLibraryID = reconciledConfirmedID
-
-                    // macOS asked for a fresh bookmark; write one back now while we
-                    // still hold a live scope.
-                    if scopedAccess.isStale,
-                       let refreshed = try? SecurityScopedBookmark.makeBookmarkData(for: scopedAccess.url) {
-                        let refreshedIdentity = LibrarySourceIdentity.resolve(
-                            url: scopedAccess.url, confirmedManifestLibraryID: reconciledConfirmedID
-                        )
-                        updated.bookmarkData = refreshed
-                        updated.lastKnownPath = scopedAccess.url.path
-                        updated.resourceIdentifier = refreshedIdentity.resourceIdentifier
-                        updated.volumeIdentifier = refreshedIdentity.volumeIdentifier
-                        updated.rootFingerprint = refreshedIdentity.rootFingerprint
-                        needsSave = true
-                    }
-
-                    if needsSave {
-                        try? bookmarkStore.save(updated)
-                    }
-                } else {
-                    // Resolved to a real bookmark, but the volume it points at
-                    // isn't mounted right now — distinct from a revoked or
-                    // corrupt bookmark, which never resolves at all (spec §7).
-                    folder.connectionState = .offline
-                }
+                stagedAccess = try folderAccessResolver.resolve(bookmarkData: bookmark.bookmarkData)
             } catch {
-                // Resolution itself failed: authorization was revoked, or the
-                // bookmark data is unreadable. The user must re-pick the
-                // folder, not just reconnect a drive (spec §7).
                 folder.connectionState = .needsAuthorization
+                folder = try commitDisconnectedRestore(
+                    folder: folder,
+                    diagnostic: .authorizationFailure,
+                    stagedAccess: nil
+                )
+                restored.append(folder)
+                continue
             }
 
-            folder.photoCount = (try? index.photoCount(inLibrary: folder.id)) ?? 0
-            if let indexed = try? index.library(id: folder.id) {
-                folder.lastScanAt = indexed.lastScanAt
+            guard stagedAccess.isReachable else {
+                folder.connectionState = .offline
+                folder = try commitDisconnectedRestore(
+                    folder: folder,
+                    diagnostic: nil,
+                    stagedAccess: stagedAccess
+                )
+                restored.append(folder)
+                continue
             }
 
+            let repository = FileSidecarRepository(libraryRootURL: stagedAccess.url)
+            folder.rootURL = stagedAccess.url
+            folder.lastKnownPath = stagedAccess.url.path
+
+            let validation = Self.validateManifestForRestore(
+                persisted: bookmark.confirmedManifestLibraryID,
+                ownLibraryID: bookmark.libraryID,
+                probe: repository.probeManifest()
+            )
+            guard case .accepted(let confirmedID, let requiresBackfill) = validation else {
+                guard case .blocked(let diagnostic) = validation else { preconditionFailure() }
+                folder.connectionState = .needsAuthorization
+                folder = try commitDisconnectedRestore(
+                    folder: folder,
+                    diagnostic: diagnostic,
+                    stagedAccess: stagedAccess
+                )
+                restored.append(folder)
+                continue
+            }
+
+            var updatedBookmark = bookmark
+            var requiresSave = requiresBackfill
+            updatedBookmark.confirmedManifestLibraryID = confirmedID
+
+            if stagedAccess.isStale {
+                do {
+                    let refreshed = try Self.makeBookmarkData(for: stagedAccess.url)
+                    let refreshedIdentity = LibrarySourceIdentity.resolve(
+                        url: stagedAccess.url,
+                        confirmedManifestLibraryID: confirmedID,
+                        resourceIdentityResolver: resourceIdentityResolver
+                    )
+                    updatedBookmark.bookmarkData = refreshed
+                    updatedBookmark.lastKnownPath = stagedAccess.url.path
+                    updatedBookmark.resourceIdentifier = refreshedIdentity.resourceIdentifier
+                    updatedBookmark.volumeIdentifier = refreshedIdentity.volumeIdentifier
+                    updatedBookmark.rootFingerprint = refreshedIdentity.rootFingerprint
+                    requiresSave = true
+                } catch {
+                    folder.connectionState = .needsAuthorization
+                    folder = try commitDisconnectedRestore(
+                        folder: folder,
+                        diagnostic: .persistenceFailure,
+                        stagedAccess: stagedAccess
+                    )
+                    restored.append(folder)
+                    continue
+                }
+            }
+
+            if requiresSave {
+                do {
+                    try bookmarkStore.save(updatedBookmark)
+                } catch {
+                    folder.connectionState = .needsAuthorization
+                    folder = try commitDisconnectedRestore(
+                        folder: folder,
+                        diagnostic: .persistenceFailure,
+                        stagedAccess: stagedAccess
+                    )
+                    restored.append(folder)
+                    continue
+                }
+            }
+
+            folder.connectionState = repository.isWritable ? .ready : .readOnly
+            do {
+                try populateRestoreProjection(&folder)
+                try index.upsert(library: folder)
+            } catch {
+                stagedAccess.stop()
+                throw error
+            }
+
+            let oldAccess = access.updateValue(stagedAccess, forKey: folder.id)
             libraries[folder.id] = folder
-            try? index.upsert(library: folder)
+            restoreDiagnostics.removeValue(forKey: folder.id)
+            oldAccess?.stop()
             restored.append(folder)
         }
 
         return restored
+    }
+
+    private func populateRestoreProjection(_ folder: inout LibraryFolder) throws {
+        folder.photoCount = try index.photoCount(inLibrary: folder.id)
+        if let indexed = try index.library(id: folder.id) {
+            folder.lastScanAt = indexed.lastScanAt
+        }
+    }
+
+    private func commitDisconnectedRestore(
+        folder initialFolder: LibraryFolder,
+        diagnostic: LibraryRestoreDiagnostic?,
+        stagedAccess: (any FolderAccessHandle)?
+    ) throws -> LibraryFolder {
+        stagedAccess?.stop()
+        access.removeValue(forKey: initialFolder.id)?.stop()
+
+        var folder = initialFolder
+        libraries[folder.id] = folder
+        if let diagnostic {
+            restoreDiagnostics[folder.id] = diagnostic
+        } else {
+            restoreDiagnostics.removeValue(forKey: folder.id)
+        }
+
+        try populateRestoreProjection(&folder)
+        libraries[folder.id] = folder
+        try index.upsert(library: folder)
+        return folder
     }
 
     /// Re-points a library at a folder the user picked again after the
@@ -642,7 +759,9 @@ public actor PhotoLibraryService {
             from: repository.probeManifest(), path: url.path
         )
         let candidateIdentity = LibrarySourceIdentity.resolve(
-            url: url, confirmedManifestLibraryID: confirmedManifestID
+            url: url,
+            confirmedManifestLibraryID: confirmedManifestID,
+            resourceIdentityResolver: resourceIdentityResolver
         )
 
         let targetRelationship = try identity(for: target).relationship(to: candidateIdentity)
@@ -691,6 +810,7 @@ public actor PhotoLibraryService {
         access[id]?.stop()
         access[id] = nil
         libraries[id] = nil
+        restoreDiagnostics[id] = nil
         try bookmarkStore.remove(libraryID: id)
         try index.removeLibrary(id: id)
     }
@@ -700,6 +820,14 @@ public actor PhotoLibraryService {
     public func refreshAvailability(libraryID: LibraryID) throws -> LibraryFolder {
         guard var folder = libraries[libraryID] else {
             throw LibraryError.notFound(libraryID)
+        }
+        if restoreDiagnostics[libraryID] != nil || access[libraryID] == nil {
+            folder.connectionState = restoreDiagnostics[libraryID] != nil
+                ? .needsAuthorization
+                : .offline
+            libraries[libraryID] = folder
+            try index.upsert(library: folder)
+            return folder
         }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
         folder.connectionState = !repository.isAvailable
@@ -799,6 +927,10 @@ public actor PhotoLibraryService {
 
         guard let folder = libraries[libraryID] else {
             await emit(.failed(.notFound(libraryID)))
+            return
+        }
+        guard folder.isOnline else {
+            await emit(.failed(.offline(path: folder.lastKnownPath)))
             return
         }
 
@@ -1173,6 +1305,9 @@ public actor PhotoLibraryService {
         guard let folder = libraries[photo.libraryID] else {
             throw LibraryError.notFound(photo.libraryID)
         }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
         do {
             return try repository.loadSidecar(for: photo.id)?.adjustments ?? .neutral
@@ -1191,6 +1326,9 @@ public actor PhotoLibraryService {
     ) throws {
         guard let folder = libraries[photo.libraryID] else {
             throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
         }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
 

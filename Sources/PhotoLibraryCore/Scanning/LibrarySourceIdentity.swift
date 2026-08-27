@@ -304,9 +304,16 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
             return relationshipOnConfirmedSharedVolume(with: other)
         }
 
-        // Volume unknown on at least one side: resource-identifier and
-        // live-path comparisons both require a confirmed shared volume, so
-        // only a fingerprint match remains, and it only ever asks.
+        // Volume unknown on at least one side: matching resource/path evidence
+        // cannot confirm a shared physical location, but it is still strong
+        // enough that declaring the sources distinct would be unsafe.
+        if let mine = resourceIdentifier, let theirs = other.resourceIdentifier, mine == theirs {
+            return .ambiguous
+        }
+        if let minePath = canonicalLivePath, let theirsPath = other.canonicalLivePath,
+           Self.possiblyEqualOrContained(mine: minePath, theirs: theirsPath) {
+            return .ambiguous
+        }
         if let mine = rootFingerprint, let theirs = other.rootFingerprint, mine == theirs {
             return .ambiguous
         }
@@ -342,21 +349,17 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
         mine: String, mineSensitivity: PathCaseSensitivity,
         theirs: String, theirsSensitivity: PathCaseSensitivity
     ) -> SourceRelationship {
-        if mine == theirs { return .same }
-
-        if let containment = containmentRelationship(mine: mine, theirs: theirs) {
-            return containment
+        if let naturalRelationship = equalityOrContainmentRelationship(mine: mine, theirs: theirs) {
+            return naturalRelationship
         }
 
-        // Not exactly equal on their natural case, and not a containment
-        // relationship either. If folding case would make them coincide,
-        // whether that means `.same` or genuinely `.distinct` depends on
-        // this volume's case sensitivity — an `.unknown` answer on either
-        // side must never guess (spec §7): it could silently merge two
-        // real, distinct folders on a case-sensitive volume.
-        if mine.lowercased() == theirs.lowercased() {
+        let foldedMine = mine.lowercased()
+        let foldedTheirs = theirs.lowercased()
+        if let foldedRelationship = equalityOrContainmentRelationship(
+            mine: foldedMine, theirs: foldedTheirs
+        ) {
             if mineSensitivity == .insensitive, theirsSensitivity == .insensitive {
-                return .same
+                return foldedRelationship
             }
             if mineSensitivity == .sensitive, theirsSensitivity == .sensitive {
                 return .distinct
@@ -367,7 +370,22 @@ public struct LibrarySourceIdentity: Sendable, Equatable {
         return .distinct
     }
 
-    private static func containmentRelationship(mine: String, theirs: String) -> SourceRelationship? {
+    private static func possiblyEqualOrContained(mine: String, theirs: String) -> Bool {
+        equalityOrContainmentRelationship(mine: mine, theirs: theirs) != nil
+            || equalityOrContainmentRelationship(
+                mine: mine.lowercased(), theirs: theirs.lowercased()
+            ) != nil
+    }
+
+    private static func equalityOrContainmentRelationship(
+        mine: String,
+        theirs: String
+    ) -> SourceRelationship? {
+        if mine == theirs { return .same }
+
+        if mine == "/", theirs.hasPrefix("/") { return .ancestor }
+        if theirs == "/", mine.hasPrefix("/") { return .descendant }
+
         let separator: Character = "/"
         if mine.count < theirs.count,
            theirs.hasPrefix(mine),

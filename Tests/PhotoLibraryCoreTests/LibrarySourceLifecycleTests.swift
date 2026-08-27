@@ -6,9 +6,25 @@ import XCTest
 /// end-to-end through `PhotoLibraryService`, plus the Task 1 handoff item —
 /// `saveAdjustments`/rescan projecting `lastEditAt`, not just `hasEdits`.
 final class LibrarySourceLifecycleTests: TemporaryDirectoryTestCase {
-    private func makeService(supportName: String = "ApplicationSupport") throws -> PhotoLibraryService {
+    private struct StubResourceIdentityResolver: ResourceIdentityResolving {
+        let identitiesByPath: [String: ResolvedResourceIdentity]
+
+        func resolvedIdentity(for url: URL) -> ResolvedResourceIdentity? {
+            identitiesByPath.first {
+                $0.key.lowercased() == url.standardizedFileURL.path.lowercased()
+            }?.value
+        }
+    }
+
+    private func makeService(
+        supportName: String = "ApplicationSupport",
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
+    ) throws -> PhotoLibraryService {
         let supportDirectory = try makeSubdirectory(supportName)
-        return try PhotoLibraryService(locations: ApplicationSupportLocations(baseURL: supportDirectory))
+        return try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: supportDirectory),
+            resourceIdentityResolver: resourceIdentityResolver
+        )
     }
 
     /// Adding a library needs a real security-scoped bookmark. If the host
@@ -120,6 +136,87 @@ final class LibrarySourceLifecycleTests: TemporaryDirectoryTestCase {
 
         let knownCount = await service.knownLibraries().count
         XCTAssertEqual(knownCount, 2)
+    }
+
+    func testInjectedResourceIdentityControlsServiceOverlapDecisions() async throws {
+        let differentVolumeA = try makeSubdirectory("DifferentVolumes/A")
+        let differentVolumeB = try makeSubdirectory("DifferentVolumes/B")
+        try FileSidecarRepository(libraryRootURL: differentVolumeA)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        try FileSidecarRepository(libraryRootURL: differentVolumeB)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        let differentVolumeResolver = StubResourceIdentityResolver(identitiesByPath: [
+            differentVolumeA.path: ResolvedResourceIdentity(
+                fileResourceIdentifier: Data([0x01]), volumeIdentifier: Data("volume-a".utf8),
+                caseSensitivity: .sensitive
+            ),
+            differentVolumeB.path: ResolvedResourceIdentity(
+                fileResourceIdentifier: Data([0x02]), volumeIdentifier: Data("volume-b".utf8),
+                caseSensitivity: .sensitive
+            )
+        ])
+        let differentVolumeService = try makeService(
+            supportName: "DifferentVolumesSupport",
+            resourceIdentityResolver: differentVolumeResolver
+        )
+        _ = try await addLibrary(differentVolumeService, at: differentVolumeA)
+        _ = try await addLibrary(differentVolumeService, at: differentVolumeB)
+        let differentVolumeCount = await differentVolumeService.knownLibraries().count
+        XCTAssertEqual(differentVolumeCount, 2)
+
+        let siblingsA = try makeSubdirectory("SameVolume/A")
+        let siblingsB = try makeSubdirectory("SameVolume/B")
+        try FileSidecarRepository(libraryRootURL: siblingsA)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        try FileSidecarRepository(libraryRootURL: siblingsB)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        let sameVolume = Data("shared-volume".utf8)
+        let siblingResolver = StubResourceIdentityResolver(identitiesByPath: [
+            siblingsA.path: ResolvedResourceIdentity(
+                fileResourceIdentifier: Data([0x03]), volumeIdentifier: sameVolume,
+                caseSensitivity: .sensitive
+            ),
+            siblingsB.path: ResolvedResourceIdentity(
+                fileResourceIdentifier: Data([0x04]), volumeIdentifier: sameVolume,
+                caseSensitivity: .sensitive
+            )
+        ])
+        let siblingService = try makeService(
+            supportName: "SameVolumeSupport",
+            resourceIdentityResolver: siblingResolver
+        )
+        _ = try await addLibrary(siblingService, at: siblingsA)
+        _ = try await addLibrary(siblingService, at: siblingsB)
+        let siblingCount = await siblingService.knownLibraries().count
+        XCTAssertEqual(siblingCount, 2)
+
+        let caseParent = try makeSubdirectory("CaseAliases/Photos")
+        let caseChild = try makeSubdirectory("CaseAliases/photos/Child")
+        try FileSidecarRepository(libraryRootURL: caseParent)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        try FileSidecarRepository(libraryRootURL: caseChild)
+            .write(manifest: LibraryManifest(libraryID: LibraryID()))
+        let caseInsensitiveResolver = StubResourceIdentityResolver(identitiesByPath: [
+            caseParent.path: ResolvedResourceIdentity(
+                fileResourceIdentifier: Data([0x05]), volumeIdentifier: sameVolume,
+                caseSensitivity: .insensitive
+            ),
+            caseChild.path: ResolvedResourceIdentity(
+                fileResourceIdentifier: Data([0x06]), volumeIdentifier: sameVolume,
+                caseSensitivity: .insensitive
+            )
+        ])
+        let caseService = try makeService(
+            supportName: "CaseAliasesSupport",
+            resourceIdentityResolver: caseInsensitiveResolver
+        )
+        _ = try await addLibrary(caseService, at: caseParent)
+        do {
+            _ = try await caseService.addLibrary(at: caseChild)
+            XCTFail("Expected injected case-insensitive containment to reject the child")
+        } catch let error as LibraryError {
+            XCTAssertEqual(error, .overlappingSource)
+        }
     }
 
     // MARK: - Manifest identity
@@ -589,8 +686,8 @@ final class LibrarySourceLifecycleTests: TemporaryDirectoryTestCase {
 
     /// Item 16 of the fix-round regression list (bookmark half): an
     /// unrecognised `sourceKind`/`scanState` raw value — a future case this
-    /// build doesn't know, or a corrupted field — must never drop the whole
-    /// record via `FileBookmarkStore.loadAll()`'s `compactMap`.
+    /// build doesn't know, or a corrupted field — remains backward-compatible
+    /// data and must not fail the whole registry load.
     func testUnknownBookmarkSourceKindAndScanStateDoNotDropTheSource() throws {
         let libraryID = LibraryID()
         let json = """
