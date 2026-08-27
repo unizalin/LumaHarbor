@@ -63,6 +63,10 @@ public enum LibraryError: Error, Equatable, Sendable {
     /// confirm as the same source being relinked. The bookmark, index and
     /// access scope for `libraryID` are left completely untouched.
     case relinkTargetMismatch(LibraryID)
+    /// A pending local registry transaction could not be rolled back. The
+    /// journal remains in Application Support and all registry mutations stay
+    /// blocked until a later recovery attempt succeeds.
+    case registryRecoveryRequired
 }
 
 /// Safe, structured reason a remembered source could not be restored. These
@@ -99,6 +103,8 @@ extension LibraryError: LocalizedError {
             return L10n.t("This folder's saved identity doesn't match a library you already added.")
         case .relinkTargetMismatch:
             return L10n.t("This folder doesn't match the library you're reconnecting.")
+        case .registryRecoveryRequired:
+            return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
         }
     }
 
@@ -120,6 +126,8 @@ extension LibraryError: LocalizedError {
             return L10n.t("Choose a different folder, or confirm which library this one belongs to.")
         case .relinkTargetMismatch:
             return L10n.t("Choose the folder that holds this exact library, then try again.")
+        case .registryRecoveryRequired:
+            return L10n.t("Quit and reopen LumaHarbor, then try again.")
         }
     }
 }
@@ -132,6 +140,7 @@ extension LibraryError: LocalizedError {
 public actor PhotoLibraryService {
     private let locations: ApplicationSupportLocations
     private let bookmarkStore: any BookmarkStoring
+    private let registryTransactionStore: any RegistryTransactionStoring
     /// Replaceable so `resetRebuildableLocalData()` can swap in a fresh SQLite
     /// connection after closing this one, instead of the two ever being open
     /// on the same file at once.
@@ -174,10 +183,32 @@ public actor PhotoLibraryService {
         folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
         resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
     ) throws {
+        try self.init(
+            locations: locations,
+            bookmarkStore: bookmarkStore,
+            decoder: decoder,
+            scanner: scanner,
+            folderAccessResolver: folderAccessResolver,
+            resourceIdentityResolver: resourceIdentityResolver,
+            registryTransactionStore: nil
+        )
+    }
+
+    init(
+        locations: ApplicationSupportLocations,
+        bookmarkStore: (any BookmarkStoring)? = nil,
+        decoder: any RawDecoding = CoreImageRawDecoder(),
+        scanner: FolderScanner = FolderScanner(),
+        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver(),
+        registryTransactionStore: (any RegistryTransactionStoring)?
+    ) throws {
         try locations.createDirectories()
         self.locations = locations
         self.bookmarkStore = bookmarkStore
             ?? FileBookmarkStore(directoryURL: locations.bookmarksDirectoryURL)
+        self.registryTransactionStore = registryTransactionStore
+            ?? FileRegistryTransactionStore(directoryURL: locations.registryTransactionsDirectoryURL)
         self.index = try PhotoIndexStore(databaseURL: locations.databaseURL)
         self.decoder = decoder
         self.scanner = scanner
@@ -220,6 +251,7 @@ public actor PhotoLibraryService {
         displayName: String? = nil,
         sourceKind: LibrarySourceKind = .externalFolder
     ) throws -> LibraryFolder {
+        try recoverPendingRegistryTransaction()
         let repository = FileSidecarRepository(libraryRootURL: url)
         let confirmedManifestID = try Self.requireConfirmedManifestID(
             from: repository.probeManifest(), path: url.path
@@ -405,6 +437,10 @@ public actor PhotoLibraryService {
         guard try bookmarkStore.load(libraryID: libraryID) == nil else {
             throw LibraryError.manifestConflict(libraryID)
         }
+        guard try index.library(id: libraryID) == nil,
+              try index.photoCount(inLibrary: libraryID) == 0 else {
+            throw LibraryError.manifestConflict(libraryID)
+        }
 
         let bookmarkData = try Self.makeBookmarkData(for: url)
 
@@ -436,15 +472,13 @@ public actor PhotoLibraryService {
             rootFingerprint: candidateIdentity.rootFingerprint
         )
 
-        // PERSIST: bookmark, then index. A failure here has touched nothing
-        // that needs undoing except the bookmark this very call just wrote.
-        try bookmarkStore.save(storedBookmark)
-        do {
-            try index.upsert(library: folder)
-        } catch {
-            try? bookmarkStore.remove(libraryID: libraryID)
-            throw error
-        }
+        try applyRegistryTransaction(
+            kind: .freshAdd,
+            previousBookmark: nil,
+            intendedBookmark: storedBookmark,
+            previousLibrary: nil,
+            intendedLibrary: folder
+        )
 
         // COMMIT: only now touch the security scope and in-memory state,
         // now that both persistent stores agree.
@@ -464,25 +498,19 @@ public actor PhotoLibraryService {
     /// The baseline read must fail closed, not be swallowed into "no
     /// previous bookmark" — that would make a later rollback *delete* a
     /// perfectly good existing record instead of restoring it (spec §7).
-    /// Otherwise staged identically to `createNewLibrary`: bookmark, then
-    /// index; a mid-way failure rolls the bookmark back to its previous
-    /// value (or removes it, if there really wasn't one) and never touches
-    /// the security scope or in-memory state — so a failed focus/relink
-    /// leaves the old root, bookmark, index and access completely
-    /// untouched, and never opens a new security scope it would have to
-    /// release. If the rollback write itself also fails, the original
-    /// failure is still what's thrown (never silently swallowed) and
-    /// `access`/`libraries` remain the old, untouched values for the rest of
-    /// this run; the next `restoreLibraries()` call re-reads whichever
-    /// complete state the bookmark file (written atomically, so never torn)
-    /// actually ended up holding and re-syncs the index to match it, so a
-    /// restart always converges to one consistent, recognisable state.
+    /// Otherwise it uses the same durable rollback-to-old-state journal as
+    /// `createNewLibrary`. A mid-way failure never touches actor memory or
+    /// access. If rollback cannot finish, the journal stays in Application
+    /// Support, a safe `.registryRecoveryRequired` error is returned, and a
+    /// later same-session or restart recovery deterministically restores the
+    /// old bookmark/index snapshot before any other registry mutation runs.
     private func focusExistingLibrary(
         _ existing: LibraryFolder,
         at url: URL,
         displayName: String?,
         candidateIdentity: LibrarySourceIdentity,
-        repository: FileSidecarRepository
+        repository: FileSidecarRepository,
+        transactionKind: RegistryTransactionKind = .focus
     ) throws -> LibraryFolder {
         let previousStoredBookmark = try bookmarkStore.load(libraryID: existing.id)
 
@@ -509,17 +537,14 @@ public actor PhotoLibraryService {
             rootFingerprint: candidateIdentity.rootFingerprint
         )
 
-        try bookmarkStore.save(newStoredBookmark)
-        do {
-            try index.upsert(library: folder)
-        } catch {
-            if let previousStoredBookmark {
-                try? bookmarkStore.save(previousStoredBookmark)
-            } else {
-                try? bookmarkStore.remove(libraryID: existing.id)
-            }
-            throw error
-        }
+        let previousLibrary = try index.library(id: existing.id) ?? existing
+        try applyRegistryTransaction(
+            kind: transactionKind,
+            previousBookmark: previousStoredBookmark,
+            intendedBookmark: newStoredBookmark,
+            previousLibrary: previousLibrary,
+            intendedLibrary: folder
+        )
 
         access[existing.id]?.stop()
         access[existing.id] = folderAccessResolver.grant(url: url)
@@ -527,6 +552,110 @@ public actor PhotoLibraryService {
         restoreDiagnostics.removeValue(forKey: existing.id)
 
         return folder
+    }
+
+    /// Explicit retry hook for UI/startup code after a safe
+    /// `.registryRecoveryRequired` failure. Every mutating public entry point
+    /// also invokes the same recovery automatically before doing any work.
+    public func recoverPendingRegistryChanges() throws {
+        try recoverPendingRegistryTransaction()
+    }
+
+    private func applyRegistryTransaction(
+        kind: RegistryTransactionKind,
+        previousBookmark: StoredBookmark?,
+        intendedBookmark: StoredBookmark,
+        previousLibrary: LibraryFolder?,
+        intendedLibrary: LibraryFolder
+    ) throws {
+        try recoverPendingRegistryTransaction()
+
+        let record = RegistryTransactionRecord(
+            transactionID: UUID(),
+            libraryID: intendedBookmark.libraryID,
+            kind: kind,
+            previousBookmark: previousBookmark,
+            intendedBookmark: intendedBookmark,
+            previousLibrary: previousLibrary.map(LibraryFolderSnapshot.init),
+            intendedLibrary: LibraryFolderSnapshot(intendedLibrary)
+        )
+
+        // PREPARE: no bookmark/index mutation is legal before this durable
+        // record exists.
+        try registryTransactionStore.save(record)
+
+        do {
+            try bookmarkStore.save(intendedBookmark)
+            try index.upsert(library: intendedLibrary)
+            // Commit point. Actor memory/access is updated by the caller only
+            // after this non-rebuildable record has durably disappeared.
+            try registryTransactionStore.remove()
+        } catch let operationError {
+            do {
+                try rollbackRegistryTransaction(record)
+                try registryTransactionStore.remove()
+            } catch {
+                throw LibraryError.registryRecoveryRequired
+            }
+            throw operationError
+        }
+    }
+
+    private func recoverPendingRegistryTransaction() throws {
+        let pending: RegistryTransactionRecord?
+        do {
+            pending = try registryTransactionStore.load()
+        } catch {
+            throw LibraryError.registryRecoveryRequired
+        }
+        guard let pending else { return }
+
+        do {
+            try rollbackRegistryTransaction(pending)
+            try registryTransactionStore.remove()
+        } catch {
+            throw LibraryError.registryRecoveryRequired
+        }
+    }
+
+    /// Idempotent rollback-to-old-state. Both stores are attempted even when
+    /// the first one fails, so a later retry can finish whichever half still
+    /// differs. The journal is cleared only by the caller after both succeed.
+    private func rollbackRegistryTransaction(_ record: RegistryTransactionRecord) throws {
+        var firstError: Error?
+
+        do {
+            if let previousBookmark = record.previousBookmark {
+                try bookmarkStore.save(previousBookmark)
+            } else {
+                try bookmarkStore.remove(libraryID: record.libraryID)
+            }
+        } catch {
+            firstError = error
+        }
+
+        do {
+            if let previousLibrary = record.previousLibrary {
+                try index.upsert(library: previousLibrary.folder)
+            } else {
+                switch record.kind {
+                case .freshAdd:
+                    // The collision gate proved the ID had no pre-existing
+                    // rows, so everything written by this failed add is an
+                    // orphan and may be removed together.
+                    try index.removeLibrary(id: record.libraryID)
+                case .focus, .relink, .restoreRefresh:
+                    // Existing-source rollback must preserve exact photo rows
+                    // even when the old index happened to lack its library
+                    // metadata row.
+                    try index.removeLibraryMetadata(id: record.libraryID)
+                }
+            }
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+
+        if let firstError { throw firstError }
     }
 
     /// The identity a currently-known library presents for overlap/reuse
@@ -578,6 +707,7 @@ public actor PhotoLibraryService {
     /// path is explicitly forbidden.
     @discardableResult
     public func restoreLibraries() throws -> [LibraryFolder] {
+        try recoverPendingRegistryTransaction()
         let stored = try bookmarkStore.loadAll()
         var restored: [LibraryFolder] = []
 
@@ -675,10 +805,26 @@ public actor PhotoLibraryService {
                 }
             }
 
-            if requiresSave {
-                do {
-                    try bookmarkStore.save(updatedBookmark)
-                } catch {
+            folder.connectionState = repository.isWritable ? .ready : .readOnly
+            do {
+                let previousLibrary = try index.library(id: folder.id)
+                try populateRestoreProjection(&folder)
+                if requiresSave {
+                    try applyRegistryTransaction(
+                        kind: .restoreRefresh,
+                        previousBookmark: bookmark,
+                        intendedBookmark: updatedBookmark,
+                        previousLibrary: previousLibrary,
+                        intendedLibrary: folder
+                    )
+                } else {
+                    try index.upsert(library: folder)
+                }
+            } catch LibraryError.registryRecoveryRequired {
+                stagedAccess.stop()
+                throw LibraryError.registryRecoveryRequired
+            } catch {
+                if requiresSave {
                     folder.connectionState = .needsAuthorization
                     folder = try commitDisconnectedRestore(
                         folder: folder,
@@ -687,16 +833,10 @@ public actor PhotoLibraryService {
                     )
                     restored.append(folder)
                     continue
+                } else {
+                    stagedAccess.stop()
+                    throw error
                 }
-            }
-
-            folder.connectionState = repository.isWritable ? .ready : .readOnly
-            do {
-                try populateRestoreProjection(&folder)
-                try index.upsert(library: folder)
-            } catch {
-                stagedAccess.stop()
-                throw error
             }
 
             let oldAccess = access.updateValue(stagedAccess, forKey: folder.id)
@@ -750,6 +890,7 @@ public actor PhotoLibraryService {
     /// Nothing is mutated until every check passes.
     @discardableResult
     public func relink(libraryID: LibraryID, to url: URL) throws -> LibraryFolder {
+        try recoverPendingRegistryTransaction()
         guard let target = libraries[libraryID] else {
             throw LibraryError.notFound(libraryID)
         }
@@ -797,7 +938,8 @@ public actor PhotoLibraryService {
 
         return try focusExistingLibrary(
             target, at: url, displayName: nil,
-            candidateIdentity: candidateIdentity, repository: repository
+            candidateIdentity: candidateIdentity, repository: repository,
+            transactionKind: .relink
         )
     }
 
@@ -807,6 +949,7 @@ public actor PhotoLibraryService {
     /// intentionally never constructs a `FileSidecarRepository` or otherwise
     /// calls a source-file remover.
     public func removeLibrary(id: LibraryID) throws {
+        try recoverPendingRegistryTransaction()
         access[id]?.stop()
         access[id] = nil
         libraries[id] = nil
@@ -818,6 +961,7 @@ public actor PhotoLibraryService {
     /// Re-checks whether the drive is plugged in and writable (spec §10).
     @discardableResult
     public func refreshAvailability(libraryID: LibraryID) throws -> LibraryFolder {
+        try recoverPendingRegistryTransaction()
         guard var folder = libraries[libraryID] else {
             throw LibraryError.notFound(libraryID)
         }
@@ -923,6 +1067,13 @@ public actor PhotoLibraryService {
             } catch {
                 return false
             }
+        }
+
+        do {
+            try recoverPendingRegistryTransaction()
+        } catch {
+            await emit(.failed(.registryRecoveryRequired))
+            return
         }
 
         guard let folder = libraries[libraryID] else {
@@ -1302,6 +1453,7 @@ public actor PhotoLibraryService {
     /// Reads a photo's saved adjustments, or neutral when it has never been
     /// edited. Corrupt or newer-schema sidecars throw so the UI can explain.
     public func adjustments(for photo: PhotoAsset) throws -> PhotoAdjustments {
+        try recoverPendingRegistryTransaction()
         guard let folder = libraries[photo.libraryID] else {
             throw LibraryError.notFound(photo.libraryID)
         }
@@ -1324,6 +1476,7 @@ public actor PhotoLibraryService {
         _ adjustments: PhotoAdjustments,
         for photo: PhotoAsset
     ) throws {
+        try recoverPendingRegistryTransaction()
         guard let folder = libraries[photo.libraryID] else {
             throw LibraryError.notFound(photo.libraryID)
         }

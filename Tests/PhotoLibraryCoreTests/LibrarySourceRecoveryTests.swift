@@ -437,7 +437,10 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
                 confirmedManifestLibraryID: testCase.persistedID(libraryID)
             ))
             if testCase.failSave {
-                bookmarkStore.saveInterceptor = { _ in true }
+                // Fail only the intended backfill. The transaction rollback
+                // must still be allowed to restore the original nil-confirmed
+                // bookmark.
+                bookmarkStore.saveInterceptor = { $0.confirmedManifestLibraryID != nil }
             }
 
             let service = try makeService(
@@ -717,92 +720,6 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(knownCount, 1)
     }
 
-    /// Item 2: forward bookmark save succeeds, index upsert fails, and the
-    /// rollback save *also* fails. The original (index) failure must still
-    /// be what's thrown; in-memory state stays at the old value for the
-    /// rest of this run; and a simulated restart converges to one
-    /// consistent, recognisable state (the bookmark file is written
-    /// atomically, so it is never left torn — whichever complete value it
-    /// ends up holding, a fresh restore re-syncs the index to match it).
-    func testFocusForwardSaveSucceedsIndexFailsAndRollbackSaveAlsoFailsStillThrowsAndSelfHealsOnRestore() async throws {
-        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
-        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
-        let service = try makeService(bookmarkStore: failableStore)
-        let root = try makeSubdirectory("Photos")
-        let library = try await addLibrary(service, at: root)
-
-        let indexStore = await service.indexStore
-        indexStore.close()
-
-        // Fail only the rollback save (restoring the ORIGINAL displayName);
-        // the forward save (the NEW displayName) must still succeed.
-        failableStore.saveInterceptor = { $0.displayName == library.displayName }
-
-        do {
-            _ = try await service.addLibrary(at: root, displayName: "New Name")
-            XCTFail("Expected the index failure to propagate")
-        } catch {
-            // expected: the original index error, not silently swallowed
-        }
-        failableStore.saveInterceptor = nil
-
-        let onDisk = try XCTUnwrap(try failableStore.load(libraryID: library.id))
-        XCTAssertEqual(onDisk.displayName, "New Name", "The forward write succeeded; the rollback did not")
-
-        let stillInMemory = await service.library(id: library.id)
-        XCTAssertEqual(
-            stillInMemory?.displayName, library.displayName,
-            "access/libraries must stay at the old value for the rest of this run"
-        )
-
-        // Simulated restart: a fresh service re-reads the bookmark file's
-        // one complete state and re-syncs the index to match it.
-        let bookmarkStoreB = FileBookmarkStore(directoryURL: bookmarksDirectory)
-        let serviceB = try makeService(supportName: "AppSupportB", bookmarkStore: bookmarkStoreB)
-        let restored = try await serviceB.restoreLibraries()
-        XCTAssertEqual(restored.count, 1)
-        XCTAssertEqual(restored.first?.id, library.id)
-        XCTAssertEqual(restored.first?.displayName, "New Name")
-    }
-
-    /// Item 3: the fresh-add equivalent — forward bookmark save succeeds,
-    /// index upsert fails, and the rollback *remove* also fails, leaving an
-    /// orphaned-but-complete bookmark on disk. In-memory state never
-    /// registers it this run; a simulated restart picks it up like any
-    /// other bookmark and completes its registration — a safe, predictable
-    /// convergence, never a duplicate and never a crash.
-    func testFreshAddForwardSaveSucceedsIndexFailsAndRollbackRemoveAlsoFailsStillThrowsAndSelfHealsOnRestore() async throws {
-        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
-        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
-        let service = try makeService(bookmarkStore: failableStore)
-        let root = try makeSubdirectory("Photos")
-
-        let indexStore = await service.indexStore
-        indexStore.close()
-        failableStore.removeInterceptor = { _ in true }
-
-        do {
-            _ = try await addLibrary(service, at: root)
-            XCTFail("Expected the index failure to propagate")
-        } catch {
-            // expected
-        }
-        failableStore.removeInterceptor = nil
-
-        let allBookmarks = try failableStore.loadAll()
-        XCTAssertEqual(allBookmarks.count, 1, "The orphaned bookmark is a complete record, never a torn one")
-        let orphanedID = try XCTUnwrap(allBookmarks.first?.libraryID)
-
-        let knownCount = await service.knownLibraries().count
-        XCTAssertEqual(knownCount, 0, "The failed add must not have registered anything this run")
-
-        let bookmarkStoreB = FileBookmarkStore(directoryURL: bookmarksDirectory)
-        let serviceB = try makeService(supportName: "AppSupportB", bookmarkStore: bookmarkStoreB)
-        let restored = try await serviceB.restoreLibraries()
-        XCTAssertEqual(restored.count, 1)
-        XCTAssertEqual(restored.first?.id, orphanedID)
-    }
-
     /// Item 5: `relink` must have its own end-to-end bookmark/index failure
     /// coverage, not just inherited (untested) behaviour from
     /// `focusExistingLibrary`.
@@ -1022,7 +939,10 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
             .init(url: saveFailure.root, isStale: true),
             forToken: saveFailure.token
         )
-        saveFailure.bookmarkStore.saveInterceptor = { _ in true }
+        let originalBookmarkData = saveFailure.resolver.makeBookmarkData(token: saveFailure.token)
+        // Fail the stale refresh, but allow journal rollback to restore the
+        // original bookmark bytes.
+        saveFailure.bookmarkStore.saveInterceptor = { $0.bookmarkData != originalBookmarkData }
         let saveBlocked = try await saveFailure.service.restoreLibraries()
         XCTAssertEqual(saveBlocked.first?.connectionState, .needsAuthorization)
         let saveDiagnostic = await saveFailure.service.restoreDiagnostic(for: saveFailure.libraryID)

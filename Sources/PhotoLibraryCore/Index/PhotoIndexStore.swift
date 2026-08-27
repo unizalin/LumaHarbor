@@ -23,6 +23,11 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// immediate children, not by however many distinct descendant
     /// directories exist under `parent`.
     private let childDirectoriesRawRowCountHook: ((Int) -> Void)?
+    enum LibraryMutation {
+        case upsert(LibraryID)
+        case remove(LibraryID)
+    }
+    private var libraryMutationHook: (@Sendable (LibraryMutation) throws -> Void)?
 
     public convenience init(databaseURL: URL) throws {
         try self.init(databaseURL: databaseURL, migrationHook: {})
@@ -227,6 +232,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
         // reopen (spec §7).
         let persistedScanState = library.scanState.normalizedForRestore
         try withLock {
+            try libraryMutationHook?(.upsert(library.id))
             try database.run("""
                 INSERT INTO library (
                     id, display_name, root_path, is_online, is_writable, last_scan_at,
@@ -295,6 +301,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
 
     public func removeLibrary(id: LibraryID) throws {
         try withLock {
+            try libraryMutationHook?(.remove(id))
             try database.transaction {
                 try database.run(
                     "DELETE FROM photo WHERE library_id = ?;", [.text(id.description)]
@@ -302,6 +309,24 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 try database.run("DELETE FROM library WHERE id = ?;", [.text(id.description)])
             }
         }
+    }
+
+    /// Removes only the rebuildable library metadata row while deliberately
+    /// preserving photos. Registry rollback uses this when an existing
+    /// remembered source had orphan photo rows but no prior library row.
+    func removeLibraryMetadata(id: LibraryID) throws {
+        try withLock {
+            try libraryMutationHook?(.remove(id))
+            try database.run("DELETE FROM library WHERE id = ?;", [.text(id.description)])
+        }
+    }
+
+    /// Deterministic failure seam for registry transaction tests. Production
+    /// never installs a hook.
+    func setLibraryMutationHook(
+        _ hook: (@Sendable (LibraryMutation) throws -> Void)?
+    ) {
+        withLock { libraryMutationHook = hook }
     }
 
     /// Legacy two-bool availability update, predating `LibraryConnectionState`
