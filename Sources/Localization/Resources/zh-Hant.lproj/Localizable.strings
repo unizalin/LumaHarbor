@@ -3,6 +3,7 @@
 "Add a photo folder" = "加入照片資料夾";
 "Add Folder" = "加入資料夾";
 "Add Photo Folder…" = "加入照片資料夾…";
+"Add Source" = "加入來源";
 "Add the folder again." = "重新加入這個資料夾。";
 "Adjustments" = "調整";
 "All" = "全部";
@@ -101,6 +102,7 @@
 "is read-only." = "是唯讀的。";
 "JPEG quality" = "JPEG 品質";
 "Keep the file in your library — support may arrive in a future macOS release." = "先把檔案留在相片庫中──未來的 macOS 版本可能會支援。";
+"Library" = "圖庫";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor 可以顯示已快取的縮圖，但編輯需要原始檔案。";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor 啟動時無法檢查是否有中斷的匯入。";
 "LumaHarbor couldn't finish cleaning up after a photo that failed to open." = "LumaHarbor 無法完成清理一張開啟失敗的照片。";
@@ -131,11 +133,13 @@
 "My Presets" = "我的 Preset";
 "Name" = "名稱";
 "Native: applies reliably" = "原生：可可靠套用";
+"Needs Access" = "需要存取權";
 "Next Photo" = "下一張照片";
 "No capture time" = "沒有拍攝時間";
 "No files were selected." = "未選擇任何檔案。";
 "No presets yet" = "尚無 Preset";
 "No RAW files found in this folder" = "這個資料夾裡沒有找到 RAW 檔案";
+"No sources yet" = "尚無來源";
 "Noise Reduction" = "降噪";
 "None of the selected files could be read as develop presets." = "所選檔案皆無法讀取為開發預設。";
 "Not saved" = "未儲存";
@@ -159,10 +163,12 @@
 "Purple" = "紫";
 "Quit and reopen LumaHarbor to rebuild the index." = "結束並重新開啟 LumaHarbor 即可重建索引。";
 "Quit and reopen LumaHarbor, then try again." = "結束並重新開啟 LumaHarbor，然後再試一次。";
+"Read-only" = "唯讀";
 "Read-only drive — edits can't be saved here" = "唯讀磁碟──在這裡無法儲存編輯";
 "Read-only — edits can't be saved to this drive" = "唯讀──這個磁碟無法儲存編輯";
 "Reading files…" = "讀取檔案中…";
 "Ready" = "就緒";
+"Recently Edited" = "最近編輯";
 "Reconnect it to browse and edit these photos." = "重新連接以瀏覽與編輯這些照片。";
 "Reconnect the drive holding this photo, then rescan." = "重新連接存放這張照片的磁碟，然後重新掃描。";
 "Reconnect the drive holding this photo, then try again." = "重新連接存放這張照片的磁碟，然後再試一次。";
@@ -206,6 +212,7 @@
 "Size" = "尺寸";
 "skipped" = "張跳過";
 "Something went wrong." = "發生了一些問題。";
+"Sources" = "來源";
 "Split Toning" = "分割色調";
 "Startup cleanup incomplete" = "啟動清理未完成";
 "Stop" = "停止";
