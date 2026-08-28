@@ -903,14 +903,25 @@ public final class PhotoDocumentEditor: ObservableObject {
 
     // MARK: - Opening a library asset (Task 4)
 
-    /// Local control-flow error for `openLibraryExternalAsset(url:)`: maps
-    /// any failure to actually read/fingerprint an indexed external asset
-    /// into the one, specific "source unreachable" outcome, distinct from a
-    /// genuine cancellation (superseded by a newer operation) or a later,
-    /// unrelated failure (e.g. metadata decode) once the source *was*
-    /// successfully read.
+    /// Local control-flow errors for `openLibraryAsset(_:)`'s two private
+    /// implementations.
     private enum LibraryAssetOpenError: Error {
+        /// `openLibraryExternalAsset(url:)`: maps any failure to actually
+        /// read/fingerprint an indexed external asset into this one,
+        /// specific outcome, distinct from a genuine cancellation
+        /// (superseded by a newer operation) or a later, unrelated failure
+        /// (e.g. metadata decode) once the source *was* successfully read.
         case sourceUnreachable
+        /// `openLibraryAppCopy(documentID:)`: the loaded record's
+        /// `storageMode` is not `.appCopy`. `LibraryOpenAsset.appCopy` is a
+        /// distinct case from `.external` precisely because the two need
+        /// different handling (no scope, no bookmark, never re-import vs.
+        /// a full external open) -- silently opening whatever
+        /// `storageMode` a mismatched `documentID` actually has would
+        /// erase that distinction: an `.inPlace` document's `workingURL`
+        /// is an external file that needs a security scope this path never
+        /// acquires.
+        case notAnAppCopy
     }
 
     /// Opens `asset`, handed in by the multi-source library browser (Task 5)
@@ -1099,6 +1110,18 @@ public final class PhotoDocumentEditor: ObservableObject {
     /// while `document` is already `nil`), opening a library App copy can
     /// happen at any time, including while a different document is open and
     /// dirty.
+    ///
+    /// `documentID` is trusted to name an `.appCopy` record only as far as
+    /// `LibraryOpenAsset.appCopy`'s own contract goes -- a caller could, in
+    /// error, pass an `.inPlace` document's id through this case instead of
+    /// `.external`. Loading the record and checking its `storageMode`
+    /// before doing anything else is what keeps that mistake from actually
+    /// reading an external file with no security scope: this path never
+    /// acquires one (`documentScope` is always set to `nil` on success),
+    /// which is only safe because a genuine `.appCopy` document's
+    /// `workingURL` always lives inside the app's own sandbox. A mismatch
+    /// fails closed -- nothing here is touched, and a caller can never see
+    /// this path silently reinterpret an in-place document as a copy.
     private func openLibraryAppCopy(documentID: UUID) {
         openingTask?.cancel()
         let token = mintToken()
@@ -1111,6 +1134,9 @@ public final class PhotoDocumentEditor: ObservableObject {
             do {
                 let loadedDocument = try await dependencies.store.loadDocument(id: documentID)
                 guard !Task.isCancelled, self.isCurrent(token) else { return }
+                guard loadedDocument.storageMode == .appCopy else {
+                    throw LibraryAssetOpenError.notAnAppCopy
+                }
 
                 let (photo, adjustments) = try await self.loadEditorState(for: loadedDocument)
                 guard !Task.isCancelled, self.isCurrent(token) else { return }
@@ -1158,6 +1184,14 @@ public final class PhotoDocumentEditor: ObservableObject {
                 self.isPreparingDocument = false
                 self.pendingRelink = nil
                 previousScope?.stop()
+            } catch LibraryAssetOpenError.notAnAppCopy {
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                self.alert = EditorAlert(
+                    title: L10n.t("Couldn't open this photo"),
+                    message: L10n.t("This isn't a saved App copy."),
+                    nextStep: nil
+                )
             } catch is CancellationError {
                 // Superseded before committing -- this document was already
                 // `.committed`, so there is nothing here to roll back.

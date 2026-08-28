@@ -173,6 +173,10 @@ final class PhotoDocumentStoreListingTests: TemporaryDirectoryTestCase {
 
         let projected = try await service.photos(inLibrary: .appStorage)
         XCTAssertEqual(projected.map(\.id), [PhotoID(appCopyDocument.id)])
+        XCTAssertEqual(
+            projected.first?.relativePath, "\(appCopyDocument.id.uuidString)/copy.ARW",
+            "relativePath must be the synthetic <document id>/<filename> form, never a real path"
+        )
 
         let indexStore = await service.indexStore
         let page = try indexStore.page(
@@ -185,6 +189,86 @@ final class PhotoDocumentStoreListingTests: TemporaryDirectoryTestCase {
         let folder = await service.library(id: .appStorage)
         XCTAssertEqual(folder?.sourceKind, .appStorage)
         XCTAssertEqual(folder?.photoCount, 1)
+    }
+
+    /// Codex pre-landing review, finding 1 (P1, blocking): the projected
+    /// `relativePath` must never carry any fragment of the document's real,
+    /// local absolute path -- not the temp/App-container root, not the
+    /// user's home directory name, not `PhotoDocumentStore`'s own
+    /// `Application Support`/`Documents/<id>` layout. It must be exactly
+    /// the synthetic `<document id>/<filename>` form, regardless of how
+    /// deep or identifying the real `workingURL` is.
+    func testRefreshAppStorageProjectionRelativePathNeverContainsLocalPathFragments() async throws {
+        let service = try makeService()
+        // Deliberately mimics the shape of a real on-disk location, with
+        // several identifying path components a naive implementation might
+        // leak: a "home directory" name, "Library/Application Support",
+        // and the document's own `Documents/<id>` container.
+        let documentID = UUID()
+        let workingURL = temporaryDirectory
+            .appendingPathComponent("unizalin-home", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/LumaHarbor/PhotoDocuments", isDirectory: true)
+            .appendingPathComponent("Documents/\(documentID.uuidString)", isDirectory: true)
+            .appendingPathComponent("private-photo.ARW")
+        try writeFile(Data("copy".utf8), at: workingURL)
+
+        let document = PhotoDocument(
+            id: documentID,
+            storageMode: .appCopy,
+            workingURL: workingURL,
+            sourceURL: workingURL,
+            sourceBookmarkData: nil,
+            sourceFingerprint: FileFingerprint(fileSize: 4, edgeDigest: "abc"),
+            workingFingerprint: FileFingerprint(fileSize: 4, edgeDigest: "abc")
+        )
+
+        try await service.refreshAppStorageProjection(from: [document])
+        let projected = try await service.photos(inLibrary: .appStorage)
+        let relativePath = try XCTUnwrap(projected.first?.relativePath)
+
+        XCTAssertEqual(relativePath, "\(documentID.uuidString)/private-photo.ARW")
+        XCTAssertFalse(relativePath.contains(temporaryDirectory.path), "must not contain the temp/App-container root")
+        XCTAssertFalse(relativePath.contains("unizalin-home"), "must not contain a home-directory-shaped fragment")
+        XCTAssertFalse(relativePath.contains("Application Support"), "must not contain the store's Application Support path")
+        XCTAssertFalse(relativePath.contains("PhotoDocuments"), "must not contain PhotoDocumentStore's own directory layout")
+        XCTAssertFalse(
+            relativePath.contains(workingURL.deletingLastPathComponent().path),
+            "must not contain the real working file's parent directory path"
+        )
+
+        let folder = await service.library(id: .appStorage)
+        XCTAssertNotNil(folder)
+        XCTAssertFalse((folder?.rootURL.path ?? "").contains(temporaryDirectory.path), "the synthetic root must not be a real local path either")
+    }
+
+    /// Same finding: a folder-tree query over `.appStorage` must expose
+    /// only the virtual `<document id>` node, never a real disk directory
+    /// name like `Users`/the caller's home-directory name.
+    func testRefreshAppStorageProjectionChildDirectoriesExposeOnlyTheVirtualDocumentUUID() async throws {
+        let service = try makeService()
+        let documentID = UUID()
+        let workingURL = temporaryDirectory
+            .appendingPathComponent("Users/unizalin/Library/Application Support/LumaHarbor/PhotoDocuments/Documents/\(documentID.uuidString)")
+            .appendingPathComponent("photo.ARW")
+        try writeFile(Data("copy".utf8), at: workingURL)
+        let document = PhotoDocument(
+            id: documentID,
+            storageMode: .appCopy,
+            workingURL: workingURL,
+            sourceURL: workingURL,
+            sourceBookmarkData: nil,
+            sourceFingerprint: FileFingerprint(fileSize: 4, edgeDigest: "abc"),
+            workingFingerprint: FileFingerprint(fileSize: 4, edgeDigest: "abc")
+        )
+
+        try await service.refreshAppStorageProjection(from: [document])
+        let indexStore = await service.indexStore
+        let children = try indexStore.childDirectories(libraryID: .appStorage, parent: "")
+
+        XCTAssertEqual(children.map(\.relativePath), [documentID.uuidString], "the only folder-tree node must be the virtual document-id one")
+        XCTAssertFalse(children.contains { $0.relativePath.contains("Users") }, "must never surface a real Users/ folder")
+        XCTAssertFalse(children.contains { $0.relativePath.contains("unizalin") }, "must never surface a real home-directory name")
+        XCTAssertFalse(children.contains { $0.relativePath.contains("Application Support") }, "must never surface the store's real layout")
     }
 
     /// Idempotent and rebuildable: a document no longer present in a later

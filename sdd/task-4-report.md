@@ -317,6 +317,142 @@ None blocking. Two points worth flagging for the next reviewer/task:
    check if `openLibraryAsset` ever gains additional callers with less
    controlled input.
 
+   **Update (review fix round 1):** this predicted exact scenario is
+   exactly what Codex's re-review found and required fixing — see "Review
+   fix round 1" below. It is resolved: a mismatched `documentID` now fails
+   closed with a safe alert, and the currently open document, its scope,
+   and the active pointer are all left untouched.
+
+## Review fix round 1
+
+Codex's pre-landing re-review of the Task 4 commit (`974aa9a`) returned
+**BLOCKED** with two findings.
+
+### Finding 1 (P1, blocking): the App-storage projection leaked local absolute paths into `PhotoAsset.relativePath`
+
+**Finding.** `refreshAppStorageProjection(from:)` derived a projected app
+copy's `relativePath` from `document.workingURL.path` (with only the
+leading `/` stripped) and set the synthetic library's `rootURL` to the
+real filesystem root (`/`). Since `relativePath` is not an internal-only
+field — `PhotoIndexStore`'s page, folder, and filename-search queries all
+read it directly, and it is meant to eventually reach a library browser UI
+— this meant a real, local, private path (`Users/<name>/Library/
+Application Support/LumaHarbor/PhotoDocuments/Documents/<id>/<filename>`)
+could end up displayed through the `.appStorage` scope, and a folder-tree
+query over it would surface fake `Users`/`<name>`/... nodes built from
+this device's own directory names, not anything user-meaningful.
+
+**Fix.** `PhotoLibraryService.swift`:
+
+- `appStorageRelativePath(for:)` now returns a purely synthetic
+  `"<document id>/<filename>"` string, built only from the document's own
+  UUID and its working file's last path component — never any other part
+  of `workingURL`. The document UUID is already a stable identifier that
+  reveals nothing about the local filesystem, and keeps same-named files
+  from different documents distinct.
+- `appStorageProjectionRootURL` changed from the real filesystem root to a
+  fixed, obviously-synthetic literal (`/LumaHarborAppStorage`) — written as
+  an already-absolute path string specifically so it never resolves
+  against this *process's* current working directory the way a relative
+  `URL(fileURLWithPath:)` would.
+- Both call sites' doc comments were rewritten to state plainly that
+  `sourceURL(for:)` must never be relied on for a projected App copy:
+  opening one always goes through `PhotoDocumentEditor.openLibraryAsset
+  (.appCopy(documentID:))` → `PhotoDocumentStore.loadDocument(id:)`, which
+  reads the real `workingURL` from the store's own durable record, never
+  reverse-derived from this projected index path. (`sourceURL(for:)`
+  itself was not changed — it still combines `rootURL` +
+  `relativePath` exactly as before, for every source kind; App-copy rows
+  now simply produce a harmless synthetic, non-existent path if it is ever
+  called against one, rather than a real user path.)
+
+### Finding 2 (P2, blocking): `openLibraryAsset(.appCopy(documentID:))` didn't validate the loaded record's storage mode
+
+**Finding.** `openLibraryAppCopy(documentID:)` called
+`store.loadDocument(id:)` and used the result directly without checking
+`storageMode`. A `documentID` that actually names an `.inPlace` record
+would be opened as if it were an App copy: `documentScope` is always set
+to `nil` on this path (an App copy needs none), so an `.inPlace` document's
+external `workingURL` would be read with no security scope at all, and
+`LibraryOpenAsset`'s case-based separation between "always in place, needs
+a scope" and "always a local App copy, never needs one" would be silently
+violated for a caller's mistake instead of caught.
+
+**Fix.** `PhotoDocumentEditor.swift`: `openLibraryAppCopy(documentID:)` now
+checks `loadedDocument.storageMode == .appCopy` immediately after loading
+the record, before touching anything else (before `loadEditorState`,
+before flushing the current document, before any active-pointer write).
+On a mismatch it throws a new `LibraryAssetOpenError.notAnAppCopy`, caught
+by a dedicated branch that fails closed: no flush, no switch, no active
+pointer write, and a safe `EditorAlert` (`"This isn't a saved App copy."`,
+localised in English and Traditional Chinese) instead. Because the check
+happens before any mutation, the currently open document, its scope, and
+the durable active-document pointer are all left byte-for-byte untouched
+— verified directly in the new tests (scope `stopCount == 0`, still
+`isAccessing`, unchanged document id, unchanged active pointer).
+
+`LibraryAssetOpenError` (previously scoped to only
+`openLibraryExternalAsset(url:)`'s `sourceUnreachable` case) gained the new
+`notAnAppCopy` case and an updated doc comment describing both.
+
+### New tests
+
+`Tests/PhotoLibraryCoreTests/PhotoDocumentStoreListingTests.swift` (+2):
+
+- `testRefreshAppStorageProjectionRelativePathNeverContainsLocalPathFragments`
+  — a working URL deliberately shaped like a real on-disk location (a
+  fake home-directory name, `Library/Application Support`, the store's own
+  `Documents/<id>` layout) is projected; the resulting `relativePath` is
+  asserted to equal exactly `"<id>/<filename>"` and to contain none of
+  those real path fragments — nor the temp/App-container root itself.
+  Also checks the synthetic library's `rootURL.path` doesn't contain the
+  real root either.
+- `testRefreshAppStorageProjectionChildDirectoriesExposeOnlyTheVirtualDocumentUUID`
+  — a real `childDirectories(libraryID: .appStorage, parent: "")` query
+  (the folder-tree primitive a library browser would actually call)
+  returns exactly one node, named after the document's UUID, and
+  contains none of `Users`/the home-directory name/`Application Support`.
+
+`Tests/EditorCoreTests/PhotoDocumentEditorLibraryOpenTests.swift` (+2):
+
+- `testOpeningAppCopyWithAMismatchedInPlaceDocumentIDFailsClosed` — an
+  `.inPlace` document opened through `.appCopy(documentID:)` while a
+  different document is already open: the open document's id, its scope
+  (`stopCount == 0`, still `isAccessing`), the `Documents/` directory
+  contents, and the active pointer are all asserted unchanged; a safe
+  alert appears instead.
+- `testOpeningAppCopyWithAMismatchedInPlaceDocumentIDWithNoCurrentDocumentOpensNothing`
+  — the same mismatch with nothing open yet: no document is fabricated,
+  the active pointer stays unset.
+
+### Verification (review fix round 1)
+
+```zsh
+swift test --filter 'PhotoDocumentStoreListingTests|PhotoDocumentEditorLibraryOpenTests'
+swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+swift test
+git diff --check f839439..HEAD
+```
+
+Results:
+
+- `PhotoDocumentStoreListingTests|PhotoDocumentEditorLibraryOpenTests`:
+  **18 tests, 0 failures** (9 + 9, run 3×, 0 flakes; 4 new since the prior
+  round).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc
+  -warnings-as-errors`: **exit 0**, no warnings. No sandbox/module-cache
+  permission failure was encountered.
+- Full `swift test`: **1,014 tests, 9 skipped, 0 failures** (1,010 before
+  this round + 4 new = 1,014). The 9 skips are the same pre-existing,
+  host-dependent security-scoped-bookmark skips, not new.
+- `git diff --check f839439..HEAD`: **PASS**, no whitespace errors.
+- `rg -n 'TBD|TODO|FIXME|fatalError|try!|as!'` over the two changed
+  production files: **no hits**.
+
+### Remaining concerns
+
+None blocking.
+
 ## Not push / merge / rebase / Task 5
 
 - No `git push`, `git merge`, or `git rebase` was run at any point.

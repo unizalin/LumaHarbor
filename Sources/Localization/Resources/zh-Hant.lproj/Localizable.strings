@@ -244,6 +244,7 @@
 "This file changed while LumaHarbor was checking it." = "這個檔案在 LumaHarbor 檢查時發生了變動。";
 "This file is too large for LumaHarbor to safely confirm it's the same photo." = "這個檔案太大，LumaHarbor 無法安全確認是否為同一張照片。";
 "This file couldn't be read" = "這個檔案無法讀取";
+"This isn't a saved App copy." = "這不是已儲存的 App 複本。";
 "This Library" = "此照片庫";
 "This library's index file is damaged." = "這個相片庫的索引檔案已經損壞。";
 "This photo has saved adjustments" = "這張照片有已儲存的調整";

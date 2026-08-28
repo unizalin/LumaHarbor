@@ -1065,7 +1065,9 @@ public actor PhotoLibraryService {
     /// identity, content or editability — `PhotoDocumentStore`'s own
     /// committed records remain that. Opening an App copy for editing goes
     /// through `PhotoDocumentEditor.openLibraryAsset(.appCopy(documentID:))`
-    /// directly against the store, never through this projection.
+    /// directly against the store, never through this projection —
+    /// `sourceURL(for:)` must never be relied on for a projected App copy;
+    /// see `appStorageRelativePath(for:)` for why.
     ///
     /// Idempotent and safe to call repeatedly (e.g. every launch, or
     /// whenever the committed set changes): every call re-derives the whole
@@ -1101,7 +1103,7 @@ public actor PhotoLibraryService {
             PhotoAsset(
                 id: PhotoID(document.id),
                 libraryID: .appStorage,
-                relativePath: Self.appStorageRelativePath(for: document.workingURL),
+                relativePath: Self.appStorageRelativePath(for: document),
                 fingerprint: document.workingFingerprint,
                 status: .ready,
                 lastSeenAt: projectedAt
@@ -1123,20 +1125,46 @@ public actor PhotoLibraryService {
     }
 
     /// Root every projected App-copy `PhotoAsset.relativePath` is expressed
-    /// relative to. The filesystem root, not `PhotoDocumentStore`'s own
-    /// `rootURL` — this actor never holds a reference to that (see
-    /// `refreshAppStorageProjection(from:)`). Combined with
-    /// `appStorageRelativePath(for:)`, `folder.rootURL
-    /// .appendingPathComponent(relativePath)` still reconstructs a
-    /// document's exact `workingURL`, so `sourceURL(for:)` resolves
-    /// correctly for a projected App copy without this actor needing to
-    /// know where `PhotoDocumentStore` itself is rooted.
-    private static let appStorageProjectionRootURL = URL(fileURLWithPath: "/", isDirectory: true)
+    /// relative to. A fixed, synthetic, absolute-looking placeholder —
+    /// deliberately never a real filesystem location (not `/`, not
+    /// `PhotoDocumentStore`'s own `rootURL`, which this actor never even
+    /// holds a reference to) — because `folder.rootURL
+    /// .appendingPathComponent(relativePath)` is not meant to resolve to
+    /// anything real; see `appStorageRelativePath(for:)` for why.
+    /// `URL(fileURLWithPath:)` with a relative string would resolve against
+    /// this *process's* current working directory, which is itself not
+    /// something to leak here, so this is written as an already-absolute
+    /// path literal instead.
+    private static let appStorageProjectionRootURL = URL(fileURLWithPath: "/LumaHarborAppStorage", isDirectory: true)
 
-    private static func appStorageRelativePath(for workingURL: URL) -> String {
-        var path = workingURL.path
-        if path.hasPrefix("/") { path.removeFirst() }
-        return path
+    /// A stable, non-private, synthetic `relativePath` for a projected App
+    /// copy: `"<document id>/<filename>"`. Deliberately never derived from
+    /// `document.workingURL`'s real path components (the user's home
+    /// directory, Application Support, `PhotoDocumentStore`'s own
+    /// `Documents/<id>` layout).
+    ///
+    /// `relativePath` is not an internal-only field — `PhotoIndexStore`'s
+    /// page, folder and filename-search queries all read it directly, and
+    /// it is meant to eventually reach a library browser UI. Storing a
+    /// document's real absolute path in it would leak local, private path
+    /// fragments (e.g. `Users/<name>/Library/Application Support/...`)
+    /// into a place a UI or a future export could surface, and would seed
+    /// a fake `Users`/`<name>`/... folder-tree node out of what are really
+    /// just this device's own directory names, not user-meaningful
+    /// folders. The document's own UUID is already a stable identifier
+    /// that reveals nothing about the local filesystem; paired with just
+    /// the filename, this keeps same-named files from different documents
+    /// distinct without carrying any of that.
+    ///
+    /// This value is not meant to be resolved back into a real file
+    /// location — `sourceURL(for:)` must never be relied on for a
+    /// projected App copy. Opening one always goes through
+    /// `PhotoDocumentEditor.openLibraryAsset(.appCopy(documentID:))` →
+    /// `PhotoDocumentStore.loadDocument(id:)`, which reads the real
+    /// `workingURL` from the store's own durable record — never reverse-
+    /// derived from this projected index path.
+    private static func appStorageRelativePath(for document: PhotoDocument) -> String {
+        "\(document.id.uuidString)/\(document.workingURL.lastPathComponent)"
     }
 
     // MARK: - Rebuildable local data
