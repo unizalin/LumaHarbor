@@ -580,21 +580,40 @@ public final class LibraryBrowserSession: ObservableObject {
         // `.photosIndexed` batch): `beginNewQuery()` fully resets `photos`
         // and re-fetches from page one, which would otherwise make the grid
         // visibly flicker/reset on every batch of a large scan.
+        //
+        // Codex re-review round 2: which scopes actually need this reload is
+        // not just "does this scan touch that source's photos" -- see
+        // `isSelectionAffected(byScanOf:)` for why `.recentlyEdited` also
+        // qualifies, alongside `.all`/`.source`/`.folder`.
         if case .finished = event, isSelectionAffected(byScanOf: libraryID) {
             beginNewQuery()
         }
     }
 
     /// Whether `selection`'s current query draws from `libraryID` (directly,
-    /// or transitively via the cross-source `.all` smart scope) and so must
-    /// be reloaded once that source finishes scanning. `.appStorage` and
-    /// `.recentlyEdited` are also cross-source smart scopes, but neither is
-    /// populated by an external source's scan -- an app-copy import or an
-    /// edit is what changes those, not this -- so a scan completion must
-    /// never force-reload them.
+    /// or transitively via a cross-source smart scope) and so must be
+    /// reloaded once that source finishes scanning.
+    ///
+    /// `.all` and `.recentlyEdited` both qualify: a scan doesn't only index
+    /// new photos, it also re-reads each photo's sidecar and rewrites
+    /// `hasEdits`/`lastEditAt` on the indexed row from it (`PhotoLibraryService`'s
+    /// own rescan path -- SQLite's edit-state columns are a rebuildable
+    /// projection of the sidecar, not the source of truth), and
+    /// `.recentlyEdited` is exactly the query that filters/sorts on those two
+    /// columns. A source with pre-existing sidecar edits can therefore turn
+    /// `.recentlyEdited` from empty to populated purely by finishing a scan,
+    /// with no new photo ever appearing -- the same stale-UI failure mode
+    /// `.all` has, just triggered by edit-state rebuild instead of indexing.
+    ///
+    /// `.appStorage` is the one cross-source smart scope that does *not*
+    /// qualify: it's populated only by `refreshAppStorageProjection(from:)`
+    /// projecting App-copy commits out of `PhotoDocumentStore`, a path an
+    /// external source's scan never touches -- so a scan completion must
+    /// never force-reload it.
     private func isSelectionAffected(byScanOf libraryID: LibraryID) -> Bool {
         switch selection {
-        case .smart(let scope): return scope == .all
+        case .smart(.all), .smart(.recentlyEdited): return true
+        case .smart: return false
         case .source(let id): return id == libraryID
         case .folder(let id, _): return id == libraryID
         }

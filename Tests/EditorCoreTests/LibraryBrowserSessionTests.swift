@@ -211,7 +211,9 @@ private func makeDependencies(_ environment: FakeLibraryEnvironment) -> LibraryB
 private func makePhoto(
     id: PhotoID = PhotoID(),
     libraryID: LibraryID,
-    name: String = "IMG_0001.ARW"
+    name: String = "IMG_0001.ARW",
+    hasEdits: Bool = false,
+    lastEditAt: Date? = nil
 ) -> PhotoAsset {
     PhotoAsset(
         id: id,
@@ -219,7 +221,9 @@ private func makePhoto(
         relativePath: name,
         fingerprint: FileFingerprint(fileSize: 1_024, edgeDigest: UUID().uuidString),
         status: .ready,
-        lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+        lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000),
+        hasEdits: hasEdits,
+        lastEditAt: lastEditAt
     )
 }
 
@@ -978,6 +982,54 @@ final class LibraryBrowserSessionTests: XCTestCase {
         XCTAssertEqual(session.selection, .smart(.all), "the reload must not itself change the selection")
         let allQueryFetchCount = await environment.fetchQueries.filter { $0.scope == .all }.count
         XCTAssertEqual(allQueryFetchCount, 2, "startup's first page plus exactly one reload after the scan finished")
+    }
+
+    /// Codex re-review round 2, blocking finding: a scan doesn't only index
+    /// new photos -- it also re-reads each photo's sidecar and rewrites
+    /// `hasEdits`/`lastEditAt` on the indexed row (`PhotoLibraryService`'s
+    /// rescan path treats those SQLite columns as a rebuildable projection
+    /// of the sidecar). `.recentlyEdited` filters/sorts on exactly those two
+    /// columns, so a source with pre-existing sidecar edits can turn
+    /// `.recentlyEdited` from empty to populated purely by finishing a scan
+    /// -- round 1's fix wrongly excluded this scope from the reload.
+    func testScanFinishingRefreshesTheCurrentRecentlyEditedQueryFromEmptyToVisible() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        let recentlyEditedQuery = LibraryQuery(scope: .recentlyEdited, sort: .captureDateDescending)
+        await environment.setPages(for: recentlyEditedQuery, pages: [[]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        session.select(.smart(.recentlyEdited))
+        try await waitUntil { session.selection == .smart(.recentlyEdited) && session.loadState == .loaded }
+        XCTAssertTrue(session.photos.isEmpty, "premise: no edited photo surfaces yet")
+
+        let sourceID = LibraryID()
+        let editedPhoto = makePhoto(
+            libraryID: sourceID,
+            name: "edited.ARW",
+            hasEdits: true,
+            lastEditAt: Date(timeIntervalSince1970: 1_700_000_500)
+        )
+        // The scan's edit-state rebuild (from the sidecar) is what would
+        // have written this row's hasEdits/lastEditAt -- simulated here by
+        // re-scripting the same `.recentlyEdited` query's page to now
+        // include it.
+        await environment.setPages(for: recentlyEditedQuery, pages: [[editedPhoto]])
+        await environment.setScanScript(for: sourceID, events: [
+            .started(sourceID),
+            .finished(makeScanResult(libraryID: sourceID, indexedCount: 0)),
+        ])
+
+        session.scanSource(sourceID)
+        try await waitUntil { session.photos.map(\.id) == [editedPhoto.id] }
+
+        XCTAssertEqual(session.loadState, .loaded)
+        XCTAssertEqual(session.selection, .smart(.recentlyEdited), "the reload must not itself change the selection")
+        let recentlyEditedFetchCount = await environment.fetchQueries.filter { $0.scope == .recentlyEdited }.count
+        XCTAssertEqual(recentlyEditedFetchCount, 2, "the initial select(_:)'s fetch plus exactly one reload after the scan finished")
     }
 
     /// Same finding: a scope the scan does not affect -- `.appStorage`,
