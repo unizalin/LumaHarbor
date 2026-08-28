@@ -160,6 +160,10 @@ public actor PhotoLibraryService {
     private let folderAccessResolver: any FolderAccessResolving
     private let resourceIdentityResolver: any ResourceIdentityResolving
     private let bookmarkDataCreator: any BookmarkDataCreating
+    /// Schedules `scanLibraries`' per-source scans across a fixed two-slot
+    /// budget (spec §9). Self-contained and not test-injectable: its own
+    /// behavior is covered directly by `MultiSourceScanCoordinatorTests`.
+    private let scanCoordinator = MultiSourceScanCoordinator()
 
     /// How many `performScan` calls are currently running, across every
     /// library. Incremented at the top of `performScan` and decremented via
@@ -1091,6 +1095,45 @@ public actor PhotoLibraryService {
     /// on the SSD supplies the `PhotoID`s, so photos keep their edits (spec §13.9).
     public nonisolated func scan(libraryID: LibraryID) -> LibraryScanSequence {
         LibraryScanSequence(service: self, libraryID: libraryID)
+    }
+
+    /// Runs bounded, coordinated scans across every listed source at once
+    /// (spec §9): at most two scan concurrently, and the rest queue behind
+    /// them. `selectedLibraryID`, when present, is scheduled ahead of the
+    /// other queued sources -- but never interrupts a scan already running,
+    /// so an in-flight batch is never rudely cut off.
+    ///
+    /// Each source's events flow through the exact same acknowledged,
+    /// bounded `scan(libraryID:)` pipeline a single-source scan already
+    /// uses -- including its existing generation validation and prune/
+    /// `lastScanAt` safety, both left completely untouched. `onEvent` is
+    /// awaited for every event before the next one is requested, so
+    /// backpressure reaches the directory cursor exactly as it does for one
+    /// source; this method never buffers events of its own. A duplicate
+    /// `libraryIDs` entry is only ever scheduled once, since the coordinator
+    /// itself allows at most one active-or-queued entry per source.
+    ///
+    /// Returns once every listed source's scan has finished, failed, or been
+    /// cancelled.
+    public nonisolated func scanLibraries(
+        _ libraryIDs: [LibraryID],
+        selectedLibraryID: LibraryID?,
+        onEvent: @escaping @Sendable (LibraryID, LibraryScanEvent) async -> Void
+    ) async {
+        guard !libraryIDs.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for libraryID in libraryIDs {
+                let priority: MultiSourceScanCoordinator.ScanPriority =
+                    (libraryID == selectedLibraryID) ? .selected : .normal
+                group.addTask {
+                    await self.scanCoordinator.run(libraryID: libraryID, priority: priority) {
+                        for await event in self.scan(libraryID: libraryID) {
+                            await onEvent(libraryID, event)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Runs one scan against an acknowledging emitter.
