@@ -357,3 +357,207 @@ None blocking. Two points worth flagging for the next reviewer:
 - Exactly two new commits are expected from this task: one feature commit
   (production + test code) and one docs commit (this report), created after
   this report was written.
+
+## Review fix round 1
+
+Codex's pre-landing review of the two Task 3 commits (`24c72bf`, `0a4bc93`)
+returned **CHANGES_REQUESTED** with two findings, both in scope for this
+round. Tests were confirmed green going in; both findings are contract gaps,
+not test failures. This section documents what was found, what was changed,
+what was added, and what still remains open (nothing, per the last
+sub-section).
+
+### Finding 1 (P1): a `LibraryID` could be simultaneously active and queued
+
+**Finding.** `MultiSourceScanCoordinator.register(...)` only ever replaced an
+existing *queued* entry for a `libraryID`; it never checked whether that
+`libraryID` was already *active*. A second `enqueue`/`run` for an
+already-active `libraryID` therefore queued a genuine second "shadow" entry,
+which `nextRunnableIndex()`'s active-skip only delayed rather than
+suppressed: once the original active run finished, the shadow entry would
+start and the same source would scan a second time. This meant
+`scanLibraries([id, id], selectedLibraryID: nil)` could run one source twice,
+and violated the plan's stated invariant ("one LibraryID may be active or
+queued once") that the coordinator's own prior report had described but the
+code did not actually enforce. Separately, `cancel(libraryID:)` removed any
+queued entry for an id *and* cancelled `activeTasks[libraryID]` for the same
+id in the same call — safe only because the two could never legitimately
+coexist for a correct implementation, which this one did not guarantee.
+
+**Fix.** `MultiSourceScanCoordinator.swift` was restructured around a new
+`insert(...)` primitive: a registration for a `libraryID` that is already in
+`activeTasks` is no longer queued at all. Instead it becomes an
+"active rider" (`activeRiders: [LibraryID: [CompletionBox]]`) that rides
+along on the *already-running* task and is resolved -- without ever running
+its own `operation` -- exactly when that active task's own completion
+callback (`completed(libraryID:completionBox:)`) fires. A fire-and-forget
+`enqueue(...)` for an already-active id has no completion to track and is
+simply dropped once `insert(...)` confirms the id is active, so nothing is
+ever queued or run a second time.
+
+`run(libraryID:priority:operation:)`'s completion semantics were generalized
+from a single per-entry `CheckedContinuation` into a small `CompletionBox`
+class (`isResolved` + an optional continuation), so both "resolve now, wait
+later" (the active-rider case: the box may resolve before anyone calls
+`waitBox(_:)` on it) and "wait now, resolve later" (the ordinary queued
+case) are both handled by the same `waitBox`/`resolveBox` pair without
+leaking any unbounded coordinator-level state for calls nobody ever waits
+on (`enqueue`'s fire-and-forget boxes are simply never created).
+
+Because a `libraryID` can now never be both active and queued at the same
+time, `cancel(libraryID:)`'s two halves (remove-if-queued,
+cancel-if-active) can no longer collide for the same id -- this is now
+structurally guaranteed rather than incidentally true, and
+`nextRunnableIndex()`'s active-skip guard is kept as an explicit (and now
+provably dead) assertion of that invariant rather than the only thing
+enforcing it.
+
+`run(...)` called against an already-active `libraryID` neither hangs nor
+starts a second scan: it resumes exactly when the existing active run's own
+`Task<Void, Never>` finishes (normally or after cooperative cancellation),
+via the same `activeRiders` mechanism.
+
+### Finding 2 (P2): no deterministic selected-priority scheduling across one `scanLibraries` batch
+
+**Finding.** `PhotoLibraryService.scanLibraries` gave each `libraryID` its
+own concurrent child task inside a `withTaskGroup`, each independently
+calling `scanCoordinator.run(...)`. Which child task actually reached the
+coordinator actor first was an unspecified race: for
+`scanLibraries([normalA, normalB, selectedC], selectedLibraryID: selectedC)`,
+`normalA` and `normalB`'s child tasks could both register before
+`selectedC`'s did, filling both scan slots and leaving the selected source
+to wait for a third slot -- contradicting the selected-source-priority
+guarantee the public surface is supposed to provide for a single batch call.
+
+**Fix.** Two changes, both scoped to the two flagged files:
+
+- `MultiSourceScanCoordinator` gained `runBatch(_:)`: it registers every
+  `(libraryID, priority, operation)` triple in a caller-supplied array via
+  `insert(...)` in one synchronous, non-suspending pass -- nothing else can
+  reach the actor while that pass runs -- and only calls
+  `scheduleAvailableSlots()` once, after the whole batch has been inserted.
+  This makes the priority/FIFO ordering that `nextRunnableIndex()` sees
+  reflect the entire batch at once, regardless of how `runBatch`'s own
+  `TaskGroup` (used only afterward, to await each entry's completion) gets
+  scheduled by the runtime.
+- `PhotoLibraryService.scanLibraries` now de-duplicates `libraryIDs` up
+  front, orders the selected source (if present) first followed by every
+  other requested source in its original order, and calls
+  `scanCoordinator.runBatch(_:)` once with the resulting array, instead of
+  spawning one `TaskGroup` child task per source that each calls `run(...)`
+  independently.
+
+No polling, semaphore, `Task.detached`, `AsyncStream`, or unbounded
+continuation was introduced by either fix. Scan-generation validation and
+`AcknowledgedAsyncChannel`'s acknowledged backpressure inside `performScan`
+were not touched at all -- both fixes are entirely inside the scheduling
+layer above them.
+
+### New tests
+
+`Tests/PhotoLibraryCoreTests/MultiSourceScanCoordinatorTests.swift`:
+
+- `testActiveEnqueueForSameLibraryIDNeverQueuesOrRunsTwice` (replaces the
+  prior `testSameLibraryIDNeverActiveTwiceSimultaneously`, whose assertions
+  had actually encoded the P1 bug as expected behavior) -- a re-`enqueue` of
+  an already-active id creates no queued entry and never runs a second time.
+- `testRunWhileActiveWaitsForTheActiveOperationWithoutRunningASecondTime` --
+  `run(...)` against an already-active id neither hangs nor starts a second
+  scan; it resumes when the existing active run finishes.
+- `testCancelQueuedItemNeverAffectsUnrelatedActiveScans` -- cancelling a
+  queued-only entry never reaches into `activeTasks` for an unrelated id,
+  now provable as a structural invariant rather than an incidental one.
+- `testRunBatchSchedulesSelectedPriorityAheadOfNormalEntriesInTheSameBatch`
+  (run 20× in a loop) -- a single `runBatch(_:)` call always starts the
+  selected entry within the two-slot budget, even though it is listed last.
+- `testRunBatchKeepsSamePriorityEntriesFIFO` -- same-priority entries within
+  one batch stay FIFO, matching `enqueue(...)`'s existing guarantee.
+- `testRunBatchDeduplicatesRepeatedLibraryIDWithinOneBatch` -- a duplicate
+  `libraryID` within one batch array behaves exactly like two sequential
+  `enqueue`/`run` calls: the later entry replaces the earlier one, which
+  never runs.
+
+`Tests/LumaHarborIntegrationTests/MultiSourceBoundedScanTests.swift`:
+
+- `testSelectedSourceStartsWithinTwoSlotBudgetInASingleScanLibrariesBatch` --
+  a single `scanLibraries([normalA, normalB, selectedC],
+  selectedLibraryID: selectedC)` call always starts the selected source
+  within the two-slot budget, closing the exact race Finding 2 described
+  (the pre-existing `testSelectedSourcePriorityIsHonoredThroughScanLibraries`
+  only ever exercised *separate* `scanLibraries` calls per source, so it
+  could not have caught this).
+- `testScanLibrariesDeduplicatesARepeatedLibraryIDWithinOneCall` --
+  `scanLibraries([id, id], selectedLibraryID: nil)` delivers exactly one
+  `.started`/`.finished` pair and records `lastScanAt` exactly once.
+
+Coordinator suite: 18 tests (13 prior + 6 new − 1 replaced in place).
+Integration suite: 5 tests (3 prior + 2 new).
+
+### Verification (round 1 fix)
+
+```zsh
+swift test --filter MultiSourceScanCoordinatorTests
+swift test --filter MultiSourceBoundedScanTests
+swift test --filter 'BoundedFolderScanTests|ScanCancellationTests'
+swift test --filter PhotoLibraryCoreTests
+swift test
+swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+git diff --check
+```
+
+Results:
+
+- `MultiSourceScanCoordinatorTests`: **18 tests, 0 failures** (run 4×, 0
+  flakes).
+- `MultiSourceBoundedScanTests`: **5 tests, 0 failures** (run 4×, 0 flakes,
+  including the 3×10,000-entry test).
+- `BoundedFolderScanTests|ScanCancellationTests`: **18 tests, 0 failures** --
+  no regression in the pre-existing single-source bounded-pipeline
+  contracts.
+- `PhotoLibraryCoreTests`: **444 tests, 0 failures** (439 before this round +
+  6 new coordinator tests − 1 old test replaced in place = 444).
+- Full `swift test`: **993 tests, 9 skipped, 0 failures** (986 before this
+  round + 6 new coordinator + 2 new integration − 1 old test replaced in
+  place; net +7 = 993). The 9 skips are the same pre-existing,
+  host-dependent security-scoped-bookmark skips, not new.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc
+  -warnings-as-errors`: **exit 0**, no warnings. No sandbox/module-cache
+  permission failure was encountered.
+- `git diff --check`: **PASS**, no whitespace errors.
+- `rg -n 'TBD|TODO|FIXME|fatalError|try!|as!'` over both changed production
+  files: **no hits**.
+- `rg -n 'Task\.detached|Semaphore|DispatchSemaphore'` over both changed
+  production files: **one hit**, a pre-existing doc comment in
+  `PhotoLibraryService.swift` explaining why `runOffActor` is used *instead
+  of* `Task.detached` -- not an actual usage, and not touched by this round.
+- One test bug was found and fixed while writing this round's tests (not a
+  production defect): an early version of
+  `testRunBatchSchedulesSelectedPriorityAheadOfNormalEntriesInTheSameBatch`
+  released all three `ScanTracker`-gated ids as soon as two had started,
+  before the third had actually started and registered its own gate --
+  `ScanTracker.release` is a no-op if called before the corresponding `run`
+  registers itself, so the third id's eventual run then waited on a release
+  that had already happened and would never happen again, hanging that test
+  indefinitely. Fixed by releasing only the ids confirmed started, then
+  waiting for the remaining one to actually start before releasing it --
+  the same pattern the pre-existing `testOnlyTwoSourcesRunAndThirdWaits`
+  already uses. Caught by a 3-minute `timeout`-wrapped run rather than
+  letting it hang the session.
+
+### Remaining concerns
+
+None blocking. One point carried forward from the original report, now
+sharpened rather than resolved (unchanged in scope, not something either
+finding asked to fix):
+
+- `MultiSourceScanCoordinator.run(libraryID:priority:operation:)`'s and
+  `runBatch(_:)`'s cancel-on-displacement semantics apply per `libraryID`,
+  not per specific caller. Two independent callers racing `run(...)`/
+  `runBatch(_:)` for the exact same `libraryID` at the same time -- e.g. two
+  concurrent `PhotoLibraryService.scanLibraries` calls that both list the
+  same id -- would mean cancelling one caller's own task cancels the
+  shared active run (and thus every other caller/rider waiting on it) via
+  `cancel(libraryID:)`. This is not reachable through any single
+  `scanLibraries` call today (it de-duplicates `libraryIDs` before ever
+  reaching the coordinator), but would matter if a future caller composed
+  the coordinator differently across independent calls.
