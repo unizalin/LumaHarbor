@@ -105,20 +105,49 @@ struct PadLibraryGrid: View {
         )
     }
 
+    /// Editor-return restoration (Task 7 Step 1's "editor return restores
+    /// by `PhotoID`"): `ScrollViewReader` lets `scrollToAnchorIfNeeded(_:proxy:)`
+    /// actually land the grid on `library.pendingScrollAnchor` once
+    /// `library.restoreGridPosition()` has loaded the page containing it --
+    /// `ForEach`'s own `PhotoID`-based `Identifiable` conformance is what
+    /// `proxy.scrollTo` resolves against, so no extra `.id()` modifier is
+    /// needed on each cell (Codex pre-landing review, Task 7 round: the
+    /// session-side restoration query was already correct, but nothing
+    /// here ever consumed it to actually scroll the view).
     private var gridScrollView: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(library.photos) { photo in
-                    cell(for: photo)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(library.photos) { photo in
+                        cell(for: photo)
+                    }
+                }
+                .padding(16)
+
+                if library.loadState == .loadingNextPage {
+                    ProgressView()
+                        .padding()
                 }
             }
-            .padding(16)
-
-            if library.loadState == .loadingNextPage {
-                ProgressView()
-                    .padding()
+            .onAppear {
+                scrollToAnchorIfNeeded(photos: library.photos, proxy: proxy)
+            }
+            .onChange(of: library.photos) { _, photos in
+                scrollToAnchorIfNeeded(photos: photos, proxy: proxy)
             }
         }
+    }
+
+    /// Scrolls to `library.pendingScrollAnchor` only once it's actually
+    /// present in `photos` -- never a blind/empty scroll while the anchor's
+    /// page is still loading -- and immediately acknowledges it so a later,
+    /// unrelated `photos` change (paging further) never re-triggers the
+    /// same scroll.
+    private func scrollToAnchorIfNeeded(photos: [PhotoAsset], proxy: ScrollViewProxy) {
+        guard let anchor = library.pendingScrollAnchor,
+              photos.contains(where: { $0.id == anchor }) else { return }
+        proxy.scrollTo(anchor, anchor: .center)
+        library.acknowledgeScrollToAnchor()
     }
 
     @ViewBuilder

@@ -314,6 +314,130 @@ final class LibraryBrowserGridFlowTests: XCTestCase {
         )
     }
 
+    /// Codex pre-landing review, Task 7 round, finding 2 (P1, blocking):
+    /// `restoreGridPosition()` re-fetches the right page, but nothing
+    /// previously told the grid to actually scroll to the anchor -- data
+    /// loaded silently is not the same as the view landing on the exact
+    /// photo the user had open. `pendingScrollAnchor` is the session-side
+    /// signal a view consumes to do that; this proves it's set to exactly
+    /// the anchor `PhotoID` once (and only once) that photo is actually
+    /// present in `photos`.
+    func testRestoreGridPositionSetsThePendingScrollAnchorOnceTheAnchorPageLoads() async throws {
+        let environment = GridFlowFakeEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let sourceID = LibraryID()
+        let query = LibraryQuery(scope: .source(sourceID), sort: .captureDateDescending)
+        let pageOne = [makeGridFlowPhoto(libraryID: sourceID, name: "p1.ARW")]
+        let anchorPhoto = makeGridFlowPhoto(libraryID: sourceID, name: "anchor.ARW")
+        let pageTwo = [anchorPhoto]
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setPages(for: query, pages: [pageOne, pageTwo])
+        await environment.setResolveResult(
+            for: anchorPhoto.id,
+            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), sourceKind: .externalFolder))
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
+        session.start()
+        try await waitUntilGridFlow { session.loadState == .loaded }
+        session.select(.source(sourceID))
+        try await waitUntilGridFlow { session.photos.map(\.id) == pageOne.map(\.id) }
+        XCTAssertNil(session.pendingScrollAnchor, "nothing pending before any restoration has ever run")
+
+        _ = await session.openAsset(for: anchorPhoto)
+        session.select(.smart(.all))
+        try await waitUntilGridFlow { session.loadState == .loaded }
+        XCTAssertNil(session.pendingScrollAnchor, "an ordinary select(_:) must never set a pending scroll anchor")
+
+        session.restoreGridPosition()
+        try await waitUntilGridFlow { session.pendingScrollAnchor == anchorPhoto.id }
+
+        // By the time `pendingScrollAnchor` is set, the anchor must already
+        // be present in `photos` -- a view must never have to guess whether
+        // it's safe to scroll yet.
+        XCTAssertTrue(session.photos.contains { $0.id == anchorPhoto.id })
+
+        session.acknowledgeScrollToAnchor()
+        XCTAssertNil(session.pendingScrollAnchor, "acknowledging must clear it so a later, unrelated photos change never re-triggers the same scroll")
+
+        // Paging further afterward must not resurrect a cleared anchor.
+        session.loadNextPage()
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(session.pendingScrollAnchor)
+    }
+
+    /// Same finding: when the anchor can't be found at all (falls back to a
+    /// fresh page one), there is nothing to scroll to -- `pendingScrollAnchor`
+    /// must never be set in that case.
+    func testMissingAnchorNeverSetsAPendingScrollAnchor() async throws {
+        let environment = GridFlowFakeEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let sourceID = LibraryID()
+        let query = LibraryQuery(scope: .source(sourceID), sort: .captureDateDescending)
+        let onlyPhoto = makeGridFlowPhoto(libraryID: sourceID, name: "only.ARW")
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setPages(for: query, pages: [[onlyPhoto]])
+        await environment.setResolveResult(
+            for: onlyPhoto.id,
+            .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), sourceKind: .externalFolder))
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
+        session.start()
+        try await waitUntilGridFlow { session.loadState == .loaded }
+        session.select(.source(sourceID))
+        try await waitUntilGridFlow { session.photos.map(\.id) == [onlyPhoto.id] }
+        _ = await session.openAsset(for: onlyPhoto)
+
+        let replacementPhoto = makeGridFlowPhoto(libraryID: sourceID, name: "different.ARW")
+        await environment.setPages(for: query, pages: [[replacementPhoto]])
+        session.select(.smart(.all))
+        try await waitUntilGridFlow { session.loadState == .loaded }
+
+        session.restoreGridPosition()
+        try await waitUntilGridFlow { session.loadState == .loaded && !session.photos.isEmpty }
+
+        XCTAssertNil(session.pendingScrollAnchor, "a missing anchor falling back to page one must never claim a scroll target")
+    }
+
+    /// Same finding: a query change that happens to arrive while a pending
+    /// scroll anchor hasn't been consumed yet must not leave a stale anchor
+    /// ID sitting there for an unrelated later scope/search/sort.
+    func testStartingANewQueryClearsAnyUnconsumedPendingScrollAnchor() async throws {
+        let environment = GridFlowFakeEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let sourceID = LibraryID()
+        let query = LibraryQuery(scope: .source(sourceID), sort: .captureDateDescending)
+        let anchorPhoto = makeGridFlowPhoto(libraryID: sourceID, name: "anchor.ARW")
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setPages(for: query, pages: [[anchorPhoto]])
+        await environment.setResolveResult(
+            for: anchorPhoto.id,
+            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), sourceKind: .externalFolder))
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
+        session.start()
+        try await waitUntilGridFlow { session.loadState == .loaded }
+        session.select(.source(sourceID))
+        try await waitUntilGridFlow { session.photos.map(\.id) == [anchorPhoto.id] }
+        _ = await session.openAsset(for: anchorPhoto)
+        session.select(.smart(.all))
+        try await waitUntilGridFlow { session.loadState == .loaded }
+
+        session.restoreGridPosition()
+        try await waitUntilGridFlow { session.pendingScrollAnchor == anchorPhoto.id }
+
+        // The view never got a chance to acknowledge it -- the user
+        // immediately picks a different scope instead.
+        let otherSourceID = LibraryID()
+        await environment.setPages(for: LibraryQuery(scope: .source(otherSourceID), sort: .captureDateDescending), pages: [[]])
+        session.select(.source(otherSourceID))
+        try await waitUntilGridFlow { session.selection == .source(otherSourceID) }
+
+        XCTAssertNil(session.pendingScrollAnchor, "an unrelated new query must never leave a stale scroll anchor behind")
+    }
+
     // MARK: 6. Missing anchor falls back to page one
 
     func testMissingAnchorFallsBackToPageOne() async throws {

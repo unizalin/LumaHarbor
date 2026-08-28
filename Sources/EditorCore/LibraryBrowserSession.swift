@@ -132,6 +132,19 @@ public final class LibraryBrowserSession: ObservableObject {
     /// Saved the moment `openAsset(for:)` successfully hands a photo off to
     /// the editor; consumed by `restoreGridPosition()` on return.
     @Published public private(set) var restorationAnchor: GridRestorationState?
+    /// Set the moment `restoreGridPosition()`'s search actually lands on
+    /// the page containing its anchor -- `photos` is guaranteed to already
+    /// contain this `PhotoID` by the time this becomes non-nil (Codex
+    /// pre-landing review, Task 7 round: `restoreGridPosition()` re-fetched
+    /// the right page, but nothing told the grid to actually scroll back to
+    /// it -- data loaded silently is not the same as the view landing on
+    /// the exact photo the user had open). A view observes this, scrolls to
+    /// the named photo once it's actually present, and calls
+    /// `acknowledgeScrollToAnchor()` -- never left for a later, unrelated
+    /// `photos` change to re-trigger the same scroll. `nil` both before any
+    /// restoration and whenever the anchor isn't found (the page-one
+    /// fallback never sets this -- there is nothing to scroll to).
+    @Published public private(set) var pendingScrollAnchor: PhotoID?
 
     private let dependencies: LibraryBrowserDependencies
     private var queryGeneration: UInt64 = 0
@@ -306,6 +319,7 @@ public final class LibraryBrowserSession: ObservableObject {
         pageTask?.cancel()
         nextCursor = nil
         loadState = .loadingFirstPage
+        pendingScrollAnchor = nil
     }
 
     private func beginNewQuery() {
@@ -314,10 +328,19 @@ public final class LibraryBrowserSession: ObservableObject {
         photos = []
         nextCursor = nil
         loadState = .loadingFirstPage
+        pendingScrollAnchor = nil
         pageTask?.cancel()
         pageTask = Task { [weak self] in
             await self?.loadFirstPage(generation: generation)
         }
+    }
+
+    /// Consumes `pendingScrollAnchor` -- called by the grid immediately
+    /// after it actually scrolls to the named photo, so a later, unrelated
+    /// `photos` change (paging further, a background refresh) can never
+    /// re-trigger the same scroll.
+    public func acknowledgeScrollToAnchor() {
+        pendingScrollAnchor = nil
     }
 
     private func loadFirstPage(generation: UInt64) async {
@@ -454,6 +477,7 @@ public final class LibraryBrowserSession: ObservableObject {
         photos = []
         nextCursor = nil
         loadState = .loadingFirstPage
+        pendingScrollAnchor = nil
         pageTask?.cancel()
         let query = anchor.query
         let targetID = anchor.anchorPhotoID
@@ -482,6 +506,12 @@ public final class LibraryBrowserSession: ObservableObject {
                 photos = accumulated
                 nextCursor = page.nextCursor
                 loadState = .loaded
+                // `targetID` was just found in `page.photos`, the newest
+                // addition to `accumulated` -- `trimmedWindow` only ever
+                // trims from the front, so it's guaranteed to still be
+                // present in `photos` right now, for whichever view reads
+                // `pendingScrollAnchor` next.
+                pendingScrollAnchor = targetID
                 return
             }
             cursor = page.nextCursor
