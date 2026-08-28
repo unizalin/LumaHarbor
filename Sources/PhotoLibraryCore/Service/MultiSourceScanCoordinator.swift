@@ -63,6 +63,16 @@ actor MultiSourceScanCoordinator {
 
     private var queue: [QueuedOperation] = []
     private var activeTasks: [LibraryID: Task<Void, Never>] = [:]
+    /// The completion box of whichever registration actually *started* the
+    /// currently-active task for a `libraryID` -- i.e. the one `start(_:)`
+    /// promoted out of `queue`, as opposed to a rider that arrived after the
+    /// task was already running. `nil`/absent for a `libraryID` started via
+    /// the fire-and-forget `enqueue(...)`, which has no box at all.
+    /// `cancelRegistration(libraryID:box:)` uses this to tell "the caller
+    /// that owns this active scan is cancelling it" (which legitimately
+    /// cancels `activeTasks[libraryID]`) apart from "a rider is cancelling
+    /// its own wait" (which must not).
+    private var activeOwnerBoxes: [LibraryID: CompletionBox] = [:]
     /// Extra completion boxes riding along with the currently-active task for
     /// a `libraryID`: created when a registration arrives for a `libraryID`
     /// that is already active. One `libraryID` may be active or queued at
@@ -118,12 +128,24 @@ actor MultiSourceScanCoordinator {
     ///   run and resumes when that one finishes -- never hanging, and never
     ///   starting a second scan.
     ///
-    /// Cancelling the calling task -- e.g. cancelling a
-    /// `PhotoLibraryService.scanLibraries` caller -- cancels the entry itself
-    /// via `cancel(libraryID:)` (removing it if still queued, or cancelling
-    /// its active task if running) rather than merely marking the caller's
-    /// own suspension point cancelled and leaving the scan running
-    /// unobserved.
+    /// Cancelling the calling task cancels this specific registration via
+    /// `cancelRegistration(libraryID:box:)` -- never the blunter
+    /// `cancel(libraryID:)`, and deliberately scoped to *this* call's own
+    /// box:
+    ///
+    /// - If this call is still queued, its entry is removed (never run).
+    /// - If this call is a rider on someone else's already-active scan, only
+    ///   this call's own wait is torn down -- the shared active scan, and
+    ///   every other caller/rider waiting on it, is left running untouched.
+    ///   A rider cancelling itself must never take down a scan another
+    ///   caller started and is still waiting on (e.g. two independent
+    ///   `PhotoLibraryService.scanLibraries` callers racing the same
+    ///   `libraryID`).
+    /// - If this call is the one that actually *started* the active scan
+    ///   (its box is `activeOwnerBoxes[libraryID]`), cancelling it really is
+    ///   a request to stop that scan, so it does cancel
+    ///   `activeTasks[libraryID]` -- same effect as calling
+    ///   `cancel(libraryID:)` directly.
     func run(
         libraryID: LibraryID,
         priority: ScanPriority,
@@ -135,7 +157,7 @@ actor MultiSourceScanCoordinator {
         await withTaskCancellationHandler {
             await waitBox(box)
         } onCancel: {
-            Task { await self.cancel(libraryID: libraryID) }
+            Task { await self.cancelRegistration(libraryID: libraryID, box: box) }
         }
     }
 
@@ -188,28 +210,46 @@ actor MultiSourceScanCoordinator {
                     await withTaskCancellationHandler {
                         await self.waitBox(box)
                     } onCancel: {
-                        Task { await self.cancel(libraryID: entry.libraryID) }
+                        // Scoped to this one entry's own box, exactly like
+                        // `run(...)`'s cancellation handler -- cancelling one
+                        // entry in a batch (e.g. the whole `scanLibraries`
+                        // call this entry came from) must never cancel a
+                        // *different* caller's already-active scan of the
+                        // same `libraryID` that this entry turned out to be
+                        // riding on.
+                        Task { await self.cancelRegistration(libraryID: entry.libraryID, box: box) }
                     }
                 }
             }
         }
     }
 
-    /// Removes any queued entry for `libraryID` (never running it) and
-    /// cancels its active task, if any. Either half may be a no-op: cancel
-    /// is safe to call for a `libraryID` that is only queued, only active,
-    /// or not known to the coordinator at all. Because a `libraryID` is never
-    /// both active and queued at once (req. 5/10), these two halves can never
-    /// collide for the same `libraryID` -- removing a queued duplicate can
-    /// never reach into `activeTasks` for that same id, since no such active
-    /// entry can exist alongside it.
+    /// Unconditional, source-level cancel: removes any queued entry for
+    /// `libraryID` (never running it) and cancels its active task, if any --
+    /// regardless of who started that active task or who else is riding on
+    /// it. This is the right call for an explicit "stop scanning this
+    /// library" request (e.g. a cancel button aimed at one specific
+    /// library), but it is deliberately *not* what a `run(...)`/
+    /// `runBatch(...)` caller's own cancellation uses -- that goes through
+    /// `cancelRegistration(libraryID:box:)` instead, which only tears down
+    /// the calling registration itself and never a scan some other caller
+    /// started or is still waiting on. Either half here may be a no-op:
+    /// cancel is safe to call for a `libraryID` that is only queued, only
+    /// active, or not known to the coordinator at all. Because a `libraryID`
+    /// is never both active and queued at once (req. 5/10), these two halves
+    /// can never collide for the same `libraryID` -- removing a queued
+    /// duplicate can never reach into `activeTasks` for that same id, since
+    /// no such active entry can exist alongside it.
     ///
     /// A cancelled active task still runs its own `Task<Void, Never>` to
     /// completion cooperatively -- exactly like cancelling the consumer of a
     /// `LibraryScanSequence` directly -- so the slot is only actually
     /// released, and the next queued item started, once that completion
     /// callback re-enters this actor (req. 8). Any riders waiting on that
-    /// same active run (see `activeRiders`) resolve at that same point.
+    /// same active run (see `activeRiders`) resolve at that same point --
+    /// this is the one case where cancelling deliberately takes every rider
+    /// down with the scan they were all waiting on, because the request here
+    /// is explicitly "stop this library", not "stop my own wait".
     func cancel(libraryID: LibraryID) {
         if let index = queue.firstIndex(where: { $0.libraryID == libraryID }) {
             let displaced = queue.remove(at: index)
@@ -295,6 +335,9 @@ actor MultiSourceScanCoordinator {
         let libraryID = entry.libraryID
         let operation = entry.operation
         let completionBox = entry.completionBox
+        if let completionBox {
+            activeOwnerBoxes[libraryID] = completionBox
+        }
         activeTasks[libraryID] = Task {
             await operation()
             self.completed(libraryID: libraryID, completionBox: completionBox)
@@ -304,11 +347,60 @@ actor MultiSourceScanCoordinator {
 
     private func completed(libraryID: LibraryID, completionBox: CompletionBox?) {
         activeTasks.removeValue(forKey: libraryID)
+        activeOwnerBoxes.removeValue(forKey: libraryID)
         resolveIfNeeded(completionBox)
         if let riders = activeRiders.removeValue(forKey: libraryID) {
             for rider in riders { resolveBox(rider) }
         }
         scheduleAvailableSlots()
+    }
+
+    /// Cancels exactly the registration identified by `box`, scoped so that
+    /// cancelling one caller's own `run(...)`/`runBatch(...)` wait can never
+    /// reach past that caller into a scan someone else started or is also
+    /// waiting on. Contrast with `cancel(libraryID:)`, which is an
+    /// unconditional, source-level "stop scanning this library" -- the right
+    /// call for an explicit cancel button, but too broad for "my task got
+    /// cancelled" when `libraryID` might be shared with another caller.
+    ///
+    /// - Already resolved (e.g. this entry was displaced while still queued,
+    ///   or its active run/rider group already finished by the time this
+    ///   runs): a no-op. `resolveBox(_:)` is never reached, so there is no
+    ///   risk of double-resuming `box`'s continuation.
+    /// - Still queued: removed like any other queued cancellation, and
+    ///   `box` resolves without ever running.
+    /// - A rider on someone else's active scan: `box` alone is dropped from
+    ///   `activeRiders[libraryID]` and resolved. `activeTasks[libraryID]` is
+    ///   never touched -- the scan that started it, and every other rider
+    ///   waiting on it, keep running exactly as if this call had never
+    ///   happened.
+    /// - The owner of the active scan (`box === activeOwnerBoxes[libraryID]`):
+    ///   this caller is the one who started the scan, so cancelling it is a
+    ///   genuine request to stop that scan -- delegates to
+    ///   `cancel(libraryID:)`.
+    private func cancelRegistration(libraryID: LibraryID, box: CompletionBox) {
+        guard !box.isResolved else { return }
+
+        if let index = queue.firstIndex(where: { $0.libraryID == libraryID && $0.completionBox === box }) {
+            queue.remove(at: index)
+            resolveBox(box)
+            return
+        }
+
+        if var riders = activeRiders[libraryID], let riderIndex = riders.firstIndex(where: { $0 === box }) {
+            riders.remove(at: riderIndex)
+            if riders.isEmpty {
+                activeRiders.removeValue(forKey: libraryID)
+            } else {
+                activeRiders[libraryID] = riders
+            }
+            resolveBox(box)
+            return
+        }
+
+        if activeOwnerBoxes[libraryID] === box {
+            cancel(libraryID: libraryID)
+        }
     }
 
     private func resolveIfNeeded(_ box: CompletionBox?) {
