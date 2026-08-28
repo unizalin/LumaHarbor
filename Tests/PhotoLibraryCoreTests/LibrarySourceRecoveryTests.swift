@@ -19,7 +19,8 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
             locations: ApplicationSupportLocations(baseURL: try makeSubdirectory(supportName)),
             bookmarkStore: bookmarkStore,
             folderAccessResolver: folderAccessResolver ?? SystemFolderAccessResolver(),
-            bookmarkDataCreator: bookmarkDataCreator ?? SystemBookmarkDataCreator()
+            bookmarkDataCreator: bookmarkDataCreator ?? SystemBookmarkDataCreator(),
+            registryTransactionStore: nil
         )
     }
 
@@ -1081,7 +1082,8 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
             locations: locations,
             bookmarkStore: bookmarkStore,
             folderAccessResolver: resolver,
-            bookmarkDataCreator: bookmarkDataCreator
+            bookmarkDataCreator: bookmarkDataCreator,
+            registryTransactionStore: nil
         )
 
         let libraryID = LibraryID()
@@ -1205,7 +1207,8 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
             locations: locations,
             bookmarkStore: bookmarkStore,
             folderAccessResolver: resolver,
-            bookmarkDataCreator: bookmarkDataCreator
+            bookmarkDataCreator: bookmarkDataCreator,
+            registryTransactionStore: nil
         )
 
         let libraryID = LibraryID()
@@ -1327,6 +1330,115 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         )
         try assertFileUnchanged(
             at: sentinelB, matches: sentinelBSnapshot, "Root B's source file must be byte-for-byte unchanged"
+        )
+    }
+
+    /// Round 3 re-review fix: `commitDisconnectedRestore` itself performs a
+    /// second SQLite read (`populateRestoreProjection`, via
+    /// `photoCount(inLibrary:)` then `library(id:)`) after deciding a
+    /// previously-connected library is now disconnected. This is a distinct
+    /// failure window from the compound test above, whose failing read
+    /// (`priorProjection = try index.library(id:)`) happens in the *caller*,
+    /// before `commitDisconnectedRestore` is ever entered. Here the library
+    /// goes offline -- no stale-bookmark refresh, no caller-side rebuild --
+    /// so the only index access on this pass is the one inside
+    /// `commitDisconnectedRestore`. If that throws, the previously-connected
+    /// A access, the actor-visible folder/diagnostic, and the durable
+    /// bookmark/index projection must all remain exactly as they were before
+    /// this restore pass; only the newly staged (offline) handle may be
+    /// stopped.
+    func testCommitDisconnectedRestoreSecondProjectionReadFailurePreservesAllState() async throws {
+        let resolver = FakeFolderAccessResolver()
+        let bookmarkStore = FileBookmarkStore(directoryURL: try makeSubdirectory("SecondReadBookmarks"))
+        let locations = ApplicationSupportLocations(baseURL: try makeSubdirectory("SecondReadAppSupport"))
+        let service = try PhotoLibraryService(
+            locations: locations,
+            bookmarkStore: bookmarkStore,
+            folderAccessResolver: resolver,
+            registryTransactionStore: nil
+        )
+
+        let libraryID = LibraryID()
+        let rootA = try makeSubdirectory("SecondReadRootA")
+        try FileSidecarRepository(libraryRootURL: rootA)
+            .write(manifest: LibraryManifest(libraryID: libraryID))
+
+        let token = "second-read-failure-token"
+        resolver.setCanned(.init(url: rootA), forToken: token)
+        try bookmarkStore.save(StoredBookmark(
+            libraryID: libraryID,
+            displayName: "Second Read Failure",
+            lastKnownPath: rootA.path,
+            bookmarkData: resolver.makeBookmarkData(token: token),
+            confirmedManifestLibraryID: libraryID
+        ))
+
+        // Restore once so the library is genuinely connected and ready, with
+        // real access ownership, not synthetic.
+        _ = try await service.restoreLibraries()
+        let indexStore = await service.indexStore
+        let oldBookmark = try XCTUnwrap(bookmarkStore.load(libraryID: libraryID))
+        let oldIndexedFolder = try XCTUnwrap(indexStore.library(id: libraryID))
+        XCTAssertEqual(resolver.createdHandles.count, 1)
+        XCTAssertEqual(resolver.createdHandles[0].stopCallCount, 0)
+
+        // The drive goes offline on the next pass. Nothing before
+        // `commitDisconnectedRestore` touches the index on this path (no
+        // stale-bookmark refresh, no prior-projection rebuild), so closing
+        // the index now means the failing read is `commitDisconnectedRestore`'s
+        // own `populateRestoreProjection` call.
+        resolver.setCanned(.init(url: rootA, isReachable: false), forToken: token)
+        indexStore.close()
+
+        do {
+            _ = try await service.restoreLibraries()
+            XCTFail("Expected the second projection-read failure to propagate")
+        } catch let error as SQLiteError {
+            guard case .prepareFailed(let sql, let message) = error else {
+                XCTFail("Expected SQLiteError.prepareFailed, got SQLiteError.\(error)")
+                return
+            }
+            XCTAssertEqual(message, "database is closed")
+            XCTAssertTrue(
+                sql.contains("FROM photo"),
+                "The failing statement must be photoCount's read, the first thing "
+                    + "`populateRestoreProjection` does -- proving this is a different "
+                    + "window than the caller-side `library(id:)` rebuild above"
+            )
+        } catch {
+            XCTFail("Expected SQLiteError.prepareFailed, got \(type(of: error))")
+        }
+
+        XCTAssertEqual(resolver.createdHandles.count, 2, "The offline handle must still have been staged")
+        XCTAssertEqual(
+            resolver.createdHandles[0].stopCallCount, 0,
+            "The previously retained A access must not be touched when the second projection read fails"
+        )
+        XCTAssertEqual(
+            resolver.createdHandles[1].stopCallCount, 1,
+            "The newly staged (offline) access must still be stopped exactly once, never leaked"
+        )
+
+        let actorVisible = await service.library(id: libraryID)
+        XCTAssertEqual(actorVisible?.rootURL, rootA, "Actor-visible state must remain the previous ready A folder")
+        XCTAssertEqual(
+            actorVisible?.connectionState, .ready,
+            "Connection state must not flip to offline when the disconnected commit never completed"
+        )
+        let diagnostic = await service.restoreDiagnostic(for: libraryID)
+        XCTAssertNil(diagnostic, "The restore diagnostic must not change: the failed commit never landed")
+
+        XCTAssertEqual(
+            try bookmarkStore.load(libraryID: libraryID), oldBookmark,
+            "The bookmark record must remain exactly the old A record"
+        )
+
+        // Reopen a fresh store against the same on-disk database, since the
+        // in-process `indexStore` was deliberately closed above.
+        let reopenedIndex = try PhotoIndexStore(databaseURL: locations.databaseURL)
+        XCTAssertEqual(
+            try reopenedIndex.library(id: libraryID), oldIndexedFolder,
+            "SQLite must remain exactly the old A projection; the failed offline commit must never be written"
         )
     }
 

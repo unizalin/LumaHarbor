@@ -91,14 +91,17 @@ public enum SecurityScopedBookmark {
 /// a fake so a specific URL's bookmark-data creation can be made to fail
 /// deterministically — including during stale-bookmark refresh, where a
 /// genuine macOS API failure isn't reliably reproducible on demand.
-public protocol BookmarkDataCreating: Sendable {
+///
+/// Internal on purpose: this is a test seam, not product API. Injection is
+/// only reachable through `PhotoLibraryService`'s internal initializer.
+protocol BookmarkDataCreating: Sendable {
     func makeBookmarkData(for url: URL) throws -> Data
 }
 
-public struct SystemBookmarkDataCreator: BookmarkDataCreating {
-    public init() {}
+struct SystemBookmarkDataCreator: BookmarkDataCreating {
+    init() {}
 
-    public func makeBookmarkData(for url: URL) throws -> Data {
+    func makeBookmarkData(for url: URL) throws -> Data {
         try SecurityScopedBookmark.makeBookmarkData(for: url)
     }
 }
