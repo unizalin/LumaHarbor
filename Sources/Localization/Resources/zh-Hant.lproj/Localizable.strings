@@ -16,6 +16,7 @@
 "Back to the library grid" = "回到相片庫網格";
 "Blacks" = "黑色";
 "Blue" = "藍";
+"Can't open this photo" = "無法開啟這張照片";
 "Cancel" = "取消";
 "Can't verify this photo" = "無法驗證這張照片";
 "Choose a different output location." = "選擇其他輸出位置。";
@@ -35,13 +36,18 @@
 "Contrast" = "對比";
 "Copy to This iPad" = "複製到這台 iPad";
 "Couldn't add that folder" = "無法加入這個資料夾";
+"Couldn't add this source" = "無法加入這個來源";
 "Couldn't copy this preset" = "無法複製這個 Preset";
 "Couldn't create this preset" = "無法建立這個 Preset";
 "Couldn't delete this preset" = "無法刪除這個 Preset";
 "Couldn't export this preset" = "無法匯出這個 Preset";
 "Couldn't close this photo" = "無法關閉這張照片";
 "Couldn't find an unused filename for" = "找不到可用的檔名：";
+"Couldn't load photos" = "無法載入照片";
+"Couldn't load your library" = "無法載入你的照片庫";
 "Couldn't open this photo" = "無法開啟這張照片";
+"Couldn't reconnect this source" = "無法重新連接這個來源";
+"Couldn't remove this source" = "無法移除這個來源";
 "Couldn't switch photos" = "無法切換照片";
 "Couldn't reopen your last photo" = "無法重新開啟你上次的照片";
 "Couldn't read saved edits" = "無法讀取已儲存的編輯";
@@ -247,6 +253,8 @@
 "This isn't a saved App copy." = "這不是已儲存的 App 複本。";
 "This Library" = "此照片庫";
 "This library's index file is damaged." = "這個相片庫的索引檔案已經損壞。";
+"This source couldn't finish scanning." = "這個來源無法完成掃描。";
+"This source isn't currently reachable." = "目前無法連接這個來源。";
 "This photo has saved adjustments" = "這張照片有已儲存的調整";
 "This photo hasn't been cached yet and its drive isn't connected." = "這張照片還沒有快取，而且它所在的磁碟未連接。";
 "This preset has no adjustments LumaHarbor can apply yet." = "這個 Preset 目前沒有 LumaHarbor 可套用的調整。";
