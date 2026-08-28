@@ -158,6 +158,27 @@ public final class LibraryBrowserSession: ObservableObject {
         LibraryQuery(scope: selection.scope, filenameSearch: searchText.isEmpty ? nil : searchText, sort: sort)
     }
 
+    /// The known source for `libraryID`, or `nil` for a library ID that
+    /// isn't currently in `sources` -- most notably the synthetic
+    /// `.appStorage` library, which `restoreSources()` never returns (see
+    /// `openAsset(for:)`'s own note on this). Task 7's grid/cell views use
+    /// this to resolve a photo's source display name and connection state
+    /// for its accessibility label, rather than duplicating this same
+    /// `sources.first(where:)` lookup in more than one view.
+    public func folder(for libraryID: LibraryID) -> LibraryFolder? {
+        sources.first(where: { $0.id == libraryID })
+    }
+
+    /// Whether the current selection ignores `sort` entirely. `.recentlyEdited`
+    /// always sorts by most-recently-edited first at the SQL layer (see
+    /// `PhotoIndexStore`'s `EffectiveSortKey`), so Task 7's toolbar sort
+    /// control uses this to avoid offering a choice that would have no
+    /// effect while that scope is selected.
+    public var isSortFixedByScope: Bool {
+        if case .smart(.recentlyEdited) = selection { return true }
+        return false
+    }
+
     // MARK: - Startup
 
     /// Restores every known source, then loads the first page of the

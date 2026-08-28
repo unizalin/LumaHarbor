@@ -26,6 +26,12 @@ final class PadAppServices {
     let thumbnailProvider: ThumbnailProvider
     let library: PadLibraryModel
     let editor: PadEditorModel
+    /// Injected so `PadLibrarySettingsView` (Task 7 Step 5) can be handed
+    /// the exact same store this instance used to resolve its initial
+    /// cache budget, rather than each independently defaulting to
+    /// `.standard` and risking the two silently diverging for a caller
+    /// that injects a custom store.
+    let userDefaults: UserDefaults
 
     /// iPad default cache budget (global constraint: 2 GiB default, 512 MiB
     /// through 10 GiB configurable range for Task 7's settings screen) —
@@ -34,7 +40,7 @@ final class PadAppServices {
     /// not change").
     static let defaultThumbnailCacheByteBudget: Int64 = 2 * 1_024 * 1_024 * 1_024
 
-    init(applicationSupportURL: URL) throws {
+    init(applicationSupportURL: URL, userDefaults: UserDefaults = .standard) throws {
         let locations = ApplicationSupportLocations(
             baseURL: applicationSupportURL.appendingPathComponent("LumaHarbor", isDirectory: true)
         )
@@ -49,9 +55,14 @@ final class PadAppServices {
 
         let libraryService = try PhotoLibraryService(locations: locations, decoder: decoder)
 
+        // Honors a cache-budget preference persisted by an earlier launch
+        // (Task 7's `PadLibrarySettingsView`) rather than always
+        // re-constructing the disk cache at the hardcoded 2 GiB default —
+        // `PadThumbnailCacheBudget.resolvingPersisted` already clamps an
+        // absent or invalid value back to that same default.
         let thumbnailCache = try DiskCache(
             directoryURL: locations.thumbnailCacheURL,
-            byteBudget: Self.defaultThumbnailCacheByteBudget
+            byteBudget: PadThumbnailCacheBudget.resolvingPersisted(userDefaults).rawValue
         )
 
         // Deliberately not `PhotoDocumentEditorDependencies.live(applicationSupportURL:)`
@@ -84,6 +95,30 @@ final class PadAppServices {
         )
         self.library = PadLibraryModel(dependencies: .live(service: libraryService))
         self.editor = PadEditorModel(dependencies: editorDependencies)
+        self.userDefaults = userDefaults
+    }
+
+    /// Resolves the file URL a thumbnail should be decoded from for `photo`
+    /// -- the read-only counterpart, for grid thumbnails, to
+    /// `LibraryBrowserDependencies.live(service:)`'s own `resolveOpenAsset`
+    /// split between an indexed external photo and a projected App copy.
+    ///
+    /// Deliberately does **not** use `PhotoLibraryService.sourceURL(for:)`
+    /// for an `.appStorage` photo -- that method documents itself as unsafe
+    /// to rely on for a projected App copy (its `rootURL` is a synthetic
+    /// placeholder, not a real, decodable location; see
+    /// `PhotoLibraryService.refreshAppStorageProjection(from:)`'s own doc
+    /// comment). An App-copy `PhotoID` is always that document's UUID (same
+    /// invariant `resolveOpenAsset`'s `.appCopy(documentID:)` branch
+    /// relies on), so this resolves it through `documentStore.loadDocument`
+    /// instead, to the document's own local `workingURL` -- always
+    /// reachable, since it lives in this app's own storage.
+    func thumbnailSourceURL(for photo: PhotoAsset) async -> URL? {
+        if photo.libraryID == .appStorage {
+            return try? await documentStore.loadDocument(id: photo.id.rawValue).workingURL
+        }
+        guard let folder = library.folder(for: photo.libraryID) else { return nil }
+        return photo.url(inLibraryRootedAt: folder.rootURL)
     }
 
     /// Projects every currently-committed App copy (Task 4's
