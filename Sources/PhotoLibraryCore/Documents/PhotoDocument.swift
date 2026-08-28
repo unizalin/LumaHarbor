@@ -224,6 +224,22 @@ public enum RelinkError: Error, Equatable, Sendable {
     case bookmarkIdentityMismatch
 }
 
+/// One asset `PhotoDocumentEditor.openLibraryAsset(_:)` (Task 4) can open,
+/// handed in by the multi-source library browser rather than produced by a
+/// user's Files picker selection. Which case this is already decides
+/// in-place vs. copy, so opening it bypasses that choice dialog entirely.
+public enum LibraryOpenAsset: Sendable, Equatable {
+    /// An indexed photo at an already-authorised external library source.
+    /// Opened exactly like a fresh `.inPlace` selection. `url` is
+    /// runtime-only -- resolved from the library's own security scope at
+    /// the moment of opening, never persisted or logged by this type.
+    case external(url: URL, sourceKind: LibrarySourceKind)
+    /// An existing, already-`.committed` App-copy document in
+    /// `PhotoDocumentStore` (typically one `committedDocuments()` reported).
+    /// Opens that record directly; must never call `importCopy` again.
+    case appCopy(documentID: UUID)
+}
+
 /// The durably persisted active-document pointer's state — deliberately
 /// distinct from a plain `UUID?`, so `reconcileOrphanedImports(activePointer:)`
 /// can tell "there genuinely is no active document" apart from "the pointer

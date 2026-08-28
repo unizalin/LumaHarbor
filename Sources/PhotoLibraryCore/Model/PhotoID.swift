@@ -75,3 +75,19 @@ public struct LibraryID: Hashable, Sendable, Codable, CustomStringConvertible {
         try container.encode(rawValue.uuidString)
     }
 }
+
+extension LibraryID {
+    /// Fixed identity for the synthetic library that projects committed
+    /// App-copy `PhotoDocument`s into the multi-source index (Task 4's
+    /// `PhotoLibraryService.refreshAppStorageProjection(from:)`). A fixed,
+    /// hardcoded UUID -- rather than one minted per launch or per store --
+    /// is what lets `LibraryScope.appStorage` always find the same source
+    /// row, on every device and every relaunch, instead of a fresh random
+    /// one that would orphan whatever was projected under the last one.
+    public static let appStorage: LibraryID = {
+        guard let uuid = UUID(uuidString: "6C554D41-4841-5242-4F52-000000000001") else {
+            preconditionFailure("LibraryID.appStorage's fixed UUID literal is malformed.")
+        }
+        return LibraryID(uuid)
+    }()
+}

@@ -941,6 +941,100 @@ public actor PhotoDocumentStore {
         return nil
     }
 
+    // MARK: - Committed document listing
+
+    /// Every committed, currently-readable document this store knows about
+    /// (Task 4) — used to project App copies into the multi-source library
+    /// via `PhotoLibraryService.refreshAppStorageProjection(from:)`. Both
+    /// storage modes are included; the caller decides what to do with each
+    /// (the app-storage projection itself only ever keeps the `.appCopy`
+    /// ones — see that method).
+    ///
+    /// Enumerates `Records/*.json`, the same directory
+    /// `reconcileOrphanedImports(activePointer:)` reads in its own pass 2,
+    /// with the same lenient per-entry handling: a record this pass cannot
+    /// decode, or whose committed working file is missing, is reported in
+    /// `PhotoDocumentListing.failures` rather than aborting the whole
+    /// listing or being silently dropped. A `.pending` record — still
+    /// mid-import, or interrupted mid-import — is neither promoted nor
+    /// deleted here: it is simply skipped, exactly as
+    /// `reconcileOrphanedImports`'s own documentation already establishes
+    /// for "don't touch a creation this pass didn't itself start." Only
+    /// that dedicated reconciliation pass, gated on the durable
+    /// active-document pointer, is ever allowed to promote or roll one
+    /// back.
+    ///
+    /// This is a plain read: unlike `reconcileOrphanedImports`, it never
+    /// acquires the root import lock or any per-document lease — nothing
+    /// here mutates a record, and every record write elsewhere in this
+    /// store goes through `AtomicFileWriter`, so a reader here only ever
+    /// sees a complete, previously-committed write, never a partial one.
+    ///
+    /// Returned in stable ascending `UUID` order, not filesystem
+    /// enumeration order, so a caller diffing two consecutive calls (or two
+    /// different store instances pointed at the same `rootURL`) sees a
+    /// deterministic sequence rather than one at the mercy of directory
+    /// listing order.
+    ///
+    /// Throws only if `Records/` itself cannot be enumerated (mirroring
+    /// `reconcileOrphanedImports`'s own directory-listing behavior) — a
+    /// missing `Records/` directory is treated as "no documents yet," not
+    /// an error.
+    public func committedDocuments() throws -> PhotoDocumentListing {
+        guard fileManager.fileExists(atPath: recordsDirectoryURL.path) else {
+            return PhotoDocumentListing(documents: [], failures: [:])
+        }
+
+        var documents: [PhotoDocument] = []
+        var failures: [UUID: String] = [:]
+
+        let recordFiles = try fileManager.contentsOfDirectory(at: recordsDirectoryURL, includingPropertiesForKeys: nil)
+        for recordFile in recordFiles {
+            guard recordFile.pathExtension == "json",
+                  let filenameID = UUID(uuidString: recordFile.deletingPathExtension().lastPathComponent) else { continue }
+
+            guard let record = try? SidecarCoding.decode(PhotoDocumentRecord.self, from: Data(contentsOf: recordFile)),
+                  record.id == filenameID else {
+                failures[filenameID] = Self.corruptRecordFailureMessage
+                continue
+            }
+
+            // Never promoted, never deleted here -- see the documentation
+            // above.
+            guard record.effectiveLifecycleState == .committed else { continue }
+
+            let resolved: PhotoDocument
+            if record.storageMode == .appCopy, record.workingPathComponents == nil {
+                guard let migrated = try? migrateLegacyAppCopyRecordIfPossible(record) else {
+                    failures[filenameID] = Self.corruptRecordFailureMessage
+                    continue
+                }
+                resolved = migrated
+            } else {
+                resolved = resolvedDocument(from: record)
+            }
+
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: resolved.workingURL.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                failures[filenameID] = Self.missingWorkingFileFailureMessage
+                continue
+            }
+
+            documents.append(resolved)
+        }
+
+        documents.sort { $0.id.uuidString < $1.id.uuidString }
+        return PhotoDocumentListing(documents: documents, failures: failures)
+    }
+
+    /// Fixed, path-free diagnostics for `committedDocuments()` — same
+    /// reasoning as `orphanCopyRemovalFailureMessage` and friends above:
+    /// never `(error as NSError).localizedDescription`, which can embed an
+    /// absolute path.
+    private static let corruptRecordFailureMessage = "This document's record could not be read."
+    private static let missingWorkingFileFailureMessage = "This document's working file is missing."
+
     // MARK: - Active document pointer
 
     /// Reads the durably persisted active-document pointer — in the same
@@ -1558,5 +1652,26 @@ public struct PhotoDocumentReconciliationReport: Equatable, Sendable {
         self.rolledBackPendingIDs = rolledBackPendingIDs
         self.failures = failures
         self.activePointerWasUnreadable = activePointerWasUnreadable
+    }
+}
+
+/// Result of `PhotoDocumentStore.committedDocuments()`.
+public struct PhotoDocumentListing: Equatable, Sendable {
+    /// Every committed document whose record decoded cleanly and whose
+    /// working file was confirmed present, in stable ascending `UUID`
+    /// order.
+    public let documents: [PhotoDocument]
+    /// Committed-looking records that could not be read back, keyed by the
+    /// `UUID` their filename names, with a fixed, path-free diagnostic —
+    /// never `(error as NSError).localizedDescription`, which can embed an
+    /// absolute path. A `.pending` record is never reported here: it is
+    /// simply absent from both `documents` and `failures`, exactly as
+    /// `reconcileOrphanedImports(activePointer:)` alone is responsible for
+    /// promoting or rolling it back.
+    public let failures: [UUID: String]
+
+    public init(documents: [PhotoDocument], failures: [UUID: String]) {
+        self.documents = documents
+        self.failures = failures
     }
 }

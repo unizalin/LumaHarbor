@@ -6,6 +6,7 @@
 "Add the folder again." = "Add the folder again.";
 "Adjustments" = "Adjustments";
 "All" = "All";
+"App Copies" = "App Copies";
 "Applies this preset using the current merge or replace mode" = "Applies this preset using the current merge or replace mode";
 "Apply mode" = "Apply mode";
 "Apply preset" = "Apply preset";
@@ -162,6 +163,7 @@
 "Reconnect the drive to generate a thumbnail." = "Reconnect the drive to generate a thumbnail.";
 "Reconnect the drive, then retry." = "Reconnect the drive, then retry.";
 "Reconnect the drive, then try again." = "Reconnect the drive, then try again.";
+"Reconnect the source, then try again." = "Reconnect the source, then try again.";
 "Reconnect" = "Reconnect";
 "Reconnect…" = "Reconnect…";
 "Red" = "Red";

@@ -1049,6 +1049,96 @@ public actor PhotoLibraryService {
         return photo.url(inLibraryRootedAt: folder.rootURL)
     }
 
+    // MARK: - App-storage projection
+
+    /// Projects every currently-committed App-copy `PhotoDocument` into the
+    /// synthetic `.appStorage` library (Task 4), so it shows up through the
+    /// same paged, multi-source index (Task 1's `LibraryScope.appStorage`,
+    /// which selects `WHERE library.source_kind = 'appStorage'`) as every
+    /// other source. `documents` is the caller's own up-to-date listing —
+    /// typically `PhotoDocumentStore.committedDocuments().documents` —
+    /// since this actor does not itself hold a `PhotoDocumentStore`
+    /// instance; the two are independent components composed by the caller.
+    ///
+    /// This projection is local and rebuildable, exactly like the rest of
+    /// `PhotoIndexStore`: it is never the authority on a document's
+    /// identity, content or editability — `PhotoDocumentStore`'s own
+    /// committed records remain that. Opening an App copy for editing goes
+    /// through `PhotoDocumentEditor.openLibraryAsset(.appCopy(documentID:))`
+    /// directly against the store, never through this projection.
+    ///
+    /// Idempotent and safe to call repeatedly (e.g. every launch, or
+    /// whenever the committed set changes): every call re-derives the whole
+    /// `.appStorage` projection from `documents` and prunes any previously
+    /// projected row for a document no longer present in it (removed,
+    /// rolled back, or no longer committed) — the same "re-seen vs. pruned"
+    /// pattern a folder scan already uses to drop rows for files that
+    /// disappeared, applied here to committed documents instead of files on
+    /// a scanned drive.
+    ///
+    /// Only `.appCopy` documents are projected. An `.inPlace` document's
+    /// working file is an external RAW that, if it happens to live inside
+    /// an already-indexed external source, is already projected through
+    /// that source's own scan; this is not a second, competing path for it.
+    public func refreshAppStorageProjection(from documents: [PhotoDocument]) throws {
+        let appCopies = documents.filter { $0.storageMode == .appCopy }
+        let projectedAt = Date()
+
+        if libraries[.appStorage] == nil {
+            let folder = LibraryFolder(
+                id: .appStorage,
+                displayName: L10n.t("App Copies"),
+                rootURL: Self.appStorageProjectionRootURL,
+                sourceKind: .appStorage,
+                connectionState: .ready,
+                scanState: .idle
+            )
+            try index.upsert(library: folder)
+            libraries[.appStorage] = folder
+        }
+
+        let assets = appCopies.map { document in
+            PhotoAsset(
+                id: PhotoID(document.id),
+                libraryID: .appStorage,
+                relativePath: Self.appStorageRelativePath(for: document.workingURL),
+                fingerprint: document.workingFingerprint,
+                status: .ready,
+                lastSeenAt: projectedAt
+            )
+        }
+        try index.upsert(photos: assets)
+        // Anything not just re-seen above (a document rolled back, removed,
+        // or no longer committed since the last call) still carries an
+        // older `lastSeenAt` and is pruned here -- never something newer
+        // than `projectedAt` itself, since every row this call just wrote
+        // shares that exact timestamp.
+        try index.removePhotos(inLibrary: .appStorage, notSeenSince: projectedAt)
+
+        if var folder = libraries[.appStorage] {
+            folder.photoCount = try index.photoCount(inLibrary: .appStorage)
+            libraries[.appStorage] = folder
+            try index.upsert(library: folder)
+        }
+    }
+
+    /// Root every projected App-copy `PhotoAsset.relativePath` is expressed
+    /// relative to. The filesystem root, not `PhotoDocumentStore`'s own
+    /// `rootURL` — this actor never holds a reference to that (see
+    /// `refreshAppStorageProjection(from:)`). Combined with
+    /// `appStorageRelativePath(for:)`, `folder.rootURL
+    /// .appendingPathComponent(relativePath)` still reconstructs a
+    /// document's exact `workingURL`, so `sourceURL(for:)` resolves
+    /// correctly for a projected App copy without this actor needing to
+    /// know where `PhotoDocumentStore` itself is rooted.
+    private static let appStorageProjectionRootURL = URL(fileURLWithPath: "/", isDirectory: true)
+
+    private static func appStorageRelativePath(for workingURL: URL) -> String {
+        var path = workingURL.path
+        if path.hasPrefix("/") { path.removeFirst() }
+        return path
+    }
+
     // MARK: - Rebuildable local data
 
     /// Deletes and recreates the local SQLite index and thumbnail/preview
