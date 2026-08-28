@@ -15,17 +15,17 @@ import UIKit
 /// `.task(id:)` is cancelled by SwiftUI itself once a `LazyVGrid` scrolls
 /// the cell out and `ForEach`'s `Identifiable` conformance drops it -- and
 /// the cache entry stays pinned for that entire visible lifetime, not just
-/// while `load()` itself is in flight (`provider.pinnedUntilCancelled(photoID:)`),
-/// matching the "protect what's on screen, not what's off it" cache
-/// contract `ThumbnailProvider.pin(photoID:)` documents. Pinning and
-/// loading run concurrently as sibling child tasks of the same `.task(id:)`
-/// closure, so cancelling the cell's task cancels both together, and
-/// awaiting the pinning task last means its unpin always runs inline in
-/// this same structured task -- never a separate unstructured `Task { }`
-/// racing the pin (Codex pre-landing review, Task 7 round: an earlier
-/// version unpinned the moment `load()` returned, and did so from a
-/// separate `.onDisappear`-triggered task with no ordering guarantee
-/// against `pin` at all).
+/// while `load()` itself is in flight. `provider.withVisiblePin(photoID:operation:)`
+/// owns the whole pin/load/unpin ordering as one atomic contract, matching
+/// the "protect what's on screen, not what's off it" cache contract
+/// `ThumbnailProvider.pin(photoID:)` documents, so this cell never composes
+/// pin/load/unpin by hand (Codex pre-landing review, Task 7 round -- twice:
+/// an earlier version unpinned the moment `load()` returned, via a separate
+/// `.onDisappear`-triggered task with no ordering guarantee against `pin`
+/// at all; the next version fixed that but ran `pin` and `load` as
+/// concurrent `async let` siblings with no guarantee `pin` landed before
+/// `load` could decode and store, defeating `DiskCache`'s own "pin before
+/// store" contract).
 struct PadThumbnailCell: View {
     let photo: PhotoAsset
     /// Whether this photo's *source* is currently reachable -- `true` for
@@ -83,12 +83,9 @@ struct PadThumbnailCell: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabel))
         .task(id: photo.id) {
-            async let keepPinned: Void = provider.pinnedUntilCancelled(photoID: photo.id)
-            await load()
-            // Awaited last so `keepPinned`'s unpin -- reached only once
-            // this task is cancelled -- runs to completion, inline, before
-            // this closure itself returns.
-            _ = await keepPinned
+            await provider.withVisiblePin(photoID: photo.id) {
+                await load()
+            }
         }
     }
 

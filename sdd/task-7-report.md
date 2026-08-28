@@ -420,6 +420,103 @@ first draft of `pinnedUntilCancelled`'s "sleep forever" duration by
 actually running the test against it, rather than assuming `.seconds(Int64.max)`
 was safe) rather than only reasoning about the diff.
 
+## Codex pre-landing review, round 2 (commit `TBD`)
+
+Codex's re-review of the round-1 fix (range `f28e68f..e58fda3` → re-checked
+after `38e857c`) confirmed the `pendingScrollAnchor`/`ScrollViewReader`
+direction (finding 2) and the focused test suite (45/45) and
+`git diff --check`, but returned **BLOCKED** again with 1 remaining P1.
+
+### Finding — `PadThumbnailCell`'s pin/load ordering still had a race
+
+Round 1's fix closed the *cancellation* bug (unpinning too early) by
+running pinning and loading as `async let` siblings, but `async let` gives
+no ordering guarantee between them: `operation` (the load) could start,
+decode, and call `DiskCache.store()` -- which evicts immediately if the
+budget is tight -- before `pin()` had actually landed on the cache,
+defeating `DiskCache`'s own "pin before store" contract
+(`ThumbnailProviderTests.testPinBeforeStoreProtectsTheEntryThatArrivesLater`
+already guards this for a caller that pins by hand; the `async let`
+composition didn't extend that guarantee to this call site).
+
+**Fix:** replaced `pinnedUntilCancelled(photoID:)` with
+`ThumbnailProvider.withVisiblePin(photoID:operation:)`
+(`Sources/PhotoLibraryCore/Cache/ThumbnailProvider.swift`), which owns the
+*entire* pin → operation → wait-for-cancellation → unpin contract as one
+atomic unit instead of leaving a caller to compose it:
+
+```swift
+public func withVisiblePin(photoID: PhotoID, operation: @Sendable () async -> Void) async {
+    await pin(photoID: photoID)
+    await operation()
+    try? await Task.sleep(for: .seconds(60 * 60 * 24 * 365 * 100))
+    await unpin(photoID: photoID)
+}
+```
+
+`pin` and `operation` are now sequential statements in one function body,
+not concurrent siblings, so `operation` cannot start until `pin`'s `await`
+has already returned -- a guarantee from Swift's own sequential-statement
+semantics, not scheduler behavior. `PadThumbnailCell.swift`'s `.task(id:)`
+simplifies to a single call: `await provider.withVisiblePin(photoID: photo.id) { await load() }`.
+
+**New tests** (`Tests/PhotoLibraryCoreTests/ThumbnailProviderTests.swift`):
+- `testWithVisiblePinAwaitsPinToLandBeforeTheOperationCanStoreAnEvictableEntry`
+  -- a 1-byte-budget `operation` that calls the real `thumbnailData(for:sourceURL:)`
+  (the same pin-before-store shape `testPinBeforeStoreProtectsTheEntryThatArrivesLater`
+  already proves for manual pinning), asserting the store survives.
+- `testWithVisiblePinStaysPinnedAfterTheOperationCompletesAndOnlyUnpinsOnCancellation`
+  -- renamed/updated from round 1's `pinnedUntilCancelled` test to call
+  `withVisiblePin` instead; unchanged assertions otherwise.
+
+**A genuine test-writing bug caught and fixed along the way:** the first
+draft of the ordering test called `await provider.withVisiblePin(...)`
+directly, with no enclosing `Task`/cancellation -- since `withVisiblePin`
+never returns on its own (only once cancelled), this hung the test
+indefinitely. Caught by actually running it (a `swift test` invocation sat
+alive but nearly idle for minutes before being killed and diagnosed via
+`ps`), not assumed safe from reading the diff. Fixed by wrapping the call
+in a `Task` and cancelling it after the assertion, matching the second
+test's existing pattern.
+
+**A known limitation, disclosed rather than glossed over:** re-running the
+new ordering test against a deliberately reintroduced `async let`-based
+`withVisiblePin` (to get RED evidence) still *passed* in this environment,
+repeatedly (8/8 runs) -- Swift's scheduler happens to let the tiny `pin()`
+actor call win the race against the closure's own async dispatch overhead
+consistently in practice, even though the language gives no such
+guarantee. The test is therefore a genuine, deterministic proof that the
+**current, correct** implementation behaves correctly (its assertion
+cannot fail under code where `pin`/`operation` are truly sequential
+statements), but it is not a reliable *regression* trip-wire against that
+one specific incorrect shape reappearing later -- that guarantee instead
+rests on the structural argument above (sequential statements, not
+concurrent siblings) and on a reviewer reading the code, the same way
+round 2's reviewer verified the pin/unpin cancellation ordering by
+"walking through" it rather than by test alone.
+
+### Verification
+
+- `git diff --check f28e68f..HEAD` -- clean.
+- `swift test --filter 'LibraryBrowserGridFlowTests|PadLibraryAccessibilityContractTests|ThumbnailProviderTests'`
+  -- 46/46 pass (45 + 1 net new: 2 tests replaced `pinnedUntilCancelled`'s
+  1 test).
+- `swift test` (full suite) -- 1080 tests / 9 skipped / 0 failures.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  -- succeeds, no warnings.
+- `(cd Apps/LumaHarborPad.swiftpm && xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build)`
+  -- **BUILD SUCCEEDED**.
+
+### Files changed (this round)
+
+- `Sources/PhotoLibraryCore/Cache/ThumbnailProvider.swift` --
+  `pinnedUntilCancelled(photoID:)` replaced with
+  `withVisiblePin(photoID:operation:)`.
+- `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadThumbnailCell.swift`
+  -- `.task(id:)` simplified to the single `withVisiblePin` call.
+- `Tests/PhotoLibraryCoreTests/ThumbnailProviderTests.swift` -- 1 new test,
+  1 renamed/updated test.
+
 ## Not push / merge / rebase / Task 8
 
 - No `git push`, `git merge`, `git rebase`, or `git commit --amend` was run
@@ -427,5 +524,6 @@ was safe) rather than only reasoning about the diff.
 - No Task 8 or Task 9 file was created or modified.
 - Commits from this task: `70ca1b6` (implementation), `eefe9c3` (review
   round 1 fixes), `e58fda3` (Task 7 report), `38e857c` (Codex
-  pre-landing-review fixes), and `<this commit>` (recording this hash in
+  pre-landing-review fixes round 1), `<this commit>` (Codex pre-landing-review
+  fixes round 2), and a final docs commit (recording this hash in
   the report).
