@@ -420,7 +420,7 @@ first draft of `pinnedUntilCancelled`'s "sleep forever" duration by
 actually running the test against it, rather than assuming `.seconds(Int64.max)`
 was safe) rather than only reasoning about the diff.
 
-## Codex pre-landing review, round 2 (commit `TBD`)
+## Codex pre-landing review, round 2 (commit `53d87d6`)
 
 Codex's re-review of the round-1 fix (range `f28e68f..e58fda3` → re-checked
 after `38e857c`) confirmed the `pendingScrollAnchor`/`ScrollViewReader`
@@ -524,6 +524,5 @@ round 2's reviewer verified the pin/unpin cancellation ordering by
 - No Task 8 or Task 9 file was created or modified.
 - Commits from this task: `70ca1b6` (implementation), `eefe9c3` (review
   round 1 fixes), `e58fda3` (Task 7 report), `38e857c` (Codex
-  pre-landing-review fixes round 1), `<this commit>` (Codex pre-landing-review
-  fixes round 2), and a final docs commit (recording this hash in
-  the report).
+  pre-landing-review fixes round 1), `53d87d6` (Codex pre-landing-review
+  fixes round 2), and `<this commit>` (recording this hash in the report).
