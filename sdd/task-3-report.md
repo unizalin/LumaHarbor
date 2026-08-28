@@ -561,3 +561,153 @@ finding asked to fix):
   `scanLibraries` call today (it de-duplicates `libraryIDs` before ever
   reaching the coordinator), but would matter if a future caller composed
   the coordinator differently across independent calls.
+
+  **Update (round 2):** this predicted exact scenario is what Codex's round-2
+  re-review found and required fixing -- see "Review fix round 2" below. It
+  is resolved: cancelling one caller's registration no longer cancels a
+  scan another caller started or is also waiting on.
+
+## Review fix round 2
+
+Codex's pre-landing re-review of round 1's fix (`b293b4c`, `6d21f23`)
+confirmed both round-1 findings were fixed in their general direction --
+deterministic `runBatch(_:)` scheduling and up-front duplicate-`libraryID`
+de-duplication both held up -- but found one new **blocking** issue
+introduced by the round-1 fix itself.
+
+### Finding: active rider cancellation cancels the shared active scan
+
+**Finding.** Round 1 fixed "a `LibraryID` could be simultaneously active and
+queued" by having a duplicate registration against an already-active
+`libraryID` become an `activeRiders` entry instead of a second queued entry
+-- riding along on the existing active run rather than starting a redundant
+second scan. That direction was correct. But `run(...)`'s and
+`runBatch(...)`'s own `withTaskCancellationHandler` still called the
+unconditional `cancel(libraryID:)` whenever the *calling* task was
+cancelled, regardless of whether that call had become the active run's
+owner, a still-queued entry, or a rider. `cancel(libraryID:)` always cancels
+`activeTasks[libraryID]` if one exists -- so cancelling a *rider's own*
+caller tore down the *original* caller's already-active scan too, along with
+every other rider waiting on it.
+
+This is reachable through the public surface exactly as described: caller A
+starts `PhotoLibraryService.scanLibraries([id], ...)`; caller B
+independently calls `scanLibraries([id], ...)` for the same id while A is
+still scanning and becomes a rider; something cancels caller B's own task
+(a UI navigation, a query change, a superseded request) -- and A's
+still-in-flight scan is cancelled as a side effect, even though nothing
+about A was ever supposed to be interrupted. Task 5's UI-driven scans make
+this concurrency shape more likely, not less, so it needed fixing before
+Task 3 could be considered closed.
+
+**Fix.** `MultiSourceScanCoordinator.swift`:
+
+- Added `activeOwnerBoxes: [LibraryID: CompletionBox]`, tracking which
+  registration's box actually *started* the active task for a `libraryID`
+  (set in `start(_:)`, cleared in `completed(libraryID:completionBox:)`) --
+  as opposed to a box that arrived later and became a rider.
+- Added a new private `cancelRegistration(libraryID:box:)`, scoped to one
+  specific registration's own box rather than a whole `libraryID`:
+  - If `box` is already resolved (displaced while queued, or already
+    resolved by its active run/rider group finishing), it is a no-op --
+    `resolveBox(_:)` is never called a second time on the same box, so there
+    is no double-resume risk.
+  - If `box` belongs to a still-queued entry, that entry is removed (never
+    run) and `box` resolves -- unchanged from round 1's behavior for the
+    ordinary queued case.
+  - If `box` belongs to an active rider, only `box` itself is removed from
+    `activeRiders[libraryID]` and resolved. `activeTasks[libraryID]` is
+    never touched, so the scan that started it -- and every *other* rider
+    still waiting on it -- keeps running exactly as if this call had never
+    happened.
+  - If `box === activeOwnerBoxes[libraryID]` (this caller is the one who
+    actually started the active scan), cancelling it really is a request to
+    stop that scan, so it delegates to `cancel(libraryID:)` -- identical
+    effect to before.
+- `run(...)`'s and each `runBatch(...)` batch entry's `onCancel` handler now
+  call `cancelRegistration(libraryID:box:)` with their own box, instead of
+  the blunt `cancel(libraryID:)`.
+- The public, unconditional `cancel(libraryID:)` (an explicit "stop
+  scanning this library" request) is unchanged and still cancels the active
+  task and every rider waiting on it -- that is the one case where taking
+  every rider down with the scan is the actual intent, not a side effect.
+  Its doc comment was updated to spell out the distinction from
+  `cancelRegistration(libraryID:box:)`.
+
+No new state was added to `CompletionBox` itself -- `activeOwnerBoxes` lives
+on the actor, alongside `queue`/`activeTasks`/`activeRiders`, and is read
+and written only from actor-isolated methods (`start(_:)`,
+`completed(libraryID:completionBox:)`, `cancelRegistration(libraryID:box:)`),
+exactly like every other coordinator collection. No lock, semaphore,
+`Task.detached`, `AsyncStream`, or unbounded buffering was introduced.
+`PhotoLibraryService.swift` did not need any change for this fix -- the
+scoping happens entirely inside the coordinator that `scanLibraries` already
+delegates to.
+
+### New tests
+
+`Tests/PhotoLibraryCoreTests/MultiSourceScanCoordinatorTests.swift`:
+
+- `testCancellingARiderNeverCancelsTheActiveOwnersScan` -- caller A starts a
+  gated scan for `id`; caller B's `run(...)` for the same `id` becomes a
+  rider; cancelling caller B leaves A's `activeCount`, run count, and
+  eventual successful completion completely untouched, and B's own
+  operation never runs.
+- `testCancellingARiderWithinRunBatchNeverCancelsTheActiveOwnersScan` -- the
+  same scenario through `runBatch(_:)` (cancelling the outer `Task` running
+  a one-entry batch whose entry turned out to be a rider), proving
+  structured-concurrency cancellation propagating into `runBatch`'s internal
+  `TaskGroup` is scoped the same way.
+
+`Tests/LumaHarborIntegrationTests/MultiSourceBoundedScanTests.swift`:
+
+- `testCancellingAConcurrentScanLibrariesCallerDoesNotCancelTheOriginalScan`
+  -- end to end: caller A's `scanLibraries([library.id], ...)` is gated
+  mid-scan; caller B independently calls `scanLibraries([library.id], ...)`
+  for the same library and becomes a rider; cancelling caller B leaves
+  caller A's scan running, and once released it finishes with
+  `wasCancelled == false` and a recorded `lastScanAt` -- proving no second
+  `.started`/`.finished` pair and no interruption reaches caller A at all.
+
+Coordinator suite: 20 tests (18 prior + 2 new). Integration suite: 6 tests
+(5 prior + 1 new).
+
+### Verification (round 2 fix)
+
+```zsh
+swift test --filter MultiSourceScanCoordinatorTests
+swift test --filter MultiSourceBoundedScanTests
+swift test --filter 'BoundedFolderScanTests|ScanCancellationTests'
+swift test --filter PhotoLibraryCoreTests
+swift test
+swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+git diff --check
+```
+
+Results:
+
+- `MultiSourceScanCoordinatorTests`: **20 tests, 0 failures** (run 4×, 0
+  flakes).
+- `MultiSourceBoundedScanTests`: **6 tests, 0 failures** (run 4×, 0 flakes,
+  including the 3×10,000-entry test).
+- `BoundedFolderScanTests|ScanCancellationTests`: **18 tests, 0 failures** --
+  no regression in the pre-existing single-source bounded-pipeline
+  contracts.
+- `PhotoLibraryCoreTests`: **446 tests, 0 failures** (444 before this round +
+  2 new coordinator tests).
+- Full `swift test`: **996 tests, 9 skipped, 0 failures** (993 before this
+  round + 2 new coordinator + 1 new integration = 996). The 9 skips are the
+  same pre-existing, host-dependent security-scoped-bookmark skips, not
+  new.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc
+  -warnings-as-errors`: **exit 0**, no warnings. No sandbox/module-cache
+  permission failure was encountered.
+- `git diff --check`: **PASS**, no whitespace errors.
+- `rg -n 'TBD|TODO|FIXME|fatalError|try!|as!'` over the changed production
+  file: **no hits**.
+- `rg -n 'Task\.detached|Semaphore|DispatchSemaphore|NSLock|NSRecursiveLock'`
+  over the changed production file: **no hits**.
+
+### Remaining concerns
+
+None blocking.
