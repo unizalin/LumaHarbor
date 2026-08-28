@@ -244,6 +244,7 @@
 "This file changed while LumaHarbor was checking it." = "This file changed while LumaHarbor was checking it.";
 "This file is too large for LumaHarbor to safely confirm it's the same photo." = "This file is too large for LumaHarbor to safely confirm it's the same photo.";
 "This file couldn't be read" = "This file couldn't be read";
+"This isn't a saved App copy." = "This isn't a saved App copy.";
 "This Library" = "This Library";
 "This library's index file is damaged." = "This library's index file is damaged.";
 "This photo has saved adjustments" = "This photo has saved adjustments";
