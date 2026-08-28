@@ -23,7 +23,8 @@ DONE
 
 ## Commit hash
 
-`<filled in after commit — see the end of this session's reply>`
+`7a8d140` — feat: add testable multi-source library browser session
+(round-1 review fix commit hash is recorded in "Review fix round 1" below)
 
 ## Changed files
 
@@ -263,6 +264,124 @@ None blocking. Three bounded points worth flagging for Task 6/7:
    file — Task 5's scope, per the plan, only produces this state machine;
    composing it with `PhotoDocumentEditor` and a SwiftUI shell is Task 6's
    job and was deliberately not anticipated or duplicated here.
+
+## Review fix round 1
+
+Codex's pre-landing re-review of the Task 5 commit (`7a8d140`) returned
+**BLOCKED** with two findings, both in `LibraryBrowserSession.swift`.
+
+### Finding 1 (P1, blocking): startup could permanently lose `sources` on a generation change
+
+**Finding.** `restoreSourcesAndLoadFirstPage()` captured `queryGeneration`
+before calling `dependencies.restoreSources()`, then gated *both*
+`sources = restored` and the default first-page load behind
+`guard generation == queryGeneration else { return }`. Since `start()` is a
+one-shot no-op after its first call (`guard startupTask == nil else {
+return }`), a `select(_:)`/`setSort(_:)`/`updateSearchText(_:)` call that
+arrived before `restoreSources()` itself returned would bump
+`queryGeneration` and cause the whole startup result — including `sources`
+— to be discarded, with nothing left to ever populate `sources` again. This
+conflated two different things under one guard: "don't let a stale *page
+query* result land" (correct) and "don't let stale *source list* data land"
+(wrong — `sources` isn't a query result at all, it doesn't go stale the way
+a page of photos does).
+
+**Fix.** `restoreSourcesAndLoadFirstPage()` now publishes `sources`
+unconditionally, with no generation guard at all. Only the *default first
+page* this call would otherwise load remains generation-gated: if a newer
+query has already begun by the time `restoreSources()` resolves, that
+query's own task already owns `photos`/`nextCursor`/`loadState`, so the
+default query's page one is never even fetched (the guard is checked
+*before* calling `loadFirstPage`, not after). The failure path was fixed
+the same way: a `restoreSources()` throw is still reported as a
+`loadState = .failed(...)` alert, but only if nothing newer has already
+taken over `loadState`.
+
+### Finding 2 (P1, blocking): `updateSearchText(_:)` left a stale-commit window until the debounce fired
+
+**Finding.** `updateSearchText(_:)` updated `searchText` immediately but
+left `queryGeneration` unchanged until the 250 ms debounce timer itself
+called `beginNewQuery()`. For the entire debounce window, a fetch already
+in flight (a first-page or next-page fetch started by an earlier
+selection/sort/search) still carried the *current* (unchanged) generation.
+If that stale fetch happened to resolve during the window, its generation
+check (`guard generation == queryGeneration`) still passed, and it could
+commit its result to `photos`/`nextCursor`/`loadState` — even though
+`searchText` had already visibly moved on to what the user just typed. This
+directly violated the plan's own stated requirement ("capture it in every
+task and discard late results") for the search-text case specifically.
+
+**Fix.** `updateSearchText(_:)` now calls a new `invalidateCurrentQuery()`
+synchronously, on every actual text change, *before* scheduling the
+debounce task: it bumps `queryGeneration` and cancels `pageTask`
+immediately, invalidating whatever is currently outstanding right away.
+The debounce timer's `beginNewQuery()` (unchanged) still does the second
+half — bump again, reset `photos`/`nextCursor`, and actually start the new
+fetch — but only once the delay has elapsed. Splitting these into two
+named steps (`invalidateCurrentQuery()` bumps-and-cancels-only;
+`beginNewQuery()` bumps-and-starts) is what keeps "invalidate now" and
+"fetch later" from being conflated the way the single previous call was.
+`select(_:)`/`setSort(_:)` were already correct (they call
+`beginNewQuery()` directly, with no debounce in between) and needed no
+change.
+
+### New tests
+
+`Tests/EditorCoreTests/LibraryBrowserSessionTests.swift` (+4 tests, 26 → 30):
+
+- `testStartupPublishesSourcesEvenWhenAQueryChangeArrivesWhileRestoringSources`
+  — gates `restoreSources()`, calls `select(_:)` while it's still stuck,
+  then releases it: asserts `sources` still publishes, the newer
+  selection's own photos survive, and the stale default query is never
+  even fetched (`fetchQueries.filter { $0.scope == .all }.count == 0`).
+- `testStartupRestorationFailureAfterBeingSupersededDoesNotOverwriteTheNewerLoadState`
+  — same setup but `restoreSources()` fails instead of succeeding: asserts
+  the newer query's `.loaded` state survives the stale failure.
+- `testUpdatingSearchTextDuringAnOutstandingFirstPageFetchDiscardsItEvenBeforeDebounceFires`
+  — gates a first-page fetch, calls `updateSearchText(_:)` while it's
+  stuck, releases it *well before* the 250 ms debounce could have fired:
+  asserts the stale result never commits, and the debounced fetch for the
+  new search text still applies once it actually runs.
+- `testUpdatingSearchTextDuringAnOutstandingNextPageFetchDiscardsItEvenBeforeDebounceFires`
+  — same shape, but the stuck fetch is a `loadNextPage()` call instead of
+  a first-page one, per the review's explicit "first-page 或 next-page"
+  requirement.
+
+`FakeLibraryEnvironment` gained a `restoreSources()`-specific gate
+(separate from the existing `fetchPage` gate), matching the same
+level-triggered `InspectionGate`-style pattern already used for paging.
+
+### Verification (review fix round 1)
+
+```zsh
+swift test --filter LibraryBrowserSessionTests
+swift test --filter EditorCoreTests
+swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+git diff --check 85b1e03..HEAD
+swift test
+```
+
+Results:
+
+- `LibraryBrowserSessionTests`: **30 tests, 0 failures** (run 4×, 0
+  flakes; 4 new since the prior round).
+- `EditorCoreTests` (full target): **94 tests, 0 failures** (90 before
+  this round + 4 new).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc
+  -warnings-as-errors`: **exit 0**, no warnings. No sandbox/module-cache
+  permission failure was encountered.
+- `git diff --check 85b1e03..HEAD`: **PASS**, no whitespace errors.
+- Full `swift test`: **1,044 tests, 9 skipped, 0 failures**, completed and
+  exited cleanly in 18.7 s (1,040 before this round + 4 new = 1,044).
+  `PendingLeaseSubprocessTests.testAProcessKilledWithSIGKILLReleasesItsLeaseForReconciliation`
+  passed (0.097 s), and no residual `xctest`/`swift-frontend` process
+  remained afterward. As in the prior round, this is reported as observed
+  on this attempt in this environment, not asserted to be hang-proof
+  everywhere.
+
+### Remaining concerns
+
+None blocking.
 
 ## Not push / merge / rebase / Task 6
 
