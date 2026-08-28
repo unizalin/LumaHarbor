@@ -220,6 +220,43 @@ public actor ThumbnailProvider {
         await cache.unpin(cacheKey(for: photoID))
     }
 
+    /// Whether `photoID`'s cache entry is currently protected from
+    /// eviction. Test/diagnostic observability for `pin`/`unpin`/
+    /// `pinnedUntilCancelled`'s effect on the underlying `DiskCache`.
+    public func isPinned(photoID: PhotoID) async -> Bool {
+        await cache.isPinned(cacheKey(for: photoID))
+    }
+
+    /// Keeps `photoID` pinned for the caller's entire task lifecycle, not
+    /// just while some load is in flight -- a cell's "protect what's on
+    /// screen" contract lasts as long as it's actually on screen, well past
+    /// whatever load first put its thumbnail there (Codex pre-landing
+    /// review, Task 7 round: pinning only for a load's duration let a
+    /// still-visible thumbnail become evictable again the moment its load
+    /// finished).
+    ///
+    /// Pins, then suspends until this task is cancelled -- `Task.sleep` is
+    /// cooperative: cancellation interrupts it immediately by throwing
+    /// `CancellationError`, however long the nominal duration, so only
+    /// being cancelled ever ends the wait, never the duration itself -- and
+    /// only then unpins, awaited directly here in this same structured
+    /// task. Callers should run their own load work concurrently with this
+    /// (e.g. via `async let`) and await this call last, so cancellation
+    /// propagates to both and unpin only ever runs inline in the caller's
+    /// own structured task, never a separate unstructured `Task { }` that
+    /// could race the pin.
+    public func pinnedUntilCancelled(photoID: PhotoID) async {
+        await pin(photoID: photoID)
+        // A cell is never visible for anywhere close to this long -- this
+        // is just "effectively forever, until cancelled." Deliberately not
+        // `.seconds(Int64.max)`: converting a duration that large down to
+        // nanoseconds for the underlying clock overflows `Int64`, crashing
+        // rather than sleeping. A century comfortably avoids that while
+        // still being unreachable in practice.
+        try? await Task.sleep(for: .seconds(60 * 60 * 24 * 365 * 100))
+        await unpin(photoID: photoID)
+    }
+
     public func resetDiagnostics() {
         diagnostics = ThumbnailDiagnostics()
     }

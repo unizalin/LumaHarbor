@@ -169,6 +169,47 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(source.contains("library.loadNextPage()"), "the grid must call loadNextPage() near the end")
     }
 
+    /// Codex pre-landing review, Task 7 round, finding 2 (P1, blocking):
+    /// `LibraryBrowserSession.restoreGridPosition()` re-fetches the right
+    /// page, but nothing here previously consumed `pendingScrollAnchor` to
+    /// actually scroll the view there. Source-parsing is the only
+    /// verification available for this file (same `.swiftpm`-package
+    /// constraint as everything else in this test file), so this asserts
+    /// the three pieces the fix requires are actually wired together: a
+    /// `ScrollViewReader` wraps the grid, it scrolls to
+    /// `library.pendingScrollAnchor`, and it acknowledges the anchor
+    /// afterward so a later, unrelated `photos` change never re-triggers
+    /// the same scroll.
+    func testGridWiresUpScrollToRestorationAnchor() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(source.contains("ScrollViewReader"), "the grid must use a ScrollViewReader to scroll programmatically")
+        guard let scrollRange = source.range(of: "private func scrollToAnchorIfNeeded") else {
+            return XCTFail("PadLibraryGrid must define a scrollToAnchorIfNeeded(_:proxy:) helper")
+        }
+        let scrollBody = source[scrollRange.upperBound...]
+
+        XCTAssertTrue(scrollBody.contains("library.pendingScrollAnchor"), "must read the session's pending scroll anchor")
+        XCTAssertTrue(
+            scrollBody.contains("photos.contains(where:"),
+            "must only scroll once the anchor is actually present in photos, never a blind/empty scroll"
+        )
+        XCTAssertTrue(scrollBody.contains("proxy.scrollTo("), "must actually call scrollTo on the anchor")
+        XCTAssertTrue(
+            scrollBody.contains("library.acknowledgeScrollToAnchor()"),
+            "must acknowledge the anchor after scrolling so a later photos change can't re-trigger the same scroll"
+        )
+
+        // Both entry points that could make the anchor already-satisfied --
+        // the view first appearing, and photos changing after that -- must
+        // route through the same check.
+        XCTAssertTrue(source.contains(".onAppear {"), "must check for an already-satisfiable anchor on first appearance")
+        XCTAssertTrue(
+            source.contains(".onChange(of: library.photos)"),
+            "must re-check whenever photos changes (e.g. once the anchor's page finishes loading)"
+        )
+    }
+
     // MARK: - PadLibrarySettingsView.swift (Task 7 Step 5, review round 1 Important #4)
 
     /// The plan's own literal acceptance numbers (512 MiB through 10 GiB) --

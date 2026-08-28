@@ -4,9 +4,10 @@
 
 DONE — implemented via `superpowers:subagent-driven-development` (fresh
 implementer subagent, task-scoped reviewer subagent, one fix round), and
-**APPROVED** on re-review of the fix round. No further Task 7 changes
-required. Pending Codex pre-landing review of this branch, matching the
-pattern already established for Tasks 1-6.
+**APPROVED** on re-review of the fix round. Codex's own pre-landing review
+of the branch then returned **BLOCKED** with 2 further P1 findings (see
+"Codex pre-landing review fixes" below); both are now fixed. No further
+Task 7 changes are expected, pending Codex's re-review of this fix.
 
 - Baseline HEAD before Task 7 work: `f28e68f` (Task 6 Codex-approved, review
   fix rounds 1-2 landed).
@@ -299,10 +300,131 @@ treated as a new finding.
   English** — conventional for unit abbreviations in Traditional Chinese
   UI copy, not treated as a real translation gap.
 
+## Codex pre-landing review fixes (commit TBD)
+
+Codex's pre-landing review of the branch (range `f28e68f..e58fda3`) returned
+**BLOCKED** with 2 P1 findings, both distinct from the two review rounds
+above (this was Codex's first look at the actual grid/cell UI code, not
+just the subagent reviewer's).
+
+### Finding 1 — `PadThumbnailCell`'s pin/unpin lifecycle was wrong
+
+The round-1 fix (`defer { Task { await provider.unpin(...) } }` placed
+right after `pin()`, before `load()`) closed the *ordering* race between
+pin and unpin, but not the actual *lifecycle* bug: `defer`'s body runs the
+moment the `.task(id:)` closure's scope exits, which is immediately after
+`load()` returns -- not once the cell actually leaves the screen. A
+thumbnail that finished loading quickly (the common case) became evictable
+again while still fully visible, protected only for its load duration, not
+its display duration -- the cache-budget contract Task 7 Step 2 and the
+existing `ThumbnailProvider.pin(photoID:)` doc comment both call for
+("protect what's on screen, not what's off it").
+
+**Fix:**
+- `ThumbnailProvider.pinnedUntilCancelled(photoID:)` (new, in
+  `Sources/PhotoLibraryCore/Cache/ThumbnailProvider.swift`): pins, then
+  suspends via a "sleep for a century" cooperative-cancellation idiom (not
+  `.seconds(Int64.max)` -- that overflows `Int64` nanoseconds internally
+  and crashes; verified by actually running the new test against it before
+  settling on a safe duration), and only unpins once cancelled -- awaited
+  inline in the same function, never a detached `Task { }`.
+- `ThumbnailProvider.isPinned(photoID:)` (new) -- test/diagnostic
+  observability, forwarding to `DiskCache.isPinned(_:)`.
+- `PadThumbnailCell.swift`: `.task(id:)` now runs pinning and loading as
+  sibling child tasks (`async let keepPinned = provider.pinnedUntilCancelled(...)`),
+  awaiting `keepPinned` last. SwiftUI cancelling the `.task` (cell leaving
+  the screen) cancels both children together; awaiting `keepPinned` last
+  guarantees its unpin runs to completion, inline, before the closure
+  itself returns.
+- New test: `ThumbnailProviderTests.testPinnedUntilCancelledStaysPinnedAfterOperationCompletesAndOnlyUnpinsOnCancellation`
+  -- proves the entry stays pinned (and survives an `evictIfNeeded()` pass)
+  well after the concurrent "operation" would have finished, and only
+  unpins once the task is cancelled, verified via `task.cancel()` +
+  `await task.value` (the latter only resolving once unpin has actually
+  run). RED confirmed against a temporarily reintroduced "unpin
+  immediately" version; GREEN against the real fix.
+
+### Finding 2 — `restoreGridPosition()` loaded the anchor page but never scrolled to it
+
+`LibraryBrowserSession.restoreGridPosition()` already re-fetched the exact
+page containing the anchor `PhotoID`, but `PadLibraryGrid` was a plain
+`ScrollView` with no `ScrollViewReader`/`scrollTo` -- the data was correct,
+but the view never actually scrolled back to the photo the user had open,
+contradicting `PadLibraryView`'s own doc comment ("scrolling back to the
+exact photo") and Task 7 Step 1's editor-return-restoration requirement.
+
+**Fix:**
+- `LibraryBrowserSession`: new `@Published public private(set) var pendingScrollAnchor: PhotoID?`,
+  set to the anchor's `PhotoID` at the exact point `restore(generation:query:anchor:)`
+  finds it (guaranteed already present in `photos` by construction --
+  `trimmedWindow` only trims from the front, and the anchor's page was just
+  appended). Left `nil` when the anchor isn't found (the page-one fallback
+  has nothing to scroll to). New `public func acknowledgeScrollToAnchor()`
+  clears it, called by the view once it actually scrolls. Also cleared in
+  `beginNewQuery()`/`invalidateCurrentQuery()` so an unconsumed anchor never
+  leaks into an unrelated later scope/search/sort change.
+- `PadLibraryGrid.swift`: wraps the grid in `ScrollViewReader`; a new
+  `scrollToAnchorIfNeeded(photos:proxy:)` scrolls to
+  `library.pendingScrollAnchor` only once it's actually present in
+  `photos` (never a blind/empty scroll), then immediately acknowledges it.
+  Wired from both `.onAppear` (anchor already satisfiable when the view
+  first appears) and `.onChange(of: library.photos)` (anchor's page
+  finishes loading after the view is already up).
+- New tests in `LibraryBrowserGridFlowTests.swift`:
+  `testRestoreGridPositionSetsThePendingScrollAnchorOnceTheAnchorPageLoads`
+  (RED-confirmed against the anchor-set line temporarily removed --
+  timed out waiting, as expected), `testMissingAnchorNeverSetsAPendingScrollAnchor`,
+  `testStartingANewQueryClearsAnyUnconsumedPendingScrollAnchor`.
+- New source-parsing test in `PadLibraryAccessibilityContractTests.swift`:
+  `testGridWiresUpScrollToRestorationAnchor`, asserting the
+  `ScrollViewReader`/`pendingScrollAnchor`/`scrollTo`/`acknowledgeScrollToAnchor()`/
+  `.onAppear`/`.onChange` wiring is all actually present in source (same
+  `.swiftpm`-package tooling constraint as every other UI-layer test in
+  this file -- no way to instantiate the real view hierarchy).
+
+### Verification
+
+- `git diff --check f28e68f..HEAD` -- clean.
+- `swift test --filter 'LibraryBrowserGridFlowTests|PadLibraryAccessibilityContractTests|ThumbnailProviderTests'`
+  -- 45/45 pass (40 + 5 new: 1 `ThumbnailProviderTests`, 3
+  `LibraryBrowserGridFlowTests`, 1 `PadLibraryAccessibilityContractTests`).
+- `swift test` (full suite) -- 1079 tests / 9 skipped / 0 failures (1074 →
+  1079).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  -- succeeds, no warnings.
+- `(cd Apps/LumaHarborPad.swiftpm && xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build)`
+  -- **BUILD SUCCEEDED**.
+
+### Files changed (this round)
+
+- `Sources/PhotoLibraryCore/Cache/ThumbnailProvider.swift` (finding 1 --
+  `pinnedUntilCancelled(photoID:)`, `isPinned(photoID:)`)
+- `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadThumbnailCell.swift`
+  (finding 1 -- `.task(id:)` restructured with `async let`)
+- `Sources/EditorCore/LibraryBrowserSession.swift` (finding 2 --
+  `pendingScrollAnchor`, `acknowledgeScrollToAnchor()`)
+- `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadLibraryGrid.swift`
+  (finding 2 -- `ScrollViewReader` + `scrollToAnchorIfNeeded(photos:proxy:)`)
+- `Tests/PhotoLibraryCoreTests/ThumbnailProviderTests.swift` (finding 1 --
+  1 new test)
+- `Tests/EditorCoreTests/LibraryBrowserGridFlowTests.swift` (finding 2 --
+  3 new tests)
+- `Tests/AdjustmentUITests/PadLibraryAccessibilityContractTests.swift`
+  (finding 2 -- 1 new test)
+
+### Concerns
+
+None blocking. Both fixes were verified with real RED→GREEN evidence
+(including catching a genuine `Int64` nanosecond-overflow crash in the
+first draft of `pinnedUntilCancelled`'s "sleep forever" duration by
+actually running the test against it, rather than assuming `.seconds(Int64.max)`
+was safe) rather than only reasoning about the diff.
+
 ## Not push / merge / rebase / Task 8
 
 - No `git push`, `git merge`, `git rebase`, or `git commit --amend` was run
-  at any point, across either commit.
+  at any point, across any commit in this task.
 - No Task 8 or Task 9 file was created or modified.
-- Two commits are expected from this task: `70ca1b6` (implementation) and
-  `eefe9c3` (review round 1 fixes).
+- Commits from this task: `70ca1b6` (implementation), `eefe9c3` (review
+  round 1 fixes), `e58fda3` (this report), and the Codex pre-landing-review
+  fix commit recorded at the top of this section once created.
