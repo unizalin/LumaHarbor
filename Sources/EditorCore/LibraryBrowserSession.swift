@@ -173,19 +173,36 @@ public final class LibraryBrowserSession: ObservableObject {
         }
     }
 
+    /// `sources` is deliberately published unconditionally, never gated on
+    /// `queryGeneration`: it describes what sources exist, not the result of
+    /// any particular query, so a `select(_:)`/`setSort(_:)`/
+    /// `updateSearchText(_:)` call that arrives while `restoreSources()` is
+    /// still in flight must never cause this restoration's sources to be
+    /// silently dropped. Codex review: the previous version gated the
+    /// `sources` assignment on the same generation check used for page
+    /// results, which — since `start()` is a one-shot no-op after its first
+    /// call — could leave `sources` permanently empty if the user acted
+    /// before restoration finished, with nothing left to ever populate it.
+    ///
+    /// Only the *default first page* this call would otherwise load is
+    /// still generation-gated: if a newer query has already begun while
+    /// `restoreSources()` was in flight, that query's own task already
+    /// owns `photos`/`nextCursor`/`loadState`, and this call must not
+    /// clobber it with the stale default query's page one.
     private func restoreSourcesAndLoadFirstPage() async {
-        let generation = queryGeneration
+        let startupGeneration = queryGeneration
         do {
             let restored = try await dependencies.restoreSources()
-            guard generation == queryGeneration else { return }
             sources = restored
         } catch {
-            guard generation == queryGeneration else { return }
-            loadState = .failed(SafeErrorPresentation.alert(title: L10n.t("Couldn't load your library"), for: error))
+            if startupGeneration == queryGeneration {
+                loadState = .failed(SafeErrorPresentation.alert(title: L10n.t("Couldn't load your library"), for: error))
+            }
             return
         }
+        guard startupGeneration == queryGeneration else { return }
         loadState = .loadingFirstPage
-        await loadFirstPage(generation: generation)
+        await loadFirstPage(generation: startupGeneration)
     }
 
     // MARK: - Selection / query changes
@@ -203,19 +220,43 @@ public final class LibraryBrowserSession: ObservableObject {
     }
 
     /// `searchText` itself updates immediately, so a bound text field stays
-    /// responsive; the actual re-query is debounced by
-    /// `searchDebounceDelay` so a burst of keystrokes fetches once, not
-    /// once per character. Only the last call in a burst ever reaches the
-    /// index -- every earlier one's debounce task is cancelled outright.
+    /// responsive, and so does invalidating whatever query is currently
+    /// outstanding -- only *starting the new fetch* is debounced by
+    /// `searchDebounceDelay`, so a burst of keystrokes fetches once, not
+    /// once per character.
+    ///
+    /// Codex review: an earlier version left `queryGeneration` unchanged
+    /// until the debounce timer itself fired `beginNewQuery()`. That left a
+    /// window, for the full debounce delay, where a fetch already in flight
+    /// for the *previous* search text still carried the current generation
+    /// and could commit its (now stale) result to `photos`/`loadState`/
+    /// `nextCursor` even though `searchText` had already visibly moved on.
+    /// `invalidateCurrentQuery()` below closes that window immediately,
+    /// synchronously, on every actual text change -- debouncing only ever
+    /// delays *issuing* the new fetch, never *invalidating* the old one.
     public func updateSearchText(_ text: String) {
         guard searchText != text else { return }
         searchText = text
+        invalidateCurrentQuery()
         searchDebounceTask?.cancel()
         searchDebounceTask = Task { [weak self] in
             try? await Task.sleep(for: Self.searchDebounceDelay)
             guard !Task.isCancelled else { return }
             self?.beginNewQuery()
         }
+    }
+
+    /// Bumps `queryGeneration` and cancels `pageTask` immediately, without
+    /// starting a replacement fetch -- so anything already in flight (a
+    /// first-page or next-page fetch, or another still-pending debounce)
+    /// can never commit its result once this call returns, no matter how
+    /// much later it actually resolves. `beginNewQuery()` below is the
+    /// counterpart that both invalidates *and* immediately starts the new
+    /// fetch; this one only does the first half, for callers (the search
+    /// debounce) that must invalidate now but delay issuing the new fetch.
+    private func invalidateCurrentQuery() {
+        queryGeneration += 1
+        pageTask?.cancel()
     }
 
     private func beginNewQuery() {

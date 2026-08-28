@@ -26,7 +26,30 @@ private actor FakeLibraryEnvironment {
     func setRelinkResult(_ result: Result<LibraryFolder, Error>) { relinkResult = result }
     func setRemoveError(_ error: Error?) { removeError = error }
 
-    func restoreSources() throws -> [LibraryFolder] { try sourcesResult.get() }
+    /// A separate gate from `fetchPage`'s (below) so a test can hold
+    /// `restoreSources()` open independently of any page fetch.
+    private var isRestoreSourcesGated = false
+    private var isRestoreSourcesGateOpen = false
+    private var restoreSourcesGateWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var restoreSourcesEntryCount = 0
+
+    func setRestoreSourcesGated(_ gated: Bool) { isRestoreSourcesGated = gated }
+
+    func openRestoreSourcesGate() {
+        isRestoreSourcesGateOpen = true
+        for waiter in restoreSourcesGateWaiters { waiter.resume() }
+        restoreSourcesGateWaiters = []
+    }
+
+    func restoreSources() async throws -> [LibraryFolder] {
+        if isRestoreSourcesGated, !isRestoreSourcesGateOpen {
+            restoreSourcesEntryCount += 1
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                restoreSourcesGateWaiters.append(continuation)
+            }
+        }
+        return try sourcesResult.get()
+    }
 
     func addSource(_ url: URL, _ sourceKind: LibrarySourceKind) throws -> LibraryFolder {
         addSourceCalls.append((url, sourceKind))
@@ -292,6 +315,78 @@ final class LibraryBrowserSessionTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1, "a second start() must be a no-op")
     }
 
+    /// Codex pre-landing re-review, finding 1 (P1, blocking): `sources`
+    /// must never be dropped just because the user acted (selected a
+    /// different scope) before `restoreSources()` itself returned. Since
+    /// `start()` is a one-shot no-op after its first call, gating `sources`
+    /// on the same `queryGeneration` check used for page results could
+    /// leave it permanently empty -- with nothing left to ever populate it.
+    func testStartupPublishesSourcesEvenWhenAQueryChangeArrivesWhileRestoringSources() async throws {
+        let environment = FakeLibraryEnvironment()
+        let sourceID = LibraryID()
+        await environment.setSourcesResult(.success([makeFolder(id: sourceID, name: "Trip")]))
+        await environment.setRestoreSourcesGated(true)
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        let sourceScopedQuery = LibraryQuery(scope: .source(sourceID), sort: .captureDateDescending)
+        let sourcePhoto = makePhoto(libraryID: sourceID)
+        await environment.setPages(for: sourceScopedQuery, pages: [[sourcePhoto]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntilAsync { await environment.restoreSourcesEntryCount >= 1 }
+        XCTAssertTrue(session.sources.isEmpty, "restoreSources() is still stuck -- nothing to publish yet")
+
+        // The user acts before restoreSources() ever returns.
+        session.select(.source(sourceID))
+        try await waitUntil { session.photos.map(\.id) == [sourcePhoto.id] }
+        XCTAssertEqual(session.selection, .source(sourceID))
+
+        // restoreSources() finally resolves -- its sources must still
+        // publish, and must not resurrect the stale default-query page over
+        // the selection the user already made in the meantime.
+        await environment.openRestoreSourcesGate()
+        try await waitUntil { !session.sources.isEmpty }
+
+        XCTAssertEqual(session.sources.map(\.id), [sourceID], "a delayed restoreSources() must still publish its sources")
+        XCTAssertEqual(session.selection, .source(sourceID), "the newer selection must not be clobbered by the delayed startup load")
+        XCTAssertEqual(session.photos.map(\.id), [sourcePhoto.id], "the newer query's own results must survive")
+        XCTAssertEqual(session.loadState, .loaded)
+
+        // The stale default query must never even have been fetched, since
+        // a newer query had already taken over by the time restoreSources()
+        // resolved.
+        let defaultQueryFetchCount = await environment.fetchQueries.filter { $0.scope == .all }.count
+        XCTAssertEqual(defaultQueryFetchCount, 0, "the superseded default first page must never be fetched at all")
+    }
+
+    /// Same finding: a startup *failure* that resolves after being
+    /// superseded must not overwrite the newer query's own (successful)
+    /// `loadState` either.
+    func testStartupRestorationFailureAfterBeingSupersededDoesNotOverwriteTheNewerLoadState() async throws {
+        struct FakeRestoreError: Error {}
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.failure(FakeRestoreError()))
+        await environment.setRestoreSourcesGated(true)
+        let sourceID = LibraryID()
+        let sourceQuery = LibraryQuery(scope: .source(sourceID), sort: .captureDateDescending)
+        let photo = makePhoto(libraryID: sourceID)
+        await environment.setPages(for: sourceQuery, pages: [[photo]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntilAsync { await environment.restoreSourcesEntryCount >= 1 }
+
+        session.select(.source(sourceID))
+        try await waitUntil { session.photos.map(\.id) == [photo.id] }
+
+        await environment.openRestoreSourcesGate()
+        try? await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(session.loadState, .loaded, "a stale startup failure must not overwrite the newer query's successful loadState")
+        XCTAssertEqual(session.photos.map(\.id), [photo.id])
+        XCTAssertTrue(session.sources.isEmpty, "the failed restore still produced no sources")
+    }
+
     // MARK: 2. Paging
 
     func testLoadNextPageAppendsToPhotos() async throws {
@@ -464,6 +559,85 @@ final class LibraryBrowserSessionTests: XCTestCase {
 
         let fetchCount = await environment.fetchCallCount
         XCTAssertEqual(fetchCount, 1, "re-setting the same (empty) search text must not trigger a second fetch")
+    }
+
+    /// Codex pre-landing re-review, finding 2 (P1, blocking): a stale fetch
+    /// already in flight when `updateSearchText(_:)` is called must be
+    /// invalidated *immediately* -- not only once the 250 ms debounce timer
+    /// itself fires `beginNewQuery()`. Otherwise, if that stale fetch
+    /// resolves during the debounce window, it still carries the
+    /// (unchanged, until debounce fires) generation and can commit its
+    /// result even though `searchText` has already visibly moved on.
+    func testUpdatingSearchTextDuringAnOutstandingFirstPageFetchDiscardsItEvenBeforeDebounceFires() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let sourceID = LibraryID()
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+
+        // A fresh selection's first-page fetch is stuck in flight.
+        await environment.setGated(true)
+        let staleSourceQuery = LibraryQuery(scope: .source(sourceID), sort: .captureDateDescending)
+        let stalePhoto = makePhoto(libraryID: sourceID, name: "stale.ARW")
+        await environment.setPages(for: staleSourceQuery, pages: [[stalePhoto]])
+        session.select(.source(sourceID))
+        try await waitUntilAsync { await environment.gatedEntryCount >= 1 }
+
+        // The user types a search query before that stuck fetch -- or the
+        // debounce timer -- has had any chance to resolve.
+        let finalQuery = LibraryQuery(scope: .source(sourceID), filenameSearch: "final", sort: .captureDateDescending)
+        let finalPhoto = makePhoto(libraryID: sourceID, name: "final-match.ARW")
+        await environment.setPages(for: finalQuery, pages: [[finalPhoto]])
+        session.updateSearchText("final")
+
+        // Release the stale, stuck first-page fetch well *before* the
+        // 250 ms debounce could possibly have fired -- it must never be
+        // allowed to commit, even though it's the only thing released.
+        await environment.openGate()
+        try? await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertNotEqual(session.photos.map(\.id), [stalePhoto.id], "the stale pre-search-text fetch must never commit its result")
+
+        // Once the debounce actually fires, the *new* search's own fetch
+        // must still apply normally.
+        try await waitUntil(timeout: 3) { session.photos.map(\.id) == [finalPhoto.id] }
+    }
+
+    /// Same finding, for a *next*-page fetch in flight rather than a first
+    /// page one.
+    func testUpdatingSearchTextDuringAnOutstandingNextPageFetchDiscardsItEvenBeforeDebounceFires() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let sourceID = LibraryID()
+        let query = LibraryQuery(scope: .all, sort: .captureDateDescending)
+        let pageOne = [makePhoto(libraryID: sourceID, name: "p1.ARW")]
+        let pageTwoStale = [makePhoto(libraryID: sourceID, name: "p2-stale.ARW")]
+        await environment.setPages(for: query, pages: [pageOne, pageTwoStale])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        XCTAssertEqual(session.photos.map(\.id), pageOne.map(\.id))
+
+        await environment.setGated(true)
+        session.loadNextPage()
+        try await waitUntilAsync { await environment.gatedEntryCount >= 1 }
+
+        let finalQuery = LibraryQuery(scope: .all, filenameSearch: "final", sort: .captureDateDescending)
+        let finalPhoto = makePhoto(libraryID: sourceID, name: "final-match.ARW")
+        await environment.setPages(for: finalQuery, pages: [[finalPhoto]])
+        session.updateSearchText("final")
+
+        await environment.openGate()
+        try? await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(session.photos.map(\.id), pageOne.map(\.id), "the stale next-page fetch must never append to photos")
+        XCTAssertFalse(session.photos.contains { $0.id == pageTwoStale[0].id })
+
+        try await waitUntil(timeout: 3) { session.photos.map(\.id) == [finalPhoto.id] }
     }
 
     // MARK: 5. Page window bound
