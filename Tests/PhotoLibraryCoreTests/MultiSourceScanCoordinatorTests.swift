@@ -222,6 +222,132 @@ final class MultiSourceScanCoordinatorTests: XCTestCase {
         await tracker.release(second)
     }
 
+    // MARK: - `runBatch(_:)` deterministic batch scheduling
+
+    /// Codex pre-landing review round 1, finding 2 (P2): registering
+    /// `.normal` sources through one `TaskGroup` child task per source races
+    /// a later-arriving `.selected` one for the two available slots. This
+    /// proves `runBatch(_:)` -- the atomic, non-suspending registration path
+    /// `PhotoLibraryService.scanLibraries` now uses -- schedules the selected
+    /// source ahead of two earlier-positioned normal ones within a *single*
+    /// batch call, with only two slots available, every time.
+    func testRunBatchSchedulesSelectedPriorityAheadOfNormalEntriesInTheSameBatch() async throws {
+        for _ in 0..<20 {
+            let coordinator = MultiSourceScanCoordinator()
+            let tracker = ScanTracker()
+            let normalA = LibraryID()
+            let normalB = LibraryID()
+            let selectedC = LibraryID()
+            let allIDs: Set<LibraryID> = [normalA, normalB, selectedC]
+
+            let batchTask = Task {
+                await coordinator.runBatch([
+                    (libraryID: normalA, priority: .normal, operation: { await tracker.run(normalA) }),
+                    (libraryID: normalB, priority: .normal, operation: { await tracker.run(normalB) }),
+                    (libraryID: selectedC, priority: .selected, operation: { await tracker.run(selectedC) }),
+                ])
+            }
+
+            await waitUntil("two sources to start") { await tracker.startedIDs.count == 2 }
+            let startedAfterTwo = await tracker.startedIDs
+            XCTAssertTrue(
+                startedAfterTwo.contains(selectedC),
+                "The selected source must be among the first two started, even though it is listed last"
+            )
+            XCTAssertFalse(
+                startedAfterTwo.contains(normalA) && startedAfterTwo.contains(normalB),
+                "The selected source must not be the one left waiting for a third slot"
+            )
+
+            // Release only the two that actually started -- `ScanTracker`'s
+            // gate is a no-op if released before the id registers it, so the
+            // still-queued third id must not be released until it has
+            // actually started.
+            for startedID in startedAfterTwo {
+                await tracker.release(startedID)
+            }
+            let remainingID = try XCTUnwrap(allIDs.subtracting(startedAfterTwo).first)
+            await waitUntil("the third source to start once a slot frees") {
+                await tracker.startedIDs.contains(remainingID)
+            }
+            await tracker.release(remainingID)
+            await batchTask.value
+        }
+    }
+
+    /// Same-priority entries within one `runBatch(_:)` call keep the FIFO
+    /// guarantee (req. 4/7) that `enqueue(...)`-built queues already have.
+    func testRunBatchKeepsSamePriorityEntriesFIFO() async throws {
+        let coordinator = MultiSourceScanCoordinator()
+        let tracker = ScanTracker()
+        let blockerA = LibraryID()
+        let blockerB = LibraryID()
+        let first = LibraryID()
+        let second = LibraryID()
+
+        await coordinator.enqueue(libraryID: blockerA, priority: .normal) { await tracker.run(blockerA) }
+        await coordinator.enqueue(libraryID: blockerB, priority: .normal) { await tracker.run(blockerB) }
+        await waitUntil("both blockers to start") { await tracker.startedIDs.count == 2 }
+
+        let batchTask = Task {
+            await coordinator.runBatch([
+                (libraryID: first, priority: .normal, operation: { await tracker.run(first) }),
+                (libraryID: second, priority: .normal, operation: { await tracker.run(second) }),
+            ])
+        }
+        await waitUntil("both batch entries to be queued") { await coordinator.queuedLibraryIDs == [first, second] }
+
+        await tracker.release(blockerA)
+        await waitUntil("the first-listed batch entry to start") { await tracker.startedIDs.contains(first) }
+        let startedAfterFirst = await tracker.startedIDs
+        XCTAssertFalse(
+            startedAfterFirst.contains(second),
+            "FIFO within a batch: a later-listed, same-priority entry must not start ahead of an earlier one"
+        )
+
+        await tracker.release(first)
+        await tracker.release(blockerB)
+        await waitUntil("the second batch entry to start") { await tracker.startedIDs.contains(second) }
+        await tracker.release(second)
+        await batchTask.value
+    }
+
+    /// A duplicate `libraryID` within a single `runBatch(_:)` call is
+    /// inserted exactly as if the two entries had been passed to `insert(...)`
+    /// one after another in array order: the later entry replaces the
+    /// earlier one before either ever starts, matching `enqueue(...)`'s
+    /// ordinary "a second registration for a still-queued libraryID replaces
+    /// it in place" rule. Only one of the two ever consumes a slot, and the
+    /// superseded one never runs its own operation.
+    func testRunBatchDeduplicatesRepeatedLibraryIDWithinOneBatch() async throws {
+        let coordinator = MultiSourceScanCoordinator()
+        let tracker = ScanTracker()
+        let id = LibraryID()
+        let firstRan = Flag()
+
+        let batchTask = Task {
+            await coordinator.runBatch([
+                (libraryID: id, priority: .normal, operation: { await firstRan.set() }),
+                (libraryID: id, priority: .normal, operation: { await tracker.run(id) }),
+            ])
+        }
+        await waitUntil("the id to start") { await tracker.startedIDs.contains(id) }
+        let activeCount = await coordinator.activeCount
+        XCTAssertEqual(activeCount, 1, "A duplicate id within one batch must not consume a second slot")
+        let queued = await coordinator.queuedLibraryIDs
+        XCTAssertEqual(queued, [], "A duplicate id within one batch must never be queued")
+
+        await tracker.release(id)
+        await batchTask.value
+        let firstRanValue = await firstRan.value
+        XCTAssertFalse(
+            firstRanValue,
+            "The earlier duplicate entry within a batch must be superseded and never run its own operation"
+        )
+        let runCount = await tracker.runCounts[id]
+        XCTAssertEqual(runCount, 1)
+    }
+
     // MARK: - Cancellation
 
     func testCancelQueuedItemNeverRuns() async throws {
@@ -309,9 +435,16 @@ final class MultiSourceScanCoordinatorTests: XCTestCase {
         await tracker.release(queuedID)
     }
 
-    // MARK: - One active slot per source
+    // MARK: - One active-or-queued slot per source
 
-    func testSameLibraryIDNeverActiveTwiceSimultaneously() async throws {
+    /// Codex pre-landing review round 1, finding 1 (P1): the original
+    /// implementation let a re-`enqueue` of an already-active `libraryID`
+    /// queue a second, "shadow" entry that would run again once the active
+    /// scan finished -- violating the plan's "one LibraryID may be active or
+    /// queued once" invariant and letting `scanLibraries([id, id])` run a
+    /// source twice. This test locks in the corrected behavior: no queued
+    /// entry is ever created, and the operation never runs a second time.
+    func testActiveEnqueueForSameLibraryIDNeverQueuesOrRunsTwice() async throws {
         let coordinator = MultiSourceScanCoordinator()
         let tracker = ScanTracker()
         let id = LibraryID()
@@ -324,34 +457,112 @@ final class MultiSourceScanCoordinatorTests: XCTestCase {
         // Re-enqueue the same id while its first run is still active.
         await coordinator.enqueue(libraryID: id, priority: .normal) { await tracker.run(id) }
         let queuedWhileActive = await coordinator.queuedLibraryIDs
-        XCTAssertEqual(queuedWhileActive, [id])
+        XCTAssertEqual(
+            queuedWhileActive, [],
+            "A duplicate enqueue for an already-active libraryID must never create a queued entry"
+        )
+        let activeCountWhileActive = await coordinator.activeCount
+        XCTAssertEqual(activeCountWhileActive, 2, "The duplicate enqueue must not itself consume a slot")
 
         await tracker.release(otherSlotID)
-        // The slot that just freed must go unused for `id`: its first run is
-        // still active, so the replacement must keep waiting.
+        // The slot that just freed must go unused for `id`: there is no
+        // queued duplicate to start, since none was ever created.
         try? await Task.sleep(for: .milliseconds(100))
-        let maxConcurrentByIDBeforeSecondRun = await tracker.maximumConcurrentCountByID[id]
+        let queuedStillEmpty = await coordinator.queuedLibraryIDs
         XCTAssertEqual(
-            maxConcurrentByIDBeforeSecondRun, 1,
-            "The same LibraryID ran concurrently with itself"
+            queuedStillEmpty, [],
+            "No queued entry should ever appear for an id that is already active"
         )
-        let queuedStillWaiting = await coordinator.queuedLibraryIDs
-        XCTAssertEqual(
-            queuedStillWaiting, [id],
-            "A freed slot must not start a second run of an id that is already active"
-        )
+        let runCountBeforeFirstFinishes = await tracker.runCounts[id]
+        XCTAssertEqual(runCountBeforeFirstFinishes, 1, "The duplicate enqueue must never run its own operation")
 
         await tracker.release(id)
-        await waitUntil("the queued replacement to start once the first run finishes") {
-            await tracker.runCounts[id] == 2
+        try? await Task.sleep(for: .milliseconds(100))
+        let finalRunCount = await tracker.runCounts[id]
+        XCTAssertEqual(finalRunCount, 1, "An already-active id must run exactly once, never twice")
+        let maxConcurrentByID = await tracker.maximumConcurrentCountByID[id]
+        XCTAssertEqual(maxConcurrentByID, 1, "The same LibraryID ran concurrently with itself")
+    }
+
+    /// Codex pre-landing review round 1, finding 1 (P1): `run(...)` called
+    /// for an already-active `libraryID` must neither hang nor start a
+    /// second scan -- it rides along on the existing active run and resumes
+    /// exactly when that run finishes.
+    func testRunWhileActiveWaitsForTheActiveOperationWithoutRunningASecondTime() async throws {
+        let coordinator = MultiSourceScanCoordinator()
+        let tracker = ScanTracker()
+        let id = LibraryID()
+        let secondRan = Flag()
+        let secondDone = Flag()
+
+        let firstTask = Task {
+            await coordinator.run(libraryID: id, priority: .normal) { await tracker.run(id) }
         }
-        let maxConcurrentByIDAfterSecondRun = await tracker.maximumConcurrentCountByID[id]
-        XCTAssertEqual(
-            maxConcurrentByIDAfterSecondRun, 1,
-            "The same LibraryID ran concurrently with itself"
+        await waitUntil("the first run to start") { await tracker.startedIDs.contains(id) }
+
+        let secondTask = Task {
+            await coordinator.run(libraryID: id, priority: .normal) { await secondRan.set() }
+            await secondDone.set()
+        }
+
+        try? await Task.sleep(for: .milliseconds(100))
+        let secondDoneBeforeRelease = await secondDone.value
+        XCTAssertFalse(
+            secondDoneBeforeRelease,
+            "run(...) for an already-active id must wait for that active run, not hang or return on its own"
         )
+        let queuedWhileActive = await coordinator.queuedLibraryIDs
+        XCTAssertEqual(queuedWhileActive, [], "run(...) for an already-active id must never be queued")
 
         await tracker.release(id)
+        await firstTask.value
+        await waitUntil("the second run(...) call to resume once the active operation finishes") {
+            await secondDone.value
+        }
+        await secondTask.value
+
+        let secondRanValue = await secondRan.value
+        XCTAssertFalse(secondRanValue, "run(...) for an already-active id must never execute its own operation")
+        let runCount = await tracker.runCounts[id]
+        XCTAssertEqual(runCount, 1)
+    }
+
+    /// Codex pre-landing review round 1, finding 1 (P1): since a `libraryID`
+    /// can never be both active and queued at once, `cancel(libraryID:)`'s
+    /// queued-removal half can never reach into `activeTasks` for that same
+    /// id -- so cancelling a queued entry must never touch an unrelated
+    /// active scan.
+    func testCancelQueuedItemNeverAffectsUnrelatedActiveScans() async throws {
+        let coordinator = MultiSourceScanCoordinator()
+        let tracker = ScanTracker()
+        let activeA = LibraryID()
+        let activeB = LibraryID()
+        let queuedID = LibraryID()
+
+        await coordinator.enqueue(libraryID: activeA, priority: .normal) { await tracker.run(activeA) }
+        await coordinator.enqueue(libraryID: activeB, priority: .normal) { await tracker.run(activeB) }
+        await waitUntil("both to start") { await tracker.startedIDs.count == 2 }
+
+        await coordinator.enqueue(libraryID: queuedID, priority: .normal) { await tracker.run(queuedID) }
+        let queuedBeforeCancel = await coordinator.queuedLibraryIDs
+        XCTAssertEqual(queuedBeforeCancel, [queuedID])
+
+        await coordinator.cancel(libraryID: queuedID)
+
+        let activeIDsAfterCancel = await coordinator.activeLibraryIDs
+        XCTAssertEqual(
+            activeIDsAfterCancel, [activeA, activeB],
+            "Cancelling a queued entry must not touch unrelated active scans"
+        )
+        let queuedAfterCancel = await coordinator.queuedLibraryIDs
+        XCTAssertEqual(queuedAfterCancel, [])
+
+        try? await Task.sleep(for: .milliseconds(100))
+        let queuedIDStarted = await tracker.startedIDs.contains(queuedID)
+        XCTAssertFalse(queuedIDStarted, "A cancelled queued operation must never run")
+
+        await tracker.release(activeA)
+        await tracker.release(activeB)
     }
 
     // MARK: - High-density scheduling

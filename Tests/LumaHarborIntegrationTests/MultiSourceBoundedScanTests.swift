@@ -380,4 +380,112 @@ final class MultiSourceBoundedScanTests: TemporaryDirectoryTestCase {
             "The selected-priority source must start before the earlier-queued normal source"
         )
     }
+
+    /// Codex pre-landing review round 1, finding 2 (P2): the previous
+    /// implementation gave each listed source its own concurrent `TaskGroup`
+    /// child task, and which child actually reached the coordinator first was
+    /// a race -- so within a *single* `scanLibraries([normalA, normalB,
+    /// selectedC], selectedLibraryID: selectedC)` call, two normal sources
+    /// listed earlier in the array could win both scan slots before the
+    /// selected one ever registered. This proves one batch call always
+    /// starts the selected source within the two-slot budget, never leaving
+    /// it to wait for a third slot.
+    func testSelectedSourceStartsWithinTwoSlotBudgetInASingleScanLibrariesBatch() async throws {
+        let rootA = try makeSubdirectory("BatchPriorityNormalA")
+        let rootB = try makeSubdirectory("BatchPriorityNormalB")
+        let rootC = try makeSubdirectory("BatchPrioritySelectedC")
+
+        let gate = InspectionGate()
+        let decoder = GatedScanDecoder()
+        decoder.gate = gate
+        decoder.gateAfterFileCount = 0
+
+        let service = try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: try makeSubdirectory("BatchPriorityAppSupport")),
+            decoder: decoder,
+            scanner: FolderScanner(batchSize: 1)
+        )
+
+        for root in [rootA, rootB, rootC] {
+            try writeFile(Data("batch priority test bytes".utf8), at: root.appendingPathComponent("one.ARW"))
+        }
+
+        let normalA = try await addLibrary(service, at: rootA, displayName: "Normal A")
+        let normalB = try await addLibrary(service, at: rootB, displayName: "Normal B")
+        let selectedC = try await addLibrary(service, at: rootC, displayName: "Selected C")
+
+        actor StartOrder {
+            private(set) var order: [LibraryID] = []
+            func record(_ id: LibraryID) { order.append(id) }
+        }
+        let startOrder = StartOrder()
+
+        let runTask = Task {
+            await service.scanLibraries(
+                [normalA.id, normalB.id, selectedC.id],
+                selectedLibraryID: selectedC.id
+            ) { id, event in
+                if case .started = event { await startOrder.record(id) }
+            }
+        }
+
+        await waitUntil("two sources to start under the slot budget") { gate.started >= 2 }
+        let orderAfterTwo = await startOrder.order
+        XCTAssertEqual(orderAfterTwo.count, 2, "Exactly two sources may start under the two-slot budget")
+        XCTAssertTrue(
+            orderAfterTwo.contains(selectedC.id),
+            "The selected source must start within the two-slot budget, listed last or not"
+        )
+
+        gate.release()
+        await runTask.value
+
+        let finalOrder = await startOrder.order
+        XCTAssertEqual(Set(finalOrder), [normalA.id, normalB.id, selectedC.id])
+    }
+
+    // MARK: - Duplicate libraryID within one scanLibraries call
+
+    /// Codex pre-landing review round 1, finding 1 (P1): before the fix, the
+    /// coordinator could let a `libraryID` be simultaneously active and
+    /// queued, so `scanLibraries([id, id], selectedLibraryID: nil)` could run
+    /// the same source's scan twice -- doubling delivered `.started`/
+    /// `.finished` events and re-running the index/manifest/`lastScanAt`
+    /// commit a second time on top of the first. This proves a repeated id
+    /// in one call scans exactly once, end to end.
+    func testScanLibrariesDeduplicatesARepeatedLibraryIDWithinOneCall() async throws {
+        let root = try makeSubdirectory("DuplicateIDRoot")
+        try writeFile(Data("duplicate id test bytes".utf8), at: root.appendingPathComponent("one.ARW"))
+
+        let service = try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: try makeSubdirectory("DuplicateIDAppSupport"))
+        )
+        let library = try await addLibrary(service, at: root, displayName: "Duplicate")
+
+        actor Collector {
+            private(set) var startedCount = 0
+            private(set) var finishedCount = 0
+            func record(_ event: LibraryScanEvent) {
+                switch event {
+                case .started: startedCount += 1
+                case .finished: finishedCount += 1
+                default: break
+                }
+            }
+        }
+        let collector = Collector()
+
+        await service.scanLibraries([library.id, library.id], selectedLibraryID: nil) { _, event in
+            await collector.record(event)
+        }
+
+        let startedCount = await collector.startedCount
+        let finishedCount = await collector.finishedCount
+        XCTAssertEqual(startedCount, 1, "A repeated libraryID in one call must only start one scan")
+        XCTAssertEqual(finishedCount, 1, "A repeated libraryID in one call must only finish one scan")
+
+        let libraryAfterScan = await service.library(id: library.id)
+        let folder = try XCTUnwrap(libraryAfterScan)
+        XCTAssertNotNil(folder.lastScanAt, "The single scan must still record lastScanAt")
+    }
 }
