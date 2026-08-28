@@ -182,8 +182,7 @@ public actor PhotoLibraryService {
         decoder: any RawDecoding = CoreImageRawDecoder(),
         scanner: FolderScanner = FolderScanner(),
         folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
-        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver(),
-        bookmarkDataCreator: any BookmarkDataCreating = SystemBookmarkDataCreator()
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
     ) throws {
         try self.init(
             locations: locations,
@@ -192,7 +191,7 @@ public actor PhotoLibraryService {
             scanner: scanner,
             folderAccessResolver: folderAccessResolver,
             resourceIdentityResolver: resourceIdentityResolver,
-            bookmarkDataCreator: bookmarkDataCreator,
+            bookmarkDataCreator: SystemBookmarkDataCreator(),
             registryTransactionStore: nil
         )
     }
@@ -893,27 +892,38 @@ public actor PhotoLibraryService {
         }
     }
 
+    /// Every throwing step (the projection re-read and, when requested, the
+    /// index upsert) must finish before anything nonthrowing is committed.
+    /// `stagedAccess` was never inserted into `access`, so stopping it on
+    /// failure only releases a resource this call never published — it does
+    /// not touch durable or actor-visible state. If either throwing step
+    /// fails, the existing `access`/`libraries`/`restoreDiagnostics` entries
+    /// for this library are left completely untouched, matching whatever was
+    /// last durably committed.
     private func commitDisconnectedRestore(
         folder initialFolder: LibraryFolder,
         diagnostic: LibraryRestoreDiagnostic?,
         stagedAccess: (any FolderAccessHandle)?,
         persistLibraryProjection: Bool = true
     ) throws -> LibraryFolder {
-        stagedAccess?.stop()
-        access.removeValue(forKey: initialFolder.id)?.stop()
-
         var folder = initialFolder
+        do {
+            try populateRestoreProjection(&folder)
+            if persistLibraryProjection {
+                try index.upsert(library: folder)
+            }
+        } catch {
+            stagedAccess?.stop()
+            throw error
+        }
+
+        stagedAccess?.stop()
+        access.removeValue(forKey: folder.id)?.stop()
         libraries[folder.id] = folder
         if let diagnostic {
             restoreDiagnostics[folder.id] = diagnostic
         } else {
             restoreDiagnostics.removeValue(forKey: folder.id)
-        }
-
-        try populateRestoreProjection(&folder)
-        libraries[folder.id] = folder
-        if persistLibraryProjection {
-            try index.upsert(library: folder)
         }
         return folder
     }
