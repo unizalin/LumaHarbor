@@ -722,4 +722,107 @@ final class MultiSourceScanCoordinatorTests: XCTestCase {
         let ranValue = await ran.value
         XCTAssertFalse(ranValue, "A cancelled queued run(...) operation must never execute")
     }
+
+    // MARK: - Rider cancellation must not cancel the active owner
+
+    /// Codex pre-landing re-review round 2, finding 1 (P1, blocking): the
+    /// round-1 fix let a duplicate registration against an already-active
+    /// `libraryID` ride along on that active run instead of queuing a
+    /// second one, but `run(...)`'s cancellation handler still called the
+    /// unconditional `cancel(libraryID:)` -- so cancelling the *rider's own*
+    /// caller (e.g. a second, independent `PhotoLibraryService.scanLibraries`
+    /// call for the same source) tore down the *original* caller's
+    /// already-active scan too. This proves cancelling a rider now only
+    /// removes that rider's own wait -- the active owner's scan, and its
+    /// operation, are completely unaffected.
+    func testCancellingARiderNeverCancelsTheActiveOwnersScan() async throws {
+        let coordinator = MultiSourceScanCoordinator()
+        let tracker = ScanTracker()
+        let id = LibraryID()
+
+        let ownerTask = Task {
+            await coordinator.run(libraryID: id, priority: .normal) { await tracker.run(id) }
+        }
+        await waitUntil("the owner to start") { await tracker.startedIDs.contains(id) }
+
+        let riderRan = Flag()
+        let riderDone = Flag()
+        let riderTask = Task {
+            await coordinator.run(libraryID: id, priority: .normal) { await riderRan.set() }
+            await riderDone.set()
+        }
+        // Give the rider a moment to actually register (become a rider on
+        // the active owner) before cancelling it.
+        try? await Task.sleep(for: .milliseconds(50))
+
+        riderTask.cancel()
+        await waitUntil("the cancelled rider to return") { await riderDone.value }
+
+        // The owner's scan must be completely unaffected by the rider's own
+        // cancellation: still active, its own operation not released or
+        // disturbed.
+        try? await Task.sleep(for: .milliseconds(100))
+        let activeCountAfterRiderCancel = await coordinator.activeCount
+        XCTAssertEqual(
+            activeCountAfterRiderCancel, 1,
+            "Cancelling a rider must not cancel the active owner's scan"
+        )
+        let runCountBeforeRelease = await tracker.runCounts[id]
+        XCTAssertEqual(runCountBeforeRelease, 1, "The owner's operation must not be re-run or disturbed")
+
+        await tracker.release(id)
+        await ownerTask.value
+        let finalRunCount = await tracker.runCounts[id]
+        XCTAssertEqual(
+            finalRunCount, 1,
+            "The owner's operation must run exactly once, undisturbed by the cancelled rider"
+        )
+        let maxConcurrentByID = await tracker.maximumConcurrentCountByID[id]
+        XCTAssertEqual(maxConcurrentByID, 1)
+        let riderRanValue = await riderRan.value
+        XCTAssertFalse(riderRanValue, "A cancelled rider must never run its own operation")
+    }
+
+    /// Same finding, exercised through `runBatch(_:)`: cancelling the task
+    /// running a batch whose only entry turned out to be a rider on someone
+    /// else's active scan must not cancel that active scan either.
+    func testCancellingARiderWithinRunBatchNeverCancelsTheActiveOwnersScan() async throws {
+        let coordinator = MultiSourceScanCoordinator()
+        let tracker = ScanTracker()
+        let id = LibraryID()
+
+        let ownerTask = Task {
+            await coordinator.run(libraryID: id, priority: .normal) { await tracker.run(id) }
+        }
+        await waitUntil("the owner to start") { await tracker.startedIDs.contains(id) }
+
+        let riderRan = Flag()
+        let batchTask = Task {
+            await coordinator.runBatch([
+                (libraryID: id, priority: .normal, operation: { await riderRan.set() }),
+            ])
+        }
+        // Give the batch's single entry a moment to actually register as a
+        // rider before cancelling the whole batch call.
+        try? await Task.sleep(for: .milliseconds(50))
+
+        batchTask.cancel()
+        await batchTask.value
+
+        try? await Task.sleep(for: .milliseconds(100))
+        let activeCountAfterRiderCancel = await coordinator.activeCount
+        XCTAssertEqual(
+            activeCountAfterRiderCancel, 1,
+            "Cancelling a runBatch(_:) call whose entry is riding on an active scan must not cancel that scan"
+        )
+        let runCountBeforeRelease = await tracker.runCounts[id]
+        XCTAssertEqual(runCountBeforeRelease, 1, "The owner's operation must not be re-run or disturbed")
+
+        await tracker.release(id)
+        await ownerTask.value
+        let finalRunCount = await tracker.runCounts[id]
+        XCTAssertEqual(finalRunCount, 1, "The owner's operation must run exactly once")
+        let riderRanValue = await riderRan.value
+        XCTAssertFalse(riderRanValue, "A cancelled batch rider must never run its own operation")
+    }
 }

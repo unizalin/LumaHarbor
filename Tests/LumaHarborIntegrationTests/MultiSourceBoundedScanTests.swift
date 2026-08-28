@@ -488,4 +488,101 @@ final class MultiSourceBoundedScanTests: TemporaryDirectoryTestCase {
         let folder = try XCTUnwrap(libraryAfterScan)
         XCTAssertNotNil(folder.lastScanAt, "The single scan must still record lastScanAt")
     }
+
+    // MARK: - Concurrent caller cancellation must not cancel another caller's scan
+
+    /// Codex pre-landing re-review round 2, finding 1 (P1, blocking),
+    /// end to end: two independent `scanLibraries` callers for the same
+    /// `libraryID` are exactly the scenario the coordinator-level rider tests
+    /// exercise directly, and exactly what Task 5's UI-driven scans (a query
+    /// change re-triggering a scan while the previous one is still running)
+    /// would hit in practice. Cancelling the second, later caller must never
+    /// cancel the first caller's already-running scan.
+    func testCancellingAConcurrentScanLibrariesCallerDoesNotCancelTheOriginalScan() async throws {
+        let root = try makeSubdirectory("ConcurrentCallerRoot")
+        try writeFile(Data("concurrent caller test bytes".utf8), at: root.appendingPathComponent("one.ARW"))
+
+        let gate = InspectionGate()
+        let decoder = GatedScanDecoder()
+        decoder.gate = gate
+        decoder.gateAfterFileCount = 0
+
+        let service = try PhotoLibraryService(
+            locations: ApplicationSupportLocations(baseURL: try makeSubdirectory("ConcurrentCallerAppSupport")),
+            decoder: decoder,
+            scanner: FolderScanner(batchSize: 1)
+        )
+        let library = try await addLibrary(service, at: root, displayName: "Concurrent")
+
+        actor Collector {
+            private(set) var startedCount = 0
+            private(set) var finishedCount = 0
+            private(set) var lastResult: LibraryScanResult?
+            func record(_ event: LibraryScanEvent) {
+                switch event {
+                case .started:
+                    startedCount += 1
+                case .finished(let result):
+                    finishedCount += 1
+                    lastResult = result
+                default:
+                    break
+                }
+            }
+        }
+
+        let collectorA = Collector()
+        let callerA = Task {
+            await service.scanLibraries([library.id], selectedLibraryID: nil) { _, event in
+                await collectorA.record(event)
+            }
+        }
+        await waitUntil("caller A to start scanning") { gate.started >= 1 }
+
+        let collectorB = Collector()
+        let callerB = Task {
+            await service.scanLibraries([library.id], selectedLibraryID: nil) { _, event in
+                await collectorB.record(event)
+            }
+        }
+        // Give caller B a moment to actually register (as a rider on caller
+        // A's already-active scan) before cancelling it.
+        try? await Task.sleep(for: .milliseconds(50))
+
+        callerB.cancel()
+        await callerB.value
+
+        // Caller A's scan must be completely unaffected by caller B's
+        // cancellation: still gated, not finished, not cancelled.
+        let startedCountA = await collectorA.startedCount
+        XCTAssertEqual(startedCountA, 1)
+        let finishedCountABeforeRelease = await collectorA.finishedCount
+        XCTAssertEqual(
+            finishedCountABeforeRelease, 0,
+            "Cancelling caller B must not finish or cancel caller A's still-running scan"
+        )
+
+        gate.release()
+        await callerA.value
+
+        let finishedCountA = await collectorA.finishedCount
+        XCTAssertEqual(finishedCountA, 1, "Caller A must receive exactly one .finished event")
+        let lastResultA = await collectorA.lastResult
+        let resultA = try XCTUnwrap(lastResultA)
+        XCTAssertFalse(
+            resultA.wasCancelled,
+            "Caller A's scan must complete successfully, unaffected by caller B's cancellation"
+        )
+
+        // Caller B rode on caller A's scan and was cancelled before that
+        // scan finished, so it never ran its own operation and never
+        // observed either event.
+        let startedCountB = await collectorB.startedCount
+        XCTAssertEqual(startedCountB, 0)
+        let finishedCountB = await collectorB.finishedCount
+        XCTAssertEqual(finishedCountB, 0)
+
+        let libraryAfterScan = await service.library(id: library.id)
+        XCTAssertNotNil(libraryAfterScan?.lastScanAt, "The original, uninterrupted scan must still record lastScanAt")
+    }
 }
