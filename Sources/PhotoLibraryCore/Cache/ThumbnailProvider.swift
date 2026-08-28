@@ -222,31 +222,44 @@ public actor ThumbnailProvider {
 
     /// Whether `photoID`'s cache entry is currently protected from
     /// eviction. Test/diagnostic observability for `pin`/`unpin`/
-    /// `pinnedUntilCancelled`'s effect on the underlying `DiskCache`.
+    /// `withVisiblePin`'s effect on the underlying `DiskCache`.
     public func isPinned(photoID: PhotoID) async -> Bool {
         await cache.isPinned(cacheKey(for: photoID))
     }
 
-    /// Keeps `photoID` pinned for the caller's entire task lifecycle, not
-    /// just while some load is in flight -- a cell's "protect what's on
-    /// screen" contract lasts as long as it's actually on screen, well past
-    /// whatever load first put its thumbnail there (Codex pre-landing
-    /// review, Task 7 round: pinning only for a load's duration let a
-    /// still-visible thumbnail become evictable again the moment its load
-    /// finished).
+    /// Runs `operation` (typically a thumbnail load) under `photoID`'s
+    /// pin, and keeps it pinned for the caller's entire task lifetime
+    /// afterward -- not just while `operation` itself is in flight -- so a
+    /// cell stays protected for as long as it's actually on screen, past
+    /// whatever load first put its thumbnail there.
     ///
-    /// Pins, then suspends until this task is cancelled -- `Task.sleep` is
-    /// cooperative: cancellation interrupts it immediately by throwing
-    /// `CancellationError`, however long the nominal duration, so only
-    /// being cancelled ever ends the wait, never the duration itself -- and
-    /// only then unpins, awaited directly here in this same structured
-    /// task. Callers should run their own load work concurrently with this
-    /// (e.g. via `async let`) and await this call last, so cancellation
-    /// propagates to both and unpin only ever runs inline in the caller's
-    /// own structured task, never a separate unstructured `Task { }` that
-    /// could race the pin.
-    public func pinnedUntilCancelled(photoID: PhotoID) async {
+    /// Owns the *whole* pin/operation/wait/unpin contract as one atomic
+    /// unit rather than leaving a caller to compose `pin()`, its own load,
+    /// and `unpin()` correctly by hand -- two prior review rounds on this
+    /// exact call site got that composition wrong in two different ways:
+    /// unpinning the moment a *sibling* `async let` operation finished
+    /// (protecting only the load's duration, not the display's), and
+    /// running pin and the operation as `async let` siblings with no
+    /// ordering guarantee between them at all (`operation` could start,
+    /// decode, and store -- triggering `DiskCache`'s own immediate
+    /// `evictIfNeeded()` -- before `pin` had actually landed on the cache,
+    /// defeating `DiskCache.store`'s "pin before store" contract that
+    /// `ThumbnailProviderTests.testPinBeforeStoreProtectsTheEntryThatArrivesLater`
+    /// already guards). Pinning and running `operation` are sequential
+    /// statements here, not concurrent siblings, so `operation` can never
+    /// start until `pin`'s effect on the actor is already committed.
+    ///
+    /// After `operation` returns, suspends until this task is cancelled --
+    /// `Task.sleep` is cooperative: cancellation interrupts it immediately
+    /// by throwing `CancellationError`, however long the nominal duration,
+    /// so only being cancelled ever ends the wait, never the duration
+    /// itself -- and only then unpins, awaited directly here in this same
+    /// structured task. A caller never needs its own `async let` or a
+    /// separate unstructured `Task { unpin() }` that could race any of
+    /// this.
+    public func withVisiblePin(photoID: PhotoID, operation: @Sendable () async -> Void) async {
         await pin(photoID: photoID)
+        await operation()
         // A cell is never visible for anywhere close to this long -- this
         // is just "effectively forever, until cancelled." Deliberately not
         // `.seconds(Int64.max)`: converting a duration that large down to
