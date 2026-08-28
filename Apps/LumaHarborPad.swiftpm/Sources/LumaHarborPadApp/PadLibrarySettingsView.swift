@@ -1,3 +1,4 @@
+import EditorCore
 import Localization
 import SwiftUI
 
@@ -56,6 +57,7 @@ struct PadLibrarySettingsView: View {
     let userDefaults: UserDefaults
 
     @State private var selection: PadThumbnailCacheBudget
+    @State private var alert: EditorAlert?
 
     init(services: PadAppServices, userDefaults: UserDefaults = .standard) {
         self.services = services
@@ -91,16 +93,31 @@ struct PadLibrarySettingsView: View {
             }
         }
         .navigationTitle(L10n.t("Thumbnail Cache"))
+        .alert(item: $alert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text([alert.message, alert.nextStep].compactMap { $0 }.joined(separator: "\n\n")),
+                dismissButton: .default(Text(L10n.t("OK")))
+            )
+        }
     }
 
     /// Persists `budget`, then calls the existing `ThumbnailProvider
     /// .setByteBudget(_:)` passthrough immediately -- the disk cache
     /// evicts down to the new budget right away rather than waiting for
-    /// the next launch.
+    /// the next launch. A thrown failure (e.g. `CacheError
+    /// .insufficientDiskSpace`/`.writeFailed`) is surfaced to the user via
+    /// a `SafeErrorPresentation` alert rather than silently discarded --
+    /// the selection/`UserDefaults` already changed, so the user must be
+    /// told when the live cache didn't actually follow.
     private func apply(_ budget: PadThumbnailCacheBudget) {
         userDefaults.set(Int(budget.rawValue), forKey: PadThumbnailCacheBudget.userDefaultsKey)
         Task {
-            try? await services.thumbnailProvider.setByteBudget(budget.rawValue)
+            do {
+                try await services.thumbnailProvider.setByteBudget(budget.rawValue)
+            } catch {
+                alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't update the cache size"), for: error)
+            }
         }
     }
 }

@@ -67,6 +67,7 @@
 "Couldn't rename this preset" = "無法重新命名這個 Preset";
 "Couldn't save your edits" = "無法儲存你的編輯";
 "Couldn't show this photo" = "無法顯示這張照片";
+"Couldn't update the cache size" = "無法更新快取大小";
 "Create a preset from this photo" = "從這張照片建立 Preset";
 "Create Preset" = "建立 Preset";
 "Decoding RAW…" = "正在解碼 RAW…";
