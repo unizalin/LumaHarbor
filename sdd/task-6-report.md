@@ -25,8 +25,7 @@ DONE (pending Codex pre-landing review)
 
 ## Commit hash
 
-Recorded after the commit for this round is created (see the end of this
-report / the follow-up message).
+`ca34a4b` — feat: add adaptive iPad library navigation
 
 ## Changed files
 
