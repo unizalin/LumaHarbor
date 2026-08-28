@@ -300,7 +300,7 @@ treated as a new finding.
   English** — conventional for unit abbreviations in Traditional Chinese
   UI copy, not treated as a real translation gap.
 
-## Codex pre-landing review fixes (commit TBD)
+## Codex pre-landing review fixes (commit `38e857c`)
 
 Codex's pre-landing review of the branch (range `f28e68f..e58fda3`) returned
 **BLOCKED** with 2 P1 findings, both distinct from the two review rounds
@@ -426,5 +426,6 @@ was safe) rather than only reasoning about the diff.
   at any point, across any commit in this task.
 - No Task 8 or Task 9 file was created or modified.
 - Commits from this task: `70ca1b6` (implementation), `eefe9c3` (review
-  round 1 fixes), `e58fda3` (this report), and the Codex pre-landing-review
-  fix commit recorded at the top of this section once created.
+  round 1 fixes), `e58fda3` (Task 7 report), `38e857c` (Codex
+  pre-landing-review fixes), and `<this commit>` (recording this hash in
+  the report).
