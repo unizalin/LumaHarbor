@@ -68,7 +68,13 @@ private actor FakeLibraryEnvironment {
 
     // MARK: Paging
 
-    private(set) var fetchCalls: [LibraryQuery] = []
+    /// Every `fetchPage` call this environment has actually seen, in order,
+    /// query paired with the exact `cursor` it was called with -- so a test
+    /// can assert not just *which* query was fetched but whether it was
+    /// correctly paired with a `nil` (first-page) cursor or a specific
+    /// prior page's cursor, never one query's cursor handed in alongside a
+    /// *different* query's scope/search/sort.
+    private(set) var fetchCalls: [(query: LibraryQuery, cursor: PhotoPageCursor?)] = []
     /// Scripted pages, keyed by a query's own string description (stable
     /// and distinct per distinct scope/search/sort combination). Which page
     /// a call serves is decided by the `cursor` it passes, exactly like the
@@ -98,11 +104,11 @@ private actor FakeLibraryEnvironment {
         gateWaiters = []
     }
 
-    var fetchQueries: [LibraryQuery] { fetchCalls }
+    var fetchQueries: [LibraryQuery] { fetchCalls.map(\.query) }
     var fetchCallCount: Int { fetchCalls.count }
 
     func fetchPage(_ query: LibraryQuery, _ cursor: PhotoPageCursor?, _ limit: Int) async throws -> PhotoPage {
-        fetchCalls.append(query)
+        fetchCalls.append((query, cursor))
         if isGated, !isGateOpen {
             gatedEntryCount += 1
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -638,6 +644,70 @@ final class LibraryBrowserSessionTests: XCTestCase {
         XCTAssertFalse(session.photos.contains { $0.id == pageTwoStale[0].id })
 
         try await waitUntil(timeout: 3) { session.photos.map(\.id) == [finalPhoto.id] }
+    }
+
+    /// Codex pre-landing re-review round 2, finding 1 (P1, blocking): the
+    /// round-1 fix bumped `queryGeneration` synchronously on a search-text
+    /// change, but left `nextCursor` (the *outgoing* query's paging
+    /// position) sitting there, still non-nil, until the debounce fired.
+    /// `PhotoPageCursor` is only valid for the exact query shape that
+    /// produced it -- if `loadNextPage()` is called during that window, its
+    /// own guards would both pass (`nextCursor != nil`, `loadState ==
+    /// .loaded`), and it would fetch the *new* query (already reflecting
+    /// the new search text) paired with the *old* query's cursor: a
+    /// malformed keyset request that generation-checking alone cannot
+    /// catch, since it starts under the already-bumped generation. This
+    /// proves the cursor (and paging capability) is invalidated
+    /// synchronously too, not just the generation counter.
+    func testUpdatingSearchTextImmediatelyInvalidatesTheCursorSoLoadNextPageCannotMixQueries() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let sourceID = LibraryID()
+        let queryA = LibraryQuery(scope: .all, sort: .captureDateDescending)
+        let pageOneA = [makePhoto(libraryID: sourceID, name: "a1.ARW")]
+        let pageTwoA = [makePhoto(libraryID: sourceID, name: "a2.ARW")]
+        await environment.setPages(for: queryA, pages: [pageOneA, pageTwoA])
+        let finalQuery = LibraryQuery(scope: .all, filenameSearch: "final", sort: .captureDateDescending)
+        let finalPhoto = makePhoto(libraryID: sourceID, name: "final-match.ARW")
+        await environment.setPages(for: finalQuery, pages: [[finalPhoto]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        XCTAssertEqual(session.photos.map(\.id), pageOneA.map(\.id))
+        XCTAssertNotNil(session.nextCursor, "premise: query A has a next page to paginate into")
+
+        session.updateSearchText("final")
+
+        // Immediately -- before the 250 ms debounce has had any chance to
+        // fire -- the outgoing query's cursor must already be gone, and
+        // loadState must already read as a pending first-page load (which
+        // blocks loadNextPage() on its own).
+        XCTAssertNil(session.nextCursor, "the outgoing query's cursor must never survive a search-text change")
+        XCTAssertEqual(session.loadState, .loadingFirstPage, "a pending first-page load must block loadNextPage() immediately")
+
+        // A caller (scroll/prefetch) tries to page during the debounce
+        // window anyway -- must be a complete no-op, not a malformed
+        // request mixing the new query with the old cursor.
+        session.loadNextPage()
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let callsSoFar = await environment.fetchCalls
+        XCTAssertFalse(
+            callsSoFar.contains { $0.query.filenameSearch == "final" },
+            "no fetch for the new search text may have gone out yet, still within the debounce window"
+        )
+        XCTAssertFalse(
+            callsSoFar.contains { $0.cursor != nil && $0.query.filenameSearch == "final" },
+            "fetchPage must never be called with the new search query paired with the old query's cursor"
+        )
+
+        // Once the debounce actually fires, exactly one first-page (cursor
+        // == nil) request for the new search text must go out.
+        try await waitUntil(timeout: 3) { session.photos.map(\.id) == [finalPhoto.id] }
+        let finalCalls = await environment.fetchCalls.filter { $0.query.filenameSearch == "final" }
+        XCTAssertEqual(finalCalls.count, 1)
+        XCTAssertNil(finalCalls.first?.cursor, "the new search's first fetch must use a nil cursor, never the old query's")
     }
 
     // MARK: 5. Page window bound

@@ -254,9 +254,37 @@ public final class LibraryBrowserSession: ObservableObject {
     /// counterpart that both invalidates *and* immediately starts the new
     /// fetch; this one only does the first half, for callers (the search
     /// debounce) that must invalidate now but delay issuing the new fetch.
+    ///
+    /// Codex review: bumping the generation alone is not enough while a
+    /// stale `nextCursor` is still sitting there. `PhotoPageCursor` is only
+    /// valid for the exact `LibraryQuery` shape (scope/search/sort) that
+    /// produced it -- it is not just "the boundary between page N and
+    /// N+1," it *is* page N's position within that specific query. A call
+    /// to `loadNextPage()` made during the debounce window (before
+    /// `beginNewQuery()` has run) reads `queryGeneration` and `nextCursor`
+    /// fresh at that moment: with only the generation bumped, `nextCursor`
+    /// still non-nil, and `loadState` still `.loaded`, `loadNextPage()`'s
+    /// own guards would both pass, and it would start a *new* fetch --
+    /// under the *already-bumped* generation -- pairing the outgoing
+    /// query's cursor with the incoming query's scope/search/sort. That
+    /// fetch's own generation check would then pass too (nothing bumped it
+    /// again yet), so a keyset request built from two different queries
+    /// could actually reach `fetchPage` and commit its result. Clearing
+    /// `nextCursor` and marking `loadState` as a pending first-page load
+    /// here, synchronously, is what makes `loadNextPage()` a no-op for the
+    /// rest of the debounce window: its own "is there a next cursor" and
+    /// "is a first page already loading" guards both cover this on their
+    /// own, with no extra state introduced.
+    ///
+    /// `photos` is deliberately left untouched here -- the outgoing query's
+    /// rows may keep showing during the debounce gap; only *paging past
+    /// them* is what must never be possible until the new first page has
+    /// actually loaded.
     private func invalidateCurrentQuery() {
         queryGeneration += 1
         pageTask?.cancel()
+        nextCursor = nil
+        loadState = .loadingFirstPage
     }
 
     private func beginNewQuery() {

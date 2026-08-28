@@ -24,7 +24,8 @@ DONE
 ## Commit hash
 
 `7a8d140` — feat: add testable multi-source library browser session
-(round-1 review fix commit hash is recorded in "Review fix round 1" below)
+(round-1 and round-2 review fix commit hashes are recorded in their own
+"Review fix round N" sections below)
 
 ## Changed files
 
@@ -377,6 +378,109 @@ Results:
   passed (0.097 s), and no residual `xctest`/`swift-frontend` process
   remained afterward. As in the prior round, this is reported as observed
   on this attempt in this environment, not asserted to be hang-proof
+  everywhere.
+
+### Remaining concerns
+
+None identified at the time. **Update (round 2):** Codex's next re-review
+found a related gap this round's fix did not cover — see "Review fix round
+2" below.
+
+## Review fix round 2
+
+Codex's pre-landing re-review of round 1's fix (`06b383f`) returned
+**BLOCKED** with one further finding in `LibraryBrowserSession.swift`,
+directly adjacent to round 1's search-debounce fix.
+
+### Finding (P1, blocking): a stale `nextCursor` could pair the new search query with the old query's cursor
+
+**Finding.** Round 1's `invalidateCurrentQuery()` bumped `queryGeneration`
+and cancelled `pageTask` immediately on a search-text change, which closed
+the "stale fetch commits its result" window. But it left `nextCursor` (the
+*outgoing* query's paging position) and `loadState` (still `.loaded`)
+untouched until the debounce timer's `beginNewQuery()` eventually ran.
+`PhotoPageCursor` is not a generic "there's more data" flag — it *is* a
+specific query's position within its own scope/search/sort shape, and Task
+1's own documentation on it is explicit that a cursor is "only valid when
+passed back into the same `LibraryQuery` ... that produced it." During the
+debounce window, `loadNextPage()`'s two guards
+(`nextCursor != nil`, `loadState` not already loading) both still passed,
+so a scroll/prefetch call arriving in that window would fetch
+`currentQuery` — which by then already reflected the *new* search text —
+paired with the *old* query's `nextCursor`. Because this new fetch's own
+`generation` is captured fresh (already past round 1's bump), its
+later completion would pass the generation check too: a malformed,
+cross-query keyset request could reach `fetchPage` and have its result
+committed, exactly the "generation guard doesn't catch it because the
+request itself started under the already-bumped generation" mechanism
+Codex's finding described.
+
+**Fix.** `invalidateCurrentQuery()` now also sets `nextCursor = nil` and
+`loadState = .loadingFirstPage`, synchronously, in the same call that
+bumps the generation and cancels `pageTask`. This closes the gap through
+`loadNextPage()`'s own existing guards, with no new state introduced:
+`nextCursor == nil` makes its first guard fail outright, and
+`loadState == .loadingFirstPage` makes its second guard fail too, as a
+second, independent line of defense. `photos` itself is deliberately left
+untouched — the outgoing query's rows may keep showing during the
+debounce gap (matching round 1's own choice not to blank the grid
+mid-debounce); only *paging past them* had to become impossible.
+`select(_:)`/`setSort(_:)` (which call `beginNewQuery()` directly, with no
+debounce) were never affected by this gap and needed no change.
+
+### New tests
+
+`Tests/EditorCoreTests/LibraryBrowserSessionTests.swift` (+1 test, 30 →
+31):
+
+- `testUpdatingSearchTextImmediatelyInvalidatesTheCursorSoLoadNextPageCannotMixQueries`
+  — loads query A's page one (confirms it has a `nextCursor`), calls
+  `updateSearchText("final")`, and *immediately* (no `await`, before the
+  debounce could possibly have fired) asserts `nextCursor == nil` and
+  `loadState == .loadingFirstPage`. Then calls `loadNextPage()` inside the
+  debounce window and asserts, after a short wait, that `fetchPage` was
+  never called with the new search query paired with a non-nil cursor —
+  and, once the debounce actually fires, that exactly one first-page
+  (`cursor == nil`) fetch for the new search text went out.
+
+`FakeLibraryEnvironment.fetchCalls` was widened from `[LibraryQuery]` to
+`[(query: LibraryQuery, cursor: PhotoPageCursor?)]` so a test can assert
+not just *which* query was fetched but what cursor it was paired with —
+the existing `fetchQueries` accessor (used by two earlier tests) was kept
+as a query-only projection over the same data, so no other test needed to
+change.
+
+### Verification (review fix round 2)
+
+```zsh
+swift test --filter LibraryBrowserSessionTests
+swift test --filter EditorCoreTests
+swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+git diff --check 85b1e03..HEAD
+swift test
+```
+
+Results:
+
+- `LibraryBrowserSessionTests`: **31 tests, 0 failures** (run 4×, 0
+  flakes; 1 new since round 1).
+- `EditorCoreTests` (full target): **95 tests, 0 failures** (94 before
+  this round + 1 new).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc
+  -warnings-as-errors`: **exit 0**, no warnings, run in this session's own
+  environment. Codex's round-2 review notes their own sandbox hit a
+  Swift/Clang module-cache permission problem on this exact command and
+  did not retry it with elevated permissions once a blocking finding had
+  already been identified — that is a sandbox/tooling constraint on their
+  side, not a build failure; this session's environment has no such
+  restriction and the command ran clean.
+- `git diff --check 85b1e03..HEAD`: **PASS**, no whitespace errors.
+- Full `swift test`: **1,045 tests, 9 skipped, 0 failures**, completed and
+  exited cleanly in 19.0 s (1,044 before this round + 1 new = 1,045).
+  `PendingLeaseSubprocessTests.testAProcessKilledWithSIGKILLReleasesItsLeaseForReconciliation`
+  passed (0.100 s), and no residual `xctest`/`swift-frontend` process
+  remained afterward. As in prior rounds, this is reported as observed on
+  this attempt in this environment, not asserted to be hang-proof
   everywhere.
 
 ### Remaining concerns
