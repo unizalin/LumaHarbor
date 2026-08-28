@@ -1109,9 +1109,23 @@ public actor PhotoLibraryService {
     /// `lastScanAt` safety, both left completely untouched. `onEvent` is
     /// awaited for every event before the next one is requested, so
     /// backpressure reaches the directory cursor exactly as it does for one
-    /// source; this method never buffers events of its own. A duplicate
-    /// `libraryIDs` entry is only ever scheduled once, since the coordinator
-    /// itself allows at most one active-or-queued entry per source.
+    /// source; this method never buffers events of its own.
+    ///
+    /// `libraryIDs` is de-duplicated up front -- a repeated entry is only
+    /// ever scanned once, and only ever delivers one `.started`/`.finished`
+    /// pair -- then ordered with the selected source (if present) first,
+    /// followed by every other requested source in its original order, and
+    /// registered with `scanCoordinator.runBatch(_:)` as a single atomic
+    /// batch rather than one `run(...)` call per source inside a
+    /// `TaskGroup`. That distinction matters: a `TaskGroup`'s child tasks
+    /// give no guarantee about which one actually reaches the coordinator
+    /// actor first, so spawning one concurrent child per source could let
+    /// two `.normal` sources win both scan slots before a `.selected` one
+    /// ever registers, even though this array puts it first. `runBatch(_:)`
+    /// registers the whole ordered batch in one non-suspending pass before
+    /// anything is allowed to start, so selected-source priority holds
+    /// regardless of how the coordinator's own internal tasks get scheduled
+    /// afterward.
     ///
     /// Returns once every listed source's scan has finished, failed, or been
     /// cancelled.
@@ -1121,19 +1135,31 @@ public actor PhotoLibraryService {
         onEvent: @escaping @Sendable (LibraryID, LibraryScanEvent) async -> Void
     ) async {
         guard !libraryIDs.isEmpty else { return }
-        await withTaskGroup(of: Void.self) { group in
-            for libraryID in libraryIDs {
-                let priority: MultiSourceScanCoordinator.ScanPriority =
-                    (libraryID == selectedLibraryID) ? .selected : .normal
-                group.addTask {
-                    await self.scanCoordinator.run(libraryID: libraryID, priority: priority) {
-                        for await event in self.scan(libraryID: libraryID) {
-                            await onEvent(libraryID, event)
-                        }
+
+        var orderedIDs: [LibraryID] = []
+        var seenIDs: Set<LibraryID> = []
+        if let selectedLibraryID, libraryIDs.contains(selectedLibraryID) {
+            orderedIDs.append(selectedLibraryID)
+            seenIDs.insert(selectedLibraryID)
+        }
+        for libraryID in libraryIDs where seenIDs.insert(libraryID).inserted {
+            orderedIDs.append(libraryID)
+        }
+
+        let entries = orderedIDs.map { libraryID in
+            (
+                libraryID: libraryID,
+                priority: (libraryID == selectedLibraryID)
+                    ? MultiSourceScanCoordinator.ScanPriority.selected
+                    : MultiSourceScanCoordinator.ScanPriority.normal,
+                operation: { @Sendable () async -> Void in
+                    for await event in self.scan(libraryID: libraryID) {
+                        await onEvent(libraryID, event)
                     }
                 }
-            }
+            )
         }
+        await scanCoordinator.runBatch(entries)
     }
 
     /// Runs one scan against an acknowledging emitter.
