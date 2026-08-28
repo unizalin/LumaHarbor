@@ -385,8 +385,8 @@ rebuild instead of indexing, and left unfixed for this one scope.
 
 ### Commit hash
 
-`<pending — recorded in a follow-up docs commit, matching this task's own
-established `ca34a4b`+`c35c9fe` / `3d416e4`+`68ab1c2` pattern>`
+`48d2843` — fix: include .recentlyEdited in the scan-completion query
+refresh
 
 ### Not push / merge / rebase / amend / Task 7 (round 2 fix)
 
