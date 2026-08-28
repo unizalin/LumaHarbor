@@ -238,6 +238,20 @@ private func makeFolder(
     )
 }
 
+private func makeScanResult(libraryID: LibraryID, indexedCount: Int = 0, failedCount: Int = 0) -> LibraryScanResult {
+    LibraryScanResult(
+        libraryID: libraryID,
+        indexedCount: indexedCount,
+        failedCount: failedCount,
+        ambiguousCount: 0,
+        movedCount: 0,
+        wasCancelled: false,
+        manifestWriteFailure: nil,
+        manifestWriteRecoverySuggestion: nil,
+        completedAt: Date(timeIntervalSince1970: 1_700_000_000)
+    )
+}
+
 private func waitUntil(
     timeout: TimeInterval = 3,
     _ condition: @MainActor () -> Bool
@@ -926,6 +940,117 @@ final class LibraryBrowserSessionTests: XCTestCase {
         }
         XCTAssertFalse(alert.message.contains("/private"))
         XCTAssertFalse(alert.message.contains("/"))
+    }
+
+    /// Codex pre-landing review, Task 6 blocking finding: a source added and
+    /// scanned while `.smart(.all)` is showing must not sit permanently
+    /// empty -- the scan actually indexed a photo into the store, so once it
+    /// finishes, the currently showing `.all` query must be reloaded and
+    /// pick that photo up, with no further user action required.
+    func testScanFinishingRefreshesTheCurrentAllQueryFromEmptyToVisible() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let allQuery = LibraryQuery(scope: .all, sort: .captureDateDescending)
+        await environment.setPages(for: allQuery, pages: [[]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        XCTAssertTrue(session.photos.isEmpty, "premise: nothing indexed yet")
+
+        let sourceID = LibraryID()
+        let indexedPhoto = makePhoto(libraryID: sourceID, name: "fresh.ARW")
+        // The scan itself is what would have written this photo into the
+        // index -- simulating that here by re-scripting the same `.all`
+        // query's page to now include it, exactly as a real re-fetch after
+        // an actual SQLite write would see.
+        await environment.setPages(for: allQuery, pages: [[indexedPhoto]])
+        await environment.setScanScript(for: sourceID, events: [
+            .started(sourceID),
+            .photosIndexed([indexedPhoto]),
+            .finished(makeScanResult(libraryID: sourceID, indexedCount: 1)),
+        ])
+
+        session.scanSource(sourceID)
+        try await waitUntil { session.photos.map(\.id) == [indexedPhoto.id] }
+
+        XCTAssertEqual(session.loadState, .loaded)
+        XCTAssertEqual(session.selection, .smart(.all), "the reload must not itself change the selection")
+        let allQueryFetchCount = await environment.fetchQueries.filter { $0.scope == .all }.count
+        XCTAssertEqual(allQueryFetchCount, 2, "startup's first page plus exactly one reload after the scan finished")
+    }
+
+    /// Same finding: a scope the scan does not affect -- `.appStorage`,
+    /// populated only by app-copy imports, never by an external source's
+    /// scan -- must never be disrupted by that scan's completion.
+    func testScanFinishingDoesNotDisruptAnUnaffectedSelection() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        let appStorageQuery = LibraryQuery(scope: .appStorage, sort: .captureDateDescending)
+        let appCopyPhoto = makePhoto(libraryID: .appStorage, name: "copy.ARW")
+        await environment.setPages(for: appStorageQuery, pages: [[appCopyPhoto]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        session.select(.smart(.appStorage))
+        try await waitUntil { session.photos.map(\.id) == [appCopyPhoto.id] }
+
+        let sourceID = LibraryID()
+        await environment.setScanScript(for: sourceID, events: [
+            .started(sourceID),
+            .finished(makeScanResult(libraryID: sourceID, indexedCount: 0)),
+        ])
+        session.scanSource(sourceID)
+        try await waitUntil {
+            if case .finished = session.sourceProgress[sourceID]?.phase { return true }
+            return false
+        }
+        try? await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertEqual(session.selection, .smart(.appStorage))
+        XCTAssertEqual(session.photos.map(\.id), [appCopyPhoto.id], "an unaffected selection must survive an unrelated source's scan completion")
+        let appStorageFetchCount = await environment.fetchQueries.filter { $0.scope == .appStorage }.count
+        XCTAssertEqual(appStorageFetchCount, 1, "no reload must have been triggered for a scope the scan doesn't affect")
+    }
+
+    /// Same finding: a scan's completion reload racing against the user
+    /// switching selection must lose exactly like any other superseded
+    /// query -- the scan-triggered reload of the outgoing scope must never
+    /// overwrite the newer selection's own result.
+    func testUserSwitchingSelectionDuringAScanCompletionReloadDiscardsTheStaleResult() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        let sourceID = LibraryID()
+        let otherSourceID = LibraryID()
+        let otherQuery = LibraryQuery(scope: .source(otherSourceID), sort: .captureDateDescending)
+        let otherPhoto = makePhoto(libraryID: otherSourceID, name: "other.ARW")
+        await environment.setPages(for: otherQuery, pages: [[otherPhoto]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        XCTAssertEqual(session.selection, .smart(.all))
+
+        await environment.setScanScript(for: sourceID, events: [
+            .started(sourceID),
+            .finished(makeScanResult(libraryID: sourceID, indexedCount: 1)),
+        ])
+        await environment.setGated(true)
+        session.scanSource(sourceID)
+        try await waitUntilAsync { await environment.gatedEntryCount >= 1 }
+
+        // The user switches away from `.all` before the scan's own reload
+        // fetch has resolved.
+        session.select(.source(otherSourceID))
+        await environment.openGate()
+        try await waitUntil { session.photos.map(\.id) == [otherPhoto.id] }
+
+        XCTAssertEqual(session.selection, .source(otherSourceID))
+        XCTAssertEqual(session.photos.map(\.id), [otherPhoto.id], "the stale scan-triggered reload of .all must never overwrite the newer selection's result")
+        XCTAssertEqual(session.loadState, .loaded)
     }
 
     func testScanningAnAlreadyScanningSourceIsANoOp() async throws {
