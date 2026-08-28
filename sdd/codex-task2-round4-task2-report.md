@@ -626,3 +626,171 @@ exactly `1`, not `2`, after both.
 
 None. No hang, no skip beyond the pre-existing 9, and no `Sources/` file was
 modified.
+
+---
+
+## Round 3 re-review CHANGES_REQUESTED fix — 2026-08-28
+
+### Status
+
+DONE
+
+- Starting HEAD: `cf555055ba4299b7aac5c40b88a6174fbe34f218`
+- This round addresses the two `CHANGES_REQUESTED` findings from Codex's
+  third re-review round. No Task 3 work was started; no RAW/original source
+  file was touched; no push/merge/rebase performed.
+
+### Finding 1 — public test seam removed from product API
+
+`BookmarkDataCreating`, `SystemBookmarkDataCreator`, and the `bookmarkDataCreator`
+parameter on `PhotoLibraryService`'s **public** initializer had all been made
+`public`, expanding the product's public API surface purely to support test
+injection — against the explicit handoff requirement that this stay an
+`internal` `Sendable` test seam.
+
+Fix in `Sources/PhotoLibraryCore/Access/SecurityScopedBookmark.swift`:
+
+- `protocol BookmarkDataCreating` and `struct SystemBookmarkDataCreator`
+  (with its `init()` and `makeBookmarkData(for:)`) all dropped from `public`
+  to the default (internal) access level.
+
+Fix in `Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`:
+
+- The **public** initializer no longer accepts a `bookmarkDataCreator`
+  parameter at all; it now always forwards `SystemBookmarkDataCreator()` to
+  the internal initializer.
+- The **internal** initializer (the one that also takes
+  `registryTransactionStore:`, already not part of the public surface) keeps
+  the `bookmarkDataCreator` parameter with its default, exactly as before.
+  This is the only initializer tests use for injection, reached via
+  `@testable import PhotoLibraryCore`.
+
+No other public product API changed: `FolderAccessResolving` /
+`SystemFolderAccessResolver` and `ResourceIdentityResolving` /
+`SystemResourceIdentityResolver` were already public before this task and are
+untouched (they are legitimate product seams the app target itself
+constructs, unlike `BookmarkDataCreating`, which existed solely for test
+injection).
+
+Test-side fallout: three call sites in
+`Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift` constructed
+`PhotoLibraryService` with a `bookmarkDataCreator:` label and no
+`registryTransactionStore:` label, which resolved to the (now nonexistent)
+public overload. All three — the shared `makeService` helper and two direct
+constructions in the stale-bookmark-creation-failure tests — were updated to
+pass `registryTransactionStore: nil` explicitly, selecting the internal
+initializer, exactly as the round 2/3 tests already did implicitly.
+
+### Finding 2 — `commitDisconnectedRestore` partial-commit window
+
+Previously, `commitDisconnectedRestore` stopped `stagedAccess`, removed and
+stopped the library's existing `access` entry, and wrote `libraries`/
+`restoreDiagnostics` — all nonthrowing actor-state mutations — *before*
+calling the throwing `populateRestoreProjection(&folder)` and (when
+requested) `index.upsert(library:)`. If either of those later calls threw
+(a second SQLite read/write failure), the method rethrew with the actor's
+`access`, `libraries`, and `restoreDiagnostics` already partially updated to
+a state that was never durably committed to SQLite — a real partial-commit
+window distinct from the caller-side `priorProjection` read failure already
+covered by
+`testCompoundBookmarkCreationAndIndexReadFailureStopsStagedHandleAndPreservesA`.
+
+Fix in `Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`
+(`commitDisconnectedRestore`): reordered so every throwing step runs first,
+against a local `folder` copy only:
+
+```swift
+var folder = initialFolder
+do {
+    try populateRestoreProjection(&folder)
+    if persistLibraryProjection {
+        try index.upsert(library: folder)
+    }
+} catch {
+    stagedAccess?.stop()
+    throw error
+}
+
+stagedAccess?.stop()
+access.removeValue(forKey: folder.id)?.stop()
+libraries[folder.id] = folder
+if let diagnostic {
+    restoreDiagnostics[folder.id] = diagnostic
+} else {
+    restoreDiagnostics.removeValue(forKey: folder.id)
+}
+return folder
+```
+
+`stagedAccess` was never inserted into the actor's `access` map by this
+method, so stopping it in the failure branch only releases a resource this
+call never published — it does not create or resolve a durable/actor-state
+mismatch, and skipping it would leak a security-scoped access. On failure,
+the actor's existing `access[folder.id]`, `libraries[folder.id]`, and
+`restoreDiagnostics[folder.id]` are left completely untouched, matching
+whatever was last durably committed; on success, all nonthrowing commits
+happen atomically only after both throwing steps have already succeeded.
+
+Added `testCommitDisconnectedRestoreSecondProjectionReadFailurePreservesAllState`
+to `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`, exercising
+a call path the existing compound test does not: a library that restores
+successfully once (real access, real durable projection), then goes
+*offline* on the next pass with the index already closed. Nothing before
+`commitDisconnectedRestore` touches the index on the offline path (no
+stale-bookmark refresh, no caller-side `priorProjection` rebuild), so the
+only index access on this pass is `commitDisconnectedRestore`'s own
+`populateRestoreProjection` — specifically its first statement,
+`photoCount(inLibrary:)`. The test asserts:
+
+- the thrown error is exactly `SQLiteError.prepareFailed` with message
+  `"database is closed"` and SQL containing `"FROM photo"` — proving it is
+  `photoCount`'s read, not the `"FROM library"` read the existing compound
+  test already covers, i.e. a genuinely different failure window;
+- the previously-retained A access handle's `stopCallCount` stays `0` (never
+  touched);
+- the newly staged (offline) handle's `stopCallCount` is exactly `1` (not
+  leaked);
+- `service.library(id:)` still reports the old `.ready` folder at root A,
+  unchanged;
+- `service.restoreDiagnostic(for:)` is still `nil`;
+- the bookmark store still holds the old record;
+- reopening a fresh `PhotoIndexStore` against the same on-disk database file
+  shows the SQLite projection is still exactly the old A projection — the
+  failed offline commit was never written.
+
+### Verification
+
+- `swift build`
+  - PASS: exit 0.
+- `swift test --filter 'LibrarySourceRecoveryTests'`
+  - PASS: 20 tests, 0 failures (19 from round 4 + the 1 new test this round).
+- `swift test --filter 'LibraryRegistryTransactionTests|LibrarySourceRecoveryTests|FileBookmarkStoreTests'`
+  - PASS: 50 tests, 0 failures.
+- `swift test --filter 'PhotoLibraryCoreTests'`
+  - PASS: 426 tests, 0 failures.
+- `swift test` (full suite)
+  - PASS: 970 tests, 9 skipped (pre-existing, host-dependent bookmark tests),
+    0 failures.
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  - PASS: exit 0.
+- `git diff --check`
+  - PASS: no whitespace errors.
+- `git status --short --branch`
+  - Only `Sources/PhotoLibraryCore/Access/SecurityScopedBookmark.swift`,
+    `Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`,
+    `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`, and this
+    report changed. The five untracked handoff/review documents were left
+    exactly as found.
+
+### Changed files
+
+- `Sources/PhotoLibraryCore/Access/SecurityScopedBookmark.swift`
+- `Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`
+- `Tests/PhotoLibraryCoreTests/LibrarySourceRecoveryTests.swift`
+- `sdd/codex-task2-round4-task2-report.md`
+
+### Concerns
+
+None. No hang, no new skips, no `Sources/` RAW-handling file touched, and no
+further public API surface added — the public initializer's parameter list
+is now strictly smaller than before this round.
