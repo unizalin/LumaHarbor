@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE — review fix round 1 applied (see below); pending re-review.
+DONE — review fix rounds 1 and 2 applied (see below); pending re-review.
 
 - Baseline HEAD before Task 6 work: `9fd22aa` (`fix: invalidate the
   outgoing query's page cursor on search-text change too`) — Task 5 has
@@ -316,6 +316,84 @@ scanning
 - No Task 7 file was touched.
 - Exactly one fix commit is expected for the production + test changes
   above, separate from Task 6's original `ca34a4b`/`c35c9fe`.
+
+## Review fix round 2
+
+Codex re-review of round 1's fix (`3d416e4`/`68ab1c2`, range `c35c9fe..HEAD`)
+returned **CHANGES REQUESTED** with one blocking finding: round 1's
+`isSelectionAffected(byScanOf:)` excluded `.smart(.recentlyEdited)` from the
+scan-completion reload, on the reasoning that only an App-copy import or an
+edit populates that scope, never an external source's scan. That reasoning
+was wrong for `.recentlyEdited` specifically (it holds for `.appStorage`,
+which stayed excluded): `PhotoLibraryService`'s scan path re-reads each
+photo's sidecar on every scan and rewrites `hasEdits`/`lastEditAt` on the
+indexed row from it — those two SQLite columns are a rebuildable projection
+of the sidecar, not the source of truth, and are exactly what
+`.recentlyEdited`'s query filters and sorts on. A source with pre-existing
+sidecar edits could therefore turn `.recentlyEdited` from empty to populated
+purely by finishing a scan, with no new photo ever appearing — the same
+stale-UI failure mode round 1 fixed for `.all`, just triggered by edit-state
+rebuild instead of indexing, and left unfixed for this one scope.
+
+### Fix
+
+- `LibraryBrowserSession.isSelectionAffected(byScanOf:)`
+  (`Sources/EditorCore/LibraryBrowserSession.swift`): `.smart(.recentlyEdited)`
+  now returns `true` alongside `.smart(.all)`. `.smart(.appStorage)` remains
+  the one excluded cross-source smart scope, since it's populated only by
+  `refreshAppStorageProjection(from:)` projecting App-copy commits out of
+  `PhotoDocumentStore` — a path an external source's scan never touches.
+- Rewrote the doc comment on `isSelectionAffected(byScanOf:)` to explain
+  *why* `.recentlyEdited` qualifies (the sidecar-rebuild mechanism above,
+  citing `PhotoLibraryService`'s rescan path) instead of the round 1 comment
+  that incorrectly asserted a scan never affects it.
+- No other file changed — the fix is a one-case correction to round 1's own
+  logic and comment, with no new state or control flow.
+
+### New test (`Tests/EditorCoreTests/LibraryBrowserSessionTests.swift`)
+
+- `testScanFinishingRefreshesTheCurrentRecentlyEditedQueryFromEmptyToVisible`
+  — selection is `.smart(.recentlyEdited)`, loaded as empty; a source scan's
+  `.finished` event fires after re-scripting that same query's page to
+  include a `hasEdits: true`/`lastEditAt`-set photo (simulating the scan's
+  sidecar-driven edit-state rebuild); asserts `photos` moves from empty to
+  that photo, `selection` is untouched by the reload, and exactly two
+  `.recentlyEdited`-scoped fetches occurred (the initial `select(_:)`'s plus
+  the one reload) — the same shape as round 1's `.all` test, now proven for
+  this scope too.
+- `makePhoto(...)` in the same file gained optional `hasEdits`/`lastEditAt`
+  parameters (defaulting to `false`/`nil`, so every existing call site is
+  unaffected) so this test can construct an edited fixture at all.
+- The existing `testScanFinishingDoesNotDisruptAnUnaffectedSelection`
+  (`.appStorage`) test from round 1 is unchanged and still passes, proving
+  that scope's exclusion is still correct.
+
+### Verification (review fix round 2)
+
+- `swift build` — succeeds.
+- `swift test --filter LibraryBrowserSessionTests` — 35/35 pass (34 from
+  round 1 + 1 new).
+- `swift test --filter PadLibraryCompositionContractTests` — 3/3 pass
+  (unaffected by this fix).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  — succeeds, no warnings.
+- `git diff --check c35c9fe..HEAD` — clean.
+- `swift test` (full suite) — 1052 tests executed (1051 + 1 new), 9
+  skipped, 0 failures, 0 unexpected.
+- `(cd Apps/LumaHarborPad.swiftpm && xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build)`
+  — **BUILD SUCCEEDED**.
+
+### Commit hash
+
+`<pending — recorded in a follow-up docs commit, matching this task's own
+established `ca34a4b`+`c35c9fe` / `3d416e4`+`68ab1c2` pattern>`
+
+### Not push / merge / rebase / amend / Task 7 (round 2 fix)
+
+- No `git push`, `git merge`, `git rebase`, or `git commit --amend` was run.
+- No Task 7 file was touched.
+- Exactly one fix commit is expected for the production + test changes
+  above, separate from round 1's `3d416e4`/`68ab1c2`.
 
 ## Not push / merge / rebase / Task 7
 
