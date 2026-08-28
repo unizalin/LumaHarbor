@@ -21,6 +21,28 @@ public struct LibraryScanResult: Sendable, Equatable {
     /// text alone.
     public var manifestWriteRecoverySuggestion: String?
     public var completedAt: Date
+
+    public init(
+        libraryID: LibraryID,
+        indexedCount: Int,
+        failedCount: Int,
+        ambiguousCount: Int,
+        movedCount: Int,
+        wasCancelled: Bool,
+        manifestWriteFailure: String? = nil,
+        manifestWriteRecoverySuggestion: String? = nil,
+        completedAt: Date
+    ) {
+        self.libraryID = libraryID
+        self.indexedCount = indexedCount
+        self.failedCount = failedCount
+        self.ambiguousCount = ambiguousCount
+        self.movedCount = movedCount
+        self.wasCancelled = wasCancelled
+        self.manifestWriteFailure = manifestWriteFailure
+        self.manifestWriteRecoverySuggestion = manifestWriteRecoverySuggestion
+        self.completedAt = completedAt
+    }
 }
 
 public enum LibraryScanEvent: Sendable {

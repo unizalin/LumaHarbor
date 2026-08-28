@@ -535,6 +535,12 @@ public final class LibraryBrowserSession: ObservableObject {
     /// being scanned by this session. Not part of `select(_:)` -- selecting
     /// a source does not implicitly start scanning it; a caller (a sidebar
     /// "rescan" action, or an app-launch sweep) decides when to call this.
+    ///
+    /// Once the scan actually finishes, `handle(_:for:)` below also reloads
+    /// the current query -- via the ordinary `beginNewQuery()` generation
+    /// bump -- if `selection` draws from `libraryID` (see
+    /// `isSelectionAffected(byScanOf:)`), so a freshly added source's photos
+    /// don't sit behind a stale, already-fetched empty page.
     public func scanSource(_ libraryID: LibraryID) {
         guard scanTasks[libraryID] == nil else { return }
         sourceProgress[libraryID] = LibrarySourceScanProgress(phase: .scanning)
@@ -562,5 +568,35 @@ public final class LibraryBrowserSession: ObservableObject {
             progress.phase = .failed(SafeErrorPresentation.alert(title: L10n.t("This source couldn't finish scanning."), for: error))
         }
         sourceProgress[libraryID] = progress
+
+        // Codex pre-landing review: a scan indexes photos into SQLite, but
+        // nothing about that write itself invalidates whatever query this
+        // session already has loaded. Without this, a source added and
+        // scanned while `.all` (or that same source/folder) is showing
+        // leaves the grid stuck on the empty/partial page it fetched before
+        // the scan ever wrote anything -- "no RAW files found" forever,
+        // until the user manually changes scope/sort/search. Only run this
+        // once the scan has actually finished (not on every incremental
+        // `.photosIndexed` batch): `beginNewQuery()` fully resets `photos`
+        // and re-fetches from page one, which would otherwise make the grid
+        // visibly flicker/reset on every batch of a large scan.
+        if case .finished = event, isSelectionAffected(byScanOf: libraryID) {
+            beginNewQuery()
+        }
+    }
+
+    /// Whether `selection`'s current query draws from `libraryID` (directly,
+    /// or transitively via the cross-source `.all` smart scope) and so must
+    /// be reloaded once that source finishes scanning. `.appStorage` and
+    /// `.recentlyEdited` are also cross-source smart scopes, but neither is
+    /// populated by an external source's scan -- an app-copy import or an
+    /// edit is what changes those, not this -- so a scan completion must
+    /// never force-reload them.
+    private func isSelectionAffected(byScanOf libraryID: LibraryID) -> Bool {
+        switch selection {
+        case .smart(let scope): return scope == .all
+        case .source(let id): return id == libraryID
+        case .folder(let id, _): return id == libraryID
+        }
     }
 }

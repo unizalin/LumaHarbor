@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE (pending Codex pre-landing review)
+DONE — review fix round 1 applied (see below); pending re-review.
 
 - Baseline HEAD before Task 6 work: `9fd22aa` (`fix: invalidate the
   outgoing query's page cursor on search-text change too`) — Task 5 has
@@ -212,11 +212,110 @@ existed and are reused as-is (no duplicate keys added).
   This is by design (Task 7 owns `PadLibraryGrid.swift`), not an oversight,
   but it means Task 6 alone does not yet deliver a browsable-looking
   library — only a functionally correct, testable one.
-- **The two Task 5 bounded concerns the user already carried forward
-  remain unchanged by Task 6**: read-only source intent still cannot cross
-  into `LibraryOpenAsset` (Task 4's interface has no case for it), and
-  `LibraryScanResult` still has no public initializer for cross-module test
-  construction. Neither was in Task 6's scope to fix.
+- **The two Task 5 bounded concerns the user already carried forward**:
+  read-only source intent still cannot cross into `LibraryOpenAsset` (Task
+  4's interface has no case for it) — unchanged, still out of scope; and
+  `LibraryScanResult` having no public initializer for cross-module test
+  construction — **resolved in review fix round 1** below, as a byproduct
+  of that round's own new tests needing to construct a `.finished(...)`
+  scan event from `EditorCoreTests`.
+
+## Review fix round 1
+
+Codex pre-landing review of `ca34a4b`/`c35c9fe` (range `9fd22aa..HEAD`)
+returned **CHANGES REQUESTED** with one blocking finding: a source added and
+scanned via `PadLibrarySidebar.addSource(at:)` indexes its photos into
+SQLite, but nothing invalidated whatever query the grid already had loaded.
+`.smart(.all)` (or that same source/folder) could already be showing an
+empty `.loaded` page fetched before the scan wrote anything, and
+`scanSource(_:)`/`handle(_:for:)` only ever updated `sourceProgress` —
+never `photos`/`nextCursor`/`loadState`. The user would see "No RAW files
+found in this folder" until manually changing scope, sort, or search, or
+leaving and returning — contradicting Task 6's own stated goal (quoted
+above) that a freshly added folder must not sit permanently empty.
+
+### Fix
+
+- `LibraryBrowserSession.handle(_:for:)`
+  (`Sources/EditorCore/LibraryBrowserSession.swift`): once a scan's
+  `.finished` event arrives, calls the new private
+  `isSelectionAffected(byScanOf:)` to check whether the *currently selected*
+  query draws from the scanned `libraryID` — `.smart(.all)` (any source
+  affects the cross-source "All" scope), `.source(libraryID)`, or
+  `.folder(libraryID: libraryID, _)`. If so, it calls the existing
+  `beginNewQuery()` — the same generation-bump-and-refetch path
+  `select(_:)`/`setSort(_:)` already use — so the reload participates in
+  the exact same staleness guard every other query change already gets, with
+  no new state introduced. `.smart(.appStorage)` and `.smart(.recentlyEdited)`
+  are deliberately excluded: neither is populated by an external source's
+  scan (only an App-copy import or an edit changes those), so a scan
+  completion must never force-reload them. Incremental `.photosIndexed`
+  events during the scan do **not** trigger a reload — only `.finished` does
+  — so a large scan's grid doesn't visibly flicker/reset once per batch.
+- This intentionally reuses `beginNewQuery()` rather than inventing a
+  separate refresh path, per the review's own suggested direction: the
+  reload gets `queryGeneration` bump + `pageTask` cancellation + `photos`/
+  `nextCursor` reset for free, and is automatically superseded by any
+  newer selection/search/sort change the same way an ordinary `select(_:)`
+  call already would be.
+- `PhotoLibraryCore.LibraryScanResult` (`Sources/PhotoLibraryCore/Service/PhotoLibraryService.swift`)
+  gained an explicit `public init(...)` — its previous auto-generated
+  memberwise initializer was `internal`, so `EditorCoreTests` (a different
+  module) could not construct a `.finished(LibraryScanResult(...))` scan
+  event to exercise this fix at all. This also resolves the pre-existing
+  "no public initializer for cross-module test construction" bounded
+  concern this report already flagged above, under Task 6's original
+  "Remaining concerns."
+- `PadLibrarySidebar.swift`/`PadLibraryView.swift` needed no change — the
+  fix lives entirely in `LibraryBrowserSession`, per the review's own
+  guidance to put it there rather than as a SwiftUI-layer workaround.
+
+### New tests (`Tests/EditorCoreTests/LibraryBrowserSessionTests.swift`)
+
+- `testScanFinishingRefreshesTheCurrentAllQueryFromEmptyToVisible` —
+  selection is `.smart(.all)`, loaded as empty; a source is scanned and its
+  `.finished` event fires; asserts `photos` moves from empty to the newly
+  indexed photo, `selection` is untouched by the reload, and exactly two
+  `.all`-scoped fetches occurred (startup's + the one reload).
+- `testScanFinishingDoesNotDisruptAnUnaffectedSelection` — selection is
+  `.smart(.appStorage)`, already showing an app-copy photo; an unrelated
+  external source's scan finishes; asserts `photos`/`selection` are
+  untouched and no additional `.appStorage`-scoped fetch was issued.
+- `testUserSwitchingSelectionDuringAScanCompletionReloadDiscardsTheStaleResult`
+  — a scan's `.finished`-triggered reload of `.smart(.all)` is gated
+  in-flight; the user calls `select(.source(otherSourceID))` before it
+  resolves; asserts the newer selection's own result wins and the stale
+  `.all` reload never overwrites it — the same generation-based guarantee
+  `testSwitchingSelectionDuringAnOutstandingFetchDiscardsTheStaleResult`
+  already proves for an ordinary `select(_:)` race, now proven for a
+  scan-triggered one too.
+
+### Verification (review fix round 1)
+
+- `swift build` — succeeds.
+- `swift test --filter LibraryBrowserSessionTests` — 34/34 pass (31
+  pre-existing + 3 new).
+- `swift test --filter PadLibraryCompositionContractTests` — 3/3 pass
+  (unaffected by this fix).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  — succeeds, no warnings.
+- `git diff --check` — clean.
+- `swift test` (full suite) — 1051 tests executed (1048 + 3 new), 9
+  skipped, 0 failures, 0 unexpected.
+- `(cd Apps/LumaHarborPad.swiftpm && xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build)`
+  — **BUILD SUCCEEDED**.
+
+### Commit hash
+
+`<pending — recorded in a follow-up docs commit, matching this task's own
+established pattern of `ca34a4b` + `c35c9fe`>`
+
+### Not push / merge / rebase / amend / Task 7 (round 1 fix)
+
+- No `git push`, `git merge`, `git rebase`, or `git commit --amend` was run.
+- No Task 7 file was touched.
+- Exactly one fix commit is expected for the production + test changes
+  above, separate from Task 6's original `ca34a4b`/`c35c9fe`.
 
 ## Not push / merge / rebase / Task 7
 
