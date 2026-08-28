@@ -307,8 +307,8 @@ above) that a freshly added folder must not sit permanently empty.
 
 ### Commit hash
 
-`<pending — recorded in a follow-up docs commit, matching this task's own
-established pattern of `ca34a4b` + `c35c9fe`>`
+`3d416e4` — fix: refresh the current library query after a source finishes
+scanning
 
 ### Not push / merge / rebase / amend / Task 7 (round 1 fix)
 
