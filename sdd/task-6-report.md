@@ -2,7 +2,9 @@
 
 ## Status
 
-DONE — review fix rounds 1 and 2 applied (see below); pending re-review.
+DONE — Codex pre-landing review, rounds 1 and 2 fixed (see below), then
+**APPROVED** on re-review of round 2 (range `68ab1c2..HEAD`, commits
+`48d2843`/`69ffe2a`). No further Task 6 changes required.
 
 - Baseline HEAD before Task 6 work: `9fd22aa` (`fix: invalidate the
   outgoing query's page cursor on search-text change too`) — Task 5 has
