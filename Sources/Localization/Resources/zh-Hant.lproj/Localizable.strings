@@ -6,6 +6,7 @@
 "Add the folder again." = "重新加入這個資料夾。";
 "Adjustments" = "調整";
 "All" = "全部";
+"App Copies" = "App 複本";
 "Applies this preset using the current merge or replace mode" = "依目前的合併或取代模式套用此 Preset";
 "Apply mode" = "套用模式";
 "Apply preset" = "套用 Preset";
@@ -162,6 +163,7 @@
 "Reconnect the drive to generate a thumbnail." = "重新連接磁碟以產生縮圖。";
 "Reconnect the drive, then retry." = "重新連接磁碟，然後重試。";
 "Reconnect the drive, then try again." = "重新連接磁碟，然後再試一次。";
+"Reconnect the source, then try again." = "重新連接來源，然後再試一次。";
 "Reconnect" = "重新連接";
 "Reconnect…" = "重新連接…";
 "Red" = "紅";
