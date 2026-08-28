@@ -3,6 +3,7 @@
 "Add a photo folder" = "Add a photo folder";
 "Add Folder" = "Add Folder";
 "Add Photo Folder…" = "Add Photo Folder…";
+"Add Source" = "Add Source";
 "Add the folder again." = "Add the folder again.";
 "Adjustments" = "Adjustments";
 "All" = "All";
@@ -101,6 +102,7 @@
 "is read-only." = "is read-only.";
 "JPEG quality" = "JPEG quality";
 "Keep the file in your library — support may arrive in a future macOS release." = "Keep the file in your library — support may arrive in a future macOS release.";
+"Library" = "Library";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor can show cached thumbnails, but editing needs the original file.";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor couldn't check for interrupted imports on launch.";
 "LumaHarbor couldn't find this photo's saved document." = "LumaHarbor couldn't find this photo's saved document.";
@@ -131,11 +133,13 @@
 "My Presets" = "My Presets";
 "Name" = "Name";
 "Native: applies reliably" = "Native: applies reliably";
+"Needs Access" = "Needs Access";
 "Next Photo" = "Next Photo";
 "No capture time" = "No capture time";
 "No files were selected." = "No files were selected.";
 "No presets yet" = "No presets yet";
 "No RAW files found in this folder" = "No RAW files found in this folder";
+"No sources yet" = "No sources yet";
 "Noise Reduction" = "Noise Reduction";
 "None of the selected files could be read as develop presets." = "None of the selected files could be read as develop presets.";
 "Not saved" = "Not saved";
@@ -159,10 +163,12 @@
 "Purple" = "Purple";
 "Quit and reopen LumaHarbor to rebuild the index." = "Quit and reopen LumaHarbor to rebuild the index.";
 "Quit and reopen LumaHarbor, then try again." = "Quit and reopen LumaHarbor, then try again.";
+"Read-only" = "Read-only";
 "Read-only drive — edits can't be saved here" = "Read-only drive — edits can't be saved here";
 "Read-only — edits can't be saved to this drive" = "Read-only — edits can't be saved to this drive";
 "Reading files…" = "Reading files…";
 "Ready" = "Ready";
+"Recently Edited" = "Recently Edited";
 "Reconnect it to browse and edit these photos." = "Reconnect it to browse and edit these photos.";
 "Reconnect the drive holding this photo, then rescan." = "Reconnect the drive holding this photo, then rescan.";
 "Reconnect the drive holding this photo, then try again." = "Reconnect the drive holding this photo, then try again.";
@@ -206,6 +212,7 @@
 "Size" = "Size";
 "skipped" = "skipped";
 "Something went wrong." = "Something went wrong.";
+"Sources" = "Sources";
 "Split Toning" = "Split Toning";
 "Startup cleanup incomplete" = "Startup cleanup incomplete";
 "Stop" = "Stop";
