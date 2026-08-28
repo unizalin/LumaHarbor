@@ -1,5 +1,11 @@
+"1 GB" = "1 GB";
 "1 photo" = "1 photo";
+"10 GB" = "10 GB";
+"2 GB" = "2 GB";
+"5 GB" = "5 GB";
+"512 MB" = "512 MB";
 "A cached preview couldn't be written." = "A cached preview couldn't be written.";
+"A larger cache keeps more thumbnails available offline, but uses more storage." = "A larger cache keeps more thumbnails available offline, but uses more storage.";
 "Add a photo folder" = "Add a photo folder";
 "Add Folder" = "Add Folder";
 "Add Photo Folder…" = "Add Photo Folder…";
@@ -44,6 +50,7 @@
 "Couldn't export this preset" = "Couldn't export this preset";
 "Couldn't close this photo" = "Couldn't close this photo";
 "Couldn't find an unused filename for" = "Couldn't find an unused filename for";
+"Couldn't load" = "Couldn't load";
 "Couldn't load photos" = "Couldn't load photos";
 "Couldn't load your library" = "Couldn't load your library";
 "Couldn't open this photo" = "Couldn't open this photo";
@@ -68,6 +75,7 @@
 "Double-click the row to reset" = "Double-click the row to reset";
 "Drag to move this panel." = "Drag to move this panel.";
 "Edit in Place" = "Edit in Place";
+"Edited" = "Edited";
 "Export a full-resolution JPEG" = "Export a full-resolution JPEG";
 "Export failed" = "Export failed";
 "Export Here" = "Export Here";
@@ -82,6 +90,8 @@
 "Favorite" = "Favorite";
 "Favorites" = "Favorites";
 "Fields included:" = "Fields included:";
+"Filename (A–Z)" = "Filename (A–Z)";
+"Filename (Z–A)" = "Filename (Z–A)";
 "Filter presets" = "Filter presets";
 "Focus Mode" = "Focus Mode";
 "found" = "found";
@@ -102,6 +112,7 @@
 "is read-only." = "is read-only.";
 "JPEG quality" = "JPEG quality";
 "Keep the file in your library — support may arrive in a future macOS release." = "Keep the file in your library — support may arrive in a future macOS release.";
+"Large" = "Large";
 "Library" = "Library";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor can show cached thumbnails, but editing needs the original file.";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor couldn't check for interrupted imports on launch.";
@@ -127,6 +138,7 @@
 "The system denied access to" = "The system denied access to";
 "Magenta" = "Magenta";
 "Make sure the file isn't being modified, then try again." = "Make sure the file isn't being modified, then try again.";
+"Medium" = "Medium";
 "Merge keeps fields the preset doesn't set; Replace starts from neutral" = "Merge keeps fields the preset doesn't set; Replace starts from neutral";
 "Merge" = "Merge";
 "More preset actions" = "More preset actions";
@@ -134,6 +146,7 @@
 "Name" = "Name";
 "Native: applies reliably" = "Native: applies reliably";
 "Needs Access" = "Needs Access";
+"Newest First" = "Newest First";
 "Next Photo" = "Next Photo";
 "No capture time" = "No capture time";
 "No files were selected." = "No files were selected.";
@@ -146,6 +159,7 @@
 "Offline — reconnect the drive to edit or export" = "Offline — reconnect the drive to edit or export";
 "Offline" = "Offline";
 "OK" = "OK";
+"Oldest First" = "Oldest First";
 "Open a RAW photo" = "Open a RAW photo";
 "Open RAW…" = "Open RAW…";
 "Opening photo…" = "Opening photo…";
@@ -169,6 +183,7 @@
 "Reading files…" = "Reading files…";
 "Ready" = "Ready";
 "Recently Edited" = "Recently Edited";
+"Recently Edited is always sorted by most recently edited." = "Recently Edited is always sorted by most recently edited.";
 "Reconnect it to browse and edit these photos." = "Reconnect it to browse and edit these photos.";
 "Reconnect the drive holding this photo, then rescan." = "Reconnect the drive holding this photo, then rescan.";
 "Reconnect the drive holding this photo, then try again." = "Reconnect the drive holding this photo, then try again.";
@@ -201,9 +216,11 @@
 "Scanned, but couldn't update the library file" = "Scanned, but couldn't update the library file";
 "Scanning for RAW files…" = "Scanning for RAW files…";
 "Scanning —" = "Scanning —";
+"Search by filename" = "Search by filename";
 "Search presets by name or group" = "Search presets by name or group";
 "Search presets" = "Search presets";
 "Select a photo to start editing" = "Select a photo to start editing";
+"Settings" = "Settings";
 "Several files match — confirm which photo this is" = "Several files match — confirm which photo this is";
 "Shadows" = "Shadows";
 "Sharpening" = "Sharpening";
@@ -211,7 +228,9 @@
 "Show Original" = "Show Original";
 "Size" = "Size";
 "skipped" = "skipped";
+"Small" = "Small";
 "Something went wrong." = "Something went wrong.";
+"Sort" = "Sort";
 "Sources" = "Sources";
 "Split Toning" = "Split Toning";
 "Startup cleanup incomplete" = "Startup cleanup incomplete";
@@ -267,6 +286,8 @@
 "This preset has no adjustments LumaHarbor can apply yet." = "This preset has no adjustments LumaHarbor can apply yet.";
 "This preset's preview couldn't be rendered right now." = "This preset's preview couldn't be rendered right now.";
 "This RAW file appears to be damaged." = "This RAW file appears to be damaged.";
+"Thumbnail Cache" = "Thumbnail Cache";
+"Thumbnail Size" = "Thumbnail Size";
 "Tint" = "Tint";
 "Toggle favorite" = "Toggle favorite";
 "Tone Curve" = "Tone Curve";

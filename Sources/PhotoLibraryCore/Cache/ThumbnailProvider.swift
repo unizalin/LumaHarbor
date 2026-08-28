@@ -224,6 +224,16 @@ public actor ThumbnailProvider {
         diagnostics = ThumbnailDiagnostics()
     }
 
+    /// Forwards to the underlying `DiskCache`'s own `setByteBudget(_:)`,
+    /// which applies the new budget and evicts over-budget entries
+    /// immediately. `cache` is otherwise `private` -- this is the smallest
+    /// passthrough that lets a caller (the iPad app's cache-budget settings
+    /// screen, Task 7) change the budget without this type exposing its
+    /// whole `DiskCache` publicly.
+    public func setByteBudget(_ budget: Int64) async throws {
+        try await cache.setByteBudget(budget)
+    }
+
     // MARK: - Producer lifecycle
 
     private func attachWaiter(key: CacheKey, sourceURL: URL) -> WaiterTicket {

@@ -9,6 +9,7 @@ struct PadRootView: View {
     @ObservedObject var library: PadLibraryModel
     @State private var isImporting = false
     @State private var isRelinking = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -26,6 +27,26 @@ struct PadRootView: View {
                         // so disabling this is a UX nicety, not a
                         // correctness requirement.
                         .disabled(editor.isPreparingDocument)
+                    }
+                    ToolbarItem {
+                        Button {
+                            isShowingSettings = true
+                        } label: {
+                            Label(L10n.t("Settings"), systemImage: "gearshape")
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+                .sheet(isPresented: $isShowingSettings) {
+                    NavigationStack {
+                        PadLibrarySettingsView(services: services, userDefaults: services.userDefaults)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button(L10n.t("Close")) {
+                                        isShowingSettings = false
+                                    }
+                                }
+                            }
                     }
                 }
                 .fileImporter(
@@ -138,7 +159,7 @@ struct PadRootView: View {
         } else if editor.isPreparingDocument {
             ProgressView(L10n.t("Opening photo…"))
         } else {
-            PadLibraryView(library: library, editor: editor)
+            PadLibraryView(library: library, editor: editor, services: services)
         }
     }
 

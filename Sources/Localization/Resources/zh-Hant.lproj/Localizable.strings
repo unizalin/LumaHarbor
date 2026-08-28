@@ -1,5 +1,11 @@
+"1 GB" = "1 GB";
 "1 photo" = "1 張照片";
+"10 GB" = "10 GB";
+"2 GB" = "2 GB";
+"5 GB" = "5 GB";
+"512 MB" = "512 MB";
 "A cached preview couldn't be written." = "無法寫入快取的預覽圖。";
+"A larger cache keeps more thumbnails available offline, but uses more storage." = "較大的快取能在離線時保留更多縮圖，但會占用更多儲存空間。";
 "Add a photo folder" = "加入照片資料夾";
 "Add Folder" = "加入資料夾";
 "Add Photo Folder…" = "加入照片資料夾…";
@@ -44,6 +50,7 @@
 "Couldn't export this preset" = "無法匯出這個 Preset";
 "Couldn't close this photo" = "無法關閉這張照片";
 "Couldn't find an unused filename for" = "找不到可用的檔名：";
+"Couldn't load" = "無法載入";
 "Couldn't load photos" = "無法載入照片";
 "Couldn't load your library" = "無法載入你的照片庫";
 "Couldn't open this photo" = "無法開啟這張照片";
@@ -68,6 +75,7 @@
 "Double-click the row to reset" = "雙擊這一列可重設";
 "Drag to move this panel." = "拖曳可移動此面板。";
 "Edit in Place" = "原地編輯";
+"Edited" = "已編輯";
 "Export a full-resolution JPEG" = "匯出全解析度 JPEG";
 "Export failed" = "匯出失敗";
 "Export Here" = "匯出到這裡";
@@ -82,6 +90,8 @@
 "Favorite" = "收藏";
 "Favorites" = "收藏";
 "Fields included:" = "包含欄位數：";
+"Filename (A–Z)" = "檔名（A–Z）";
+"Filename (Z–A)" = "檔名（Z–A）";
 "Filter presets" = "篩選 Preset";
 "Focus Mode" = "專注模式";
 "found" = "張照片";
@@ -102,6 +112,7 @@
 "is read-only." = "是唯讀的。";
 "JPEG quality" = "JPEG 品質";
 "Keep the file in your library — support may arrive in a future macOS release." = "先把檔案留在相片庫中──未來的 macOS 版本可能會支援。";
+"Large" = "大";
 "Library" = "圖庫";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor 可以顯示已快取的縮圖，但編輯需要原始檔案。";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor 啟動時無法檢查是否有中斷的匯入。";
@@ -127,6 +138,7 @@
 "The system denied access to" = "系統拒絕存取：";
 "Magenta" = "洋紅";
 "Make sure the file isn't being modified, then try again." = "請確認這個檔案沒有被修改中，然後再試一次。";
+"Medium" = "中";
 "Merge keeps fields the preset doesn't set; Replace starts from neutral" = "合併會保留 Preset 未設定的欄位；取代則從中性值重新開始";
 "Merge" = "合併";
 "More preset actions" = "更多 Preset 操作";
@@ -134,6 +146,7 @@
 "Name" = "名稱";
 "Native: applies reliably" = "原生：可可靠套用";
 "Needs Access" = "需要存取權";
+"Newest First" = "最新優先";
 "Next Photo" = "下一張照片";
 "No capture time" = "沒有拍攝時間";
 "No files were selected." = "未選擇任何檔案。";
@@ -146,6 +159,7 @@
 "Offline — reconnect the drive to edit or export" = "離線──重新連接磁碟才能編輯或匯出";
 "Offline" = "離線";
 "OK" = "好";
+"Oldest First" = "最舊優先";
 "Open a RAW photo" = "開啟一張 RAW 照片";
 "Open RAW…" = "開啟 RAW…";
 "Opening photo…" = "正在開啟照片…";
@@ -169,6 +183,7 @@
 "Reading files…" = "讀取檔案中…";
 "Ready" = "就緒";
 "Recently Edited" = "最近編輯";
+"Recently Edited is always sorted by most recently edited." = "「最近編輯」一律依最近編輯時間排序。";
 "Reconnect it to browse and edit these photos." = "重新連接以瀏覽與編輯這些照片。";
 "Reconnect the drive holding this photo, then rescan." = "重新連接存放這張照片的磁碟，然後重新掃描。";
 "Reconnect the drive holding this photo, then try again." = "重新連接存放這張照片的磁碟，然後再試一次。";
@@ -201,9 +216,11 @@
 "Scanned, but couldn't update the library file" = "已掃描，但無法更新相片庫檔案";
 "Scanning for RAW files…" = "正在掃描 RAW 檔案…";
 "Scanning —" = "掃描中──";
+"Search by filename" = "依檔名搜尋";
 "Search presets by name or group" = "依名稱或群組搜尋 Preset";
 "Search presets" = "搜尋 Preset";
 "Select a photo to start editing" = "選擇一張照片開始編輯";
+"Settings" = "設定";
 "Several files match — confirm which photo this is" = "有多個檔案相符──請確認是哪一張照片";
 "Shadows" = "陰影";
 "Sharpening" = "銳化";
@@ -211,7 +228,9 @@
 "Show Original" = "顯示原圖";
 "Size" = "尺寸";
 "skipped" = "張跳過";
+"Small" = "小";
 "Something went wrong." = "發生了一些問題。";
+"Sort" = "排序";
 "Sources" = "來源";
 "Split Toning" = "分割色調";
 "Startup cleanup incomplete" = "啟動清理未完成";
@@ -267,6 +286,8 @@
 "This preset has no adjustments LumaHarbor can apply yet." = "這個 Preset 目前沒有 LumaHarbor 可套用的調整。";
 "This preset's preview couldn't be rendered right now." = "這個 Preset 的預覽目前無法算圖。";
 "This RAW file appears to be damaged." = "這個 RAW 檔案似乎已經損壞。";
+"Thumbnail Cache" = "縮圖快取";
+"Thumbnail Size" = "縮圖大小";
 "Tint" = "色調";
 "Toggle favorite" = "切換收藏狀態";
 "Tone Curve" = "色調曲線";
