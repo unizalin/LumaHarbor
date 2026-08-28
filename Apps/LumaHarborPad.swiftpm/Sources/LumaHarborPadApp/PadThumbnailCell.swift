@@ -76,10 +76,8 @@ struct PadThumbnailCell: View {
         .accessibilityLabel(Text(accessibilityLabel))
         .task(id: photo.id) {
             await provider.pin(photoID: photo.id)
+            defer { Task { await provider.unpin(photoID: photo.id) } }
             await load()
-        }
-        .onDisappear {
-            Task { await provider.unpin(photoID: photo.id) }
         }
     }
 

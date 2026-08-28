@@ -455,6 +455,36 @@ final class ThumbnailProviderTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(isPinned, "A wiped cache kept a pin nothing will ever release")
     }
 
+    // MARK: - Cache budget
+
+    /// Review round 1, Important #3: `ThumbnailProvider.setByteBudget(_:)`
+    /// is a passthrough added for the iPad's cache-budget settings screen
+    /// (Task 7 Step 5) with no prior test coverage. This proves it genuinely
+    /// forwards to the underlying `DiskCache` -- lowering the budget through
+    /// the provider must evict over-budget entries immediately, the same
+    /// contract `DiskCacheTests.testLoweringTheBudgetPrunesImmediately`
+    /// asserts directly against `DiskCache` -- rather than being a no-op
+    /// that only updates some provider-local value nothing reads.
+    func testSetByteBudgetForwardsToTheUnderlyingCacheAndPrunesImmediately() async throws {
+        let cache = try makeCache(budget: 10_000)
+        let provider = makeProvider(cache: cache, decoder: SpyRawDecoder())
+        for index in 0..<5 {
+            try await cache.store(Data(repeating: 0, count: 100), for: CacheKey("budget-e\(index)"))
+        }
+        let before = await cache.totalByteCount
+        XCTAssertEqual(before, 500)
+
+        try await provider.setByteBudget(250)
+
+        let after = await cache.totalByteCount
+        XCTAssertLessThanOrEqual(
+            after, 250,
+            "provider.setByteBudget did not forward to the cache -- entries were not pruned"
+        )
+        let budget = await cache.byteBudget
+        XCTAssertEqual(budget, 250)
+    }
+
     // MARK: - Diagnostics
 
     func testCacheWriteFailureIsRecordedRatherThanReportedAsCached() async throws {

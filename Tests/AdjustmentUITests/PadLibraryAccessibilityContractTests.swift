@@ -168,4 +168,91 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("library.loadNextPage()"), "the grid must call loadNextPage() near the end")
     }
+
+    // MARK: - PadLibrarySettingsView.swift (Task 7 Step 5, review round 1 Important #4)
+
+    /// The plan's own literal acceptance numbers (512 MiB through 10 GiB) --
+    /// checked by exact text match against the raw source rather than
+    /// re-derived arithmetically, so a typo'd constant fails this test
+    /// instead of silently agreeing with itself.
+    func testCacheBudgetOffersExactlyThePlansFiveByteConstants() throws {
+        let source = try Self.loadSource("PadLibrarySettingsView.swift")
+
+        for constant in ["536_870_912", "1_073_741_824", "2_147_483_648", "5_368_709_120", "10_737_418_240"] {
+            XCTAssertTrue(source.contains(constant), "the cache-budget enum must offer the exact byte constant \(constant)")
+        }
+    }
+
+    /// 2 GiB is the documented default -- both as the enum's own `default`
+    /// and as `resolvingPersisted`'s fallback (checked separately below).
+    func testCacheBudgetDefaultIsExactlyTwoGibibytes() throws {
+        let source = try Self.loadSource("PadLibrarySettingsView.swift")
+
+        XCTAssertTrue(
+            source.contains("static let `default`: PadThumbnailCacheBudget = .gib2"),
+            "the cache-budget enum must declare .gib2 as its exact default"
+        )
+    }
+
+    /// An absent/invalid/out-of-range persisted value must resolve to
+    /// `.default`, never an arbitrary budget built by force-unwrapping or
+    /// otherwise trusting the raw stored `Int64` directly.
+    func testResolvingPersistedFallsBackToDefaultRatherThanTrustingTheRawStoredValue() throws {
+        let source = try Self.loadSource("PadLibrarySettingsView.swift")
+
+        guard let range = source.range(of: "static func resolvingPersisted(") else {
+            return XCTFail("PadThumbnailCacheBudget must declare resolvingPersisted(_:)")
+        }
+        let body = source[range.upperBound...]
+
+        XCTAssertTrue(
+            body.contains("?? .default"),
+            "resolvingPersisted must fall back to .default rather than force-unwrapping or trusting the raw value"
+        )
+        XCTAssertFalse(
+            body.contains("PadThumbnailCacheBudget(rawValue: stored)!"),
+            "resolvingPersisted must never force-unwrap an untrusted stored value"
+        )
+    }
+
+    /// Step 5's "applies immediately" requirement: selecting a budget must
+    /// not just persist it for the next launch -- it must call
+    /// `setByteBudget` on the live provider in the same action.
+    func testApplyCallsSetByteBudgetOnTheLiveProvider() throws {
+        let source = try Self.loadSource("PadLibrarySettingsView.swift")
+
+        guard let range = source.range(of: "private func apply(_ budget: PadThumbnailCacheBudget) {") else {
+            return XCTFail("PadLibrarySettingsView must declare apply(_:)")
+        }
+        let body = source[range.upperBound...]
+
+        XCTAssertTrue(
+            body.contains("services.thumbnailProvider.setByteBudget(budget.rawValue)"),
+            "apply(_:) must call setByteBudget on the live provider, not just persist the selection"
+        )
+    }
+
+    /// Review round 1, Important #2: a thrown `setByteBudget` failure must
+    /// surface as a real alert, never be swallowed by `try?`.
+    func testApplyPropagatesSetByteBudgetFailuresInsteadOfSwallowingThem() throws {
+        let source = try Self.loadSource("PadLibrarySettingsView.swift")
+
+        guard let range = source.range(of: "private func apply(_ budget: PadThumbnailCacheBudget) {") else {
+            return XCTFail("PadLibrarySettingsView must declare apply(_:)")
+        }
+        let body = source[range.upperBound...]
+
+        XCTAssertFalse(
+            body.contains("try? await services.thumbnailProvider.setByteBudget"),
+            "apply(_:) must not silently discard a setByteBudget failure with try?"
+        )
+        XCTAssertTrue(
+            body.contains("do {") && body.contains("} catch {"),
+            "apply(_:) must catch a thrown setByteBudget failure"
+        )
+        XCTAssertTrue(
+            body.contains("alert = SafeErrorPresentation.alert("),
+            "apply(_:) must surface the failure as a SafeErrorPresentation alert"
+        )
+    }
 }
