@@ -16,6 +16,7 @@
 "Back to the library grid" = "Back to the library grid";
 "Blacks" = "Blacks";
 "Blue" = "Blue";
+"Can't open this photo" = "Can't open this photo";
 "Cancel" = "Cancel";
 "Can't verify this photo" = "Can't verify this photo";
 "Choose a different output location." = "Choose a different output location.";
@@ -35,13 +36,18 @@
 "Choose the file again from Files." = "Choose the file again from Files.";
 "Copy to This iPad" = "Copy to This iPad";
 "Couldn't add that folder" = "Couldn't add that folder";
+"Couldn't add this source" = "Couldn't add this source";
 "Couldn't copy this preset" = "Couldn't copy this preset";
 "Couldn't create this preset" = "Couldn't create this preset";
 "Couldn't delete this preset" = "Couldn't delete this preset";
 "Couldn't export this preset" = "Couldn't export this preset";
 "Couldn't close this photo" = "Couldn't close this photo";
 "Couldn't find an unused filename for" = "Couldn't find an unused filename for";
+"Couldn't load photos" = "Couldn't load photos";
+"Couldn't load your library" = "Couldn't load your library";
 "Couldn't open this photo" = "Couldn't open this photo";
+"Couldn't reconnect this source" = "Couldn't reconnect this source";
+"Couldn't remove this source" = "Couldn't remove this source";
 "Couldn't switch photos" = "Couldn't switch photos";
 "Couldn't reopen your last photo" = "Couldn't reopen your last photo";
 "Couldn't read saved edits" = "Couldn't read saved edits";
@@ -248,6 +254,8 @@
 "This Library" = "This Library";
 "This library's index file is damaged." = "This library's index file is damaged.";
 "This photo has saved adjustments" = "This photo has saved adjustments";
+"This source couldn't finish scanning." = "This source couldn't finish scanning.";
+"This source isn't currently reachable." = "This source isn't currently reachable.";
 "This photo hasn't been cached yet and its drive isn't connected." = "This photo hasn't been cached yet and its drive isn't connected.";
 "This preset has no adjustments LumaHarbor can apply yet." = "This preset has no adjustments LumaHarbor can apply yet.";
 "This preset's preview couldn't be rendered right now." = "This preset's preview couldn't be rendered right now.";
