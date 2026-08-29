@@ -64,7 +64,7 @@ Self-test coverage includes:
 - concurrent simulated runs;
 - isolated SELFTEST run tree.
 
-`Scripts/run-ipad-vertical-slice-acceptance.zsh` was integrated from the previously reviewed vertical-slice acceptance worktree (`1f3283c`, plus a local `BG_NICE` self-test-noise guard). Syntax checking passed. Its full `__selftest` was started with process-list access and progressed through parser, redaction, signal, timeout, publish-loop, correction-marker, concurrent-run, isolation and fingerprint checks, but was interrupted during the final nested parallel full-selftest section after several minutes rather than being counted as PASS. No residual runner, fake helper, `xcodebuild`, `swift-frontend` or `xctest` processes remained after interruption. The library runner therefore integrates the vertical-slice gate, but this report does not claim the vertical runner's own full self-test as complete in this branch.
+`Scripts/run-ipad-vertical-slice-acceptance.zsh` was integrated from the previously reviewed vertical-slice acceptance worktree (`1f3283c`, plus a local `BG_NICE` self-test-noise guard). Syntax checking passed. A full `Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest` run with process-list access completed successfully: parser, redaction, signal, timeout, publish-loop, correction-marker, concurrent-run, isolation, fingerprint and nested parallel full-selftest coverage all passed. No residual runner, fake helper, `xcodebuild`, `swift-frontend`, `xctest` or long-sleep helper processes remained after completion.
 
 ## Production runner evidence from this session
 
@@ -114,6 +114,5 @@ These remain required before final merge/sign-off.
 Before claiming the full iPad multi-source library complete:
 
 1. Mount/export the exFAT fixture directory and rerun `Scripts/run-ipad-library-acceptance.zsh`.
-2. Complete a dedicated full `Scripts/run-ipad-vertical-slice-acceptance.zsh __selftest` run in this branch, or review/fix the long-running nested parallel self-test section before counting it as PASS.
-3. Execute the real M1+ iPad checklist and update this report with concrete PASS/FAIL evidence.
-4. Run the final review gate from the implementation plan.
+2. Execute the real M1+ iPad checklist and update this report with concrete PASS/FAIL evidence.
+3. Run the final review gate from the implementation plan.
