@@ -2,12 +2,15 @@
 
 ## Status
 
-DONE — implemented via `superpowers:subagent-driven-development` (fresh
-implementer subagent, task-scoped reviewer subagent, one fix round), and
-**APPROVED** on re-review of the fix round. Codex's own pre-landing review
-of the branch then returned **BLOCKED** with 2 further P1 findings (see
-"Codex pre-landing review fixes" below); both are now fixed. No further
-Task 7 changes are expected, pending Codex's re-review of this fix.
+DONE — **APPROVED**. Implemented via `superpowers:subagent-driven-development`
+(fresh implementer subagent, task-scoped reviewer subagent, one fix
+round), approved on re-review of that fix round; Codex's own pre-landing
+review of the branch then went through two further rounds of P1 findings
+(pin/unpin lifecycle and editor-return scroll restoration in round 1,
+then a residual pin/load ordering race in round 2 — see the two "Codex
+pre-landing review" sections below), both fixed and verified. Codex's
+final re-review (range `f28e68f..5c915e9`) returned **APPROVED** with no
+outstanding findings. No further Task 7 changes required.
 
 - Baseline HEAD before Task 7 work: `f28e68f` (Task 6 Codex-approved, review
   fix rounds 1-2 landed).
@@ -516,6 +519,24 @@ round 2's reviewer verified the pin/unpin cancellation ordering by
   -- `.task(id:)` simplified to the single `withVisiblePin` call.
 - `Tests/PhotoLibraryCoreTests/ThumbnailProviderTests.swift` -- 1 new test,
   1 renamed/updated test.
+
+## Codex pre-landing review, final re-review: APPROVED
+
+Codex's re-review of round 2's fix (range `f28e68f..5c915e9`) confirmed:
+
+- The pin/load ordering race is closed: `PadThumbnailCell` no longer
+  composes `async let` itself, calling
+  `ThumbnailProvider.withVisiblePin(photoID:operation:)` instead, whose
+  internal order (pin → operation → wait for cancellation → unpin) makes
+  load/store structurally unable to run before pin lands.
+- Round 1's `pendingScrollAnchor`/`ScrollViewReader`/`scrollTo` fix still
+  holds.
+- `git diff --check f28e68f..HEAD` clean, `swift test --filter 'LibraryBrowserGridFlowTests|PadLibraryAccessibilityContractTests|ThumbnailProviderTests'`
+  46/46, full `swift test` 1080/9 skipped/0 failures, strict-concurrency
+  build clean, iPad simulator `xcodebuild` **BUILD SUCCEEDED**,
+  `git status --short --branch` clean.
+
+**Verdict: APPROVED.** No outstanding findings. Task 7 is complete.
 
 ## Not push / merge / rebase / Task 8
 
