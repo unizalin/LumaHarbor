@@ -1621,20 +1621,94 @@ public actor PhotoLibraryService {
         case cancelled
     }
 
-    /// Guards a `CheckedContinuation` against being resumed twice when two
-    /// independent, unstructured tasks race to report a result -- the same
-    /// single-resolution shape as `MultiSourceScanCoordinator`'s own
-    /// `CompletionBox`, generalised to carry a value instead of just firing
-    /// once.
-    private final class RaceBox<Value: Sendable>: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuation: CheckedContinuation<Value, Never>?
+    /// A safe, path-free reason for a per-file inspection that never
+    /// answered. Never mentions the file itself -- `.photoFailed(relativePath:reason:)`
+    /// already carries that separately.
+    private static var providerTimeoutMessage: String {
+        L10n.t("LumaHarbor gave up waiting for this file to respond.")
+    }
 
-        init(_ continuation: CheckedContinuation<Value, Never>) {
+    /// Bridges three independent signals -- the inspection finishing, the
+    /// timeout elapsing, and the caller of `inspectWithTimeout` itself being
+    /// cancelled -- into one single-resolution `CheckedContinuation`.
+    ///
+    /// The single-resolution shape matches `MultiSourceScanCoordinator`'s
+    /// own `CompletionBox`: whichever signal calls `resolve(_:)` first wins,
+    /// and every later call is silently dropped, so a slow loser can never
+    /// overwrite an already-reported result. `cancel()` additionally
+    /// forwards real cancellation into `inspectTask` via `Task.cancel()` --
+    /// which `Self.inspect`'s own `runOffActor` call observes, so a
+    /// *cooperative* decoder still notices and stops promptly -- while
+    /// resolving immediately with `.cancelled` itself, so `inspectWithTimeout`
+    /// never blocks its own return on how long that decoder actually takes
+    /// to notice. A *non-cooperative* decoder is simply left running,
+    /// forgotten, exactly like the timeout path already treats one
+    /// (addendum §3.5): whatever it eventually reports arrives after this
+    /// box has already resolved, and is dropped by the same guard.
+    ///
+    /// (Codex pre-landing review, Task 8 round: an earlier version raced the
+    /// inspection and the timeout as two unstructured `Task { }`s with no
+    /// cancellation bridge at all, so cancelling the scan never interrupted
+    /// whichever file was currently mid-inspection. A structured `TaskGroup`
+    /// was tried next, but a `TaskGroup` cannot resolve and return before
+    /// *every* child finishes -- which reintroduced exactly the "block on a
+    /// non-cooperative provider" stall this timeout exists to prevent, and
+    /// deadlocked `testNonCooperativeInspectionDiscardsItsResultAndStopsThere`.
+    /// This `withTaskCancellationHandler`-based bridge is what actually
+    /// satisfies both constraints: prompt cancellation response, and never
+    /// waiting on the loser.)
+    private final class InspectionRace: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<InspectionOutcome, Never>?
+        private var inspectTask: Task<Void, Never>?
+        private var isCancelled = false
+
+        func start(
+            continuation: CheckedContinuation<InspectionOutcome, Never>,
+            inspect: @escaping @Sendable () async -> InspectionOutcome,
+            timeout: @escaping @Sendable () async -> InspectionOutcome?
+        ) {
+            lock.lock()
             self.continuation = continuation
+            let alreadyCancelled = isCancelled
+            lock.unlock()
+
+            let task = Task { [weak self] in
+                let outcome = await inspect()
+                self?.resolve(outcome)
+            }
+
+            lock.lock()
+            inspectTask = task
+            lock.unlock()
+
+            if alreadyCancelled {
+                // `cancel()` already ran before `start()` reached this point
+                // (the caller was cancelled before this race ever began) --
+                // stop the inspection immediately rather than letting it run
+                // needlessly, and resolve since `cancel()`'s own resolve
+                // call raced ahead of `continuation` even being set.
+                task.cancel()
+                resolve(.cancelled)
+                return
+            }
+
+            Task { [weak self] in
+                guard let outcome = await timeout() else { return }
+                self?.resolve(outcome)
+            }
         }
 
-        func resolve(_ value: Value) {
+        func cancel() {
+            lock.lock()
+            isCancelled = true
+            let task = inspectTask
+            lock.unlock()
+            task?.cancel()
+            resolve(.cancelled)
+        }
+
+        func resolve(_ value: InspectionOutcome) {
             lock.lock()
             let pending = continuation
             continuation = nil
@@ -1643,23 +1717,9 @@ public actor PhotoLibraryService {
         }
     }
 
-    /// A safe, path-free reason for a per-file inspection that never
-    /// answered. Never mentions the file itself -- `.photoFailed(relativePath:reason:)`
-    /// already carries that separately.
-    private static var providerTimeoutMessage: String {
-        L10n.t("LumaHarbor gave up waiting for this file to respond.")
-    }
-
     /// Races one file's fingerprint+decode inspection against a fixed
     /// provider timeout: an unresponsive, cloud-backed Files folder that
     /// never answers a read must not stall the rest of the scan.
-    ///
-    /// Whichever side finishes first wins, via `RaceBox`; the loser is never
-    /// awaited. In particular, a genuinely non-cooperative provider read that
-    /// outlasts the timeout is simply left running as an orphaned, unawaited
-    /// `Task` -- exactly like a cancelled scan already discards a
-    /// non-cooperative decoder's late result (addendum §3.5) -- rather than
-    /// this call blocking on it, which would defeat the timeout entirely.
     ///
     /// A timeout is reported as an ordinary `.failure`, the same outcome a
     /// fingerprint I/O error already produces: no `PhotoAsset` is added to
@@ -1675,24 +1735,32 @@ public actor PhotoLibraryService {
         libraryID: LibraryID
     ) async -> InspectionOutcome {
         let sleep = providerTimeoutSleep
-        return await withCheckedContinuation { (continuation: CheckedContinuation<InspectionOutcome, Never>) in
-            let box = RaceBox(continuation)
-            Task {
-                let outcome = await Self.inspect(
-                    file: file, manifest: manifest, decoder: decoder, libraryID: libraryID
+        let race = InspectionRace()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<InspectionOutcome, Never>) in
+                race.start(
+                    continuation: continuation,
+                    inspect: {
+                        await Self.inspect(
+                            file: file, manifest: manifest, decoder: decoder, libraryID: libraryID
+                        )
+                    },
+                    timeout: {
+                        do {
+                            try await sleep(Self.providerRequestTimeout)
+                        } catch {
+                            // The sleep itself was cancelled -- the
+                            // inspection side already won, or the caller was
+                            // cancelled and `onCancel` below already
+                            // resolved this race. Nothing to report.
+                            return nil
+                        }
+                        return .failure(reason: Self.providerTimeoutMessage)
+                    }
                 )
-                box.resolve(outcome)
             }
-            Task {
-                do {
-                    try await sleep(Self.providerRequestTimeout)
-                } catch {
-                    // The sleep itself was cancelled/thrown -- the inspection
-                    // task above already won, or will. Nothing to report.
-                    return
-                }
-                box.resolve(.failure(reason: Self.providerTimeoutMessage))
-            }
+        } onCancel: {
+            race.cancel()
         }
     }
 
