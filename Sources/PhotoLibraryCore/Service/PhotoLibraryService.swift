@@ -187,6 +187,16 @@ public actor PhotoLibraryService {
     /// behavior is covered directly by `MultiSourceScanCoordinatorTests`.
     private let scanCoordinator = MultiSourceScanCoordinator()
 
+    /// How long one file's fingerprint+decode inspection may run before it's
+    /// treated as an unresponsive provider (an unreachable, cloud-backed
+    /// Files folder that never answers a read) rather than a slow one.
+    static let providerRequestTimeout: Duration = .seconds(30)
+    /// Seam over waiting out that timeout: production really waits; a test
+    /// substitutes a sleep that resolves immediately (while still recording
+    /// what duration it was asked to wait), so the 30-second path is provable
+    /// without an actual 30-second wait.
+    private let providerTimeoutSleep: @Sendable (Duration) async throws -> Void
+
     /// How many `performScan` calls are currently running, across every
     /// library. Incremented at the top of `performScan` and decremented via
     /// `defer`, so every exit path — cancellation, early failure, normal
@@ -230,7 +240,10 @@ public actor PhotoLibraryService {
         folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
         resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver(),
         bookmarkDataCreator: any BookmarkDataCreating = SystemBookmarkDataCreator(),
-        registryTransactionStore: (any RegistryTransactionStoring)?
+        registryTransactionStore: (any RegistryTransactionStoring)?,
+        providerTimeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
     ) throws {
         try locations.createDirectories()
         self.locations = locations
@@ -244,6 +257,7 @@ public actor PhotoLibraryService {
         self.folderAccessResolver = folderAccessResolver
         self.resourceIdentityResolver = resourceIdentityResolver
         self.bookmarkDataCreator = bookmarkDataCreator
+        self.providerTimeoutSleep = providerTimeoutSleep
     }
 
     public var indexStore: PhotoIndexStore { index }
@@ -1414,7 +1428,7 @@ public actor PhotoLibraryService {
                     let consumerLeft = await emitter.isCancelled
                     if Task.isCancelled || consumerLeft { cancelled = true; break }
 
-                    let outcome = await Self.inspect(
+                    let outcome = await self.inspectWithTimeout(
                         file: file,
                         manifest: manifest,
                         decoder: decoder,
@@ -1477,6 +1491,17 @@ public actor PhotoLibraryService {
                         await emit(.failed(
                             .indexUnavailable((error as NSError).localizedDescription)
                         ))
+                        // A batch that failed to persist leaves this scan's
+                        // "which photos are still there" picture incomplete
+                        // for at least those photos -- never safe grounds for
+                        // the differential prune below, or for stamping
+                        // `lastScanAt`/the manifest's success timestamp as if
+                        // this run finished cleanly. Folding it into
+                        // `cancelled` reuses the exact same "don't trust an
+                        // incomplete picture" gate a genuine cancellation
+                        // already relies on, rather than inventing a second,
+                        // parallel one.
+                        cancelled = true
                     }
                 }
 
@@ -1513,6 +1538,20 @@ public actor PhotoLibraryService {
                 manifestWriteRecoverySuggestion: nil,
                 completedAt: Date()
             )))
+            return
+        }
+
+        // A `FileManager.DirectoryEnumerator` can't tell "ran out of files"
+        // from "the drive disappeared mid-walk" -- both just stop yielding
+        // items, so `cancelled` alone never catches this. Re-checking here,
+        // once, right before anything destructive runs, is what does: a
+        // source that vanished partway through a scan must be reported as
+        // offline -- exactly like the guard at the top of this function that
+        // refuses to even start a scan on an already-offline source -- and
+        // must never be mistaken for "every file this run didn't re-see is
+        // actually gone".
+        if !cancelled, !repository.isAvailable {
+            await emit(.failed(.offline(path: folder.rootURL.path)))
             return
         }
 
@@ -1580,6 +1619,81 @@ public actor PhotoLibraryService {
         /// The caller gave up. Explicitly not a `failure`: a cancelled scan must
         /// never leave the user looking at photos marked damaged (addendum §3.5).
         case cancelled
+    }
+
+    /// Guards a `CheckedContinuation` against being resumed twice when two
+    /// independent, unstructured tasks race to report a result -- the same
+    /// single-resolution shape as `MultiSourceScanCoordinator`'s own
+    /// `CompletionBox`, generalised to carry a value instead of just firing
+    /// once.
+    private final class RaceBox<Value: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Value, Never>?
+
+        init(_ continuation: CheckedContinuation<Value, Never>) {
+            self.continuation = continuation
+        }
+
+        func resolve(_ value: Value) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
+    }
+
+    /// A safe, path-free reason for a per-file inspection that never
+    /// answered. Never mentions the file itself -- `.photoFailed(relativePath:reason:)`
+    /// already carries that separately.
+    private static var providerTimeoutMessage: String {
+        L10n.t("LumaHarbor gave up waiting for this file to respond.")
+    }
+
+    /// Races one file's fingerprint+decode inspection against a fixed
+    /// provider timeout: an unresponsive, cloud-backed Files folder that
+    /// never answers a read must not stall the rest of the scan.
+    ///
+    /// Whichever side finishes first wins, via `RaceBox`; the loser is never
+    /// awaited. In particular, a genuinely non-cooperative provider read that
+    /// outlasts the timeout is simply left running as an orphaned, unawaited
+    /// `Task` -- exactly like a cancelled scan already discards a
+    /// non-cooperative decoder's late result (addendum §3.5) -- rather than
+    /// this call blocking on it, which would defeat the timeout entirely.
+    ///
+    /// A timeout is reported as an ordinary `.failure`, the same outcome a
+    /// fingerprint I/O error already produces: no `PhotoAsset` is added to
+    /// this scan's batch and the manifest keeps whatever record it already
+    /// had for this path, so a *later* scan -- a fresh generation, not a
+    /// retry loop inside this one -- picks the file up completely fresh. This
+    /// call never retries on its own: one timeout is exactly one
+    /// `.photoFailed` event, and the scan moves straight on to the next file.
+    private func inspectWithTimeout(
+        file: ScannedFile,
+        manifest: LibraryManifest,
+        decoder: any RawDecoding,
+        libraryID: LibraryID
+    ) async -> InspectionOutcome {
+        let sleep = providerTimeoutSleep
+        return await withCheckedContinuation { (continuation: CheckedContinuation<InspectionOutcome, Never>) in
+            let box = RaceBox(continuation)
+            Task {
+                let outcome = await Self.inspect(
+                    file: file, manifest: manifest, decoder: decoder, libraryID: libraryID
+                )
+                box.resolve(outcome)
+            }
+            Task {
+                do {
+                    try await sleep(Self.providerRequestTimeout)
+                } catch {
+                    // The sleep itself was cancelled/thrown -- the inspection
+                    // task above already won, or will. Nothing to report.
+                    return
+                }
+                box.resolve(.failure(reason: Self.providerTimeoutMessage))
+            }
+        }
     }
 
     /// Fingerprint, identity and metadata for one file.

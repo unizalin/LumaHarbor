@@ -10,15 +10,27 @@ import UniformTypeIdentifiers
 /// column at regular width and presented from a toolbar button at compact
 /// width — see `PadLibraryView` for which.
 ///
-/// Per-source scan progress display, and periodically re-scanning an
-/// already-known source, are deliberately not part of this task — the
-/// sidebar's own row here only triggers `library.scanSource(_:)` once,
-/// immediately after a source is newly added, so the folder the user just
-/// picked doesn't sit permanently empty. A richer progress UI belongs with
-/// Task 7's own grid work.
+/// Per-source scan progress display is deliberately not part of this task —
+/// that belongs with Task 7's own grid work. Task 8 adds the other
+/// per-source lifecycle commands (remove/reconnect/rescan), every one of
+/// them calling straight into `library` (an `EditorCore.LibraryBrowserSession`)
+/// rather than any filesystem API of this view's own: removing only ever
+/// forgets the source locally (`LibraryBrowserSession.removeSource(_:)` →
+/// `PhotoLibraryService.removeLibrary(id:)`, which never touches the source
+/// root), reconnecting re-verifies the folder's identity server-side
+/// (`relinkSource(_:to:)` → `PhotoLibraryService.relink(libraryID:to:)`), and
+/// rescanning reuses the exact same bounded scan (`scanSource(_:)`) the
+/// "just added" sweep already used.
 struct PadLibrarySidebar: View {
     @ObservedObject var library: PadLibraryModel
     @State private var isAddingSource = false
+    /// The source a remove confirmation is currently pending for. Non-nil
+    /// drives `.confirmationDialog` below; set back to `nil` on every path
+    /// out (confirm, cancel, or the dialog's own dismiss).
+    @State private var pendingRemoval: LibraryFolder?
+    /// The source a folder picker was opened to reconnect. Non-nil drives
+    /// its own `.fileImporter`, distinct from `isAddingSource`'s.
+    @State private var relinkTarget: LibraryFolder?
 
     var body: some View {
         List {
@@ -35,6 +47,16 @@ struct PadLibrarySidebar: View {
                 } else {
                     ForEach(library.sources) { source in
                         sourceRow(source)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    pendingRemoval = source
+                                } label: {
+                                    Label(L10n.t("Remove from LumaHarbor"), systemImage: "trash")
+                                }
+                            }
+                            .contextMenu {
+                                sourceContextMenuItems(for: source)
+                            }
                     }
                 }
             }
@@ -73,6 +95,83 @@ struct PadLibrarySidebar: View {
                     return
                 }
             }
+        }
+        .fileImporter(
+            isPresented: Binding(
+                get: { relinkTarget != nil },
+                set: { isPresented in if !isPresented { relinkTarget = nil } }
+            ),
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            guard let target = relinkTarget else { return }
+            relinkTarget = nil
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task { await library.relinkSource(target.id, to: url) }
+            case .failure(let error):
+                let nsError = error as NSError
+                guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
+                    library.alert = EditorAlert(
+                        title: L10n.t("Couldn't reconnect this source"),
+                        message: L10n.t("Couldn't read the file."),
+                        nextStep: nil
+                    )
+                    return
+                }
+            }
+        }
+        // Spec/plan requirement: this text must say the RAW files and
+        // sidecars remain untouched -- removal only ever forgets the source
+        // locally (`PhotoLibraryService.removeLibrary(id:)`'s own doc
+        // comment: it "must never touch the source root itself").
+        .confirmationDialog(
+            L10n.t("Remove this source?"),
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { isPresented in if !isPresented { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { source in
+            Button(L10n.t("Remove from LumaHarbor"), role: .destructive) {
+                pendingRemoval = nil
+                Task { await library.removeSource(source.id) }
+            }
+            Button(L10n.t("Cancel"), role: .cancel) {
+                pendingRemoval = nil
+            }
+        } message: { _ in
+            Text(L10n.t("LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are."))
+        }
+    }
+
+    @ViewBuilder
+    private func sourceContextMenuItems(for source: LibraryFolder) -> some View {
+        Button {
+            library.scanSource(source.id)
+        } label: {
+            Label(L10n.t("Rescan"), systemImage: "arrow.clockwise")
+        }
+        if needsReconnection(source) {
+            Button {
+                relinkTarget = source
+            } label: {
+                Label(L10n.t("Reconnect…"), systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+        Button(role: .destructive) {
+            pendingRemoval = source
+        } label: {
+            Label(L10n.t("Remove from LumaHarbor"), systemImage: "trash")
+        }
+    }
+
+    private func needsReconnection(_ source: LibraryFolder) -> Bool {
+        switch source.connectionState {
+        case .offline, .needsAuthorization: return true
+        case .ready, .readOnly: return false
         }
     }
 
