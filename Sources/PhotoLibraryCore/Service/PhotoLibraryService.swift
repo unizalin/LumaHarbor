@@ -1670,7 +1670,6 @@ public actor PhotoLibraryService {
         ) {
             lock.lock()
             self.continuation = continuation
-            let alreadyCancelled = isCancelled
             lock.unlock()
 
             let task = Task { [weak self] in
@@ -1678,16 +1677,28 @@ public actor PhotoLibraryService {
                 self?.resolve(outcome)
             }
 
+            // Storing `inspectTask` and reading `isCancelled` inside the
+            // *same* critical section is what closes a race a two-lock
+            // version of this had: `cancel()` (which can run concurrently,
+            // from `onCancel`, on a different thread) also reads/writes
+            // both of these under this same lock, so whichever of `cancel()`
+            // or this section runs first, the other sees a fully consistent
+            // picture -- never "`inspectTask` not stored yet" paired with
+            // "the earlier snapshot said not cancelled." The just-created
+            // task is therefore always cancelled exactly once, from
+            // whichever side notices first, with no window in between.
             lock.lock()
             inspectTask = task
+            let cancelledNow = isCancelled
             lock.unlock()
 
-            if alreadyCancelled {
-                // `cancel()` already ran before `start()` reached this point
-                // (the caller was cancelled before this race ever began) --
-                // stop the inspection immediately rather than letting it run
-                // needlessly, and resolve since `cancel()`'s own resolve
-                // call raced ahead of `continuation` even being set.
+            if cancelledNow {
+                // The caller was already cancelled by the time this race
+                // began (or `cancel()` won this exact race) -- stop the
+                // inspection immediately rather than letting it run
+                // needlessly, and resolve now since a concurrent `cancel()`
+                // may have found `inspectTask` still nil and been unable to
+                // do either of these itself.
                 task.cancel()
                 resolve(.cancelled)
                 return
