@@ -2,13 +2,15 @@
 
 ## Status
 
-DONE — implemented via `superpowers:subagent-driven-development` (fresh
-implementer subagent, task-scoped reviewer subagent), two rounds of
+DONE — **APPROVED**. Implemented via `superpowers:subagent-driven-development`
+(fresh implementer subagent, task-scoped reviewer subagent), two rounds of
 Important findings from review fixed directly by the controller (both
 genuine concurrency defects requiring careful analysis of Swift
-structured-concurrency semantics), re-reviewed clean on round 3. Pending
-Codex pre-landing review of this branch, matching the pattern established
-for Tasks 1-7.
+structured-concurrency semantics — first an unstructured-`Task`
+cancellation-forwarding gap, then a narrower TOCTOU race in that fix's own
+`InspectionRace` class), re-reviewed **APPROVED** on round 3 with no
+outstanding findings. Pending Codex pre-landing review of this branch,
+matching the pattern established for Tasks 1-7.
 
 - Baseline HEAD before Task 8 work: `aae9866` (Task 7 fully Codex
   pre-landing-review APPROVED).
@@ -342,6 +344,34 @@ not a defect in the diff.
   were both read in full and deliberately left unmodified after concluding
   neither needed a change for this task — noted here so a reviewer doesn't
   mistake the absence of a diff in either file for an oversight.
+
+## Review round 3 (final, task-reviewer subagent): APPROVED
+
+Re-verified round 2's fix independently — read the final state of
+`start()`/`cancel()`/`resolve()` directly (not the report's description of
+them) and traced both possible lock orderings explicitly:
+
+- If `cancel()`'s critical section runs first: it sees `inspectTask == nil`
+  and can't cancel the real task itself, but `start()`'s later critical
+  section now correctly reads `cancelledNow == true` (no longer stale)
+  and cancels the real task from its own branch instead — closing exactly
+  the interleaving that broke the two-lock version.
+- If `start()`'s critical section runs first: `cancel()` then reads the
+  real, already-stored `inspectTask` and cancels it directly.
+- No third ordering exists — the shared lock serializes the two critical
+  sections into a strict before/after relationship.
+
+Confirmed no new hazard from the restructuring (a theoretical double
+`task.cancel()`/double `resolve(.cancelled)` is both structurally
+impossible per the trace above, and independently safe either way:
+`Task.cancel()` is idempotent, and `resolve()`'s pre-existing
+nil-out-under-lock guard makes a second call a no-op). Confirmed the
+`continuation` field's own lock discipline is untouched and has no
+analogous gap. Endorsed the decision not to add a new test for this
+specific window as reasonable, not a gap, given the fix is a standard
+atomic-check-and-act correctness pattern.
+
+**Verdict: APPROVED.** No outstanding findings. Task 8 is complete.
 
 ## Not push / merge / rebase / Task 9
 
