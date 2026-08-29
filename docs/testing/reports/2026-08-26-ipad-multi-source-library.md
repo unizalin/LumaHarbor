@@ -15,6 +15,8 @@ Current status: **BLOCKED for final sign-off**, not because the implemented Task
 
 The runner records those items as `NOT RUN` / `SKIPPED`, never PASS.
 
+The exact remaining gates, commands, pass criteria and evidence format are defined in `docs/testing/2026-08-29-ipad-multi-source-library-verification-spec.md`.
+
 ## Automated runner
 
 Created:
@@ -116,3 +118,5 @@ Before claiming the full iPad multi-source library complete:
 1. Mount/export the exFAT fixture directory and rerun `Scripts/run-ipad-library-acceptance.zsh`.
 2. Execute the real M1+ iPad checklist and update this report with concrete PASS/FAIL evidence.
 3. Run the final review gate from the implementation plan.
+
+An early static scan for that final review currently has one OPEN hit: the temporary-root fallback in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` uses `try! PadAppServices(...)`. Existing composition tests do not directly exercise failure of both the primary Application Support root and the temporary fallback root. This is not yet classified as a product defect, but it must be resolved or explicitly justified during Gate V4 before approval.
