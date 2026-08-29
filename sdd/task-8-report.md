@@ -3,11 +3,12 @@
 ## Status
 
 DONE — implemented via `superpowers:subagent-driven-development` (fresh
-implementer subagent, task-scoped reviewer subagent), one Important finding
-from review fixed directly by the controller (a genuine concurrency defect
-requiring careful analysis of Swift structured-concurrency semantics).
-Pending Codex pre-landing review of this branch, matching the pattern
-established for Tasks 1-7.
+implementer subagent, task-scoped reviewer subagent), two rounds of
+Important findings from review fixed directly by the controller (both
+genuine concurrency defects requiring careful analysis of Swift
+structured-concurrency semantics), re-reviewed clean on round 3. Pending
+Codex pre-landing review of this branch, matching the pattern established
+for Tasks 1-7.
 
 - Baseline HEAD before Task 8 work: `aae9866` (Task 7 fully Codex
   pre-landing-review APPROVED).
@@ -23,7 +24,9 @@ established for Tasks 1-7.
 
 - `8de5e44` — fix: harden multi-source library lifecycle (implementer)
 - `378f471` — fix: correct the provider-timeout cancellation race
-  (controller's fix for the reviewer's Important finding; see below)
+  (controller's fix for round 1's Important finding; see below)
+- `7d6cafb` — fix: close the InspectionRace start/cancel TOCTOU window
+  (controller's fix for round 2's Important finding; see below)
 
 ## Changed files
 
@@ -160,7 +163,7 @@ sidebar (swipe action + context menu), and `PhotoLibraryService.swift`'s
 already-large file size continuing to grow — none blocking, none fixed in
 this round.
 
-## Review fix (commit `378f471`)
+## Review fix round 1 (commit `378f471`)
 
 Fixing the Important finding took two attempts, both instructive:
 
@@ -214,7 +217,79 @@ cancellation never reached it); GREEN against the fix (elapsed 0.015s).
 - `(cd Apps/LumaHarborPad.swiftpm && xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build)`
   — **BUILD SUCCEEDED**.
 
-## Verification (full task, both rounds)
+## Review round 2 (task-reviewer subagent, post-round-1-fix)
+
+**Verdict on `378f471`: Partially fixed** — the round-1 systemic,
+100%-reproducible defect (unstructured `Task {}` pairs with zero
+cancellation bridge, cancelling a scan never interrupted *any* in-flight
+file) is genuinely closed for the common cases, independently re-derived
+by the reviewer via reading `runOffActor` and `GatedScanDecoder`'s
+cooperative polling rather than trusting the report. But `InspectionRace.start()`
+had an unaddressed TOCTOU race, narrow but real:
+
+**The race:** `start()` snapshotted `isCancelled` into `alreadyCancelled`
+under one lock/unlock, then created the inspect `Task`, then stored it
+into `inspectTask` under a *second*, separate lock/unlock. If `cancel()`
+(invoked from `onCancel`, which can run concurrently on a different
+thread per Apple's own documentation) landed in the window between those
+two critical sections, it would read `inspectTask` as still `nil` (unable
+to cancel the real task) while `start()`'s own `alreadyCancelled` snapshot
+was already stale (taken before `cancel()` ran, so it read `false`) —
+silently reproducing the exact round-1 defect, just narrowed to a single
+timing window instead of every file. The race still resolved promptly
+with `.cancelled` (no hang), but the actual decode work was left running
+uncancelled. The reviewer confirmed the new round-1 test cannot catch
+this, since it only cancels long after `start()` has already returned.
+
+Also confirmed correct (no new issues from round 1's fix): the
+single-resolution guard in `resolve()` (no double-resume possible), no
+retain-cycle/premature-deallocation risk (the `[weak self]` captures can't
+observe `self == nil` for the call that matters, since `race` is kept
+alive by the suspended coroutine frame across `withCheckedContinuation`),
+and the discarded `TaskGroup` attempt's deadlock diagnosis is sound
+(`withTaskGroup` is language-guaranteed to await every child before
+returning).
+
+## Review fix round 2 (commit `7d6cafb`)
+
+Fixed exactly as the reviewer suggested: moved the `isCancelled` read into
+the *same* critical section that stores `inspectTask`, rather than two
+separate lock regions. `InspectionRace.start()` now creates the `Task`
+first, then does one `lock()`/`unlock()` that both sets `inspectTask` and
+reads `isCancelled` into `cancelledNow`, branching afterward. Since
+`cancel()` also reads/writes both under the same lock, whichever of
+`cancel()` or this critical section runs first, the other now sees a
+fully consistent picture — there is no window left where `inspectTask`
+being unset and `isCancelled` reading stale-`false` can coincide.
+
+**No new test added for this specific window deliberately.** Forcing this
+exact interleaving deterministically would require adding a test-only
+delay/gate seam into `InspectionRace` itself, production code whose only
+purpose would be making an internal timing race reproducible — the fix
+is a well-understood, provably-correct concurrency pattern (do the
+check-and-act as one atomic critical section instead of two), not a
+behavior whose correctness is in doubt pending a test. This mirrors this
+branch's own established precedent for judgment calls where a forced test
+would test the harness rather than the behavior (e.g. Task 7 round 1's
+decision not to force a `CacheError` throw from a call site that
+genuinely can't produce one).
+
+### Verification (review fix round 2)
+
+- `swift test --filter 'ScanCancellationTests|MultiSourceFailureRecoveryTests|LibraryRemovalSafetyTests'`
+  — 16/16 pass, including the round-1 fix's own regression test
+  (`testCancellingWhileACooperativeDecodeIsInFlightInterruptsItWithoutEverReleasingTheGate`,
+  0.022s) and `testNonCooperativeInspectionDiscardsItsResultAndStopsThere`
+  (0.230s, no hang).
+- `swift test` (full suite) — 1090 tests / 9 skipped / 0 failures
+  (unchanged count — this round is an internal-only fix, no new test).
+- `swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors`
+  — succeeds, no warnings.
+- `git diff --check` — clean.
+- `(cd Apps/LumaHarborPad.swiftpm && xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build)`
+  — **BUILD SUCCEEDED**.
+
+## Verification (full task, all rounds)
 
 - `swift test --filter 'LibraryRemovalSafetyTests|MultiSourceFailureRecoveryTests'`
   — 9/9 pass.
@@ -273,5 +348,6 @@ not a defect in the diff.
 - No `git push`, `git merge`, `git rebase`, or `git commit --amend` was
   run at any point, across any commit in this task.
 - No Task 9 file was created or modified.
-- Commits from this task: `8de5e44` (implementation), `378f471`
-  (review fix), and `<this commit>` (this report).
+- Commits from this task: `8de5e44` (implementation), `e5087f1` (report),
+  `378f471` (review fix round 1), `7d6cafb` (review fix round 2), and
+  `<this commit>` (recording this hash in the report).
