@@ -129,10 +129,12 @@
 "LumaHarbor couldn't remember that this photo was closed." = "LumaHarbor 無法記住這張照片已經關閉。";
 "LumaHarbor couldn't remember this photo for next time." = "LumaHarbor 無法記住這張照片，供下次使用。";
 "LumaHarbor couldn't start up" = "LumaHarbor 無法啟動";
+"LumaHarbor gave up waiting for this file to respond." = "LumaHarbor 已放棄等待這個檔案回應。";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor 正在匯入或清理另一張照片。";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor 會尋找相機 RAW 檔案，例如 Sony .ARW。";
 "LumaHarbor no longer has access to this file." = "LumaHarbor 已經不再擁有這個檔案的存取權限。";
 "LumaHarbor no longer has access to this photo folder." = "LumaHarbor 已經不再擁有這個照片資料夾的存取權限。";
+"LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are." = "LumaHarbor 只會在這裡忘記這個來源。RAW 檔案與 sidecar 檔案仍會留在原本的位置，不會受到影響。";
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor 會以完整解析度重新解碼原始 RAW，並將結果標記為 sRGB。如果目的地已有同名檔案，會自動加上流水號──不會覆蓋任何檔案。";
 "LumaHarbor's local index couldn't be opened." = "無法開啟 LumaHarbor 的本機索引。";
 "LumaHarbor's local index reported an error." = "LumaHarbor 的本機索引回報了一個錯誤。";
@@ -197,6 +199,7 @@
 "Red" = "紅";
 "Redo" = "重做";
 "Remove from LumaHarbor" = "從 LumaHarbor 移除";
+"Remove this source?" = "要移除這個來源嗎？";
 "Rename Preset" = "重新命名 Preset";
 "Rename…" = "重新命名…";
 "Replace" = "取代";

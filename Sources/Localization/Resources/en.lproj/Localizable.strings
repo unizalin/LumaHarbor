@@ -129,10 +129,12 @@
 "LumaHarbor couldn't remember that this photo was closed." = "LumaHarbor couldn't remember that this photo was closed.";
 "LumaHarbor couldn't remember this photo for next time." = "LumaHarbor couldn't remember this photo for next time.";
 "LumaHarbor couldn't start up" = "LumaHarbor couldn't start up";
+"LumaHarbor gave up waiting for this file to respond." = "LumaHarbor gave up waiting for this file to respond.";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor is already importing or cleaning up another photo.";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor looks for camera RAW files such as Sony .ARW.";
 "LumaHarbor no longer has access to this file." = "LumaHarbor no longer has access to this file.";
 "LumaHarbor no longer has access to this photo folder." = "LumaHarbor no longer has access to this photo folder.";
+"LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are." = "LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are.";
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten.";
 "LumaHarbor's local index couldn't be opened." = "LumaHarbor's local index couldn't be opened.";
 "LumaHarbor's local index reported an error." = "LumaHarbor's local index reported an error.";
@@ -197,6 +199,7 @@
 "Red" = "Red";
 "Redo" = "Redo";
 "Remove from LumaHarbor" = "Remove from LumaHarbor";
+"Remove this source?" = "Remove this source?";
 "Rename Preset" = "Rename Preset";
 "Rename…" = "Rename…";
 "Replace" = "Replace";
