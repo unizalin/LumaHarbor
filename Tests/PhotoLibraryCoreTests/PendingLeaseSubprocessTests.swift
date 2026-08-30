@@ -29,6 +29,26 @@ import XCTest
 final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
 
     private struct SetupFailure: Error {}
+    private final class TrackedProcess {
+        let process = Process()
+        private let didExit = DispatchSemaphore(value: 0)
+
+        init() {
+            process.terminationHandler = { [didExit] _ in
+                didExit.signal()
+            }
+        }
+
+        var isRunning: Bool { process.isRunning }
+        var processIdentifier: pid_t { process.processIdentifier }
+        var terminationReason: Process.TerminationReason { process.terminationReason }
+        var terminationStatus: Int32 { process.terminationStatus }
+
+        func waitUntilExit(timeout: TimeInterval = 5) -> Bool {
+            if !process.isRunning { return true }
+            return didExit.wait(timeout: .now() + timeout) == .success
+        }
+    }
 
     // MARK: - Helpers
 
@@ -62,24 +82,24 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
         return url
     }
 
-    @discardableResult
-    private func launchHelper(mode: String, sourceURL: URL, rootURL: URL, readyFileURL: URL) throws -> Process {
-        let process = Process()
+    private func launchHelper(mode: String, sourceURL: URL, rootURL: URL, readyFileURL: URL) throws -> TrackedProcess {
+        let tracked = TrackedProcess()
+        let process = tracked.process
         process.executableURL = try pendingLeaseHelperURL()
         process.arguments = [rootURL.path, mode, sourceURL.path, readyFileURL.path]
         process.standardInput = Pipe()
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
         try process.run()
-        return process
+        return tracked
     }
 
     /// Drains a helper's stderr after it has terminated and redacts anything
     /// that looks like an absolute path before it is put into an assertion
     /// message. Callers must reap the process first so reading through the
     /// pipe can never wait for a still-live writer.
-    private func sanitizedStandardError(of process: Process) -> String {
-        guard let pipe = process.standardError as? Pipe else { return "<no stderr captured>" }
+    private func sanitizedStandardError(of tracked: TrackedProcess) -> String {
+        guard let pipe = tracked.process.standardError as? Pipe else { return "<no stderr captured>" }
         let data = (try? pipe.fileHandleForReading.readToEnd()) ?? nil
         guard let data else { return "<unavailable>" }
         guard !data.isEmpty, let text = String(data: data, encoding: .utf8), !text.isEmpty else {
@@ -97,17 +117,22 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
         return redacted
     }
 
-    private func terminateAndCollectDiagnostic(for process: Process) -> String {
-        let wasRunning = process.isRunning
+    private func terminateAndCollectDiagnostic(for tracked: TrackedProcess) -> String {
+        let wasRunning = tracked.isRunning
         if wasRunning {
-            kill(process.processIdentifier, SIGKILL)
+            kill(tracked.processIdentifier, SIGKILL)
         }
-        process.waitUntilExit()
+        let reaped = tracked.waitUntilExit()
 
-        let lifecycle = wasRunning
-            ? "was still running and was terminated with status \(process.terminationStatus), reason \(process.terminationReason.rawValue)"
-            : "had exited with status \(process.terminationStatus), reason \(process.terminationReason.rawValue)"
-        return "Helper process \(lifecycle). stderr: \(sanitizedStandardError(of: process))"
+        let lifecycle: String
+        if !reaped {
+            lifecycle = "did not report termination within the bounded wait after SIGKILL"
+        } else if wasRunning {
+            lifecycle = "was still running and was terminated with status \(tracked.terminationStatus), reason \(tracked.terminationReason.rawValue)"
+        } else {
+            lifecycle = "had exited with status \(tracked.terminationStatus), reason \(tracked.terminationReason.rawValue)"
+        }
+        return "Helper process \(lifecycle). stderr: \(sanitizedStandardError(of: tracked))"
     }
 
     /// Polls for the helper's ready file rather than sleeping a guessed
@@ -119,7 +144,7 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
     /// the process is still running, its exit status if not, and its
     /// sanitized stderr.
     private func waitForReadyDocumentID(
-        at url: URL, helper process: Process, timeout: TimeInterval = 10,
+        at url: URL, helper process: TrackedProcess, timeout: TimeInterval = 10,
         file: StaticString = #filePath, line: UInt = #line
     ) async throws -> UUID {
         let deadline = Date().addingTimeInterval(timeout)
@@ -143,12 +168,15 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
 
     /// Tells the child (still blocked on `readLine()`) to exit gracefully,
     /// then blocks -- for real, via the OS -- until it actually has.
-    private func requestGracefulExit(of process: Process) {
-        if let stdin = process.standardInput as? Pipe {
+    private func requestGracefulExit(of tracked: TrackedProcess, file: StaticString = #filePath, line: UInt = #line) throws {
+        if let stdin = tracked.process.standardInput as? Pipe {
             stdin.fileHandleForWriting.write(Data("done\n".utf8))
             try? stdin.fileHandleForWriting.close()
         }
-        process.waitUntilExit()
+        guard tracked.waitUntilExit() else {
+            XCTFail("Timed out waiting for PendingLeaseHelper to exit gracefully", file: file, line: line)
+            throw SetupFailure()
+        }
     }
 
     /// Unconditional cleanup for a `defer` right after a helper process is
@@ -157,11 +185,11 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
     /// reached, etc.), it is killed and *actually* waited for -- never
     /// left as a lingering subprocess just because the test that started
     /// it ended early.
-    private func forceCleanup(_ process: Process) {
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
+    private func forceCleanup(_ tracked: TrackedProcess) {
+        if tracked.isRunning {
+            kill(tracked.processIdentifier, SIGKILL)
         }
-        process.waitUntilExit()
+        _ = tracked.waitUntilExit()
     }
 
     /// Directly probes whether `documentID`'s per-document lease is free
@@ -203,7 +231,7 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(whileAlive.failures.isEmpty, "a held-elsewhere lease is not a failure -- it is correctly and quietly skipped")
         XCTAssertTrue(FileManager.default.fileExists(atPath: recordURL.path), "still there -- untouched while the child is alive")
 
-        requestGracefulExit(of: process)
+        try requestGracefulExit(of: process)
         XCTAssertFalse(process.isRunning, "the child must have genuinely exited before reconciliation is asked to reclaim its lease")
         XCTAssertEqual(process.terminationStatus, 0)
         XCTAssertTrue(isLeaseFree(rootURL: rootURL, documentID: documentID), "the lease must be free the moment the holding process is actually gone")
@@ -235,7 +263,7 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
         // crash looks like. The kernel, not this code, is what releases
         // the flock.
         XCTAssertEqual(kill(process.processIdentifier, SIGKILL), 0, "failed to signal the helper process")
-        process.waitUntilExit()
+        XCTAssertTrue(process.waitUntilExit(), "the child must report termination promptly after SIGKILL -- this wait is deliberately bounded so the suite cannot hang")
         XCTAssertFalse(process.isRunning, "the child must have genuinely terminated, not merely be assumed to -- no lingering subprocess left behind")
         XCTAssertEqual(process.terminationReason, .uncaughtSignal)
         XCTAssertTrue(isLeaseFree(rootURL: rootURL, documentID: documentID), "the kernel must have released the lease the moment the killed process was reaped")
@@ -251,11 +279,11 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
     }
 
     func testCollectingDiagnosticsFromASilentChildIsBoundedAndReapsIt() throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        process.arguments = ["5"]
-        process.standardError = Pipe()
-        try process.run()
+        let process = TrackedProcess()
+        process.process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.process.arguments = ["5"]
+        process.process.standardError = Pipe()
+        try process.process.run()
         defer { forceCleanup(process) }
 
         let startedAt = Date()
@@ -267,12 +295,12 @@ final class PendingLeaseSubprocessTests: TemporaryDirectoryTestCase {
     }
 
     func testCollectedDiagnosticsRedactPrivatePaths() throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "echo '/Users/example/private.ARW /Volumes/Camera/card.ARW /private/var/example /private/tmp/example' >&2"]
-        process.standardError = Pipe()
-        try process.run()
-        process.waitUntilExit()
+        let process = TrackedProcess()
+        process.process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.process.arguments = ["-c", "echo '/Users/example/private.ARW /Volumes/Camera/card.ARW /private/var/example /private/tmp/example' >&2"]
+        process.process.standardError = Pipe()
+        try process.process.run()
+        XCTAssertTrue(process.waitUntilExit())
 
         let diagnostic = terminateAndCollectDiagnostic(for: process)
 
