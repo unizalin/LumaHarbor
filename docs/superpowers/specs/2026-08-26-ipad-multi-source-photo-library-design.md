@@ -10,6 +10,8 @@
 
 目前 iPad App 已能從 Files 或外接來源開啟單張 RAW、選擇原地編輯或複製到 iPad、使用十個基本調整並非破壞式自動保存。下一階段要把這條單張垂直切片擴充成可日常使用的多照片圖庫：使用者能授權多個資料夾或外接磁碟，從同一個 iPad 圖庫增量瀏覽、搜尋及開啟照片；來源離線時仍看得到索引與快取縮圖，重新連結後可繼續工作。
 
+對標參考：Awaysu 的 [AwayPhotoRawEditor](https://github.com/awaysu/AwayPhotoRawEditor) 作為功能完整度與驗測清單的產品參考，重點是「直接瀏覽 RAW、非破壞式編輯、局部/進階調整、批次工作流、風格檔、匯出與清楚等待狀態」這些使用者可見能力。LumaHarbor 仍是獨立 Swift／SwiftUI／Core Image 實作；不得移植 AwayPhotoRawEditor 的 C#、.NET、WinForms、LibRaw 綁定程式碼、UI、圖示或素材。既有閱讀筆記見 `docs/reference/awayphotoraweditor-design-notes.md` 與 `docs/reference/next-phase-scope-notes.md`。
+
 本設計只涵蓋多來源瀏覽基礎。它不宣稱完成評分、相簿、批次操作、Preset／XMP 圖庫 UI、完整匯出或進階調色。
 
 ## 2. 已驗證的現況

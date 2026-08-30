@@ -47,13 +47,16 @@ struct PadLibraryGrid: View {
     @ObservedObject var library: PadLibraryModel
     let editor: PadEditorModel
     let services: PadAppServices
+    let onAddSource: () -> Void
 
     @AppStorage("PadLibraryGridDensity") private var densityRawValue = PadLibraryGridDensity.medium.rawValue
+    @State private var openingPhotoID: PhotoID?
 
     /// How close to the end of `library.photos` a visible cell must be
     /// before it triggers `loadNextPage()` -- the brief's "last 20 visible
     /// items" prefetch threshold, exactly.
     private static let prefetchThreshold = 20
+    private static let minimumOpeningProgressDuration: Duration = .milliseconds(450)
 
     private var density: PadLibraryGridDensity {
         PadLibraryGridDensity(rawValue: densityRawValue) ?? .medium
@@ -74,6 +77,15 @@ struct PadLibraryGrid: View {
                 ToolbarItem(placement: .primaryAction) { sortMenu }
                 ToolbarItem(placement: .primaryAction) { densityMenu }
             }
+            .overlay {
+                if openingPhotoID != nil {
+                    PadLibraryProgressOverlay(
+                        title: L10n.t("Preparing photo…"),
+                        message: L10n.t("Checking file access before opening the editor.")
+                    )
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: openingPhotoID)
     }
 
     @ViewBuilder
@@ -98,11 +110,14 @@ struct PadLibraryGrid: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView(
-            L10n.t("No RAW files found in this folder"),
-            systemImage: "photo.on.rectangle.angled",
-            description: Text(L10n.t("Add a photo folder"))
-        )
+        ContentUnavailableView {
+            Label(L10n.t("No RAW files found in this folder"), systemImage: "photo.on.rectangle.angled")
+        } description: {
+            Text(L10n.t("Add a photo folder"))
+        } actions: {
+            Button(L10n.t("Add Source"), action: onAddSource)
+                .frame(minWidth: 44, minHeight: 44)
+        }
     }
 
     /// Editor-return restoration (Task 7 Step 1's "editor return restores
@@ -125,7 +140,7 @@ struct PadLibraryGrid: View {
                 .padding(16)
 
                 if library.loadState == .loadingNextPage {
-                    ProgressView()
+                    ProgressView(L10n.t("Loading more photos…"))
                         .padding()
                 }
             }
@@ -178,8 +193,17 @@ struct PadLibraryGrid: View {
     /// result to `editor` -- this is what actually drives `PadRootView`'s
     /// route switch to `PadEditorView`.
     private func open(_ photo: PhotoAsset) async {
-        guard let asset = await library.openAsset(for: photo) else { return }
+        openingPhotoID = photo.id
+        async let minimumVisibleDelay: Void = sleepForMinimumOpeningProgressDuration()
+        let asset = await library.openAsset(for: photo)
+        await minimumVisibleDelay
+        openingPhotoID = nil
+        guard let asset else { return }
         editor.openLibraryAsset(asset)
+    }
+
+    private func sleepForMinimumOpeningProgressDuration() async {
+        try? await Task.sleep(for: Self.minimumOpeningProgressDuration)
     }
 
     /// A photo's cell needs its *source's* connection state, not just its

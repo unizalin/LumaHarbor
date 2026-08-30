@@ -121,7 +121,7 @@ extension LibraryBrowserDependencies {
                 guard let url = await service.sourceURL(for: photo) else {
                     throw LibraryBrowserResolutionError.sourceUnavailable
                 }
-                return .external(url: url, sourceKind: folder.sourceKind)
+                return .external(url: url, scopeURL: folder.rootURL, sourceKind: folder.sourceKind)
             }
         )
     }

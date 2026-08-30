@@ -935,8 +935,8 @@ public final class PhotoDocumentEditor: ObservableObject {
     /// or a restore.
     public func openLibraryAsset(_ asset: LibraryOpenAsset) {
         switch asset {
-        case .external(let url, _):
-            openLibraryExternalAsset(url: url)
+        case .external(let url, let scopeURL, _):
+            openLibraryExternalAsset(url: url, scopeURL: scopeURL)
         case .appCopy(let documentID):
             openLibraryAppCopy(documentID: documentID)
         }
@@ -969,8 +969,8 @@ public final class PhotoDocumentEditor: ObservableObject {
     /// failing for any non-cancellation reason. Either way, nothing here
     /// mints a token or touches `document`/`openingTask` until the source
     /// has actually been proven reachable.
-    private func openLibraryExternalAsset(url: URL) {
-        let scope = dependencies.makeScope(url)
+    private func openLibraryExternalAsset(url: URL, scopeURL: URL) {
+        let scope = dependencies.makeScope(scopeURL)
         guard scope.isAccessing else {
             scope.stop()
             alert = offlineSourceAlert()
