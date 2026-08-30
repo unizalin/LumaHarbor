@@ -230,10 +230,12 @@ public enum RelinkError: Error, Equatable, Sendable {
 /// in-place vs. copy, so opening it bypasses that choice dialog entirely.
 public enum LibraryOpenAsset: Sendable, Equatable {
     /// An indexed photo at an already-authorised external library source.
-    /// Opened exactly like a fresh `.inPlace` selection. `url` is
-    /// runtime-only -- resolved from the library's own security scope at
-    /// the moment of opening, never persisted or logged by this type.
-    case external(url: URL, sourceKind: LibrarySourceKind)
+    /// Opened exactly like a fresh `.inPlace` selection. `url` is the child
+    /// RAW file; `scopeURL` is the source root whose security-scoped grant
+    /// must be held while reading it. Both are runtime-only -- resolved from
+    /// the library's own security scope at the moment of opening, never
+    /// persisted or logged by this type.
+    case external(url: URL, scopeURL: URL, sourceKind: LibrarySourceKind)
     /// An existing, already-`.committed` App-copy document in
     /// `PhotoDocumentStore` (typically one `committedDocuments()` reported).
     /// Opens that record directly; must never call `importCopy` again.

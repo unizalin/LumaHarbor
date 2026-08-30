@@ -282,7 +282,7 @@ final class LibraryBrowserGridFlowTests: XCTestCase {
         await environment.setPages(for: query, pages: [pageOne, pageTwo])
         await environment.setResolveResult(
             for: anchorPhoto.id,
-            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), sourceKind: .externalFolder))
+            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder))
         )
 
         let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
@@ -334,7 +334,7 @@ final class LibraryBrowserGridFlowTests: XCTestCase {
         await environment.setPages(for: query, pages: [pageOne, pageTwo])
         await environment.setResolveResult(
             for: anchorPhoto.id,
-            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), sourceKind: .externalFolder))
+            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder))
         )
 
         let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
@@ -379,7 +379,7 @@ final class LibraryBrowserGridFlowTests: XCTestCase {
         await environment.setPages(for: query, pages: [[onlyPhoto]])
         await environment.setResolveResult(
             for: onlyPhoto.id,
-            .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), sourceKind: .externalFolder))
+            .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder))
         )
 
         let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
@@ -413,7 +413,7 @@ final class LibraryBrowserGridFlowTests: XCTestCase {
         await environment.setPages(for: query, pages: [[anchorPhoto]])
         await environment.setResolveResult(
             for: anchorPhoto.id,
-            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), sourceKind: .externalFolder))
+            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder))
         )
 
         let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))
@@ -450,7 +450,7 @@ final class LibraryBrowserGridFlowTests: XCTestCase {
         await environment.setPages(for: query, pages: [[onlyPhoto]])
         await environment.setResolveResult(
             for: onlyPhoto.id,
-            .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), sourceKind: .externalFolder))
+            .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder))
         )
 
         let session = LibraryBrowserSession(dependencies: makeGridFlowDependencies(environment))

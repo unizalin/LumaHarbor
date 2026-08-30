@@ -10,6 +10,7 @@
 "Add Folder" = "加入資料夾";
 "Add Photo Folder…" = "加入照片資料夾…";
 "Add Source" = "加入來源";
+"Adding source…" = "正在加入來源…";
 "Add the folder again." = "重新加入這個資料夾。";
 "Adjustments" = "調整";
 "All" = "全部";
@@ -38,6 +39,7 @@
 "Choose the folder again to restore access to your photos." = "重新選擇這個資料夾以恢復照片的存取權限。";
 "Choose the photo folder again to restore access." = "重新選擇這個照片資料夾以恢復存取權限。";
 "Choose where to save the exported photo." = "選擇要儲存匯出照片的位置。";
+"Checking file access before opening the editor." = "正在確認檔案存取權，接著會開啟編輯器。";
 "Close" = "關閉";
 "Color" = "色彩";
 "Contrast" = "對比";
@@ -138,6 +140,7 @@
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor 會以完整解析度重新解碼原始 RAW，並將結果標記為 sRGB。如果目的地已有同名檔案，會自動加上流水號──不會覆蓋任何檔案。";
 "LumaHarbor's local index couldn't be opened." = "無法開啟 LumaHarbor 的本機索引。";
 "LumaHarbor's local index reported an error." = "LumaHarbor 的本機索引回報了一個錯誤。";
+"Loading more photos…" = "正在載入更多照片…";
 "The system denied access to" = "系統拒絕存取：";
 "Magenta" = "洋紅";
 "Make sure the file isn't being modified, then try again." = "請確認這個檔案沒有被修改中，然後再試一次。";
@@ -172,12 +175,14 @@
 "Photo" = "相片";
 "photos" = "張照片";
 "Pick the folder on your drive that holds your RAW files." = "選擇磁碟上存放 RAW 檔案的資料夾。";
+"Preparing photo…" = "正在準備照片…";
 "Preserved: kept but not applied" = "保留：僅保存，不套用";
 "Preset group" = "Preset 群組";
 "Preset name" = "Preset 名稱";
 "Presets" = "Preset";
 "Previous Photo" = "上一張照片";
 "Purple" = "紫";
+"Scanning this folder so photos can appear as they are indexed." = "正在掃描這個資料夾，照片會隨著索引陸續出現。";
 "Quit and reopen LumaHarbor to rebuild the index." = "結束並重新開啟 LumaHarbor 即可重建索引。";
 "Quit and reopen LumaHarbor, then try again." = "結束並重新開啟 LumaHarbor，然後再試一次。";
 "Read-only" = "唯讀";

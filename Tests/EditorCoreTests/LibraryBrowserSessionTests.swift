@@ -770,14 +770,14 @@ final class LibraryBrowserSessionTests: XCTestCase {
         let photo = makePhoto(libraryID: sourceID)
         await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[photo]])
         let resolvedURL = URL(fileURLWithPath: "/Volumes/Drive/photo.ARW")
-        await environment.setResolveResult(for: photo.id, .success(.external(url: resolvedURL, sourceKind: .externalFolder)))
+        await environment.setResolveResult(for: photo.id, .success(.external(url: resolvedURL, scopeURL: resolvedURL.deletingLastPathComponent(), sourceKind: .externalFolder)))
 
         let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
         session.start()
         try await waitUntil { session.loadState == .loaded }
 
         let result = await session.openAsset(for: photo)
-        guard case .external(let url, let sourceKind) = result else {
+        guard case .external(let url, _, let sourceKind) = result else {
             return XCTFail("expected .external, got \(String(describing: result))")
         }
         XCTAssertEqual(url, resolvedURL)
@@ -858,7 +858,7 @@ final class LibraryBrowserSessionTests: XCTestCase {
         let photo = makePhoto(libraryID: sourceID)
         await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[photo]])
         let url = URL(fileURLWithPath: "/Volumes/ReadOnlyDrive/photo.ARW")
-        await environment.setResolveResult(for: photo.id, .success(.external(url: url, sourceKind: .externalFolder)))
+        await environment.setResolveResult(for: photo.id, .success(.external(url: url, scopeURL: url.deletingLastPathComponent(), sourceKind: .externalFolder)))
 
         let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
         session.start()
@@ -1139,7 +1139,7 @@ final class LibraryBrowserSessionTests: XCTestCase {
         await environment.setPages(for: query, pages: [pageOne, pageTwo, pageThree])
         await environment.setResolveResult(
             for: anchorPhoto.id,
-            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), sourceKind: .externalFolder))
+            .success(.external(url: URL(fileURLWithPath: "/tmp/anchor.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder))
         )
 
         let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
@@ -1179,7 +1179,7 @@ final class LibraryBrowserSessionTests: XCTestCase {
         let onlyPhoto = makePhoto(libraryID: sourceID, name: "only.ARW")
         await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
         await environment.setPages(for: query, pages: [[onlyPhoto]])
-        await environment.setResolveResult(for: onlyPhoto.id, .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), sourceKind: .externalFolder)))
+        await environment.setResolveResult(for: onlyPhoto.id, .success(.external(url: URL(fileURLWithPath: "/tmp/only.ARW"), scopeURL: URL(fileURLWithPath: "/tmp", isDirectory: true), sourceKind: .externalFolder)))
 
         let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
         session.start()

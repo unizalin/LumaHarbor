@@ -23,7 +23,7 @@ import UniformTypeIdentifiers
 /// "just added" sweep already used.
 struct PadLibrarySidebar: View {
     @ObservedObject var library: PadLibraryModel
-    @State private var isAddingSource = false
+    let onAddSource: () -> Void
     /// The source a remove confirmation is currently pending for. Non-nil
     /// drives `.confirmationDialog` below; set back to `nil` on every path
     /// out (confirm, cancel, or the dialog's own dismiss).
@@ -66,34 +66,11 @@ struct PadLibrarySidebar: View {
         .toolbar {
             ToolbarItem {
                 Button {
-                    isAddingSource = true
+                    onAddSource()
                 } label: {
                     Label(L10n.t("Add Source"), systemImage: "plus")
                 }
-            }
-        }
-        .fileImporter(
-            isPresented: $isAddingSource,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                Task { await addSource(at: url) }
-            case .failure(let error):
-                // A plain user cancellation must stay silent; any other
-                // provider failure needs a safe, actionable alert instead
-                // of being swallowed.
-                let nsError = error as NSError
-                guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
-                    library.alert = EditorAlert(
-                        title: L10n.t("Couldn't add this source"),
-                        message: L10n.t("Couldn't read the file."),
-                        nextStep: nil
-                    )
-                    return
-                }
+                .frame(minWidth: 44, minHeight: 44)
             }
         }
         .fileImporter(
@@ -173,17 +150,6 @@ struct PadLibrarySidebar: View {
         case .offline, .needsAuthorization: return true
         case .ready, .readOnly: return false
         }
-    }
-
-    /// Adds `url` as a new source, then -- if it actually landed in
-    /// `library.sources` (an error leaves it unchanged) -- kicks off one
-    /// scan for it, so the folder just picked doesn't sit permanently
-    /// empty until some later, unrelated trigger scans it.
-    private func addSource(at url: URL) async {
-        let idsBefore = Set(library.sources.map(\.id))
-        await library.addSource(at: url, sourceKind: .externalFolder)
-        guard let newSource = library.sources.first(where: { !idsBefore.contains($0.id) }) else { return }
-        library.scanSource(newSource.id)
     }
 
     private func smartScopeRow(_ title: String, scope: LibraryScope, systemImage: String) -> some View {

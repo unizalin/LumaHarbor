@@ -19,6 +19,12 @@ The runner records those items as `NOT RUN` / `SKIPPED`, never PASS.
 
 The exact remaining gates, commands, pass criteria and evidence format are defined in `docs/testing/2026-08-29-ipad-multi-source-library-verification-spec.md`.
 
+## Product benchmark reference
+
+On 2026-08-30, the user reconfirmed Awaysu's [AwayPhotoRawEditor](https://github.com/awaysu/AwayPhotoRawEditor) as the product benchmark for LumaHarbor's RAW-editing completeness. For this iPad multi-source phase, the benchmark is recorded as a behavior-level comparison target: direct RAW browsing, non-destructive editing, local/advanced adjustments, batch-oriented workflows, presets, export, and visible loading/progress states.
+
+This does not authorize copying or porting AwayPhotoRawEditor source code, UI, icons, artwork, or LibRaw/WinForms implementation details. LumaHarbor remains an independent Swift implementation; benchmark-specific design notes live in `docs/reference/awayphotoraweditor-design-notes.md` and next-phase scope notes live in `docs/reference/next-phase-scope-notes.md`.
+
 ## Automated runner
 
 Created:

@@ -10,6 +10,7 @@
 "Add Folder" = "Add Folder";
 "Add Photo Folder…" = "Add Photo Folder…";
 "Add Source" = "Add Source";
+"Adding source…" = "Adding source…";
 "Add the folder again." = "Add the folder again.";
 "Adjustments" = "Adjustments";
 "All" = "All";
@@ -38,6 +39,7 @@
 "Choose the photo folder again to restore access." = "Choose the photo folder again to restore access.";
 "Choose where to save the exported photo." = "Choose where to save the exported photo.";
 "Close" = "Close";
+"Checking file access before opening the editor." = "Checking file access before opening the editor.";
 "Color" = "Color";
 "Contrast" = "Contrast";
 "Choose the file again from Files." = "Choose the file again from Files.";
@@ -138,6 +140,7 @@
 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten." = "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten.";
 "LumaHarbor's local index couldn't be opened." = "LumaHarbor's local index couldn't be opened.";
 "LumaHarbor's local index reported an error." = "LumaHarbor's local index reported an error.";
+"Loading more photos…" = "Loading more photos…";
 "The system denied access to" = "The system denied access to";
 "Magenta" = "Magenta";
 "Make sure the file isn't being modified, then try again." = "Make sure the file isn't being modified, then try again.";
@@ -172,12 +175,14 @@
 "Photo" = "Photo";
 "photos" = "photos";
 "Pick the folder on your drive that holds your RAW files." = "Pick the folder on your drive that holds your RAW files.";
+"Preparing photo…" = "Preparing photo…";
 "Preserved: kept but not applied" = "Preserved: kept but not applied";
 "Preset group" = "Preset group";
 "Preset name" = "Preset name";
 "Presets" = "Presets";
 "Previous Photo" = "Previous Photo";
 "Purple" = "Purple";
+"Scanning this folder so photos can appear as they are indexed." = "Scanning this folder so photos can appear as they are indexed.";
 "Quit and reopen LumaHarbor to rebuild the index." = "Quit and reopen LumaHarbor to rebuild the index.";
 "Quit and reopen LumaHarbor, then try again." = "Quit and reopen LumaHarbor, then try again.";
 "Read-only" = "Read-only";

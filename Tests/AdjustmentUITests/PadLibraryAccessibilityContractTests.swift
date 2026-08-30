@@ -156,6 +156,164 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         }
     }
 
+    /// Real-device V2.1 regression: the sidebar toolbar's small `+` button
+    /// can fail to present the folder picker on iPad, leaving an empty
+    /// library with no usable way to add its first external source. The empty
+    /// state in the main content area must therefore expose the same action as
+    /// a visible button, not just descriptive text.
+    func testEmptyLibraryStateOffersAVisibleAddSourceAction() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(
+            source.contains("let onAddSource: () -> Void"),
+            "PadLibraryGrid must receive an add-source action from the parent view"
+        )
+        XCTAssertTrue(
+            source.contains("Button(L10n.t(\"Add Source\"), action: onAddSource)"),
+            "the empty library state must include a visible Add Source button"
+        )
+    }
+
+    /// Real-device V2.1 regression, round 2: routing the main empty-state
+    /// button through SwiftUI's `.fileImporter(allowedContentTypes: [.folder])`
+    /// can leave the app apparently doing nothing on iPad. The add-source flow
+    /// must present the system folder picker through an explicit document
+    /// picker sheet owned by `PadLibraryView`, so both the sidebar `+` and the
+    /// visible empty-state button use the same reliable presenter.
+    func testAddSourceUsesDedicatedFolderDocumentPickerSheet() throws {
+        let source = try Self.loadSource("PadLibraryView.swift")
+
+        XCTAssertTrue(
+            source.contains(".sheet(isPresented: $isAddingSource)"),
+            "PadLibraryView must present add-source through a sheet, not a detached fileImporter"
+        )
+        XCTAssertTrue(
+            source.contains("FolderDocumentPicker("),
+            "PadLibraryView must use the dedicated folder document picker for add-source"
+        )
+        XCTAssertFalse(
+            source.contains("allowedContentTypes: [.folder]"),
+            "the add-source presenter must not fall back to SwiftUI's folder fileImporter"
+        )
+    }
+
+    func testFolderDocumentPickerOpensFoldersWithoutCopying() throws {
+        let source = try Self.loadSource("FolderDocumentPicker.swift")
+
+        XCTAssertTrue(source.contains("import UIKit"), "the picker wrapper must use UIKit's document picker")
+        XCTAssertTrue(
+            source.contains("UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)"),
+            "external folders must be opened in place rather than copied into the app sandbox"
+        )
+        XCTAssertTrue(
+            source.contains("picker.allowsMultipleSelection = false"),
+            "add-source must keep the single-folder contract"
+        )
+        XCTAssertTrue(source.contains("documentPickerWasCancelled"), "the picker must dismiss cleanly on cancel")
+        XCTAssertTrue(source.contains("didPickDocumentsAt"), "the picker must report the selected folder URL")
+    }
+
+    /// UIKit's document picker hands back a security-scoped URL whose access
+    /// must be actively held by our app while the async library-add path
+    /// creates its bookmark and starts the first scan. Without this, real
+    /// iPad external-drive picks can appear to work at the source-list level
+    /// but later fail opening the child `.ARW` with an access/permission alert.
+    func testAddSourceKeepsPickedFolderSecurityScopeDuringAsyncRegistration() throws {
+        let source = try Self.loadSource("PadLibraryView.swift")
+
+        XCTAssertTrue(
+            source.contains("ScopedFolderAccess(url: url, startAccessing: true)"),
+            "PadLibraryView must explicitly start security-scoped access for the picked folder URL"
+        )
+        XCTAssertTrue(
+            source.contains("defer { scope.stop() }"),
+            "the picked folder scope must stay alive until async source registration and initial scan have been kicked off"
+        )
+    }
+
+    /// Real-device UX follow-up: after the folder picker returns, source
+    /// registration and the first scan can take long enough on an external
+    /// drive that the app must show an explicit progress state rather than
+    /// appearing frozen.
+    func testAddSourceRegistrationShowsAVisibleLoadingOverlay() throws {
+        let source = try Self.loadSource("PadLibraryView.swift")
+
+        XCTAssertTrue(
+            source.contains("@State private var isRegisteringSource = false"),
+            "PadLibraryView must track the post-picker source registration/loading state"
+        )
+        XCTAssertTrue(
+            source.contains("PadLibraryProgressOverlay("),
+            "PadLibraryView must show a visible loading overlay while registering a source"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Adding source…\")"),
+            "the source-registration overlay must have user-visible text"
+        )
+    }
+
+    /// The first implementation only showed progress during the brief
+    /// registry/bookmark step, then hid it before the actual external-drive
+    /// scan began. Real-device feedback must stay visible while the browser
+    /// session reports an active per-source scan.
+    func testSourceScanProgressKeepsAVisibleLoadingOverlayMounted() throws {
+        let source = try Self.loadSource("PadLibraryView.swift")
+
+        XCTAssertTrue(
+            source.contains("private var hasActiveSourceScan: Bool"),
+            "PadLibraryView must derive visible progress from the library session's active source scans"
+        )
+        XCTAssertTrue(
+            source.contains("library.sourceProgress.values.contains"),
+            "the scan overlay must observe sourceProgress, not only the short add-source task"
+        )
+        XCTAssertTrue(
+            source.contains("case .scanning: return true"),
+            "the scan overlay must stay mounted while a source is scanning"
+        )
+        XCTAssertTrue(
+            source.contains("isRegisteringSource || hasActiveSourceScan"),
+            "the overlay condition must cover both registration and the follow-up scan"
+        )
+    }
+
+    /// Real-device UX follow-up: tapping a RAW thumbnail from an indexed
+    /// external source starts an async library resolution step before the
+    /// editor takes over. That wait must be visible and cancellable by
+    /// superseding taps, not an apparently inert grid.
+    func testOpeningPhotoFromGridShowsAVisibleLoadingOverlay() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(
+            source.contains("@State private var openingPhotoID: PhotoID?"),
+            "PadLibraryGrid must track the currently-opening photo"
+        )
+        XCTAssertTrue(
+            source.contains("PadLibraryProgressOverlay("),
+            "PadLibraryGrid must show a visible loading overlay while preparing a photo"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Preparing photo…\")"),
+            "the photo-opening overlay must have user-visible text"
+        )
+    }
+
+    /// A very fast library resolution can otherwise set and clear
+    /// `openingPhotoID` within one render pass, making the progress text
+    /// technically present in source but invisible on the device.
+    func testOpeningPhotoProgressHasAMinimumVisibleDuration() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(
+            source.contains("minimumOpeningProgressDuration"),
+            "PadLibraryGrid must keep the opening progress visible long enough to be seen"
+        )
+        XCTAssertTrue(
+            source.contains("Task.sleep(for: Self.minimumOpeningProgressDuration)"),
+            "opening progress must wait for the minimum visible duration before dismissing"
+        )
+    }
+
     /// The grid must trigger its own near-end prefetch, rather than relying
     /// only on a plain "last item" check -- the brief's "last 20 visible
     /// items" threshold.
@@ -167,6 +325,18 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
             "the grid's near-end prefetch threshold must be exactly 20"
         )
         XCTAssertTrue(source.contains("library.loadNextPage()"), "the grid must call loadNextPage() near the end")
+    }
+
+    /// The next-page prefetch indicator is often the only feedback while
+    /// scrolling deep into an external SSD. It needs readable text, not only
+    /// an unlabeled spinner at the bottom of the grid.
+    func testNextPageLoadingIndicatorHasReadableText() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(
+            source.contains("ProgressView(L10n.t(\"Loading more photos…\"))"),
+            "the next-page loading indicator must include visible localized text"
+        )
     }
 
     /// Codex pre-landing review, Task 7 round, finding 2 (P1, blocking):
