@@ -28,6 +28,11 @@ struct PadLibrarySidebar: View {
     /// drives `.confirmationDialog` below; set back to `nil` on every path
     /// out (confirm, cancel, or the dialog's own dismiss).
     @State private var pendingRemoval: LibraryFolder?
+    /// The source currently being removed from LumaHarbor's local library
+    /// records. Non-nil keeps a visible progress overlay mounted after the
+    /// destructive confirmation so the UI never looks inert while the
+    /// bookmark/index store is being updated.
+    @State private var removingSourceID: LibraryID?
     /// The source a folder picker was opened to reconnect. Non-nil drives
     /// its own `.fileImporter`, distinct from `isAddingSource`'s.
     @State private var relinkTarget: LibraryFolder?
@@ -63,6 +68,15 @@ struct PadLibrarySidebar: View {
         }
         .listStyle(.sidebar)
         .navigationTitle(L10n.t("Library"))
+        .overlay {
+            if removingSourceID != nil {
+                PadLibraryProgressOverlay(
+                    title: L10n.t("Removing source…"),
+                    message: L10n.t("RAW files stay exactly where they are.")
+                )
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: removingSourceID)
         .toolbar {
             ToolbarItem {
                 Button {
@@ -114,7 +128,13 @@ struct PadLibrarySidebar: View {
         ) { source in
             Button(L10n.t("Remove from LumaHarbor"), role: .destructive) {
                 pendingRemoval = nil
-                Task { await library.removeSource(source.id) }
+                removingSourceID = source.id
+                Task {
+                    await library.removeSource(source.id)
+                    await MainActor.run {
+                        removingSourceID = nil
+                    }
+                }
             }
             Button(L10n.t("Cancel"), role: .cancel) {
                 pendingRemoval = nil

@@ -339,6 +339,31 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
     }
 
+    /// Real-device UX follow-up: removing an external source can touch the
+    /// local index/bookmark store and should not look like a dead tap after
+    /// the destructive confirmation is accepted. The visible copy must also
+    /// keep reinforcing that RAW files are not deleted.
+    func testRemovingSourceShowsVisibleProgressAndRawSafetyCopy() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertTrue(
+            source.contains("@State private var removingSourceID: LibraryID?"),
+            "PadLibrarySidebar must track the source currently being removed"
+        )
+        XCTAssertTrue(
+            source.contains("PadLibraryProgressOverlay("),
+            "PadLibrarySidebar must show a visible progress overlay while removing a source"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Removing source…\")"),
+            "the remove-source progress overlay must have user-visible text"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"RAW files stay exactly where they are.\")"),
+            "the remove-source progress copy must reassure users that RAW files are not deleted"
+        )
+    }
+
     /// Codex pre-landing review, Task 7 round, finding 2 (P1, blocking):
     /// `LibraryBrowserSession.restoreGridPosition()` re-fetches the right
     /// page, but nothing here previously consumed `pendingScrollAnchor` to
