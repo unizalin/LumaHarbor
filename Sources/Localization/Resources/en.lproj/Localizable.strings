@@ -185,6 +185,7 @@
 "Scanning this folder so photos can appear as they are indexed." = "Scanning this folder so photos can appear as they are indexed.";
 "Quit and reopen LumaHarbor to rebuild the index." = "Quit and reopen LumaHarbor to rebuild the index.";
 "Quit and reopen LumaHarbor, then try again." = "Quit and reopen LumaHarbor, then try again.";
+"RAW files stay exactly where they are." = "RAW files stay exactly where they are.";
 "Read-only" = "Read-only";
 "Read-only drive — edits can't be saved here" = "Read-only drive — edits can't be saved here";
 "Read-only — edits can't be saved to this drive" = "Read-only — edits can't be saved to this drive";
@@ -205,6 +206,7 @@
 "Redo" = "Redo";
 "Remove from LumaHarbor" = "Remove from LumaHarbor";
 "Remove this source?" = "Remove this source?";
+"Removing source…" = "Removing source…";
 "Rename Preset" = "Rename Preset";
 "Rename…" = "Rename…";
 "Replace" = "Replace";

@@ -185,6 +185,7 @@
 "Scanning this folder so photos can appear as they are indexed." = "正在掃描這個資料夾，照片會隨著索引陸續出現。";
 "Quit and reopen LumaHarbor to rebuild the index." = "結束並重新開啟 LumaHarbor 即可重建索引。";
 "Quit and reopen LumaHarbor, then try again." = "結束並重新開啟 LumaHarbor，然後再試一次。";
+"RAW files stay exactly where they are." = "RAW 檔案會留在原本的位置。";
 "Read-only" = "唯讀";
 "Read-only drive — edits can't be saved here" = "唯讀磁碟──在這裡無法儲存編輯";
 "Read-only — edits can't be saved to this drive" = "唯讀──這個磁碟無法儲存編輯";
@@ -205,6 +206,7 @@
 "Redo" = "重做";
 "Remove from LumaHarbor" = "從 LumaHarbor 移除";
 "Remove this source?" = "要移除這個來源嗎？";
+"Removing source…" = "正在移除來源…";
 "Rename Preset" = "重新命名 Preset";
 "Rename…" = "重新命名…";
 "Replace" = "取代";
