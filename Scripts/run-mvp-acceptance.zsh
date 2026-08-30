@@ -615,6 +615,7 @@ BUILD_LOG="${RUN_DIR}/strict-build.log"
 TEST_LOG="${RUN_DIR}/swift-test.log"
 RAWFIXTURE_LOG="${RUN_DIR}/raw-fixture-test.log"
 SUMMARY_FILE="${RUN_DIR}/summary.md"
+RAWFIXTURE_EXPECTED_TEST_COUNT=9
 
 # Per-step watchdog budget (Phase 3). Validated and possibly overridden by
 # run_preflight below; this default is what a run gets when the environment
@@ -1024,7 +1025,7 @@ if (( ! PREFLIGHT_ONLY )); then
                 announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
             elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
                 "${rawfixture_cmd[@]}"; then
-                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
+                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" "$RAWFIXTURE_EXPECTED_TEST_COUNT")"; then
                     STEP_RAWFIXTURE="PASS"
                 else
                     STEP_RAWFIXTURE="FAIL (${step_reason})"
