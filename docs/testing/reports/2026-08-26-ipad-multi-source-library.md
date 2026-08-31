@@ -13,6 +13,7 @@ Tasks 1–8 of the iPad multi-source photo library plan are implemented and revi
 Current status: **BLOCKED for final sign-off**, not because the implemented Task 1–8 feature tests are failing, but because the real-device acceptance gates have not all been run yet.
 
 - Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`.
+- Startup bootstrap failure now renders a user-visible failure state instead of using `try!` at `ed7968d`.
 - Real M1+ iPad manual checklist is not executed.
 
 The runner records those items as `NOT RUN` / `SKIPPED`, never PASS.
@@ -181,4 +182,4 @@ Before claiming the full iPad multi-source library complete:
 1. Execute the real M1+ iPad checklist and update this report with concrete PASS/FAIL evidence.
 2. Run the final review gate from the implementation plan.
 
-An early static scan for that final review currently has one OPEN hit: the temporary-root fallback in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` uses `try! PadAppServices(...)`. Existing composition tests do not directly exercise failure of both the primary Application Support root and the temporary fallback root. This is not yet classified as a product defect, but it must be resolved or explicitly justified during Gate V4 before approval.
+The earlier static-scan hit in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` has been fixed at `ed7968d`: the temporary-root fallback no longer uses `try! PadAppServices(...)`. Application Support failure first attempts a fresh temporary fallback; if that also fails, `PadStartupFailureView` presents localized recovery guidance instead of force-crashing before SwiftUI renders. Gate V4 still needs to rerun the full changed-production-file scan over `150bc7d..HEAD` and document any new hits.
