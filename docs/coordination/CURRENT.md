@@ -7,9 +7,10 @@ Updated by: Codex
 ## Source of truth
 
 - Active integration branch: `codex/ipad-multi-source-library-durability`
-- Current integrated HEAD: `2192b4fdbe35aae2951752d4ed64686c9562cffb`
-- Last production fixture-validated product commit: `a539f4a8943342e14550e58df5bcbbd27dd78869`
-- Latest documented evidence commit: `fcbf63ffacfe76f55af1385ff562058671f77ca3`
+- Current integrated HEAD at the time of the latest production acceptance run: `0fbca6703a445089cdc9aae00515785b1cd18392`
+- Latest production acceptance run commit: `0fbca6703a445089cdc9aae00515785b1cd18392`
+- Last production fixture-validated product commit: `0fbca6703a445089cdc9aae00515785b1cd18392`
+- Latest documented evidence: the integrated 2026-08-31 production acceptance evidence recorded in this update commit
 - RAW fixture baseline correction commit: `f5dce94716d740ede6ad46c1632361ccf03efd8b`
 - Integrated Beta Test Kit commit: `a853f71822fc38584e1d753e6acdd5cbefbee4cf`
 - Integrated RAW baseline review report commit: `2192b4fdbe35aae2951752d4ed64686c9562cffb`
@@ -21,7 +22,7 @@ Updated by: Codex
 - At design approval the integration branch was 69 commits ahead of `main` and 0 commits behind.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
-The production fixture-validated commit recorded above remains the latest full APFS/exFAT/RAW production acceptance baseline. Later commits are documentation, coordination, or runner-baseline corrections and must be inspected before product editing begins.
+The production fixture-validated commit recorded above is the latest full APFS/exFAT/RAW production acceptance baseline. Later commits, if any, must be inspected before product editing begins.
 
 ## Ownership
 
@@ -32,12 +33,12 @@ The production fixture-validated commit recorded above remains the latest full A
 
 ## Latest verified evidence
 
-- Production acceptance runner at `a539f4a8943342e14550e58df5bcbbd27dd78869`: `PASS`.
+- Production acceptance runner at `0fbca6703a445089cdc9aae00515785b1cd18392`: `PASS`.
 - Full Swift suite: 1111 executed, 0 skipped, 0 failures.
 - MultiSourceBoundedScanTests: 6 executed, 0 skipped, 0 failures.
 - iPad Simulator build: `PASS`.
 - MVP preflight, MVP acceptance, iPad vertical-slice acceptance, and privacy scan: `PASS`.
-- Evidence source: `docs/testing/reports/2026-08-26-ipad-multi-source-library.md` and the repo-ignored production summary generated on 2026-08-31.
+- Evidence source: `docs/testing/reports/2026-08-26-ipad-multi-source-library.md` and the repo-ignored integrated production summary generated on 2026-08-31.
 - Coordination implementation baseline: `swift test` executed 1111 tests, with 9 fixture-dependent tests skipped and 0 failures. This local run did not replace the production fixture evidence above.
 - RAW fixture baseline correction: `Scripts/run-mvp-acceptance.zsh` and `docs/testing/mvp-acceptance-report-template.md` now use the approved 9-test baseline. Runner self-test passed with `executed=8` and `executed=10` failing, and `executed=9` passing.
 - Beta Test Kit: `docs/testing/beta/` now contains tester guide, real-device checklist, bug report template, privacy rules, and RC checklist.
@@ -65,4 +66,4 @@ All five remain `NOT RUN`:
 
 ## Next action
 
-Run integrated production acceptance on current HEAD with the private RAW/APFS/exFAT fixtures available, then complete the five required real-device gates before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
+Complete the five required real-device gates before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
