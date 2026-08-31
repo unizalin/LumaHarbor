@@ -253,6 +253,7 @@ struct PadEditorView: View {
     private var trailingDockPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                saveStatusIndicator
                 undoRedoControls
                 Divider()
                 BasicAdjustmentPanel(editor: editor)
@@ -268,6 +269,7 @@ struct PadEditorView: View {
     private var bottomDrawerPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                saveStatusIndicator
                 undoRedoControls
                 Divider()
                 BasicAdjustmentPanel(editor: editor)
@@ -281,6 +283,7 @@ struct PadEditorView: View {
     private var floatingPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             floatingPanelHeader
+            saveStatusIndicator
             undoRedoControls
             Divider()
             ScrollView {
@@ -365,6 +368,28 @@ struct PadEditorView: View {
     }
 
     // MARK: - Shared controls
+
+    @ViewBuilder
+    private var saveStatusIndicator: some View {
+        switch editor.saveState {
+        case .unchanged, .saved:
+            Label(L10n.t("Saved"), systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .pending:
+            Label(L10n.t("Unsaved"), systemImage: "clock")
+                .foregroundStyle(.secondary)
+        case .saving:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(L10n.t("Saving…"))
+            }
+            .foregroundStyle(.secondary)
+        case .failed:
+            Label(L10n.t("Not saved"), systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        }
+    }
 
     private var undoRedoControls: some View {
         HStack {

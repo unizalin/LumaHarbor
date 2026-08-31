@@ -173,6 +173,59 @@ public actor PhotoDocumentStore {
         }
     }
 
+    /// Returns an existing committed in-place document for the same
+    /// reachable source file, if one is already known to the store. Used by
+    /// the multi-source library grid: tapping the same external RAW again
+    /// must reopen the document whose sidecar holds the user's edits, not
+    /// mint a new neutral document every time.
+    ///
+    /// Identity is deliberately stricter than just the path: the current
+    /// file's sampled fingerprint and full-content digest must still match
+    /// the record that would be reused. If the external RAW changed in
+    /// place, this returns `nil` and the caller can create a fresh document
+    /// rather than applying stale adjustments to different bytes.
+    public func committedInPlaceDocument(matching sourceURL: URL) throws -> PhotoDocument? {
+        let (fingerprint, digest) = try fingerprintAndDigest(forFileAt: sourceURL)
+        let normalizedSourceURL = sourceURL.standardizedFileURL
+        let matches = try committedDocuments().documents.filter { document in
+            guard document.storageMode == .inPlace else { return false }
+            guard document.sourceURL.standardizedFileURL == normalizedSourceURL
+                    || document.workingURL.standardizedFileURL == normalizedSourceURL else { return false }
+            guard document.sourceFingerprint == fingerprint,
+                  document.workingFingerprint == fingerprint else { return false }
+            guard let expectedDigest = document.contentDigestSHA256 else { return true }
+            return expectedDigest == digest
+        }
+        guard !matches.isEmpty else { return nil }
+
+        return matches
+            .map { document in
+                let sidecar = try? sidecarRepository(documentID: document.id).loadSidecar(for: PhotoID(document.id))
+                return (
+                    document: document,
+                    hasSavedAdjustments: !(sidecar?.adjustments.isNeutral ?? true),
+                    modifiedAt: sidecar?.modifiedAt
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.hasSavedAdjustments != rhs.hasSavedAdjustments {
+                    return lhs.hasSavedAdjustments && !rhs.hasSavedAdjustments
+                }
+                switch (lhs.modifiedAt, rhs.modifiedAt) {
+                case let (left?, right?) where left != right:
+                    return left > right
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    return lhs.document.id.uuidString < rhs.document.id.uuidString
+                }
+            }
+            .first?
+            .document
+    }
+
     /// Copies `sourceURL` into App storage. See the type documentation for
     /// the copy → verify → commit sequence and what happens if any step
     /// fails, the source changes mid-import, or the process is killed or the
