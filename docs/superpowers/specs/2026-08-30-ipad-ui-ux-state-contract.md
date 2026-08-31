@@ -1,6 +1,6 @@
 # LumaHarbor iPad UI/UX 狀態契約
 
-日期：2026-08-30  
+日期：2026-08-30
 狀態：實機使用後補強 spec，接在 iPad 多來源 RAW 圖庫 Task 8 之後
 
 ## 1. 目的
