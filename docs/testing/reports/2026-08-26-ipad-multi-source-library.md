@@ -2,7 +2,7 @@
 
 Date: 2026-08-29
 
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 Branch: `codex/ipad-multi-source-library-durability`
 
@@ -12,7 +12,7 @@ Tasks 1–8 of the iPad multi-source photo library plan are implemented and revi
 
 Current status: **BLOCKED for final sign-off**, not because the implemented Task 1–8 feature tests are failing, but because the real-device acceptance gates have not all been run yet.
 
-- Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`.
+- Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`, and reconfirmed PASS at `a539f4a` (2026-08-31) after the `removeLibrary` durability fix — see the corresponding dated evidence section below.
 - Startup bootstrap failure now renders a user-visible failure state instead of using `try!` at `ed7968d`.
 - Real M1+ iPad manual checklist is not executed.
 
@@ -162,6 +162,53 @@ Post-run checks:
 - No residual `run-ipad-library-acceptance`, `run-ipad-vertical-slice-acceptance`, `run-mvp-acceptance`, `xcodebuild`, `swift-frontend` or `xctest` process remained.
 - `git status --short --branch` showed a clean worktree.
 - The production summary contained no `/Users/`, `/Volumes/`, `/private/var/` or `/private/tmp/` path.
+
+## Production runner evidence from 2026-08-31
+
+Gate V0 was rerun at the current durability-branch HEAD after the `remove library` durability fix, using the same three fixture directories as the 2026-08-30 run (RAW/APFS fixtures on the local APFS volume, exFAT fixture on an external drive).
+
+- Branch: `codex/ipad-multi-source-library-durability`
+- Commit: `a539f4a` (`fix: keep remove library state durable on failures`)
+- Worktree: clean except the local, non-product `Apps/LumaHarborPad.swiftpm/Package.swift` Xcode signing/formatting noise (not committed)
+- Architecture: `arm64`
+- Privacy rule: no private fixture or mount paths were written to this report or to the production summary.
+
+Command:
+
+```bash
+LUMAHARBOR_RAW_FIXTURE_DIR=<RAW_FIXTURE_DIR> \
+LUMAHARBOR_APFS_TEST_DIR=<APFS_TEST_DIR> \
+LUMAHARBOR_EXFAT_TEST_DIR=<EXFAT_FIXTURE_DIR> \
+Scripts/run-ipad-library-acceptance.zsh
+```
+
+Result summary:
+
+```text
+Run mode: PRODUCTION
+Overall result: PASS
+Exit code: 0
+Commit: a539f4a
+Architecture: arm64
+Privacy scan: PASS
+
+- strict-concurrency build: PASS
+- swift test: PASS
+  XCTest: 1111 executed, 0 skipped, 0 failures
+- iPad Simulator build: PASS
+- MultiSourceBoundedScanTests: PASS
+  XCTest: 6 executed, 0 skipped, 0 failures
+- MVP preflight: PASS
+- MVP acceptance: PASS
+- iPad vertical-slice acceptance: PASS
+```
+
+Test count rose from 1090 (2026-08-30 run) to 1111 executed, 0 skipped — consistent with the additional coverage landed since then (case-varied overlap tests, `removeLibrary` durability tests, startup bootstrap failure rendering tests, and the iPad UI/UX state-contract overlay-copy test), not a regression in fixture availability.
+
+Post-run checks:
+
+- Summary explicitly recorded `Privacy scan: PASS` and a repo-worktree fingerprint; no `/Users/`, `/Volumes/`, `/private/var/` or `/private/tmp/` path appeared in the production summary.
+- Real-device checklist section of the summary correctly reported all five items as `NOT RUN` — no real M1+ iPad was available for this run.
 
 ## Real-device checklist
 
