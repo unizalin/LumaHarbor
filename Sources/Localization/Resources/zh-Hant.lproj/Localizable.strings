@@ -69,6 +69,7 @@
 "Couldn't rename this preset" = "無法重新命名這個 Preset";
 "Couldn't save your edits" = "無法儲存你的編輯";
 "Couldn't show this photo" = "無法顯示這張照片";
+"Couldn't start LumaHarbor" = "無法啟動 LumaHarbor";
 "Couldn't update the cache size" = "無法更新快取大小";
 "Create a preset from this photo" = "從這張照片建立 Preset";
 "Create Preset" = "建立 Preset";
@@ -100,6 +101,7 @@
 "found" = "張照片";
 "Free up space on the drive, then retry." = "騰出磁碟空間，然後重試。";
 "Free up space on your startup disk, or lower the cache limit in Settings." = "騰出開機磁碟的空間，或在設定中調低快取上限。";
+"Free up space on your startup disk, then reopen LumaHarbor." = "騰出開機磁碟空間，然後重新開啟 LumaHarbor。";
 "Free up space or choose a different destination, then export again." = "騰出空間，或選擇其他目的地，然後重新匯出。";
 "Grain" = "顆粒";
 "Green" = "綠";
@@ -133,6 +135,7 @@
 "LumaHarbor couldn't start up" = "LumaHarbor 無法啟動";
 "LumaHarbor gave up waiting for this file to respond." = "LumaHarbor 已放棄等待這個檔案回應。";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor 正在匯入或清理另一張照片。";
+"LumaHarbor couldn't open local storage." = "LumaHarbor 無法開啟本機儲存空間。";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor 會尋找相機 RAW 檔案，例如 Sony .ARW。";
 "LumaHarbor no longer has access to this file." = "LumaHarbor 已經不再擁有這個檔案的存取權限。";
 "LumaHarbor no longer has access to this photo folder." = "LumaHarbor 已經不再擁有這個照片資料夾的存取權限。";
