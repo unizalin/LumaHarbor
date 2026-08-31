@@ -9,6 +9,8 @@ Updated by: Codex
 - Active integration branch: `codex/ipad-multi-source-library-durability`
 - Last fully validated product/evidence commit: `a539f4a8943342e14550e58df5bcbbd27dd78869`
 - Coordination design commit: `56e92b326038136e3c6a5728b7387a6dc7589443`
+- Coordination state commit: `8e85a6adaab869982686d00fcaae62673378a52b`
+- Shared agent entry-point commit: `4fe7574d354067235d872c2c3897a5f2a337c8d2`
 - Base branch: `main`
 - Base commit observed during design: `114b1f669f91968137d8519ef4b71b819f277444`
 - At design approval the integration branch was 69 commits ahead of `main` and 0 commits behind.
@@ -18,8 +20,8 @@ The commit recorded above is the latest fully validated product/evidence baselin
 
 ## Ownership
 
-- Codex owns implementation of the shared coordination files on the active integration branch.
-- Claude is review-only for this work until a committed handoff assigns new ownership.
+- Codex completed implementation of the shared coordination files on the active integration branch.
+- Claude may review the committed coordination files; no product-file ownership is transferred by this update.
 - Product files must never be edited concurrently from two worktrees.
 
 ## Latest verified evidence
@@ -30,6 +32,7 @@ The commit recorded above is the latest fully validated product/evidence baselin
 - iPad Simulator build: `PASS`.
 - MVP preflight, MVP acceptance, iPad vertical-slice acceptance, and privacy scan: `PASS`.
 - Evidence source: `docs/testing/reports/2026-08-26-ipad-multi-source-library.md` and the repo-ignored production summary generated on 2026-08-31.
+- Coordination implementation baseline: `swift test` executed 1111 tests, with 9 fixture-dependent tests skipped and 0 failures. This local run did not replace the production fixture evidence above.
 
 ## Required real-device gates
 
@@ -55,4 +58,4 @@ All five remain `NOT RUN`:
 
 ## Next action
 
-Complete this shared coordination implementation plan, verify the committed Markdown contains no sensitive paths, then hand off the resulting commit for review. Do not begin unrelated product work in the same commit.
+Review the shared coordination files, then correct the RAW fixture self-test and report-template baseline in a separate tested commit. After that, complete the five required real-device gates before final landing. Do not mix either task with the preserved dirty files.
