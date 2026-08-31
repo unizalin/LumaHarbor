@@ -33,6 +33,11 @@ struct PadLibrarySidebar: View {
     /// destructive confirmation so the UI never looks inert while the
     /// bookmark/index store is being updated.
     @State private var removingSourceID: LibraryID?
+    /// The source currently being reconnected after the user picked a new
+    /// folder. Non-nil keeps progress visible while core validates the
+    /// selected folder's identity before attaching it to the existing
+    /// `LibraryID`.
+    @State private var reconnectingSourceID: LibraryID?
     /// The source a folder picker was opened to reconnect. Non-nil drives
     /// its own `.fileImporter`, distinct from `isAddingSource`'s.
     @State private var relinkTarget: LibraryFolder?
@@ -69,14 +74,15 @@ struct PadLibrarySidebar: View {
         .listStyle(.sidebar)
         .navigationTitle(L10n.t("Library"))
         .overlay {
-            if removingSourceID != nil {
+            if let progress = activeLifecycleProgress {
                 PadLibraryProgressOverlay(
-                    title: L10n.t("Removing source…"),
-                    message: L10n.t("RAW files stay exactly where they are.")
+                    title: progress.title,
+                    message: progress.message
                 )
             }
         }
         .animation(.easeInOut(duration: 0.2), value: removingSourceID)
+        .animation(.easeInOut(duration: 0.2), value: reconnectingSourceID)
         .toolbar {
             ToolbarItem {
                 Button {
@@ -100,7 +106,13 @@ struct PadLibrarySidebar: View {
             switch result {
             case .success(let urls):
                 guard let url = urls.first else { return }
-                Task { await library.relinkSource(target.id, to: url) }
+                reconnectingSourceID = target.id
+                Task {
+                    await library.relinkSource(target.id, to: url)
+                    await MainActor.run {
+                        reconnectingSourceID = nil
+                    }
+                }
             case .failure(let error):
                 let nsError = error as NSError
                 guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
@@ -142,6 +154,22 @@ struct PadLibrarySidebar: View {
         } message: { _ in
             Text(L10n.t("LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are."))
         }
+    }
+
+    private var activeLifecycleProgress: (title: String, message: String)? {
+        if reconnectingSourceID != nil {
+            return (
+                L10n.t("Reconnecting source…"),
+                L10n.t("Checking this folder matches the original source.")
+            )
+        }
+        if removingSourceID != nil {
+            return (
+                L10n.t("Removing source…"),
+                L10n.t("RAW files stay exactly where they are.")
+            )
+        }
+        return nil
     }
 
     @ViewBuilder
@@ -212,6 +240,13 @@ struct PadLibrarySidebar: View {
     }
 
     private func statusMessage(for source: LibraryFolder) -> String? {
+        if let progress = library.sourceProgress[source.id] {
+            switch progress.phase {
+            case .scanning: return L10n.t("Scanning…")
+            case .failed: return L10n.t("Scan problem")
+            case .finished: break
+            }
+        }
         switch source.connectionState {
         case .ready: return nil
         case .readOnly: return L10n.t("Read-only")

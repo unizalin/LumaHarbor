@@ -277,6 +277,26 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
     }
 
+    /// Manual rescan should not reuse the add-source wording. Otherwise the
+    /// user taps "Rescan" and sees "Adding source…", which sounds like the
+    /// app is creating a duplicate source instead of refreshing the index.
+    func testSourceScanProgressUsesScanningCopyInsteadOfAddSourceCopy() throws {
+        let source = try Self.loadSource("PadLibraryView.swift")
+
+        XCTAssertTrue(
+            source.contains("private var libraryProgressTitle: String"),
+            "PadLibraryView must derive the overlay title from the current operation"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Scanning source…\")"),
+            "active source scans must use scan-specific visible text"
+        )
+        XCTAssertTrue(
+            source.contains("title: libraryProgressTitle"),
+            "the progress overlay must use the derived title rather than hard-coding add-source text"
+        )
+    }
+
     /// Real-device UX follow-up: tapping a RAW thumbnail from an indexed
     /// external source starts an async library resolution step before the
     /// editor takes over. That wait must be visible and cancellable by
@@ -361,6 +381,50 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(
             source.contains("L10n.t(\"RAW files stay exactly where they are.\")"),
             "the remove-source progress copy must reassure users that RAW files are not deleted"
+        )
+    }
+
+    /// Reconnecting a source can spend visible time validating the selected
+    /// folder's identity. The UI should say that explicitly so users do not
+    /// tap again or assume LumaHarbor accepted a same-named wrong drive.
+    func testReconnectingSourceShowsVisibleProgressAndIdentityCopy() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertTrue(
+            source.contains("@State private var reconnectingSourceID: LibraryID?"),
+            "PadLibrarySidebar must track the source currently being reconnected"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Reconnecting source…\")"),
+            "the reconnect progress overlay must have user-visible text"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Checking this folder matches the original source.\")"),
+            "the reconnect progress copy must explain identity verification"
+        )
+        XCTAssertTrue(
+            source.contains("await library.relinkSource(target.id, to: url)"),
+            "the reconnect progress state must wrap the existing relink call"
+        )
+    }
+
+    /// Source rows should expose scan state inline, not only as a temporary
+    /// overlay. After a partial failure the row is often the user's only
+    /// persistent clue that a source needs attention.
+    func testSourceRowsShowScanProgressAndFailureState() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertTrue(
+            source.contains("library.sourceProgress[source.id]"),
+            "source rows must read per-source scan progress"
+        )
+        XCTAssertTrue(
+            source.contains("case .scanning: return L10n.t(\"Scanning…\")"),
+            "source rows must show visible scanning text"
+        )
+        XCTAssertTrue(
+            source.contains("case .failed: return L10n.t(\"Scan problem\")"),
+            "source rows must show persistent scan failure text"
         )
     }
 
