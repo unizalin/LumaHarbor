@@ -188,6 +188,7 @@
 "Scanning this folder so photos can appear as they are indexed." = "Scanning this folder so photos can appear as they are indexed.";
 "Quit and reopen LumaHarbor to rebuild the index." = "Quit and reopen LumaHarbor to rebuild the index.";
 "Quit and reopen LumaHarbor, then try again." = "Quit and reopen LumaHarbor, then try again.";
+"Quit and reopen LumaHarbor, then check whether the folder still appears before trying again." = "Quit and reopen LumaHarbor, then check whether the folder still appears before trying again.";
 "RAW files stay exactly where they are." = "RAW files stay exactly where they are.";
 "Read-only" = "Read-only";
 "Read-only drive — edits can't be saved here" = "Read-only drive — edits can't be saved here";
@@ -271,6 +272,7 @@
 "The local index can't be reset while a scan is in progress." = "The local index can't be reset while a scan is in progress.";
 "The local index couldn't be reset." = "The local index couldn't be reset.";
 "The local index is unavailable." = "The local index is unavailable.";
+"The photo folder couldn't be removed cleanly." = "The photo folder couldn't be removed cleanly.";
 "The operation was cancelled." = "The operation was cancelled.";
 "The original file changed while LumaHarbor was copying it, so nothing was saved." = "The original file changed while LumaHarbor was copying it, so nothing was saved.";
 "The original file is not available at" = "The original file is not available at";

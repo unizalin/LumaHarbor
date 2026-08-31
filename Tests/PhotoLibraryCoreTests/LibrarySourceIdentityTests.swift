@@ -666,4 +666,70 @@ final class LibrarySourceIdentityTests: XCTestCase {
         )
         XCTAssertEqual(unknown.relationship(to: bothUnknown), .ambiguous)
     }
+
+    /// A case-varied parent/child pair on a confirmed case-insensitive
+    /// volume is still a real overlap. It must not fall through to
+    /// `.distinct` just because the raw strings differ in case.
+    func testCaseVariantParentChildOnACaseInsensitiveVolumeIsAncestorDescendant() {
+        let volume = "case-insensitive-volume"
+        let parent = identity(
+            resourceIdentifier: Data([0x01]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/SSD/Photos",
+            canonicalLivePathCaseSensitivity: .insensitive
+        )
+        let child = identity(
+            resourceIdentifier: Data([0x02]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/SSD/photos/Trip",
+            canonicalLivePathCaseSensitivity: .insensitive
+        )
+
+        XCTAssertEqual(parent.relationship(to: child), .ancestor)
+        XCTAssertEqual(child.relationship(to: parent), .descendant)
+    }
+
+    /// If either side cannot prove the volume's case behavior, a case-varied
+    /// parent/child match must fail closed to `.ambiguous` instead of
+    /// guessing overlap or distinctness.
+    func testCaseVariantParentChildWithUnknownSensitivityIsAmbiguous() {
+        let volume = "unknown-sensitivity-volume"
+        let parent = identity(
+            resourceIdentifier: Data([0x01]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/SSD/Photos",
+            canonicalLivePathCaseSensitivity: .unknown
+        )
+        let child = identity(
+            resourceIdentifier: Data([0x02]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/SSD/photos/Trip",
+            canonicalLivePathCaseSensitivity: .insensitive
+        )
+
+        XCTAssertEqual(parent.relationship(to: child), .ambiguous)
+        XCTAssertEqual(child.relationship(to: parent), .ambiguous)
+    }
+
+    /// On a confirmed case-sensitive volume, differently-cased path
+    /// components describe genuinely different directories, so folded
+    /// parent/child strings must not invent an overlap.
+    func testCaseVariantParentChildOnACaseSensitiveVolumeIsDistinct() {
+        let volume = "case-sensitive-volume"
+        let parent = identity(
+            resourceIdentifier: Data([0x01]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/SSD/Photos",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+        let child = identity(
+            resourceIdentifier: Data([0x02]),
+            volumeIdentifier: volume,
+            canonicalLivePath: "/Volumes/SSD/photos/Trip",
+            canonicalLivePathCaseSensitivity: .sensitive
+        )
+
+        XCTAssertEqual(parent.relationship(to: child), .distinct)
+        XCTAssertEqual(child.relationship(to: parent), .distinct)
+    }
 }

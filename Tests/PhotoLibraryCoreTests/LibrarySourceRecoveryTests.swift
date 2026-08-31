@@ -766,6 +766,126 @@ final class LibrarySourceRecoveryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(stillOriginal?.lastKnownPath, "/Volumes/Original/Photos")
     }
 
+    // MARK: - removeLibrary staged persistence
+
+    /// A bookmark-removal failure must leave this actor session exactly as
+    /// it was before `removeLibrary` was called. Clearing the in-memory
+    /// source or stopping the access handle before persistence succeeds
+    /// makes the UI report a removal that did not actually durably happen.
+    func testRemoveLibraryBookmarkRemoveFailureLeavesEverythingUntouched() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let resolver = FakeFolderAccessResolver()
+        let service = try makeService(bookmarkStore: failableStore, folderAccessResolver: resolver)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+
+        let bookmarkBefore = try XCTUnwrap(try failableStore.load(libraryID: library.id))
+        failableStore.removeInterceptor = { $0 == library.id }
+
+        do {
+            try await service.removeLibrary(id: library.id)
+            XCTFail("Expected the bookmark removal failure to propagate")
+        } catch {
+            // expected
+        }
+        failableStore.removeInterceptor = nil
+
+        let stillKnown = await service.library(id: library.id)
+        XCTAssertNotNil(stillKnown)
+        XCTAssertEqual(
+            resolver.grantedHandles.first?.stopCallCount,
+            0,
+            "A failed bookmark removal must not stop the still-active access handle"
+        )
+        XCTAssertEqual(try failableStore.load(libraryID: library.id), bookmarkBefore)
+        let indexStore = await service.indexStore
+        XCTAssertNotNil(try indexStore.library(id: library.id))
+    }
+
+    /// If the bookmark removal succeeds but the index removal fails, the
+    /// bookmark must be restored and the current actor state must remain
+    /// visible. A restart should then converge on the same still-present
+    /// source instead of losing it.
+    func testRemoveLibraryIndexRemoveFailureRollsBackTheBookmarkAndConvergesOnRestart() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let bookmarkStore = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let resolver = FakeFolderAccessResolver()
+        let service = try makeService(bookmarkStore: bookmarkStore, folderAccessResolver: resolver)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+
+        let bookmarkBefore = try XCTUnwrap(try bookmarkStore.load(libraryID: library.id))
+        let indexStore = await service.indexStore
+        indexStore.close()
+
+        do {
+            try await service.removeLibrary(id: library.id)
+            XCTFail("Expected the index removal failure to propagate")
+        } catch {
+            // expected
+        }
+
+        let stillKnown = await service.library(id: library.id)
+        XCTAssertNotNil(stillKnown)
+        XCTAssertEqual(
+            resolver.grantedHandles.first?.stopCallCount,
+            0,
+            "A failed index removal must not stop the still-active access handle"
+        )
+        XCTAssertEqual(try bookmarkStore.load(libraryID: library.id), bookmarkBefore)
+
+        let bookmarkStoreB = FileBookmarkStore(directoryURL: bookmarksDirectory)
+        let serviceB = try makeService(supportName: "AppSupportB", bookmarkStore: bookmarkStoreB)
+        let restored = try await serviceB.restoreLibraries()
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(restored.first?.id, library.id)
+    }
+
+    /// If both index removal and bookmark rollback fail, callers need an
+    /// explicit compound error. Returning only the index error hides that a
+    /// restart can no longer restore the source from durable bookmarks.
+    func testRemoveLibraryIndexRemoveFailureAndRollbackSaveFailureThrowsCompoundError() async throws {
+        let bookmarksDirectory = try makeSubdirectory("Bookmarks")
+        let failableStore = FailableBookmarkStore(directoryURL: bookmarksDirectory)
+        let resolver = FakeFolderAccessResolver()
+        let service = try makeService(bookmarkStore: failableStore, folderAccessResolver: resolver)
+        let root = try makeSubdirectory("Photos")
+        let library = try await addLibrary(service, at: root)
+
+        let indexStore = await service.indexStore
+        indexStore.close()
+        failableStore.saveInterceptor = { $0.libraryID == library.id }
+
+        do {
+            try await service.removeLibrary(id: library.id)
+            XCTFail("Expected the compound remove/rollback failure to propagate")
+        } catch LibraryError.removeLibraryRollbackFailed(
+            let failedLibraryID,
+            let indexFailure,
+            let rollbackFailure
+        ) {
+            XCTAssertEqual(failedLibraryID, library.id)
+            XCTAssertFalse(indexFailure.isEmpty)
+            XCTAssertFalse(rollbackFailure.isEmpty)
+        } catch {
+            XCTFail("Expected a compound rollback failure, got \(error)")
+        }
+
+        failableStore.saveInterceptor = nil
+        let stillKnown = await service.library(id: library.id)
+        XCTAssertNotNil(stillKnown)
+        XCTAssertEqual(
+            resolver.grantedHandles.first?.stopCallCount,
+            0,
+            "An unresolved remove must not stop the still-active access handle"
+        )
+        XCTAssertNil(
+            try failableStore.load(libraryID: library.id),
+            "The bookmark was removed and rollback failed; that durable loss must be explicit"
+        )
+    }
+
     // MARK: - Critical 3: baseline-read and rollback failure durability
 
     /// Item 1: a baseline `bookmarkStore.load` failure during preflight must
