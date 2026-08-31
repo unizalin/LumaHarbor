@@ -85,6 +85,16 @@ public enum LibraryError: Error, Equatable, Sendable {
     /// confirm as the same source being relinked. The bookmark, index and
     /// access scope for `libraryID` are left completely untouched.
     case relinkTargetMismatch(LibraryID)
+    /// `removeLibrary` removed the authoritative bookmark but then failed to
+    /// remove the rebuildable index rows, and the attempted bookmark rollback
+    /// also failed. The actor's in-memory state and access scope are left
+    /// untouched for this run, and callers must treat the removal as
+    /// unresolved rather than successful.
+    case removeLibraryRollbackFailed(
+        libraryID: LibraryID,
+        indexFailure: String,
+        rollbackFailure: String
+    )
     /// A pending local registry transaction could not be rolled back. The
     /// journal remains in Application Support and all registry mutations stay
     /// blocked until a later recovery attempt succeeds.
@@ -125,6 +135,8 @@ extension LibraryError: LocalizedError {
             return L10n.t("This folder's saved identity doesn't match a library you already added.")
         case .relinkTargetMismatch:
             return L10n.t("This folder doesn't match the library you're reconnecting.")
+        case .removeLibraryRollbackFailed:
+            return L10n.t("The photo folder couldn't be removed cleanly.")
         case .registryRecoveryRequired:
             return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
         }
@@ -148,6 +160,8 @@ extension LibraryError: LocalizedError {
             return L10n.t("Choose a different folder, or confirm which library this one belongs to.")
         case .relinkTargetMismatch:
             return L10n.t("Choose the folder that holds this exact library, then try again.")
+        case .removeLibraryRollbackFailed:
+            return L10n.t("Quit and reopen LumaHarbor, then check whether the folder still appears before trying again.")
         case .registryRecoveryRequired:
             return L10n.t("Quit and reopen LumaHarbor, then try again.")
         }
@@ -1040,12 +1054,34 @@ public actor PhotoLibraryService {
     /// calls a source-file remover.
     public func removeLibrary(id: LibraryID) throws {
         try recoverPendingRegistryTransaction()
+
+        let previousStoredBookmark = try bookmarkStore.load(libraryID: id)
+        try bookmarkStore.remove(libraryID: id)
+        do {
+            try index.removeLibrary(id: id)
+        } catch let indexError {
+            if let previousStoredBookmark {
+                do {
+                    try bookmarkStore.save(previousStoredBookmark)
+                } catch let rollbackError {
+                    throw LibraryError.removeLibraryRollbackFailed(
+                        libraryID: id,
+                        indexFailure: Self.describePersistenceFailure(indexError),
+                        rollbackFailure: Self.describePersistenceFailure(rollbackError)
+                    )
+                }
+            }
+            throw indexError
+        }
+
         access[id]?.stop()
         access[id] = nil
         libraries[id] = nil
         restoreDiagnostics[id] = nil
-        try bookmarkStore.remove(libraryID: id)
-        try index.removeLibrary(id: id)
+    }
+
+    private static func describePersistenceFailure(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
     /// Re-checks whether the drive is plugged in and writable (spec §10).

@@ -191,6 +191,8 @@ public enum SafeErrorPresentation {
             return L10n.t("This folder's saved identity doesn't match a library you already added.")
         case .relinkTargetMismatch:
             return L10n.t("This folder doesn't match the library you're reconnecting.")
+        case .removeLibraryRollbackFailed:
+            return L10n.t("The photo folder couldn't be removed cleanly.")
         case .registryRecoveryRequired:
             return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
         }

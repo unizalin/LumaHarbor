@@ -188,6 +188,7 @@
 "Scanning this folder so photos can appear as they are indexed." = "正在掃描這個資料夾，照片會隨著索引陸續出現。";
 "Quit and reopen LumaHarbor to rebuild the index." = "結束並重新開啟 LumaHarbor 即可重建索引。";
 "Quit and reopen LumaHarbor, then try again." = "結束並重新開啟 LumaHarbor，然後再試一次。";
+"Quit and reopen LumaHarbor, then check whether the folder still appears before trying again." = "結束並重新開啟 LumaHarbor，確認資料夾是否仍出現在清單後再試一次。";
 "RAW files stay exactly where they are." = "RAW 檔案會留在原本的位置。";
 "Read-only" = "唯讀";
 "Read-only drive — edits can't be saved here" = "唯讀磁碟──在這裡無法儲存編輯";
@@ -271,6 +272,7 @@
 "The local index can't be reset while a scan is in progress." = "掃描進行中，無法重設本機索引。";
 "The local index couldn't be reset." = "無法重設本機索引。";
 "The local index is unavailable." = "本機索引目前無法使用。";
+"The photo folder couldn't be removed cleanly." = "無法乾淨地移除這個照片資料夾。";
 "The operation was cancelled." = "操作已取消。";
 "The original file changed while LumaHarbor was copying it, so nothing was saved." = "LumaHarbor 複製時原始檔案發生變動，因此沒有儲存任何內容。";
 "The original file is not available at" = "找不到原始檔案，路徑：";
