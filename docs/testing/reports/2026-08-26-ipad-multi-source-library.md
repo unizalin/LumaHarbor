@@ -258,15 +258,31 @@ Post-run checks:
 
 ## Real-device checklist
 
-Not executed in this session:
+Manual beta evidence collected on a real iPad on 2026-08-31:
 
-- M1+ iPad APFS add/scan/relaunch: NOT RUN
-- exFAT add/unplug/offline/relink: NOT RUN
-- Files provider reauthorisation: NOT RUN
-- Three-source aggregate search/sort/restoration: NOT RUN
-- Sony ARW edit/autosave/reopen/checksum: NOT RUN
+- M1+ iPad APFS add/scan/relaunch: PASS. The tester reported that photos/thumbnails appeared and the source remained after relaunch.
+- exFAT add/unplug/offline/relink: PASS. The tester reported that the source could be added, thumbnails appeared, unplugging showed an offline state, reconnect/relink worked, and no duplicate source was created.
+- Files provider reauthorisation: PARTIAL PASS. The tester reported normal provider-source behavior as expected. Forced reauthorisation still needs an explicit repeat if final sign-off requires that narrower recovery path.
+- Three-source aggregate search/sort/restoration: PASS by tester report.
+- Sony ARW edit/autosave/reopen/checksum: FAIL before the local correction. The tester reported that adjusted slider values did not persist after reopening and that the editor showed no save-state prompt.
 
-These remain required before final merge/sign-off.
+Follow-up correction, not yet committed at the time of this note:
+
+- Added a regression test proving that reopening the same external-library RAW must restore saved adjustments from the existing in-place document rather than minting a new neutral document.
+- Added `PhotoDocumentStore.committedInPlaceDocument(matching:)`, which reuses a committed in-place document only when the current file URL, sampled fingerprint, and full-content digest still match. If multiple matching documents already exist from prior buggy runs, the picker prefers a document with saved non-neutral adjustments and then the newest sidecar.
+- Updated `PhotoDocumentEditor.openLibraryAsset(.external)` to use that existing document path before creating a new in-place document.
+- Added visible save-state UI to the iPad editor panels: Saved, Unsaved, Saving…, and Not saved.
+
+Post-correction automated evidence:
+
+- `swift test --filter PhotoDocumentEditorLibraryOpenTests/testReopeningTheSameExternalLibraryAssetRestoresSavedAdjustments`: PASS.
+- `swift test --filter PhotoDocumentEditorLibraryOpenTests`: PASS, 11 tests / 0 failures.
+- `swift test --filter EditorCoreTests`: PASS, 115 tests / 0 failures.
+- `swift test`: PASS, 1112 tests / 9 skipped / 0 failures.
+- `xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`: PASS.
+- `git diff --check`: PASS.
+
+Remaining real-device requirement before final merge/sign-off: install the corrected build on the iPad and rerun the Sony ARW edit/autosave/reopen gate, including an original RAW checksum before and after the edit.
 
 ## Final sign-off requirements still open
 

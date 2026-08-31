@@ -1000,6 +1000,79 @@ public final class PhotoDocumentEditor: ObservableObject {
                 // any other bookmark-less `.inPlace` document.
                 let bookmarkData = try? dependencies.makeBookmark(url)
 
+                if let existingDocument = try? await dependencies.store.committedInPlaceDocument(matching: url) {
+                    let (photo, adjustments) = try await self.loadEditorState(for: existingDocument)
+                    guard !Task.isCancelled, self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+
+                    let oldFlushed = await self.flushCurrentDocumentIfDirty()
+                    guard self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+                    guard oldFlushed else {
+                        scope.stop()
+                        self.isPreparingDocument = false
+                        return
+                    }
+
+                    guard await self.retryFinalizeIfNeeded() else {
+                        scope.stop()
+                        guard self.isCurrent(token) else { return }
+                        self.isPreparingDocument = false
+                        self.alert = EditorAlert(
+                            title: L10n.t("Couldn't switch photos"),
+                            message: L10n.t("LumaHarbor couldn't finish saving the photo you had open."),
+                            nextStep: L10n.t("Try again.")
+                        )
+                        return
+                    }
+                    guard self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+
+                    do {
+                        try await self.dependencies.store.saveActiveDocumentID(existingDocument.id)
+                    } catch {
+                        scope.stop()
+                        guard self.isCurrent(token) else { return }
+                        self.isPreparingDocument = false
+                        self.alert = EditorAlert(
+                            title: L10n.t("Couldn't switch photos"),
+                            message: L10n.t("LumaHarbor couldn't remember this photo for next time."),
+                            nextStep: L10n.t("Try again.")
+                        )
+                        return
+                    }
+                    guard self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+
+                    if let bookmarkData {
+                        do {
+                            try await self.dependencies.store.updateSourceBookmark(bookmarkData, documentID: existingDocument.id)
+                        } catch {
+                            self.cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember access to this photo for next time.")
+                        }
+                    }
+
+                    let previousScope = self.documentScope
+                    self.documentScope = scope
+                    self.document = existingDocument
+                    self.editor.open(
+                        photo: photo, sourceURL: existingDocument.workingURL,
+                        adjustments: adjustments, isReadOnly: false
+                    )
+                    self.isPreparingDocument = false
+                    self.pendingRelink = nil
+                    previousScope?.stop()
+                    return
+                }
+
                 let creation: PhotoDocumentCreation
                 do {
                     creation = try await dependencies.store.openInPlace(url, bookmarkData: bookmarkData)

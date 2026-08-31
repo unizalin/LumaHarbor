@@ -22,7 +22,7 @@ Updated by: Codex
 - At design approval the integration branch was 69 commits ahead of `main` and 0 commits behind.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
-The production fixture-validated commit recorded above is the latest full APFS/exFAT/RAW production acceptance baseline. Later commits, if any, must be inspected before product editing begins.
+The production fixture-validated commit recorded above is the latest full APFS/exFAT/RAW production acceptance baseline. Later commits include a local, uncommitted real-device beta fix for external-library edit persistence and save-state UI; rerun the targeted real-device edit gate before final landing.
 
 ## Ownership
 
@@ -45,13 +45,13 @@ The production fixture-validated commit recorded above is the latest full APFS/e
 
 ## Required real-device gates
 
-All five remain `NOT RUN`:
+Current manual real-device evidence from 2026-08-31:
 
-1. M1+ iPad APFS add, scan, and relaunch.
-2. exFAT add, unplug, offline state, and relink.
-3. Files provider reauthorisation.
-4. Three-source aggregate search, sort, and restoration.
-5. Sony ARW edit, autosave, reopen, and original-file checksum.
+1. M1+ iPad APFS add, scan, and relaunch: `PASS` by manual tester report.
+2. exFAT add, unplug, offline state, and relink: `PASS` by manual tester report; no duplicate source was created.
+3. Files provider reauthorisation: normal provider-source open flow `PASS`; forced reauthorisation still needs an explicit retry if required for final sign-off.
+4. Three-source aggregate search, sort, and restoration: `PASS` by manual tester report.
+5. Sony ARW edit, autosave, reopen, and original-file checksum: pre-fix real-device report found `FAIL` for saved adjustment restoration and no visible save-state prompt. A local uncommitted correction now reuses existing in-place documents for external-library RAWs and adds save-state UI. Retest this gate, including original-file checksum, before final sign-off.
 
 ## Preserved dirty files
 
@@ -66,4 +66,4 @@ All five remain `NOT RUN`:
 
 ## Next action
 
-Complete the five required real-device gates before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
+Retest the Sony ARW edit/autosave/reopen/checksum gate on the real iPad before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
