@@ -58,8 +58,8 @@ struct PadLibraryView: View {
         .overlay {
             if isRegisteringSource || hasActiveSourceScan {
                 PadLibraryProgressOverlay(
-                    title: L10n.t("Adding source…"),
-                    message: L10n.t("Scanning this folder so photos can appear as they are indexed.")
+                    title: libraryProgressTitle,
+                    message: libraryProgressMessage
                 )
             }
         }
@@ -105,6 +105,20 @@ struct PadLibraryView: View {
             case .finished, .failed: return false
             }
         }
+    }
+
+    private var libraryProgressTitle: String {
+        if isRegisteringSource {
+            return L10n.t("Adding source…")
+        }
+        return L10n.t("Scanning source…")
+    }
+
+    private var libraryProgressMessage: String {
+        if isRegisteringSource {
+            return L10n.t("Scanning this folder so photos can appear as they are indexed.")
+        }
+        return L10n.t("Refreshing the library index without changing your RAW files.")
     }
 
     private func presentAddSourcePicker() {

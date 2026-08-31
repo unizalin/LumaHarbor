@@ -193,6 +193,7 @@
 "Ready" = "Ready";
 "Recently Edited" = "Recently Edited";
 "Recently Edited is always sorted by most recently edited." = "Recently Edited is always sorted by most recently edited.";
+"Checking this folder matches the original source." = "Checking this folder matches the original source.";
 "Reconnect it to browse and edit these photos." = "Reconnect it to browse and edit these photos.";
 "Reconnect the drive holding this photo, then rescan." = "Reconnect the drive holding this photo, then rescan.";
 "Reconnect the drive holding this photo, then try again." = "Reconnect the drive holding this photo, then try again.";
@@ -202,6 +203,7 @@
 "Reconnect the source, then try again." = "Reconnect the source, then try again.";
 "Reconnect" = "Reconnect";
 "Reconnect…" = "Reconnect…";
+"Reconnecting source…" = "Reconnecting source…";
 "Red" = "Red";
 "Redo" = "Redo";
 "Remove from LumaHarbor" = "Remove from LumaHarbor";
@@ -210,8 +212,11 @@
 "Rename Preset" = "Rename Preset";
 "Rename…" = "Rename…";
 "Replace" = "Replace";
+"Refreshing the library index without changing your RAW files." = "Refreshing the library index without changing your RAW files.";
 "Rescan Folder" = "Rescan Folder";
 "Rescan" = "Rescan";
+"Scanning source…" = "Scanning source…";
+"Scanning…" = "Scanning…";
 "Reset All Adjustments" = "Reset All Adjustments";
 "Reset All" = "Reset All";
 "Reset" = "Reset";

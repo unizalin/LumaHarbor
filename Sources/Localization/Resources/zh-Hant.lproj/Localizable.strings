@@ -193,6 +193,7 @@
 "Ready" = "就緒";
 "Recently Edited" = "最近編輯";
 "Recently Edited is always sorted by most recently edited." = "「最近編輯」一律依最近編輯時間排序。";
+"Checking this folder matches the original source." = "正在確認這個資料夾是否符合原本的來源。";
 "Reconnect it to browse and edit these photos." = "重新連接以瀏覽與編輯這些照片。";
 "Reconnect the drive holding this photo, then rescan." = "重新連接存放這張照片的磁碟，然後重新掃描。";
 "Reconnect the drive holding this photo, then try again." = "重新連接存放這張照片的磁碟，然後再試一次。";
@@ -202,6 +203,7 @@
 "Reconnect the source, then try again." = "重新連接來源，然後再試一次。";
 "Reconnect" = "重新連接";
 "Reconnect…" = "重新連接…";
+"Reconnecting source…" = "正在重新連接來源…";
 "Red" = "紅";
 "Redo" = "重做";
 "Remove from LumaHarbor" = "從 LumaHarbor 移除";
@@ -210,8 +212,11 @@
 "Rename Preset" = "重新命名 Preset";
 "Rename…" = "重新命名…";
 "Replace" = "取代";
+"Refreshing the library index without changing your RAW files." = "正在更新圖庫索引，不會變更你的 RAW 檔案。";
 "Rescan Folder" = "重新掃描資料夾";
 "Rescan" = "重新掃描";
+"Scanning source…" = "正在掃描來源…";
+"Scanning…" = "掃描中…";
 "Reset All Adjustments" = "重設所有調整";
 "Reset All" = "全部重設";
 "Reset" = "重設";
