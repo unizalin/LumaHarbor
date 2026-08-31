@@ -69,6 +69,7 @@
 "Couldn't rename this preset" = "Couldn't rename this preset";
 "Couldn't save your edits" = "Couldn't save your edits";
 "Couldn't show this photo" = "Couldn't show this photo";
+"Couldn't start LumaHarbor" = "Couldn't start LumaHarbor";
 "Couldn't update the cache size" = "Couldn't update the cache size";
 "Create a preset from this photo" = "Create a preset from this photo";
 "Create Preset" = "Create Preset";
@@ -100,6 +101,7 @@
 "found" = "found";
 "Free up space on the drive, then retry." = "Free up space on the drive, then retry.";
 "Free up space on your startup disk, or lower the cache limit in Settings." = "Free up space on your startup disk, or lower the cache limit in Settings.";
+"Free up space on your startup disk, then reopen LumaHarbor." = "Free up space on your startup disk, then reopen LumaHarbor.";
 "Free up space or choose a different destination, then export again." = "Free up space or choose a different destination, then export again.";
 "Grain" = "Grain";
 "Green" = "Green";
@@ -133,6 +135,7 @@
 "LumaHarbor couldn't start up" = "LumaHarbor couldn't start up";
 "LumaHarbor gave up waiting for this file to respond." = "LumaHarbor gave up waiting for this file to respond.";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor is already importing or cleaning up another photo.";
+"LumaHarbor couldn't open local storage." = "LumaHarbor couldn't open local storage.";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor looks for camera RAW files such as Sony .ARW.";
 "LumaHarbor no longer has access to this file." = "LumaHarbor no longer has access to this file.";
 "LumaHarbor no longer has access to this photo folder." = "LumaHarbor no longer has access to this photo folder.";

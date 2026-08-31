@@ -65,14 +65,46 @@ final class PadLibraryCompositionContractTests: XCTestCase {
 
         let initSection = source[initRange.upperBound..<bodyRange.lowerBound]
         XCTAssertTrue(
-            initSection.contains("PadAppServices("),
-            "PadAppServices must be constructed inside init(), not lazily or from body"
+            initSection.contains("makeBootstrapState()"),
+            "init() must synchronously create the app bootstrap state, not defer service construction to body"
         )
 
-        let bodySection = source[bodyRange.upperBound...]
+        guard let bootstrapRange = source.range(of: "private static func makeBootstrapState()") else {
+            XCTFail("LumaHarborPadApp.swift must keep service construction in a dedicated bootstrap helper")
+            return
+        }
+
+        let bodySection = source[bodyRange.upperBound..<bootstrapRange.lowerBound]
         XCTAssertFalse(
             bodySection.contains("PadAppServices("),
             "body must reuse the PadAppServices built in init(), never construct its own"
+        )
+
+        let bootstrapSection = source[bootstrapRange.upperBound...]
+        XCTAssertTrue(
+            bootstrapSection.contains("PadAppServices("),
+            "PadAppServices must be constructed during bootstrap, not lazily or from body"
+        )
+    }
+
+    func testLumaHarborPadAppDoesNotForceCrashWhenServiceBootstrapFails() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("LumaHarborPadApp.swift"), encoding: .utf8)
+
+        XCTAssertFalse(
+            source.contains("try!"),
+            "LumaHarborPadApp must not force-crash if both Application Support and fallback bootstrap fail"
+        )
+        XCTAssertTrue(
+            source.contains("PadAppBootstrapState"),
+            "startup should be represented as an explicit bootstrap state"
+        )
+        XCTAssertTrue(
+            source.contains("PadStartupFailureView"),
+            "the app must render a user-visible startup failure view instead of crashing"
+        )
+        XCTAssertTrue(
+            source.contains("Couldn't start LumaHarbor"),
+            "startup failure copy must explain what happened"
         )
     }
 

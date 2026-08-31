@@ -25,7 +25,7 @@
 | exFAT fixture | **未掛載** | 目前阻擋完整自動驗收 |
 | M1+ iPad 五項實機 gate | **NOT RUN** | 阻擋最終簽核 |
 | Final Review Gate | **NOT RUN** | 自動與實機 gate 後執行 |
-| 初步靜態掃描 | **OPEN** | `LumaHarborPadApp.swift` 的 fallback `try!` 需在 V4 判定或修正 |
+| 初步靜態掃描 | **READY FOR V4** | `LumaHarborPadApp.swift` 的 fallback `try!` 已改為可呈現的啟動失敗狀態；仍需 V4 全範圍掃描確認無新命中 |
 
 結論：產品功能開發已到 Task 8；Task 9 的工具與自測已完成。目前剩餘工作是完整 fixture 驗收、實機驗收，以及最後一輪 spec／程式碼審查。
 
@@ -249,7 +249,7 @@ git diff --check 150bc7d..HEAD
 
 通過條件：每個命中都已修正，或在驗收報告逐項說明為何安全；`git diff --check` 無輸出且 exit 0。
 
-目前已知命中：`Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` 的暫存目錄 fallback 使用 `try! PadAppServices(...)`。現有 composition contract tests 會驗證服務組合，但沒有直接注入「Application Support 初始化失敗，且暫存 fallback 也失敗」的路徑；V4 必須明確決定保留並說明不變條件，或以可測試的失敗呈現取代強制 crash。
+先前已知命中：`Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` 的暫存目錄 fallback 使用 `try! PadAppServices(...)`。此項已改為 `PadAppBootstrapState`：Application Support 初始化失敗時先嘗試暫存 fallback；若 fallback 也失敗，App 顯示 `PadStartupFailureView` 與可本地化的修復提示，而不是在 SwiftUI 畫面出現前強制 crash。V4 仍需重跑本節靜態掃描，確認整個 `150bc7d..HEAD` 範圍沒有新的未說明命中。
 
 ### V4.3 獨立 pre-landing review
 
