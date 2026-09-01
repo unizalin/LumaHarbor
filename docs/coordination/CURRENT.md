@@ -2,11 +2,13 @@
 
 Updated: 2026-09-01
 
-Updated by: Claude (independent V4.3 pre-landing review)
+Updated by: Codex (UI/UX state feedback polish spec)
 
 ## Source of truth
 
-- Active integration branch: `codex/ipad-multi-source-library-durability`
+- Active integration branch: `codex/ipad-ui-ux-state-feedback-polish`
+- Previous integration branch landed and pushed to `main`: `f38f3ad7968b2d5faaffa96dda17f308a982846d`
+- Active UI/UX polish design spec: `docs/superpowers/specs/2026-09-01-ipad-ui-ux-state-feedback-polish-design.md`
 - Latest current-branch product/evidence commit validated by the full fixture runner: `9a798d5852d2688e2b44e87715038d7eb043a091`
 - Latest production acceptance run commit: `9a798d5852d2688e2b44e87715038d7eb043a091`
 - Last production fixture-validated product commit: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
@@ -28,7 +30,7 @@ The latest full APFS/exFAT/RAW production acceptance runner has now passed at cu
 
 ## Ownership
 
-- Codex owns the active integration branch.
+- Codex owns the active UI/UX polish branch.
 - Claude completed the Beta Test Kit on `claude/ipad-beta-test-kit`; Codex cherry-picked the reviewed documentation commits onto this branch.
 - Claude independently reviewed Codex RAW fixture baseline commit `f5dce94716d740ede6ad46c1632361ccf03efd8b` and reported `APPROVED` in `docs/testing/reports/2026-08-31-raw-fixture-baseline-review.md`.
 - Claude independently performed the required V4.3 pre-landing review at HEAD `d24eaae85820d120611a6c75bdd8e6c17b907a18` on 2026-09-01 from a fresh session with no prior context, and reported `APPROVED`. See the V4.3 evidence entry below.
@@ -90,4 +92,4 @@ Additional required manual gate:
 
 ## Next action
 
-The independent V4.3 pre-landing review is complete and `APPROVED` (see above). Final sign-off decision (land, push, merge) is now the user's call. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+Review the UI/UX state feedback polish design spec, then write the implementation plan if approved. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
