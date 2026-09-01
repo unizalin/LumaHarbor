@@ -7,9 +7,9 @@ Updated by: Codex
 ## Source of truth
 
 - Active integration branch: `codex/ipad-multi-source-library-durability`
-- Latest current-branch product/evidence commit validated outside the full fixture runner: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
-- Latest production acceptance run commit: `0fbca6703a445089cdc9aae00515785b1cd18392`
-- Last production fixture-validated product commit: `0fbca6703a445089cdc9aae00515785b1cd18392`
+- Latest current-branch product/evidence commit validated by the full fixture runner: `9a798d5852d2688e2b44e87715038d7eb043a091`
+- Latest production acceptance run commit: `9a798d5852d2688e2b44e87715038d7eb043a091`
+- Last production fixture-validated product commit: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
 - External-library edit persistence fix: `31e707e7773b1c7f504330702d007b87759118a9`
 - Stable iPad Xcode project: `e876b4565325fc06bfb1824ff7eb391aee94345e`
 - Latest real-device evidence update: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
@@ -24,7 +24,7 @@ Updated by: Codex
 - After this coordination-only update, the integration branch is 85 commits ahead of `main` and 0 commits behind.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
-The production fixture-validated commit recorded above remains the latest full APFS/exFAT/RAW production acceptance baseline. The later edit-persistence fix and stable Xcode project are committed and have targeted automated plus real-device evidence, but the full production fixture runner has not yet been rerun at current HEAD.
+The latest full APFS/exFAT/RAW production acceptance runner has now passed at current HEAD. Product code has not changed since `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`; later commits through `9a798d5852d2688e2b44e87715038d7eb043a091` are documentation and coordination updates.
 
 ## Ownership
 
@@ -35,8 +35,8 @@ The production fixture-validated commit recorded above remains the latest full A
 
 ## Latest verified evidence
 
-- Production acceptance runner at `0fbca6703a445089cdc9aae00515785b1cd18392`: `PASS`.
-- Full Swift suite: 1111 executed, 0 skipped, 0 failures.
+- Production acceptance runner at `9a798d5852d2688e2b44e87715038d7eb043a091`: `PASS`.
+- Full Swift suite: 1112 executed, 0 skipped, 0 failures.
 - MultiSourceBoundedScanTests: 6 executed, 0 skipped, 0 failures.
 - iPad Simulator build: `PASS`.
 - MVP preflight, MVP acceptance, iPad vertical-slice acceptance, and privacy scan: `PASS`.
@@ -45,8 +45,7 @@ The production fixture-validated commit recorded above remains the latest full A
 - RAW fixture baseline correction: `Scripts/run-mvp-acceptance.zsh` and `docs/testing/mvp-acceptance-report-template.md` now use the approved 9-test baseline. Runner self-test passed with `executed=8` and `executed=10` failing, and `executed=9` passing.
 - Beta Test Kit: `docs/testing/beta/` now contains tester guide, real-device checklist, bug report template, privacy rules, and RC checklist.
 - Stable iPad Xcode entry point: use `Apps/LumaHarborPad.xcodeproj` for real-device build/run. Do not use `Apps/LumaHarborPad.swiftpm/Package.swift` for ongoing iPad testing because Xcode's App Playground settings can rewrite that generated manifest and remove package-product dependencies.
-- Current-HEAD non-fixture verification at `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`: `swift test` reported 1112 tests, 9 fixture-dependent skips, and 0 failures; strict-concurrency build, iPad Simulator project build, and `git diff --check` passed.
-- Current-HEAD full production fixture acceptance: `NOT RUN`.
+- Current-HEAD full production fixture acceptance at `9a798d5852d2688e2b44e87715038d7eb043a091`: `PASS`. The runner reported `Run mode: PRODUCTION`, `Overall result: PASS`, `Exit code: 0`, `Privacy scan: PASS`, 1112 XCTest cases executed with 0 skipped and 0 failures, 6 `MultiSourceBoundedScanTests` executed with 0 skipped and 0 failures, and PASS for strict-concurrency build, iPad Simulator build, MVP preflight, MVP acceptance, and iPad vertical-slice acceptance.
 
 ## Required real-device gates
 
@@ -75,4 +74,4 @@ Additional required manual gate:
 
 ## Next action
 
-Run `Scripts/run-ipad-library-acceptance.zsh` with all three private fixtures at current HEAD and record the redacted result. After that, close the forced Files-provider reauthorisation gate, the V3 remove-source safety gate, and the independent V4 pre-landing review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+Close the forced Files-provider reauthorisation gate, the V3 remove-source safety gate, and the independent V4 pre-landing review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.

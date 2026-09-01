@@ -8,15 +8,15 @@ Branch: `codex/ipad-multi-source-library-durability`
 
 ## Summary
 
-Tasks 1–9 of the iPad multi-source photo library plan are implemented. The latest branch HEAD is `17ddba2`; it includes the external-library edit-persistence fix, visible save-state UI, a stable Xcode project for real-device deployment, and the corresponding real-device checksum evidence.
+Tasks 1–9 of the iPad multi-source photo library plan are implemented. The latest branch HEAD is `9a798d5`; it includes the external-library edit-persistence fix, visible save-state UI, a stable Xcode project for real-device deployment, the corresponding real-device checksum evidence, and coordination/report updates.
 
-Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the complete production fixture runner has not been rerun at current HEAD and the remaining V2.3, V3, and V4 gates are not complete.
+Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the remaining V2.3, V3, and V4 gates are not complete.
 
-- Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`, reconfirmed PASS at `a539f4a` after the `removeLibrary` durability fix, and reconfirmed PASS at integrated HEAD `0fbca67` after the Beta Test Kit and RAW fixture baseline review were integrated — see the corresponding dated evidence sections below.
+- Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`, reconfirmed PASS at `a539f4a` after the `removeLibrary` durability fix, reconfirmed PASS at integrated HEAD `0fbca67` after the Beta Test Kit and RAW fixture baseline review were integrated, and reconfirmed PASS at current HEAD `9a798d5`.
 - Startup bootstrap failure now renders a user-visible failure state instead of using `try!` at `ed7968d`.
 - Real M1+ iPad manual testing now proves APFS persistence, exFAT offline/relink without duplicate sources, three-source browsing, and Sony ARW non-destructive edit persistence. Forced Files-provider reauthorisation and the V3 remove-source destructive-safety check remain `NOT RUN`.
 
-The report keeps those open items as `NOT RUN`; earlier passing evidence is not used to infer a current-HEAD PASS.
+The report keeps the remaining manual/review items as `NOT RUN`; earlier passing evidence is not used to infer a PASS for gates that were not actually rerun.
 
 The exact remaining gates, commands, pass criteria and evidence format are defined in `docs/testing/2026-08-29-ipad-multi-source-library-verification-spec.md`.
 
@@ -253,7 +253,7 @@ Privacy scan: PASS
 Post-run checks:
 
 - No residual `run-ipad-library-acceptance`, `run-ipad-vertical-slice-acceptance`, `run-mvp-acceptance`, `xcodebuild`, `swift-frontend` or `xctest` process remained.
-- Summary explicitly recorded `Privacy scan: PASS`; no `/Users/`, `/Volumes/`, `/private/var/` or `/private/tmp/` path appeared in the production summary.
+- Summary explicitly recorded `Privacy scan: PASS`; no private user, mount, or temporary path appeared in the production summary.
 - Real-device checklist section of the summary correctly reported all five items as `NOT RUN`; these remain required before final sign-off.
 
 ## Real-device checklist
@@ -309,15 +309,60 @@ Validated commit: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`.
 - `git diff --check`: PASS.
 - V4.2 changed-production-file scan over 34 Swift files in `150bc7d..17ddba2`: PASS; no `TBD`, `TODO`, `FIXME`, `fatalError`, `try!`, or `force unwrap` hit, and range `git diff --check` passed.
 - Worktree state after removing local Xcode signing and generated-manifest noise: clean.
-- Full `Scripts/run-ipad-library-acceptance.zsh` with RAW, APFS, and exFAT fixtures at this commit: `NOT RUN`.
+- Full `Scripts/run-ipad-library-acceptance.zsh` with RAW, APFS, and exFAT fixtures at this commit: superseded by the current-HEAD production runner PASS below.
+
+## Current-HEAD production runner evidence from 2026-09-01
+
+Gate V1 was rerun after the exFAT fixture volume and iPad were connected for continued validation.
+
+- Branch: `codex/ipad-multi-source-library-durability`
+- Commit: `9a798d5` (`docs: organize iPad final sign-off state`)
+- Worktree: clean before and after the run
+- Architecture: `arm64`
+- Privacy rule: no private fixture or mount paths were written to this report or to the production summary.
+
+Command:
+
+```bash
+LUMAHARBOR_RAW_FIXTURE_DIR=<RAW_FIXTURE_DIR> \
+LUMAHARBOR_APFS_TEST_DIR=<APFS_TEST_DIR> \
+LUMAHARBOR_EXFAT_TEST_DIR=<EXFAT_FIXTURE_DIR> \
+Scripts/run-ipad-library-acceptance.zsh
+```
+
+Result summary:
+
+```text
+Run mode: PRODUCTION
+Overall result: PASS
+Exit code: 0
+Commit: 9a798d5
+Architecture: arm64
+Privacy scan: PASS
+
+- strict-concurrency build: PASS
+- swift test: PASS
+  XCTest: 1112 executed, 0 skipped, 0 failures
+- iPad Simulator build: PASS
+- MultiSourceBoundedScanTests: PASS
+  XCTest: 6 executed, 0 skipped, 0 failures
+- MVP preflight: PASS
+- MVP acceptance: PASS
+- iPad vertical-slice acceptance: PASS
+```
+
+Post-run checks:
+
+- No residual `run-ipad-library-acceptance`, `run-ipad-vertical-slice-acceptance`, `run-mvp-acceptance`, `xcodebuild`, `swift-frontend` or `xctest` process remained.
+- Summary explicitly recorded `Privacy scan: PASS`; no private user, mount, or temporary path appeared in the production summary.
+- The runner's built-in real-device checklist remains informational and `NOT RUN`; current manual real-device evidence is tracked separately above.
 
 ## Final sign-off requirements still open
 
 Before claiming the full iPad multi-source library complete:
 
-1. Rerun `Scripts/run-ipad-library-acceptance.zsh` with RAW, APFS, and exFAT fixtures at current HEAD and require a production PASS with no skipped or not-run automated step.
-2. Force Files-provider authorisation loss, complete reauthorisation, and record the identity-preserving recovery result.
-3. Execute V3 remove-source safety with before/after evidence proving RAW, sidecar, and manifest files were not removed or modified.
-4. Complete V4.1 spec coverage and an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding. V4.2 static scan is PASS at `17ddba2` and must be rerun if later product code changes.
+1. Force Files-provider authorisation loss, complete reauthorisation, and record the identity-preserving recovery result.
+2. Execute V3 remove-source safety with before/after evidence proving RAW, sidecar, and manifest files were not removed or modified.
+3. Complete V4.1 spec coverage and an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding. V4.2 static scan is PASS at `17ddba2` and must be rerun if later product code changes.
 
 The earlier static-scan hit in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` has been fixed at `ed7968d`: the temporary-root fallback no longer uses `try! PadAppServices(...)`. Application Support failure first attempts a fresh temporary fallback; if that also fails, `PadStartupFailureView` presents localized recovery guidance instead of force-crashing before SwiftUI renders. Gate V4 still needs to rerun the full changed-production-file scan over `150bc7d..HEAD` and document any new hits.
