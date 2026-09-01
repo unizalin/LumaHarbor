@@ -10,11 +10,11 @@ Branch: `codex/ipad-multi-source-library-durability`
 
 Tasks 1–9 of the iPad multi-source photo library plan are implemented. The latest branch HEAD is `9a798d5`; it includes the external-library edit-persistence fix, visible save-state UI, a stable Xcode project for real-device deployment, the corresponding real-device checksum evidence, and coordination/report updates.
 
-Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the remaining V2.3, V3, and V4 gates are not complete.
+Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the remaining V2.3 and V4 gates are not complete.
 
 - Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`, reconfirmed PASS at `a539f4a` after the `removeLibrary` durability fix, reconfirmed PASS at integrated HEAD `0fbca67` after the Beta Test Kit and RAW fixture baseline review were integrated, and reconfirmed PASS at current HEAD `9a798d5`.
 - Startup bootstrap failure now renders a user-visible failure state instead of using `try!` at `ed7968d`.
-- Real M1+ iPad manual testing now proves APFS persistence, exFAT offline/relink without duplicate sources, three-source browsing, and Sony ARW non-destructive edit persistence. Forced Files-provider reauthorisation and the V3 remove-source destructive-safety check remain `NOT RUN`.
+- Real M1+ iPad manual testing now proves APFS persistence, exFAT offline/relink without duplicate sources, three-source browsing, Sony ARW non-destructive edit persistence, and exFAT remove-source destructive safety. Forced Files-provider reauthorisation remains `NOT RUN`.
 
 The report keeps the remaining manual/review items as `NOT RUN`; earlier passing evidence is not used to infer a PASS for gates that were not actually rerun.
 
@@ -297,7 +297,14 @@ Post-correction real-device evidence from 2026-09-01:
 - Quitting and reopening the app still preserved the adjusted Exposure value.
 - Checksum testing found that the original `.ARW` content was not modified.
 
-The mandatory Sony ARW edit/autosave/reopen/checksum gate is now PASS by manual real-device evidence. Remaining real-device requirements are the forced Files-provider authorisation-loss/recovery path and V3 remove-source destructive-safety evidence; both remain `NOT RUN`.
+The mandatory Sony ARW edit/autosave/reopen/checksum gate is now PASS by manual real-device evidence. The remaining real-device requirement is the forced Files-provider authorisation-loss/recovery path, which remains `NOT RUN`.
+
+V3 remove-source destructive-safety evidence from 2026-09-01:
+
+- The tester removed the exFAT source from the iPad app.
+- Before removal, Mac-side fingerprinting recorded relative-path SHA-256 values for all non-resource-fork fixture files in the exFAT test source, including 12 Sony `.ARW` files, `.lumaharbor/library.json`, and 5 edit sidecars.
+- After removal, the same relative-path SHA-256 list was regenerated.
+- Result: PASS. The RAW files, library manifest, and edit sidecars were still present and every checked SHA-256 value matched the before-removal fingerprint exactly.
 
 ## Current-HEAD verification snapshot from 2026-09-01
 
@@ -362,7 +369,6 @@ Post-run checks:
 Before claiming the full iPad multi-source library complete:
 
 1. Force Files-provider authorisation loss, complete reauthorisation, and record the identity-preserving recovery result.
-2. Execute V3 remove-source safety with before/after evidence proving RAW, sidecar, and manifest files were not removed or modified.
-3. Complete V4.1 spec coverage and an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding. V4.2 static scan is PASS at `17ddba2` and must be rerun if later product code changes.
+2. Complete V4.1 spec coverage and an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding. V4.2 static scan is PASS at `17ddba2` and must be rerun if later product code changes.
 
 The earlier static-scan hit in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` has been fixed at `ed7968d`: the temporary-root fallback no longer uses `try! PadAppServices(...)`. Application Support failure first attempts a fresh temporary fallback; if that also fails, `PadStartupFailureView` presents localized recovery guidance instead of force-crashing before SwiftUI renders. Gate V4 still needs to rerun the full changed-production-file scan over `150bc7d..HEAD` and document any new hits.
