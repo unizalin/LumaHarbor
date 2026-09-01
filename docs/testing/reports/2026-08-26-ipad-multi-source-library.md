@@ -282,7 +282,22 @@ Post-correction automated evidence:
 - `xcodebuild -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`: PASS.
 - `git diff --check`: PASS.
 
-Remaining real-device requirement before final merge/sign-off: install the corrected build on the iPad and rerun the Sony ARW edit/autosave/reopen gate, including an original RAW checksum before and after the edit.
+Stable iPad Xcode project follow-up:
+
+- The nested `Apps/LumaHarborPad.swiftpm/Package.swift` App Playground manifest was found to be an unstable real-device entry point because Xcode rewrote it and removed package-product dependencies.
+- `e876b45` added `Apps/LumaHarborPad.xcodeproj` as the stable iPad build/run entry point and documented the workflow in `docs/development/ipad-xcode-runbook.md`.
+- `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`: PASS.
+
+Post-correction real-device evidence from 2026-09-01:
+
+- The corrected app was installed to the iPad from `Apps/LumaHarborPad.xcodeproj`.
+- Opening the test Sony `.ARW` displayed `Saved`.
+- Changing Exposure displayed `Unsaved` or `Saving…`, then returned to `Saved`.
+- Closing and reopening the same `.ARW` preserved the adjusted Exposure value.
+- Quitting and reopening the app still preserved the adjusted Exposure value.
+- Checksum testing found that the original `.ARW` content was not modified.
+
+Remaining real-device requirement before final merge/sign-off: only the optional narrower forced Files-provider reauthorisation repeat remains if final sign-off requires it. The mandatory Sony ARW edit/autosave/reopen/checksum gate is now PASS by manual real-device evidence.
 
 ## Final sign-off requirements still open
 

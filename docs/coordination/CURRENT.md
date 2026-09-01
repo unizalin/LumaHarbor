@@ -46,13 +46,13 @@ The production fixture-validated commit recorded above is the latest full APFS/e
 
 ## Required real-device gates
 
-Current manual real-device evidence from 2026-08-31:
+Current manual real-device evidence:
 
-1. M1+ iPad APFS add, scan, and relaunch: `PASS` by manual tester report.
-2. exFAT add, unplug, offline state, and relink: `PASS` by manual tester report; no duplicate source was created.
-3. Files provider reauthorisation: normal provider-source open flow `PASS`; forced reauthorisation still needs an explicit retry if required for final sign-off.
-4. Three-source aggregate search, sort, and restoration: `PASS` by manual tester report.
-5. Sony ARW edit, autosave, reopen, and original-file checksum: pre-fix real-device report found `FAIL` for saved adjustment restoration and no visible save-state prompt. A local uncommitted correction now reuses existing in-place documents for external-library RAWs and adds save-state UI. Retest this gate, including original-file checksum, before final sign-off.
+1. M1+ iPad APFS add, scan, and relaunch: `PASS` by manual tester report on 2026-08-31.
+2. exFAT add, unplug, offline state, and relink: `PASS` by manual tester report on 2026-08-31; no duplicate source was created.
+3. Files provider reauthorisation: normal provider-source open flow `PASS`; forced reauthorisation still needs an explicit repeat if final sign-off requires that narrower recovery path.
+4. Three-source aggregate search, sort, and restoration: `PASS` by manual tester report on 2026-08-31.
+5. Sony ARW edit, autosave, reopen, and original-file checksum: `PASS` by manual tester report on 2026-09-01 after `31e707e` and `e876b45`. The corrected app showed save-state text, preserved the adjusted exposure value after close/reopen and app relaunch, and checksum testing found that the original `.ARW` content was not modified.
 
 ## Preserved dirty files
 
@@ -67,4 +67,4 @@ Current manual real-device evidence from 2026-08-31:
 
 ## Next action
 
-Use `Apps/LumaHarborPad.xcodeproj` for the next real-device install, then retest the Sony ARW edit/autosave/reopen/checksum gate on the real iPad before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
+Use `Apps/LumaHarborPad.xcodeproj` for future real-device installs. Final sign-off still needs the explicit final review gate and any desired forced Files-provider reauthorisation repeat. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
