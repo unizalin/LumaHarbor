@@ -42,6 +42,7 @@ The production fixture-validated commit recorded above is the latest full APFS/e
 - Coordination implementation baseline: `swift test` executed 1111 tests, with 9 fixture-dependent tests skipped and 0 failures. This local run did not replace the production fixture evidence above.
 - RAW fixture baseline correction: `Scripts/run-mvp-acceptance.zsh` and `docs/testing/mvp-acceptance-report-template.md` now use the approved 9-test baseline. Runner self-test passed with `executed=8` and `executed=10` failing, and `executed=9` passing.
 - Beta Test Kit: `docs/testing/beta/` now contains tester guide, real-device checklist, bug report template, privacy rules, and RC checklist.
+- Stable iPad Xcode entry point: use `Apps/LumaHarborPad.xcodeproj` for real-device build/run. Do not use `Apps/LumaHarborPad.swiftpm/Package.swift` for ongoing iPad testing because Xcode's App Playground settings can rewrite that generated manifest and remove package-product dependencies.
 
 ## Required real-device gates
 
@@ -66,4 +67,4 @@ Current manual real-device evidence from 2026-08-31:
 
 ## Next action
 
-Retest the Sony ARW edit/autosave/reopen/checksum gate on the real iPad before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
+Use `Apps/LumaHarborPad.xcodeproj` for the next real-device install, then retest the Sony ARW edit/autosave/reopen/checksum gate on the real iPad before final landing. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
