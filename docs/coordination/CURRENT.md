@@ -12,7 +12,7 @@ Updated by: Codex
 - Last production fixture-validated product commit: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
 - External-library edit persistence fix: `31e707e7773b1c7f504330702d007b87759118a9`
 - Stable iPad Xcode project: `e876b4565325fc06bfb1824ff7eb391aee94345e`
-- Latest real-device evidence update: `1bebd929eb9e1714564a62764ac02c0f0a2374d5`
+- Latest real-device evidence update: `TO_BE_REPLACED_AFTER_COMMIT`
 - RAW fixture baseline correction commit: `f5dce94716d740ede6ad46c1632361ccf03efd8b`
 - Integrated Beta Test Kit commit: `a853f71822fc38584e1d753e6acdd5cbefbee4cf`
 - Integrated RAW baseline review report commit: `2192b4fdbe35aae2951752d4ed64686c9562cffb`
@@ -21,7 +21,7 @@ Updated by: Codex
 - Shared agent entry-point commit: `4fe7574d354067235d872c2c3897a5f2a337c8d2`
 - Base branch: `main`
 - Base commit observed during design: `114b1f669f91968137d8519ef4b71b819f277444`
-- After this coordination-only update, the integration branch is 88 commits ahead of `main` and 0 commits behind.
+- After this coordination-only update, the integration branch is 89 commits ahead of `main` and 0 commits behind.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
 The latest full APFS/exFAT/RAW production acceptance runner has now passed at current HEAD. Product code has not changed since `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`; later commits through `9a798d5852d2688e2b44e87715038d7eb043a091` are documentation and coordination updates.
@@ -46,6 +46,9 @@ The latest full APFS/exFAT/RAW production acceptance runner has now passed at cu
 - Beta Test Kit: `docs/testing/beta/` now contains tester guide, real-device checklist, bug report template, privacy rules, and RC checklist.
 - Stable iPad Xcode entry point: use `Apps/LumaHarborPad.xcodeproj` for real-device build/run. Do not use `Apps/LumaHarborPad.swiftpm/Package.swift` for ongoing iPad testing because Xcode's App Playground settings can rewrite that generated manifest and remove package-product dependencies.
 - Current-HEAD full production fixture acceptance at `9a798d5852d2688e2b44e87715038d7eb043a091`: `PASS`. The runner reported `Run mode: PRODUCTION`, `Overall result: PASS`, `Exit code: 0`, `Privacy scan: PASS`, 1112 XCTest cases executed with 0 skipped and 0 failures, 6 `MultiSourceBoundedScanTests` executed with 0 skipped and 0 failures, and PASS for strict-concurrency build, iPad Simulator build, MVP preflight, MVP acceptance, and iPad vertical-slice acceptance.
+- V4.1 spec coverage: `PASS` by local Codex review against design spec §§1-19.
+- V4.2 changed-production-file static scan: `PASS` over 34 production Swift files in `150bc7d..HEAD`; no `TBD`, `TODO`, `FIXME`, `fatalError`, `try!`, or `force unwrap` hit, and range `git diff --check` passed.
+- V4.3 local pre-landing review: no unresolved P0/P1 issue found by this Codex session. Strict independent review remains open because it still needs a separate reviewer or fresh independent context.
 
 ## Required real-device gates
 
@@ -53,7 +56,7 @@ Current manual real-device evidence:
 
 1. M1+ iPad APFS add, scan, and relaunch: `PASS` by manual tester report on 2026-08-31.
 2. exFAT add, unplug, offline state, and relink: `PASS` by manual tester report on 2026-08-31; no duplicate source was created.
-3. Files provider reauthorisation: normal provider-source open flow `PASS`; forced authorisation-loss and reauthorisation recovery remains `NOT RUN`.
+3. Files provider reauthorisation: `PASS` by manual tester report on 2026-09-01. Forced authorisation-loss recovery preserved the source identity, created no duplicate source, and allowed the tester to open photos after reauthorisation.
 4. Three-source aggregate search, sort, and restoration: `PASS` by manual tester report on 2026-08-31.
 5. Sony ARW edit, autosave, reopen, and original-file checksum: `PASS` by manual tester report on 2026-09-01 after `31e707e` and `e876b45`. The corrected app showed save-state text, preserved the adjusted exposure value after close/reopen and app relaunch, and checksum testing found that the original `.ARW` content was not modified.
 
@@ -74,4 +77,4 @@ Additional required manual gate:
 
 ## Next action
 
-Close the forced Files-provider reauthorisation gate and the independent V4 pre-landing review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+Run the strict independent V4.3 pre-landing review from a separate reviewer or fresh independent context, then decide whether to land. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
