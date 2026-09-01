@@ -455,6 +455,135 @@ final class ThumbnailProviderTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(isPinned, "A wiped cache kept a pin nothing will ever release")
     }
 
+    /// Codex pre-landing review, Task 7 round, finding 1, second pass (P1,
+    /// blocking): the first pass fixed "unpin the moment `load()` returns"
+    /// by running pin and the load as `async let` siblings -- but that gave
+    /// up the *other* half of the contract: nothing guaranteed `pin()` had
+    /// actually landed on the cache before the concurrent operation could
+    /// decode and store a thumbnail, triggering `DiskCache.store`'s own
+    /// immediate `evictIfNeeded()` call. A low-enough cache budget could
+    /// therefore evict a visible cell's own thumbnail the instant it
+    /// arrived, exactly the race
+    /// `testPinBeforeStoreProtectsTheEntryThatArrivesLater` above already
+    /// guards for a caller that pins by hand -- but `withVisiblePin` must
+    /// guarantee it structurally, not leave it to how a caller happens to
+    /// compose `pin`/load/`unpin` themselves.
+    ///
+    /// Proves this deterministically, not by timing luck: `withVisiblePin`
+    /// runs `pin` and `operation` as sequential statements, not concurrent
+    /// tasks, so `operation` can never even start until `pin`'s `await` has
+    /// already returned -- i.e. until the pin has already committed on the
+    /// actor. With a 1-byte budget, any store that lands unpinned is
+    /// evicted immediately; this asserts the store survives.
+    func testWithVisiblePinAwaitsPinToLandBeforeTheOperationCanStoreAnEvictableEntry() async throws {
+        let cache = try makeCache(budget: 1)
+        let provider = makeProvider(cache: cache, decoder: SpyRawDecoder())
+        let operationFinished = AsyncFlag()
+
+        // `withVisiblePin` never returns on its own -- it only unpins (and
+        // returns) once its task is cancelled -- so it must run inside a
+        // cancellable `Task`, exactly as a real cell's `.task(id:)` would
+        // drive it, not be awaited bare on the test's own task.
+        let task = Task {
+            await provider.withVisiblePin(photoID: photoID) {
+                _ = try? await provider.thumbnailData(for: self.photoID, sourceURL: self.sourceURL)
+                await operationFinished.set()
+            }
+        }
+
+        await waitUntilTrue("the operation to finish storing") { await operationFinished.isSet }
+
+        let survived = await cache.contains(provider.cacheKey(for: photoID))
+        XCTAssertTrue(
+            survived,
+            "the operation must never be able to store an entry before withVisiblePin's own pin has already landed"
+        )
+
+        task.cancel()
+        await task.value
+    }
+
+    /// Codex pre-landing review, Task 7 round, finding 1, first pass (P1,
+    /// blocking): an earlier version unpinned the moment a cell's `load()`
+    /// returned, not once the cell actually left the screen -- protecting a
+    /// thumbnail only while it was loading, not for its whole visible
+    /// lifetime. `withVisiblePin(photoID:operation:)` must keep an entry
+    /// pinned past `operation`'s own completion, for as long as its own
+    /// task stays alive, and only unpin once that task is cancelled --
+    /// inline, in the same structured task, so a caller never needs a
+    /// separate unstructured `Task { unpin }` racing the pin.
+    func testWithVisiblePinStaysPinnedAfterTheOperationCompletesAndOnlyUnpinsOnCancellation() async throws {
+        let cache = try makeCache(budget: 1)
+        let provider = makeProvider(cache: cache, decoder: SpyRawDecoder())
+        let key = provider.cacheKey(for: photoID)
+        try await cache.store(Data(repeating: 0, count: 1), for: key)
+        let operationRan = AsyncFlag()
+
+        let task = Task {
+            await provider.withVisiblePin(photoID: photoID) {
+                await operationRan.set()
+            }
+        }
+
+        // Give the task a chance to pin, run the (instant) operation, and
+        // reach its cancellation wait.
+        await waitUntilTrue("the operation to run") { await operationRan.isSet }
+
+        // The operation this task's caller would normally run (e.g. a
+        // thumbnail load) has long since finished by now -- the entry must
+        // still be pinned, proving the pin lasts past the operation's own
+        // duration, not just for it.
+        try await Task.sleep(for: .milliseconds(50))
+        let pinnedWellAfterOperationFinished = await provider.isPinned(photoID: photoID)
+        XCTAssertTrue(
+            pinnedWellAfterOperationFinished,
+            "must stay pinned for the whole task lifetime, not just while the operation is in flight"
+        )
+        try await cache.evictIfNeeded()
+        let survivedEvictionWhilePinned = await cache.contains(key)
+        XCTAssertTrue(survivedEvictionWhilePinned)
+
+        task.cancel()
+        // Awaiting `task.value` only resolves once `withVisiblePin`'s own
+        // body has fully returned -- proving unpin happens inline, before
+        // this task is considered finished, not from a detached Task that
+        // could still be racing after this await returns.
+        await task.value
+
+        let unpinnedAfterCancellation = await provider.isPinned(photoID: photoID)
+        XCTAssertFalse(unpinnedAfterCancellation, "must unpin once cancelled, inline in the same structured task")
+    }
+
+    // MARK: - Cache budget
+
+    /// Review round 1, Important #3: `ThumbnailProvider.setByteBudget(_:)`
+    /// is a passthrough added for the iPad's cache-budget settings screen
+    /// (Task 7 Step 5) with no prior test coverage. This proves it genuinely
+    /// forwards to the underlying `DiskCache` -- lowering the budget through
+    /// the provider must evict over-budget entries immediately, the same
+    /// contract `DiskCacheTests.testLoweringTheBudgetPrunesImmediately`
+    /// asserts directly against `DiskCache` -- rather than being a no-op
+    /// that only updates some provider-local value nothing reads.
+    func testSetByteBudgetForwardsToTheUnderlyingCacheAndPrunesImmediately() async throws {
+        let cache = try makeCache(budget: 10_000)
+        let provider = makeProvider(cache: cache, decoder: SpyRawDecoder())
+        for index in 0..<5 {
+            try await cache.store(Data(repeating: 0, count: 100), for: CacheKey("budget-e\(index)"))
+        }
+        let before = await cache.totalByteCount
+        XCTAssertEqual(before, 500)
+
+        try await provider.setByteBudget(250)
+
+        let after = await cache.totalByteCount
+        XCTAssertLessThanOrEqual(
+            after, 250,
+            "provider.setByteBudget did not forward to the cache -- entries were not pruned"
+        )
+        let budget = await cache.byteBudget
+        XCTAssertEqual(budget, 250)
+    }
+
     // MARK: - Diagnostics
 
     func testCacheWriteFailureIsRecordedRatherThanReportedAsCached() async throws {

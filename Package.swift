@@ -105,7 +105,7 @@ let package = Package(
             name: "LumaHarborIntegrationTests",
             dependencies: ["PhotoLibraryCore", "RawProcessingCore"]
         ),
-        .testTarget(name: "EditorCoreTests", dependencies: ["EditorCore"]),
+        .testTarget(name: "EditorCoreTests", dependencies: ["EditorCore", "Localization"]),
         .testTarget(name: "AdjustmentUITests", dependencies: ["AdjustmentUI", "EditorCore", "RawProcessingCore"])
     ]
 )

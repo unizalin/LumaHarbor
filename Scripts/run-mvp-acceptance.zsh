@@ -42,6 +42,13 @@ SCRIPT_PATH="${0:A}"
 SCRIPT_DIR="${SCRIPT_PATH:h}"
 ROOT_DIR="${SCRIPT_DIR:h}"
 
+# Approved RawFixtureTests baseline. This is a fixed, human-approved count,
+# deliberately separate from `swift test`'s live discovery so adding or
+# removing a fixture case cannot silently weaken this gate. Whoever changes
+# Tests/LumaHarborIntegrationTests/RawFixtureTests.swift must update this
+# constant and docs/testing/mvp-acceptance-report-template.md together.
+RAWFIXTURE_EXPECTED_TEST_COUNT=9
+
 # ---------------------------------------------------------------------------
 # XCTest summary parsing. `swift test` exits 0 even when XCTest reports
 # skipped tests, so a bare exit-code check would mislabel a run with silent
@@ -171,31 +178,34 @@ run_selftest() {
         print -r -- "selftest: 2 tests skipped (comma form, plural) -> FAIL (expected FAIL): ok"
     fi
 
-    write_selftest_case "${tmp}/executed-7.log" \
-        "Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
-    if evaluate_xctest_log "${tmp}/executed-7.log" 8 >/dev/null; then
-        print -r -- "selftest: executed=7, required=8 -> unexpectedly PASSED"
+    local rawfixture_under=$((RAWFIXTURE_EXPECTED_TEST_COUNT - 1))
+    local rawfixture_over=$((RAWFIXTURE_EXPECTED_TEST_COUNT + 1))
+
+    write_selftest_case "${tmp}/executed-under.log" \
+        "Executed ${rawfixture_under} tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
+    if evaluate_xctest_log "${tmp}/executed-under.log" "$RAWFIXTURE_EXPECTED_TEST_COUNT" >/dev/null; then
+        print -r -- "selftest: executed=${rawfixture_under}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> unexpectedly PASSED"
         failures=$((failures + 1))
     else
-        print -r -- "selftest: executed=7, required=8 -> FAIL (expected FAIL): ok"
+        print -r -- "selftest: executed=${rawfixture_under}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> FAIL (expected FAIL): ok"
     fi
 
-    write_selftest_case "${tmp}/executed-8.log" \
-        "Executed 8 tests, with 0 tests skipped, 0 failures (0 unexpected) in 0.001 (0.001) seconds"
-    if evaluate_xctest_log "${tmp}/executed-8.log" 8 >/dev/null; then
-        print -r -- "selftest: executed=8, required=8 -> PASS (expected PASS): ok"
+    write_selftest_case "${tmp}/executed-exact.log" \
+        "Executed ${RAWFIXTURE_EXPECTED_TEST_COUNT} tests, with 0 tests skipped, 0 failures (0 unexpected) in 0.001 (0.001) seconds"
+    if evaluate_xctest_log "${tmp}/executed-exact.log" "$RAWFIXTURE_EXPECTED_TEST_COUNT" >/dev/null; then
+        print -r -- "selftest: executed=${RAWFIXTURE_EXPECTED_TEST_COUNT}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> PASS (expected PASS): ok"
     else
-        print -r -- "selftest: executed=8, required=8 -> unexpectedly FAILED"
+        print -r -- "selftest: executed=${RAWFIXTURE_EXPECTED_TEST_COUNT}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> unexpectedly FAILED"
         failures=$((failures + 1))
     fi
 
-    write_selftest_case "${tmp}/executed-9.log" \
-        "Executed 9 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
-    if evaluate_xctest_log "${tmp}/executed-9.log" 8 >/dev/null; then
-        print -r -- "selftest: executed=9, required=8 -> unexpectedly PASSED"
+    write_selftest_case "${tmp}/executed-over.log" \
+        "Executed ${rawfixture_over} tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds"
+    if evaluate_xctest_log "${tmp}/executed-over.log" "$RAWFIXTURE_EXPECTED_TEST_COUNT" >/dev/null; then
+        print -r -- "selftest: executed=${rawfixture_over}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> unexpectedly PASSED"
         failures=$((failures + 1))
     else
-        print -r -- "selftest: executed=9, required=8 -> FAIL (expected FAIL): ok"
+        print -r -- "selftest: executed=${rawfixture_over}, required=${RAWFIXTURE_EXPECTED_TEST_COUNT} -> FAIL (expected FAIL): ok"
     fi
 
     print -r -- "no XCTest summary in this log at all" > "${tmp}/unparsable.log"
@@ -1024,7 +1034,7 @@ if (( ! PREFLIGHT_ONLY )); then
                 announce_step_result "RawFixtureTests" "$STEP_RAWFIXTURE"
             elif run_logged_step rawfixture "RawFixtureTests" "$RAWFIXTURE_LOG" \
                 "${rawfixture_cmd[@]}"; then
-                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" 8)"; then
+                if step_reason="$(evaluate_xctest_log "$RAWFIXTURE_LOG" "$RAWFIXTURE_EXPECTED_TEST_COUNT")"; then
                     STEP_RAWFIXTURE="PASS"
                 else
                     STEP_RAWFIXTURE="FAIL (${step_reason})"

@@ -183,6 +183,18 @@ public enum SafeErrorPresentation {
             return L10n.t("The local index can't be reset while a scan is in progress.")
         case .resetFailed:
             return L10n.t("The local index couldn't be reset.")
+        case .overlappingSource:
+            return L10n.t("This folder overlaps a photo library you already added.")
+        case .ambiguousSource:
+            return L10n.t("LumaHarbor can't confirm whether this is a source you already added.")
+        case .manifestConflict:
+            return L10n.t("This folder's saved identity doesn't match a library you already added.")
+        case .relinkTargetMismatch:
+            return L10n.t("This folder doesn't match the library you're reconnecting.")
+        case .removeLibraryRollbackFailed:
+            return L10n.t("The photo folder couldn't be removed cleanly.")
+        case .registryRecoveryRequired:
+            return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
         }
     }
 

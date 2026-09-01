@@ -41,8 +41,14 @@ extension SidecarError: LocalizedError {
             return L10n.t(
                 "The damaged file has been set aside and your RAW is untouched. Start editing again to write fresh settings."
             )
-        case .corruptManifest:
-            return L10n.t("The damaged file has been set aside. Rescan the folder to rebuild it.")
+        case .corruptManifest(let quarantinedAt, _):
+            // A quarantining caller (a real scan/load) actually moved the
+            // file aside; a read-only identity preflight probe never does
+            // (spec §7) — the recovery text must not claim a move that
+            // didn't happen.
+            return quarantinedAt != nil
+                ? L10n.t("The damaged file has been set aside. Rescan the folder to rebuild it.")
+                : L10n.t("The file was left in place. Fix or remove the damaged manifest file, or choose a different folder, then try again.")
         case .libraryUnavailable:
             return L10n.t("Reconnect the drive, then retry.")
         case .notWritable:
@@ -51,6 +57,24 @@ extension SidecarError: LocalizedError {
             return error.recoverySuggestion
         }
     }
+}
+
+/// Strictly read-only classification of a folder's manifest, for identity
+/// preflight (spec §7). Unlike `SidecarStoring.loadManifest()`, producing
+/// this value must never quarantine, move, write or otherwise touch
+/// anything on disk — an add/focus/relink preflight has to be able to
+/// inspect a candidate folder without risking any mutation before the
+/// caller has even decided whether the source is safe to use.
+public enum ManifestProbeResult: Sendable, Equatable {
+    /// No `.lumaharbor/library.json` exists yet.
+    case absent
+    case valid(LibraryManifest)
+    /// The file exists but isn't valid JSON, or doesn't decode as a manifest.
+    case corrupt(reason: String)
+    case unsupportedSchema(found: Int, supported: Int)
+    /// The drive isn't mounted, or the file couldn't be read for some other
+    /// reason (permissions, I/O error) — distinct from `.absent`.
+    case unavailable
 }
 
 public protocol SidecarStoring: Sendable {
@@ -152,6 +176,42 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
                 quarantinedAt: quarantined?.path,
                 reason: (error as NSError).localizedDescription
             )
+        }
+    }
+
+    /// Read-only manifest inspection for identity preflight (spec §7): unlike
+    /// `loadManifest()`, a corrupt or unreadable file is never quarantined
+    /// and this never moves, writes or otherwise touches anything on disk.
+    /// Every branch is a plain read; the strongest side effect possible here
+    /// is opening `manifestURL` for reading.
+    public func probeManifest() -> ManifestProbeResult {
+        guard isAvailable else { return .unavailable }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: manifestURL)
+        } catch {
+            return FileSystemError.isNoSuchFile(error) ? .absent : .unavailable
+        }
+
+        do {
+            let manifest = try SidecarCoding.decode(LibraryManifest.self, from: data)
+            if manifest.isFromNewerSchema {
+                return .unsupportedSchema(
+                    found: manifest.schemaVersion,
+                    supported: LibraryManifest.currentSchemaVersion
+                )
+            }
+            // A schema version below 1 decodes structurally but is never a
+            // version this or any past build could have written — treat it
+            // as corrupt/invalid, the same as unparsable JSON, rather than
+            // trusting whatever `libraryID` happens to be inside it.
+            guard manifest.schemaVersion >= 1 else {
+                return .corrupt(reason: "Schema version \(manifest.schemaVersion) is not valid.")
+            }
+            return .valid(manifest)
+        } catch {
+            return .corrupt(reason: (error as NSError).localizedDescription)
         }
     }
 

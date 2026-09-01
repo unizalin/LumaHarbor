@@ -8,6 +8,8 @@ The Mac-first MVP is complete and signed off: the automated acceptance suite pas
 
 The approved Mac-first MVP specification is available in [`docs/superpowers/specs/2026-08-13-mac-first-mvp-design.md`](docs/superpowers/specs/2026-08-13-mac-first-mvp-design.md).
 
+The iPad multi-source photo library specification and implementation plan are tracked in [`docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md`](docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md) and [`docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md`](docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md). Automated acceptance evidence is produced by [`Scripts/run-ipad-library-acceptance.zsh`](Scripts/run-ipad-library-acceptance.zsh) and recorded in [`docs/testing/reports/2026-08-26-ipad-multi-source-library.md`](docs/testing/reports/2026-08-26-ipad-multi-source-library.md); final sign-off still requires the full fixture run and real M1+ iPad checklist.
+
 ## Running it
 
 ```sh

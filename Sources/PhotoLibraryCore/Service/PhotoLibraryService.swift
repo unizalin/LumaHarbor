@@ -21,6 +21,28 @@ public struct LibraryScanResult: Sendable, Equatable {
     /// text alone.
     public var manifestWriteRecoverySuggestion: String?
     public var completedAt: Date
+
+    public init(
+        libraryID: LibraryID,
+        indexedCount: Int,
+        failedCount: Int,
+        ambiguousCount: Int,
+        movedCount: Int,
+        wasCancelled: Bool,
+        manifestWriteFailure: String? = nil,
+        manifestWriteRecoverySuggestion: String? = nil,
+        completedAt: Date
+    ) {
+        self.libraryID = libraryID
+        self.indexedCount = indexedCount
+        self.failedCount = failedCount
+        self.ambiguousCount = ambiguousCount
+        self.movedCount = movedCount
+        self.wasCancelled = wasCancelled
+        self.manifestWriteFailure = manifestWriteFailure
+        self.manifestWriteRecoverySuggestion = manifestWriteRecoverySuggestion
+        self.completedAt = completedAt
+    }
 }
 
 public enum LibraryScanEvent: Sendable {
@@ -42,6 +64,54 @@ public enum LibraryError: Error, Equatable, Sendable {
     /// which an active scan is still writing through.
     case resetRefusedWhileScanning
     case resetFailed(String)
+    /// Spec §7: the folder being added is a reliably-detected ancestor or
+    /// descendant of an already-known source. Rejected before any bookmark,
+    /// in-memory, index, manifest, or source mutation, so nothing needs to be
+    /// rolled back.
+    case overlappingSource
+    /// Spec §7 step 3: the folder being added shares only a bounded root
+    /// fingerprint with an existing source — never a manifest `LibraryID` or
+    /// a bookmark-resolved resource identifier. Never auto-relinked or
+    /// auto-reused; the caller must ask the user to confirm before either
+    /// adding it as new or reusing the named library.
+    case ambiguousSource(LibraryID)
+    /// Spec §7: the folder being added has a confirmed manifest `LibraryID`
+    /// that disagrees with an already-known source's confirmed manifest
+    /// `LibraryID`, even though other evidence (path, resource identifier)
+    /// suggests they might be the same physical folder. A confirmed
+    /// disagreement is never downgraded to a silent reuse.
+    case manifestConflict(LibraryID)
+    /// Spec §7: `relink(libraryID:to:)` was pointed at a folder that doesn't
+    /// confirm as the same source being relinked. The bookmark, index and
+    /// access scope for `libraryID` are left completely untouched.
+    case relinkTargetMismatch(LibraryID)
+    /// `removeLibrary` removed the authoritative bookmark but then failed to
+    /// remove the rebuildable index rows, and the attempted bookmark rollback
+    /// also failed. The actor's in-memory state and access scope are left
+    /// untouched for this run, and callers must treat the removal as
+    /// unresolved rather than successful.
+    case removeLibraryRollbackFailed(
+        libraryID: LibraryID,
+        indexFailure: String,
+        rollbackFailure: String
+    )
+    /// A pending local registry transaction could not be rolled back. The
+    /// journal remains in Application Support and all registry mutations stay
+    /// blocked until a later recovery attempt succeeds.
+    case registryRecoveryRequired
+}
+
+/// Safe, structured reason a remembered source could not be restored. These
+/// values deliberately carry no paths or underlying error strings, so callers
+/// can present them without exposing private filesystem details.
+public enum LibraryRestoreDiagnostic: Equatable, Sendable {
+    case authorizationFailure
+    case manifestConflict
+    case manifestMissing
+    case corruptManifest
+    case unsupportedManifest
+    case manifestUnavailable
+    case persistenceFailure
 }
 
 extension LibraryError: LocalizedError {
@@ -57,6 +127,18 @@ extension LibraryError: LocalizedError {
             return L10n.t("The local index can't be reset while a scan is in progress.")
         case .resetFailed(let message):
             return "\(L10n.t("The local index couldn't be reset.")) \(message)"
+        case .overlappingSource:
+            return L10n.t("This folder overlaps a photo library you already added.")
+        case .ambiguousSource:
+            return L10n.t("LumaHarbor can't confirm whether this is a source you already added.")
+        case .manifestConflict:
+            return L10n.t("This folder's saved identity doesn't match a library you already added.")
+        case .relinkTargetMismatch:
+            return L10n.t("This folder doesn't match the library you're reconnecting.")
+        case .removeLibraryRollbackFailed:
+            return L10n.t("The photo folder couldn't be removed cleanly.")
+        case .registryRecoveryRequired:
+            return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
         }
     }
 
@@ -70,6 +152,18 @@ extension LibraryError: LocalizedError {
         case .resetRefusedWhileScanning:
             return L10n.t("Wait for the current scan to finish, then try again.")
         case .resetFailed: return L10n.t("Quit and reopen LumaHarbor, then try again.")
+        case .overlappingSource:
+            return L10n.t("Choose a folder that doesn't contain, or sit inside, an existing library.")
+        case .ambiguousSource:
+            return L10n.t("Confirm whether this is the same source, then try again.")
+        case .manifestConflict:
+            return L10n.t("Choose a different folder, or confirm which library this one belongs to.")
+        case .relinkTargetMismatch:
+            return L10n.t("Choose the folder that holds this exact library, then try again.")
+        case .removeLibraryRollbackFailed:
+            return L10n.t("Quit and reopen LumaHarbor, then check whether the folder still appears before trying again.")
+        case .registryRecoveryRequired:
+            return L10n.t("Quit and reopen LumaHarbor, then try again.")
         }
     }
 }
@@ -82,6 +176,7 @@ extension LibraryError: LocalizedError {
 public actor PhotoLibraryService {
     private let locations: ApplicationSupportLocations
     private let bookmarkStore: any BookmarkStoring
+    private let registryTransactionStore: any RegistryTransactionStoring
     /// Replaceable so `resetRebuildableLocalData()` can swap in a fresh SQLite
     /// connection after closing this one, instead of the two ever being open
     /// on the same file at once.
@@ -89,10 +184,32 @@ public actor PhotoLibraryService {
     private let decoder: any RawDecoding
     private let scanner: FolderScanner
 
-    /// Held for the app's lifetime: dropping a `ScopedFolderAccess` releases the
-    /// security scope, so these must outlive every read of the folder.
-    private var access: [LibraryID: ScopedFolderAccess] = [:]
+    /// Held for the app's lifetime: dropping a `FolderAccessHandle` releases
+    /// the security scope, so these must outlive every read of the folder.
+    private var access: [LibraryID: any FolderAccessHandle] = [:]
     private var libraries: [LibraryID: LibraryFolder] = [:]
+    private var restoreDiagnostics: [LibraryID: LibraryRestoreDiagnostic] = [:]
+    /// Seam over resolving bookmarks/granting access (spec §7): the real
+    /// implementation is `SystemFolderAccessResolver`; tests inject a fake
+    /// so offline/needsAuthorization/stale-refresh/scope-pairing behaviour
+    /// is verifiable deterministically, without a real removable volume.
+    private let folderAccessResolver: any FolderAccessResolving
+    private let resourceIdentityResolver: any ResourceIdentityResolving
+    private let bookmarkDataCreator: any BookmarkDataCreating
+    /// Schedules `scanLibraries`' per-source scans across a fixed two-slot
+    /// budget (spec §9). Self-contained and not test-injectable: its own
+    /// behavior is covered directly by `MultiSourceScanCoordinatorTests`.
+    private let scanCoordinator = MultiSourceScanCoordinator()
+
+    /// How long one file's fingerprint+decode inspection may run before it's
+    /// treated as an unresponsive provider (an unreachable, cloud-backed
+    /// Files folder that never answers a read) rather than a slow one.
+    static let providerRequestTimeout: Duration = .seconds(30)
+    /// Seam over waiting out that timeout: production really waits; a test
+    /// substitutes a sleep that resolves immediately (while still recording
+    /// what duration it was asked to wait), so the 30-second path is provable
+    /// without an actual 30-second wait.
+    private let providerTimeoutSleep: @Sendable (Duration) async throws -> Void
 
     /// How many `performScan` calls are currently running, across every
     /// library. Incremented at the top of `performScan` and decremented via
@@ -113,15 +230,48 @@ public actor PhotoLibraryService {
         locations: ApplicationSupportLocations,
         bookmarkStore: (any BookmarkStoring)? = nil,
         decoder: any RawDecoding = CoreImageRawDecoder(),
-        scanner: FolderScanner = FolderScanner()
+        scanner: FolderScanner = FolderScanner(),
+        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver()
+    ) throws {
+        try self.init(
+            locations: locations,
+            bookmarkStore: bookmarkStore,
+            decoder: decoder,
+            scanner: scanner,
+            folderAccessResolver: folderAccessResolver,
+            resourceIdentityResolver: resourceIdentityResolver,
+            bookmarkDataCreator: SystemBookmarkDataCreator(),
+            registryTransactionStore: nil
+        )
+    }
+
+    init(
+        locations: ApplicationSupportLocations,
+        bookmarkStore: (any BookmarkStoring)? = nil,
+        decoder: any RawDecoding = CoreImageRawDecoder(),
+        scanner: FolderScanner = FolderScanner(),
+        folderAccessResolver: any FolderAccessResolving = SystemFolderAccessResolver(),
+        resourceIdentityResolver: any ResourceIdentityResolving = SystemResourceIdentityResolver(),
+        bookmarkDataCreator: any BookmarkDataCreating = SystemBookmarkDataCreator(),
+        registryTransactionStore: (any RegistryTransactionStoring)?,
+        providerTimeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
     ) throws {
         try locations.createDirectories()
         self.locations = locations
         self.bookmarkStore = bookmarkStore
             ?? FileBookmarkStore(directoryURL: locations.bookmarksDirectoryURL)
+        self.registryTransactionStore = registryTransactionStore
+            ?? FileRegistryTransactionStore(directoryURL: locations.registryTransactionsDirectoryURL)
         self.index = try PhotoIndexStore(databaseURL: locations.databaseURL)
         self.decoder = decoder
         self.scanner = scanner
+        self.folderAccessResolver = folderAccessResolver
+        self.resourceIdentityResolver = resourceIdentityResolver
+        self.bookmarkDataCreator = bookmarkDataCreator
+        self.providerTimeoutSleep = providerTimeoutSleep
     }
 
     public var indexStore: PhotoIndexStore { index }
@@ -136,46 +286,479 @@ public actor PhotoLibraryService {
         libraries[id]
     }
 
+    public func restoreDiagnostic(for libraryID: LibraryID) -> LibraryRestoreDiagnostic? {
+        restoreDiagnostics[libraryID]
+    }
+
     /// Registers a folder the user just picked. The open panel has already
     /// granted access, so this only has to remember it (spec §7).
+    ///
+    /// The whole decision is a strictly read-only, order-independent
+    /// preflight (spec §7): every currently-known library's relationship to
+    /// the candidate is collected up front — nothing is mutated while doing
+    /// so — before any bookmark, index, in-memory or source mutation
+    /// happens. A reliably-detected exact match focuses the existing source
+    /// instead of duplicating it; a reliably-detected parent/child overlap,
+    /// a confirmed manifest conflict, or an ambiguous match (no manifest ID
+    /// or resource identifier agrees, only a bounded fingerprint) is
+    /// rejected outright rather than silently guessed either way; more than
+    /// one confirmed match is itself treated as ambiguous.
     @discardableResult
-    public func addLibrary(at url: URL, displayName: String? = nil) throws -> LibraryFolder {
-        let bookmarkData: Data
+    public func addLibrary(
+        at url: URL,
+        displayName: String? = nil,
+        sourceKind: LibrarySourceKind = .externalFolder
+    ) throws -> LibraryFolder {
+        try recoverPendingRegistryTransaction()
+        let repository = FileSidecarRepository(libraryRootURL: url)
+        let confirmedManifestID = try Self.requireConfirmedManifestID(
+            from: repository.probeManifest(), path: url.path
+        )
+        let candidateIdentity = LibrarySourceIdentity.resolve(
+            url: url,
+            confirmedManifestLibraryID: confirmedManifestID,
+            resourceIdentityResolver: resourceIdentityResolver
+        )
+
+        switch try preflightDecision(for: candidateIdentity) {
+        case .reject(let error):
+            throw error
+        case .focus(let existing):
+            return try focusExistingLibrary(
+                existing, at: url, displayName: displayName,
+                candidateIdentity: candidateIdentity, repository: repository
+            )
+        case .addNew:
+            return try createNewLibrary(
+                at: url, displayName: displayName, sourceKind: sourceKind,
+                confirmedManifestID: confirmedManifestID,
+                candidateIdentity: candidateIdentity, repository: repository
+            )
+        }
+    }
+
+    private enum PreflightOutcome {
+        case addNew
+        case focus(LibraryFolder)
+        case reject(LibraryError)
+    }
+
+    /// Compares `candidate` against *every* currently-known library, then
+    /// decides using a fixed precedence over the whole collected set (spec
+    /// §7): nothing is decided — or mutated — while iterating, and the
+    /// specific error/outcome returned does not depend on `Dictionary`
+    /// iteration order, only on the (order-independent) set of
+    /// relationships found. Precedence, strongest first: any `.conflict`;
+    /// any `.ancestor`/`.descendant` overlap; any `.ambiguous`; more than one
+    /// `.same` match (itself a data inconsistency, treated as ambiguous);
+    /// exactly one `.same` match focuses it; otherwise every relationship is
+    /// `.distinct` and a fresh library is added.
+    ///
+    /// Propagates a `bookmarkStore.load` failure for any known library
+    /// rather than treating a lookup failure as "no identity" (spec §7):
+    /// an I/O or decode error must fail the whole preflight closed, never
+    /// silently read as `.distinct`.
+    private func preflightDecision(for candidate: LibrarySourceIdentity) throws -> PreflightOutcome {
+        struct Match {
+            let library: LibraryFolder
+            let relationship: SourceRelationship
+        }
+
+        var matches: [Match] = []
+        for existing in libraries.values {
+            let relationship = try identity(for: existing).relationship(to: candidate)
+            matches.append(Match(library: existing, relationship: relationship))
+        }
+        // Stable, content-derived order so the specific error/library
+        // reported never depends on `Dictionary`'s iteration order.
+        matches.sort { $0.library.id.description < $1.library.id.description }
+
+        if let conflict = matches.first(where: { $0.relationship == .conflict }) {
+            return .reject(.manifestConflict(conflict.library.id))
+        }
+        if matches.contains(where: { $0.relationship == .ancestor || $0.relationship == .descendant }) {
+            return .reject(.overlappingSource)
+        }
+        if let ambiguous = matches.first(where: { $0.relationship == .ambiguous }) {
+            return .reject(.ambiguousSource(ambiguous.library.id))
+        }
+
+        let sameMatches = matches.filter { $0.relationship == .same }.map(\.library)
+        switch sameMatches.count {
+        case 0: return .addNew
+        case 1: return .focus(sameMatches[0])
+        default:
+            // Two different known libraries both confirm as the same
+            // candidate: a data inconsistency, not a safe auto-pick between
+            // them (spec §7).
+            return .reject(.ambiguousSource(sameMatches[0].id))
+        }
+    }
+
+    /// Classifies a read-only manifest probe into either a confirmed
+    /// manifest `LibraryID` (or `nil` for a folder that simply has none yet)
+    /// or a thrown, safe error — corrupt/unsupported-schema/unavailable must
+    /// abort the add/focus/relink outright, never be silently treated as
+    /// "no manifest" (spec §7).
+    private static func requireConfirmedManifestID(
+        from probe: ManifestProbeResult,
+        path: String
+    ) throws -> LibraryID? {
+        switch probe {
+        case .absent:
+            return nil
+        case .valid(let manifest):
+            return manifest.libraryID
+        case .corrupt(let reason):
+            throw LibraryError.sidecar(.corruptManifest(quarantinedAt: nil, reason: reason))
+        case .unsupportedSchema(let found, let supported):
+            throw LibraryError.sidecar(.unsupportedSchemaVersion(found: found, supported: supported))
+        case .unavailable:
+            throw LibraryError.offline(path: path)
+        }
+    }
+
+    private enum RestoreManifestValidation {
+        case accepted(confirmedID: LibraryID?, requiresBackfill: Bool)
+        case blocked(LibraryRestoreDiagnostic)
+    }
+
+    private static func validateManifestForRestore(
+        persisted: LibraryID?,
+        ownLibraryID: LibraryID,
+        probe: ManifestProbeResult
+    ) -> RestoreManifestValidation {
+        switch probe {
+        case .valid(let manifest):
+            if let persisted {
+                return persisted == manifest.libraryID
+                    ? .accepted(confirmedID: persisted, requiresBackfill: false)
+                    : .blocked(.manifestConflict)
+            }
+            return manifest.libraryID == ownLibraryID
+                ? .accepted(confirmedID: ownLibraryID, requiresBackfill: true)
+                : .blocked(.manifestConflict)
+        case .absent:
+            return persisted == nil
+                ? .accepted(confirmedID: nil, requiresBackfill: false)
+                : .blocked(.manifestMissing)
+        case .corrupt:
+            return .blocked(.corruptManifest)
+        case .unsupportedSchema:
+            return .blocked(.unsupportedManifest)
+        case .unavailable:
+            return .blocked(.manifestUnavailable)
+        }
+    }
+
+    private func makeBookmarkData(for url: URL) throws -> Data {
         do {
-            bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
+            return try bookmarkDataCreator.makeBookmarkData(for: url)
         } catch let error as BookmarkError {
             throw LibraryError.bookmark(error)
         }
+    }
 
-        let repository = FileSidecarRepository(libraryRootURL: url)
-        // Reuse the identifier the folder already carries, so re-adding a drive
-        // on a second Mac doesn't fork the library into two.
-        let existingManifest = try? repository.loadManifest()
-        let libraryID = existingManifest?.libraryID ?? LibraryID()
+    /// Mints a brand-new `LibraryFolder` for a candidate the preflight found
+    /// no relationship to any known library for.
+    ///
+    /// Guards against a `LibraryID` collision before any mutation (spec §7):
+    /// even though the preflight found nothing matching, a drifted or
+    /// corrupted confirmed-ID record could in principle let two different
+    /// physical folders both claim the same `LibraryID` — this never
+    /// silently overwrites an existing `libraries` entry or bookmark record,
+    /// it rejects.
+    ///
+    /// Otherwise staged so a mid-way failure can never leave
+    /// `access`/`libraries` pointing at a source the persistent stores don't
+    /// agree on: for a folder with no manifest yet, the manifest is written
+    /// *before* anything is persisted, so a successful write and the
+    /// confirmed ID it establishes land in the exact same bookmark save —
+    /// never a separate best-effort backfill that could leave the disk
+    /// manifest and the local registry disagreeing. The bookmark is written
+    /// first, the index second — an index failure rolls the just-written
+    /// bookmark back out — and only once both stores agree does this touch
+    /// the security scope or in-memory state at all.
+    private func createNewLibrary(
+        at url: URL,
+        displayName: String?,
+        sourceKind: LibrarySourceKind,
+        confirmedManifestID: LibraryID?,
+        candidateIdentity: LibrarySourceIdentity,
+        repository: FileSidecarRepository
+    ) throws -> LibraryFolder {
+        let libraryID = confirmedManifestID ?? LibraryID()
+
+        guard libraries[libraryID] == nil else {
+            throw LibraryError.manifestConflict(libraryID)
+        }
+        guard try bookmarkStore.load(libraryID: libraryID) == nil else {
+            throw LibraryError.manifestConflict(libraryID)
+        }
+        guard try index.library(id: libraryID) == nil,
+              try index.photoCount(inLibrary: libraryID) == 0 else {
+            throw LibraryError.manifestConflict(libraryID)
+        }
+
+        let bookmarkData = try makeBookmarkData(for: url)
+
+        var confirmedID = confirmedManifestID
+        if confirmedID == nil, repository.isWritable,
+           (try? repository.write(manifest: LibraryManifest(libraryID: libraryID))) != nil {
+            confirmedID = libraryID
+        }
 
         let folder = LibraryFolder(
             id: libraryID,
             displayName: displayName ?? url.lastPathComponent,
             rootURL: url,
-            isOnline: true,
-            isWritable: repository.isWritable
+            sourceKind: sourceKind,
+            connectionState: repository.isWritable ? .ready : .readOnly,
+            scanState: .idle
         )
 
-        try bookmarkStore.save(StoredBookmark(
+        let storedBookmark = StoredBookmark(
             libraryID: libraryID,
             displayName: folder.displayName,
             lastKnownPath: url.path,
-            bookmarkData: bookmarkData
-        ))
+            bookmarkData: bookmarkData,
+            sourceKind: sourceKind,
+            scanState: .idle,
+            confirmedManifestLibraryID: confirmedID,
+            resourceIdentifier: candidateIdentity.resourceIdentifier,
+            volumeIdentifier: candidateIdentity.volumeIdentifier,
+            rootFingerprint: candidateIdentity.rootFingerprint
+        )
 
-        access[libraryID] = ScopedFolderAccess(url: url)
+        try applyRegistryTransaction(
+            kind: .freshAdd,
+            previousBookmark: nil,
+            intendedBookmark: storedBookmark,
+            previousLibrary: nil,
+            intendedLibrary: folder
+        )
+
+        // COMMIT: only now touch the security scope and in-memory state,
+        // now that both persistent stores agree.
+        access[libraryID] = folderAccessResolver.grant(url: url)
         libraries[libraryID] = folder
-        try index.upsert(library: folder)
+        restoreDiagnostics.removeValue(forKey: libraryID)
 
-        if existingManifest == nil, repository.isWritable {
-            try? repository.write(manifest: LibraryManifest(libraryID: libraryID))
-        }
         return folder
+    }
+
+    /// Re-points an already-known library at the exact folder the user just
+    /// picked again, rather than minting a second `LibraryFolder` for the
+    /// same physical location (spec §7). Shared by `addLibrary`'s `.same`
+    /// branch and by `relink`; `displayName` is preserved when none is
+    /// supplied, instead of being derived from the URL.
+    ///
+    /// The baseline read must fail closed, not be swallowed into "no
+    /// previous bookmark" — that would make a later rollback *delete* a
+    /// perfectly good existing record instead of restoring it (spec §7).
+    /// Otherwise it uses the same durable rollback-to-old-state journal as
+    /// `createNewLibrary`. A mid-way failure never touches actor memory or
+    /// access. If rollback cannot finish, the journal stays in Application
+    /// Support, a safe `.registryRecoveryRequired` error is returned, and a
+    /// later same-session or restart recovery deterministically restores the
+    /// old bookmark/index snapshot before any other registry mutation runs.
+    private func focusExistingLibrary(
+        _ existing: LibraryFolder,
+        at url: URL,
+        displayName: String?,
+        candidateIdentity: LibrarySourceIdentity,
+        repository: FileSidecarRepository,
+        transactionKind: RegistryTransactionKind = .focus
+    ) throws -> LibraryFolder {
+        let previousStoredBookmark = try bookmarkStore.load(libraryID: existing.id)
+
+        let bookmarkData = try makeBookmarkData(for: url)
+
+        var folder = existing
+        folder.rootURL = url
+        folder.lastKnownPath = url.path
+        folder.connectionState = repository.isWritable ? .ready : .readOnly
+        if let displayName {
+            folder.displayName = displayName
+        }
+
+        let newStoredBookmark = StoredBookmark(
+            libraryID: existing.id,
+            displayName: folder.displayName,
+            lastKnownPath: url.path,
+            bookmarkData: bookmarkData,
+            sourceKind: existing.sourceKind,
+            scanState: folder.scanState,
+            confirmedManifestLibraryID: candidateIdentity.confirmedManifestLibraryID,
+            resourceIdentifier: candidateIdentity.resourceIdentifier,
+            volumeIdentifier: candidateIdentity.volumeIdentifier,
+            rootFingerprint: candidateIdentity.rootFingerprint
+        )
+
+        let previousLibrary = try index.library(id: existing.id) ?? existing
+        try applyRegistryTransaction(
+            kind: transactionKind,
+            previousBookmark: previousStoredBookmark,
+            intendedBookmark: newStoredBookmark,
+            previousLibrary: previousLibrary,
+            intendedLibrary: folder
+        )
+
+        access[existing.id]?.stop()
+        access[existing.id] = folderAccessResolver.grant(url: url)
+        libraries[existing.id] = folder
+        restoreDiagnostics.removeValue(forKey: existing.id)
+
+        return folder
+    }
+
+    /// Explicit retry hook for UI/startup code after a safe
+    /// `.registryRecoveryRequired` failure. Every mutating public entry point
+    /// also invokes the same recovery automatically before doing any work.
+    public func recoverPendingRegistryChanges() throws {
+        try recoverPendingRegistryTransaction()
+    }
+
+    private func applyRegistryTransaction(
+        kind: RegistryTransactionKind,
+        previousBookmark: StoredBookmark?,
+        intendedBookmark: StoredBookmark,
+        previousLibrary: LibraryFolder?,
+        intendedLibrary: LibraryFolder
+    ) throws {
+        try recoverPendingRegistryTransaction()
+
+        let record = RegistryTransactionRecord(
+            transactionID: UUID(),
+            libraryID: intendedBookmark.libraryID,
+            kind: kind,
+            previousBookmark: previousBookmark,
+            intendedBookmark: intendedBookmark,
+            previousLibrary: previousLibrary.map(LibraryFolderSnapshot.init),
+            intendedLibrary: LibraryFolderSnapshot(intendedLibrary)
+        )
+        try record.validate()
+
+        // PREPARE: no bookmark/index mutation is legal before this durable
+        // record exists.
+        try registryTransactionStore.save(record)
+
+        do {
+            try bookmarkStore.save(intendedBookmark)
+            try index.upsert(library: intendedLibrary)
+            // Commit point. Actor memory/access is updated by the caller only
+            // after this non-rebuildable record has durably disappeared.
+            try registryTransactionStore.remove()
+        } catch let operationError {
+            do {
+                try rollbackRegistryTransaction(record)
+                try registryTransactionStore.remove()
+            } catch {
+                throw LibraryError.registryRecoveryRequired
+            }
+            throw operationError
+        }
+    }
+
+    private func recoverPendingRegistryTransaction() throws {
+        let pending: RegistryTransactionRecord?
+        do {
+            pending = try registryTransactionStore.load()
+        } catch {
+            throw LibraryError.registryRecoveryRequired
+        }
+        guard let pending else { return }
+
+        do {
+            try pending.validate()
+            try rollbackRegistryTransaction(pending)
+            try registryTransactionStore.remove()
+        } catch {
+            throw LibraryError.registryRecoveryRequired
+        }
+    }
+
+    /// Idempotent rollback-to-old-state. Both stores are attempted even when
+    /// the first one fails, so a later retry can finish whichever half still
+    /// differs. The journal is cleared only by the caller after both succeed.
+    private func rollbackRegistryTransaction(_ record: RegistryTransactionRecord) throws {
+        try record.validate()
+        var firstError: Error?
+
+        do {
+            if let previousBookmark = record.previousBookmark {
+                try bookmarkStore.save(previousBookmark)
+            } else {
+                try bookmarkStore.remove(libraryID: record.libraryID)
+            }
+        } catch {
+            firstError = error
+        }
+
+        do {
+            if let previousLibrary = record.previousLibrary {
+                try index.upsert(library: previousLibrary.folder)
+            } else {
+                switch record.kind {
+                case .freshAdd:
+                    // The collision gate proved the ID had no pre-existing
+                    // rows, so everything written by this failed add is an
+                    // orphan and may be removed together.
+                    try index.removeLibrary(id: record.libraryID)
+                case .focus, .relink, .restoreRefresh:
+                    // Existing-source rollback must preserve exact photo rows
+                    // even when the old index happened to lack its library
+                    // metadata row.
+                    try index.removeLibraryMetadata(id: record.libraryID)
+                }
+            }
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+
+        if let firstError { throw firstError }
+    }
+
+    /// The identity a currently-known library presents for overlap/reuse
+    /// comparison (spec §7): its confirmed manifest `LibraryID` (if any) and
+    /// resource/volume identity are read from its persisted bookmark record,
+    /// never assumed from its own in-memory `LibraryID` — so an offline or
+    /// never-manifested source compares only on evidence that's actually
+    /// been confirmed. Live path/volume data is added only while the source
+    /// is actually reachable right now, so ancestor/descendant detection
+    /// never fires against an offline source's stale path.
+    ///
+    /// Throws on a bookmark-store I/O or decode failure rather than
+    /// swallowing it (spec §7): a lookup that fails is not the same as a
+    /// source with no identity, and treating it as `.distinct` would let a
+    /// transient read glitch silently defeat overlap/conflict detection.
+    private func identity(for folder: LibraryFolder) throws -> LibrarySourceIdentity {
+        let stored = try bookmarkStore.load(libraryID: folder.id)
+        var resourceIdentifier = stored?.resourceIdentifier
+        var volumeIdentifier = stored?.volumeIdentifier
+        var canonicalLivePath: String?
+        var caseSensitivity: PathCaseSensitivity = .unknown
+
+        if folder.isOnline {
+            let live = LibrarySourceIdentity.resolve(
+                url: folder.rootURL,
+                confirmedManifestLibraryID: stored?.confirmedManifestLibraryID,
+                resourceIdentityResolver: resourceIdentityResolver
+            )
+            resourceIdentifier = resourceIdentifier ?? live.resourceIdentifier
+            volumeIdentifier = volumeIdentifier ?? live.volumeIdentifier
+            canonicalLivePath = live.canonicalLivePath
+            caseSensitivity = live.canonicalLivePathCaseSensitivity
+        }
+
+        return LibrarySourceIdentity(
+            confirmedManifestLibraryID: stored?.confirmedManifestLibraryID,
+            resourceIdentifier: resourceIdentifier,
+            volumeIdentifier: volumeIdentifier,
+            rootFingerprint: stored?.rootFingerprint,
+            canonicalLivePath: canonicalLivePath,
+            canonicalLivePathCaseSensitivity: caseSensitivity
+        )
     }
 
     /// Restores every remembered folder at launch (spec §7).
@@ -185,8 +768,16 @@ public actor PhotoLibraryService {
     /// path is explicitly forbidden.
     @discardableResult
     public func restoreLibraries() throws -> [LibraryFolder] {
+        try recoverPendingRegistryTransaction()
         let stored = try bookmarkStore.loadAll()
         var restored: [LibraryFolder] = []
+
+        let storedIDs = Set(stored.map(\.libraryID))
+        for libraryID in Array(libraries.keys) where !storedIDs.contains(libraryID) {
+            access.removeValue(forKey: libraryID)?.stop()
+            libraries.removeValue(forKey: libraryID)
+            restoreDiagnostics.removeValue(forKey: libraryID)
+        }
 
         for bookmark in stored {
             var folder = LibraryFolder(
@@ -194,93 +785,324 @@ public actor PhotoLibraryService {
                 displayName: bookmark.displayName,
                 rootURL: URL(fileURLWithPath: bookmark.lastKnownPath, isDirectory: true),
                 lastKnownPath: bookmark.lastKnownPath,
-                isOnline: false,
-                isWritable: false
+                sourceKind: bookmark.sourceKind,
+                connectionState: .needsAuthorization,
+                scanState: bookmark.scanState.normalizedForRestore
             )
+            let persistedFolder = folder
 
-            if let scopedAccess = try? ScopedFolderAccess(resolving: bookmark.bookmarkData),
-               scopedAccess.isReachable {
-                access[bookmark.libraryID] = scopedAccess
-                let repository = FileSidecarRepository(libraryRootURL: scopedAccess.url)
-                folder.rootURL = scopedAccess.url
-                folder.isOnline = true
-                folder.isWritable = repository.isWritable
+            let stagedAccess: any FolderAccessHandle
+            do {
+                stagedAccess = try folderAccessResolver.resolve(bookmarkData: bookmark.bookmarkData)
+            } catch {
+                folder.connectionState = .needsAuthorization
+                folder = try commitDisconnectedRestore(
+                    folder: folder,
+                    diagnostic: .authorizationFailure,
+                    stagedAccess: nil
+                )
+                restored.append(folder)
+                continue
+            }
 
-                // macOS asked for a fresh bookmark; write one back now while we
-                // still hold a live scope.
-                if scopedAccess.isStale,
-                   let refreshed = try? SecurityScopedBookmark.makeBookmarkData(for: scopedAccess.url) {
-                    var updated = bookmark
-                    updated.bookmarkData = refreshed
-                    updated.lastKnownPath = scopedAccess.url.path
-                    try? bookmarkStore.save(updated)
+            guard stagedAccess.isReachable else {
+                folder.connectionState = .offline
+                folder = try commitDisconnectedRestore(
+                    folder: folder,
+                    diagnostic: nil,
+                    stagedAccess: stagedAccess
+                )
+                restored.append(folder)
+                continue
+            }
+
+            let repository = FileSidecarRepository(libraryRootURL: stagedAccess.url)
+            folder.rootURL = stagedAccess.url
+            folder.lastKnownPath = stagedAccess.url.path
+
+            let validation = Self.validateManifestForRestore(
+                persisted: bookmark.confirmedManifestLibraryID,
+                ownLibraryID: bookmark.libraryID,
+                probe: repository.probeManifest()
+            )
+            guard case .accepted(let confirmedID, let requiresBackfill) = validation else {
+                guard case .blocked(let diagnostic) = validation else { preconditionFailure() }
+                folder.connectionState = .needsAuthorization
+                folder = try commitDisconnectedRestore(
+                    folder: folder,
+                    diagnostic: diagnostic,
+                    stagedAccess: stagedAccess
+                )
+                restored.append(folder)
+                continue
+            }
+
+            var updatedBookmark = bookmark
+            var requiresSave = requiresBackfill
+            updatedBookmark.confirmedManifestLibraryID = confirmedID
+
+            if stagedAccess.isStale {
+                do {
+                    let refreshed = try makeBookmarkData(for: stagedAccess.url)
+                    let refreshedIdentity = LibrarySourceIdentity.resolve(
+                        url: stagedAccess.url,
+                        confirmedManifestLibraryID: confirmedID,
+                        resourceIdentityResolver: resourceIdentityResolver
+                    )
+                    updatedBookmark.bookmarkData = refreshed
+                    updatedBookmark.lastKnownPath = stagedAccess.url.path
+                    updatedBookmark.resourceIdentifier = refreshedIdentity.resourceIdentifier
+                    updatedBookmark.volumeIdentifier = refreshedIdentity.volumeIdentifier
+                    updatedBookmark.rootFingerprint = refreshedIdentity.rootFingerprint
+                    requiresSave = true
+                } catch {
+                    // `folder` was already re-pointed at the newly resolved
+                    // (uncommitted) root above, and no registry transaction
+                    // was ever prepared for this failure to roll back. Rebuild
+                    // the blocked result from the last known-good durable
+                    // projection so the uncommitted root can never reach
+                    // SQLite or actor-visible state.
+                    let priorProjection: LibraryFolder?
+                    do {
+                        priorProjection = try index.library(id: folder.id)
+                    } catch {
+                        // The service cannot safely construct a blocked
+                        // projection either. The staged B handle must not be
+                        // leaked, but the old A actor/access state, bookmark,
+                        // SQLite and diagnostic must be left completely
+                        // untouched -- there is nothing safe to commit, so
+                        // this propagates rather than inventing a result.
+                        stagedAccess.stop()
+                        throw error
+                    }
+                    folder = priorProjection ?? persistedFolder
+                    folder.connectionState = .needsAuthorization
+                    folder = try commitDisconnectedRestore(
+                        folder: folder,
+                        diagnostic: .persistenceFailure,
+                        stagedAccess: stagedAccess,
+                        persistLibraryProjection: false
+                    )
+                    restored.append(folder)
+                    continue
                 }
             }
 
-            folder.photoCount = (try? index.photoCount(inLibrary: folder.id)) ?? 0
-            if let indexed = try? index.library(id: folder.id) {
-                folder.lastScanAt = indexed.lastScanAt
+            folder.connectionState = repository.isWritable ? .ready : .readOnly
+            var previousLibrary: LibraryFolder?
+            do {
+                previousLibrary = try index.library(id: folder.id)
+                try populateRestoreProjection(&folder)
+                if requiresSave {
+                    try applyRegistryTransaction(
+                        kind: .restoreRefresh,
+                        previousBookmark: bookmark,
+                        intendedBookmark: updatedBookmark,
+                        previousLibrary: previousLibrary,
+                        intendedLibrary: folder
+                    )
+                } else {
+                    try index.upsert(library: folder)
+                }
+            } catch LibraryError.registryRecoveryRequired {
+                stagedAccess.stop()
+                throw LibraryError.registryRecoveryRequired
+            } catch {
+                if requiresSave {
+                    // The journal already restored the old bookmark/index.
+                    // Keep the disconnected in-memory diagnostic, but base it
+                    // on the old projection and do not persist the uncommitted
+                    // resolved URL back over that rollback result.
+                    folder = previousLibrary ?? persistedFolder
+                    folder.connectionState = .needsAuthorization
+                    folder = try commitDisconnectedRestore(
+                        folder: folder,
+                        diagnostic: .persistenceFailure,
+                        stagedAccess: stagedAccess,
+                        persistLibraryProjection: false
+                    )
+                    restored.append(folder)
+                    continue
+                } else {
+                    stagedAccess.stop()
+                    throw error
+                }
             }
 
+            let oldAccess = access.updateValue(stagedAccess, forKey: folder.id)
             libraries[folder.id] = folder
-            try? index.upsert(library: folder)
+            restoreDiagnostics.removeValue(forKey: folder.id)
+            oldAccess?.stop()
             restored.append(folder)
         }
 
         return restored
     }
 
-    /// Re-points a library at a folder the user picked again after the bookmark
-    /// went stale. The `LibraryID` is preserved, so every sidecar still matches.
-    @discardableResult
-    public func relink(libraryID: LibraryID, to url: URL) throws -> LibraryFolder {
-        guard var folder = libraries[libraryID] else {
-            throw LibraryError.notFound(libraryID)
+    private func populateRestoreProjection(_ folder: inout LibraryFolder) throws {
+        folder.photoCount = try index.photoCount(inLibrary: folder.id)
+        if let indexed = try index.library(id: folder.id) {
+            folder.lastScanAt = indexed.lastScanAt
         }
-        let bookmarkData: Data
+    }
+
+    /// Every throwing step (the projection re-read and, when requested, the
+    /// index upsert) must finish before anything nonthrowing is committed.
+    /// `stagedAccess` was never inserted into `access`, so stopping it on
+    /// failure only releases a resource this call never published — it does
+    /// not touch durable or actor-visible state. If either throwing step
+    /// fails, the existing `access`/`libraries`/`restoreDiagnostics` entries
+    /// for this library are left completely untouched, matching whatever was
+    /// last durably committed.
+    private func commitDisconnectedRestore(
+        folder initialFolder: LibraryFolder,
+        diagnostic: LibraryRestoreDiagnostic?,
+        stagedAccess: (any FolderAccessHandle)?,
+        persistLibraryProjection: Bool = true
+    ) throws -> LibraryFolder {
+        var folder = initialFolder
         do {
-            bookmarkData = try SecurityScopedBookmark.makeBookmarkData(for: url)
-        } catch let error as BookmarkError {
-            throw LibraryError.bookmark(error)
+            try populateRestoreProjection(&folder)
+            if persistLibraryProjection {
+                try index.upsert(library: folder)
+            }
+        } catch {
+            stagedAccess?.stop()
+            throw error
         }
 
-        access[libraryID]?.stop()
-        access[libraryID] = ScopedFolderAccess(url: url)
-
-        let repository = FileSidecarRepository(libraryRootURL: url)
-        folder.rootURL = url
-        folder.lastKnownPath = url.path
-        folder.isOnline = true
-        folder.isWritable = repository.isWritable
-
-        try bookmarkStore.save(StoredBookmark(
-            libraryID: libraryID,
-            displayName: folder.displayName,
-            lastKnownPath: url.path,
-            bookmarkData: bookmarkData
-        ))
-        libraries[libraryID] = folder
-        try index.upsert(library: folder)
+        stagedAccess?.stop()
+        access.removeValue(forKey: folder.id)?.stop()
+        libraries[folder.id] = folder
+        if let diagnostic {
+            restoreDiagnostics[folder.id] = diagnostic
+        } else {
+            restoreDiagnostics.removeValue(forKey: folder.id)
+        }
         return folder
     }
 
+    /// Re-points a library at a folder the user picked again after the
+    /// bookmark went stale. The `LibraryID` is preserved, so every sidecar
+    /// still matches.
+    ///
+    /// Runs the exact same read-only, order-independent identity preflight
+    /// as `addLibrary` (spec §7): the new target must confirm as `.same` as
+    /// the library being relinked — never merely `.distinct`,
+    /// `.ancestor`/`.descendant`, `.conflict`, or `.ambiguous` — and must not
+    /// overlap, match or conflict with any *other* known library either.
+    /// Nothing is mutated until every check passes.
+    @discardableResult
+    public func relink(libraryID: LibraryID, to url: URL) throws -> LibraryFolder {
+        try recoverPendingRegistryTransaction()
+        guard let target = libraries[libraryID] else {
+            throw LibraryError.notFound(libraryID)
+        }
+
+        let repository = FileSidecarRepository(libraryRootURL: url)
+        let confirmedManifestID = try Self.requireConfirmedManifestID(
+            from: repository.probeManifest(), path: url.path
+        )
+        let candidateIdentity = LibrarySourceIdentity.resolve(
+            url: url,
+            confirmedManifestLibraryID: confirmedManifestID,
+            resourceIdentityResolver: resourceIdentityResolver
+        )
+
+        let targetRelationship = try identity(for: target).relationship(to: candidateIdentity)
+        guard targetRelationship == .same else {
+            switch targetRelationship {
+            case .ambiguous:
+                throw LibraryError.ambiguousSource(libraryID)
+            default:
+                throw LibraryError.relinkTargetMismatch(libraryID)
+            }
+        }
+
+        // Collected then decided with a fixed precedence, exactly like
+        // `preflightDecision` (spec §7): the specific rejection reported
+        // for the "other known libraries" check must not depend on
+        // `Dictionary` iteration order either.
+        var otherRelationships: [(other: LibraryFolder, relationship: SourceRelationship)] = []
+        for other in libraries.values where other.id != libraryID {
+            otherRelationships.append((other, try identity(for: other).relationship(to: candidateIdentity)))
+        }
+        otherRelationships.sort { $0.other.id.description < $1.other.id.description }
+
+        if otherRelationships.contains(where: {
+            $0.relationship == .same || $0.relationship == .ancestor || $0.relationship == .descendant
+        }) {
+            throw LibraryError.overlappingSource
+        }
+        if let ambiguous = otherRelationships.first(where: {
+            $0.relationship == .conflict || $0.relationship == .ambiguous
+        }) {
+            throw LibraryError.ambiguousSource(ambiguous.other.id)
+        }
+
+        return try focusExistingLibrary(
+            target, at: url, displayName: nil,
+            candidateIdentity: candidateIdentity, repository: repository,
+            transactionKind: .relink
+        )
+    }
+
+    /// Removes a source's *local* bookmark, index rows and progress state
+    /// only. Must never touch the source root itself — RAW, sidecar and
+    /// manifest content all stay exactly where they are (spec §7, §11): this
+    /// intentionally never constructs a `FileSidecarRepository` or otherwise
+    /// calls a source-file remover.
     public func removeLibrary(id: LibraryID) throws {
+        try recoverPendingRegistryTransaction()
+
+        let previousStoredBookmark = try bookmarkStore.load(libraryID: id)
+        try bookmarkStore.remove(libraryID: id)
+        do {
+            try index.removeLibrary(id: id)
+        } catch let indexError {
+            if let previousStoredBookmark {
+                do {
+                    try bookmarkStore.save(previousStoredBookmark)
+                } catch let rollbackError {
+                    throw LibraryError.removeLibraryRollbackFailed(
+                        libraryID: id,
+                        indexFailure: Self.describePersistenceFailure(indexError),
+                        rollbackFailure: Self.describePersistenceFailure(rollbackError)
+                    )
+                }
+            }
+            throw indexError
+        }
+
         access[id]?.stop()
         access[id] = nil
         libraries[id] = nil
-        try bookmarkStore.remove(libraryID: id)
-        try index.removeLibrary(id: id)
+        restoreDiagnostics[id] = nil
+    }
+
+    private static func describePersistenceFailure(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
     /// Re-checks whether the drive is plugged in and writable (spec §10).
     @discardableResult
     public func refreshAvailability(libraryID: LibraryID) throws -> LibraryFolder {
+        try recoverPendingRegistryTransaction()
         guard var folder = libraries[libraryID] else {
             throw LibraryError.notFound(libraryID)
         }
+        if restoreDiagnostics[libraryID] != nil || access[libraryID] == nil {
+            folder.connectionState = restoreDiagnostics[libraryID] != nil
+                ? .needsAuthorization
+                : .offline
+            libraries[libraryID] = folder
+            try index.upsert(library: folder)
+            return folder
+        }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
-        folder.isOnline = repository.isAvailable
-        folder.isWritable = repository.isWritable
+        folder.connectionState = !repository.isAvailable
+            ? .offline
+            : (repository.isWritable ? .ready : .readOnly)
         libraries[libraryID] = folder
         try index.setLibraryAvailability(
             id: libraryID,
@@ -299,6 +1121,124 @@ public actor PhotoLibraryService {
         return photo.url(inLibraryRootedAt: folder.rootURL)
     }
 
+    // MARK: - App-storage projection
+
+    /// Projects every currently-committed App-copy `PhotoDocument` into the
+    /// synthetic `.appStorage` library (Task 4), so it shows up through the
+    /// same paged, multi-source index (Task 1's `LibraryScope.appStorage`,
+    /// which selects `WHERE library.source_kind = 'appStorage'`) as every
+    /// other source. `documents` is the caller's own up-to-date listing —
+    /// typically `PhotoDocumentStore.committedDocuments().documents` —
+    /// since this actor does not itself hold a `PhotoDocumentStore`
+    /// instance; the two are independent components composed by the caller.
+    ///
+    /// This projection is local and rebuildable, exactly like the rest of
+    /// `PhotoIndexStore`: it is never the authority on a document's
+    /// identity, content or editability — `PhotoDocumentStore`'s own
+    /// committed records remain that. Opening an App copy for editing goes
+    /// through `PhotoDocumentEditor.openLibraryAsset(.appCopy(documentID:))`
+    /// directly against the store, never through this projection —
+    /// `sourceURL(for:)` must never be relied on for a projected App copy;
+    /// see `appStorageRelativePath(for:)` for why.
+    ///
+    /// Idempotent and safe to call repeatedly (e.g. every launch, or
+    /// whenever the committed set changes): every call re-derives the whole
+    /// `.appStorage` projection from `documents` and prunes any previously
+    /// projected row for a document no longer present in it (removed,
+    /// rolled back, or no longer committed) — the same "re-seen vs. pruned"
+    /// pattern a folder scan already uses to drop rows for files that
+    /// disappeared, applied here to committed documents instead of files on
+    /// a scanned drive.
+    ///
+    /// Only `.appCopy` documents are projected. An `.inPlace` document's
+    /// working file is an external RAW that, if it happens to live inside
+    /// an already-indexed external source, is already projected through
+    /// that source's own scan; this is not a second, competing path for it.
+    public func refreshAppStorageProjection(from documents: [PhotoDocument]) throws {
+        let appCopies = documents.filter { $0.storageMode == .appCopy }
+        let projectedAt = Date()
+
+        if libraries[.appStorage] == nil {
+            let folder = LibraryFolder(
+                id: .appStorage,
+                displayName: L10n.t("App Copies"),
+                rootURL: Self.appStorageProjectionRootURL,
+                sourceKind: .appStorage,
+                connectionState: .ready,
+                scanState: .idle
+            )
+            try index.upsert(library: folder)
+            libraries[.appStorage] = folder
+        }
+
+        let assets = appCopies.map { document in
+            PhotoAsset(
+                id: PhotoID(document.id),
+                libraryID: .appStorage,
+                relativePath: Self.appStorageRelativePath(for: document),
+                fingerprint: document.workingFingerprint,
+                status: .ready,
+                lastSeenAt: projectedAt
+            )
+        }
+        try index.upsert(photos: assets)
+        // Anything not just re-seen above (a document rolled back, removed,
+        // or no longer committed since the last call) still carries an
+        // older `lastSeenAt` and is pruned here -- never something newer
+        // than `projectedAt` itself, since every row this call just wrote
+        // shares that exact timestamp.
+        try index.removePhotos(inLibrary: .appStorage, notSeenSince: projectedAt)
+
+        if var folder = libraries[.appStorage] {
+            folder.photoCount = try index.photoCount(inLibrary: .appStorage)
+            libraries[.appStorage] = folder
+            try index.upsert(library: folder)
+        }
+    }
+
+    /// Root every projected App-copy `PhotoAsset.relativePath` is expressed
+    /// relative to. A fixed, synthetic, absolute-looking placeholder —
+    /// deliberately never a real filesystem location (not `/`, not
+    /// `PhotoDocumentStore`'s own `rootURL`, which this actor never even
+    /// holds a reference to) — because `folder.rootURL
+    /// .appendingPathComponent(relativePath)` is not meant to resolve to
+    /// anything real; see `appStorageRelativePath(for:)` for why.
+    /// `URL(fileURLWithPath:)` with a relative string would resolve against
+    /// this *process's* current working directory, which is itself not
+    /// something to leak here, so this is written as an already-absolute
+    /// path literal instead.
+    private static let appStorageProjectionRootURL = URL(fileURLWithPath: "/LumaHarborAppStorage", isDirectory: true)
+
+    /// A stable, non-private, synthetic `relativePath` for a projected App
+    /// copy: `"<document id>/<filename>"`. Deliberately never derived from
+    /// `document.workingURL`'s real path components (the user's home
+    /// directory, Application Support, `PhotoDocumentStore`'s own
+    /// `Documents/<id>` layout).
+    ///
+    /// `relativePath` is not an internal-only field — `PhotoIndexStore`'s
+    /// page, folder and filename-search queries all read it directly, and
+    /// it is meant to eventually reach a library browser UI. Storing a
+    /// document's real absolute path in it would leak local, private path
+    /// fragments (e.g. `Users/<name>/Library/Application Support/...`)
+    /// into a place a UI or a future export could surface, and would seed
+    /// a fake `Users`/`<name>`/... folder-tree node out of what are really
+    /// just this device's own directory names, not user-meaningful
+    /// folders. The document's own UUID is already a stable identifier
+    /// that reveals nothing about the local filesystem; paired with just
+    /// the filename, this keeps same-named files from different documents
+    /// distinct without carrying any of that.
+    ///
+    /// This value is not meant to be resolved back into a real file
+    /// location — `sourceURL(for:)` must never be relied on for a
+    /// projected App copy. Opening one always goes through
+    /// `PhotoDocumentEditor.openLibraryAsset(.appCopy(documentID:))` →
+    /// `PhotoDocumentStore.loadDocument(id:)`, which reads the real
+    /// `workingURL` from the store's own durable record — never reverse-
+    /// derived from this projected index path.
+    private static func appStorageRelativePath(for document: PhotoDocument) -> String {
+        "\(document.id.uuidString)/\(document.workingURL.lastPathComponent)"
+    }
+
     // MARK: - Rebuildable local data
 
     /// Deletes and recreates the local SQLite index and thumbnail/preview
@@ -309,6 +1249,7 @@ public actor PhotoLibraryService {
     /// comes from a second connection opening the same path while this actor
     /// still holds the first one.
     public func resetRebuildableLocalData() throws {
+        try recoverPendingRegistryTransaction()
         guard activeScanCount == 0 else {
             throw LibraryError.resetRefusedWhileScanning
         }
@@ -346,6 +1287,71 @@ public actor PhotoLibraryService {
         LibraryScanSequence(service: self, libraryID: libraryID)
     }
 
+    /// Runs bounded, coordinated scans across every listed source at once
+    /// (spec §9): at most two scan concurrently, and the rest queue behind
+    /// them. `selectedLibraryID`, when present, is scheduled ahead of the
+    /// other queued sources -- but never interrupts a scan already running,
+    /// so an in-flight batch is never rudely cut off.
+    ///
+    /// Each source's events flow through the exact same acknowledged,
+    /// bounded `scan(libraryID:)` pipeline a single-source scan already
+    /// uses -- including its existing generation validation and prune/
+    /// `lastScanAt` safety, both left completely untouched. `onEvent` is
+    /// awaited for every event before the next one is requested, so
+    /// backpressure reaches the directory cursor exactly as it does for one
+    /// source; this method never buffers events of its own.
+    ///
+    /// `libraryIDs` is de-duplicated up front -- a repeated entry is only
+    /// ever scanned once, and only ever delivers one `.started`/`.finished`
+    /// pair -- then ordered with the selected source (if present) first,
+    /// followed by every other requested source in its original order, and
+    /// registered with `scanCoordinator.runBatch(_:)` as a single atomic
+    /// batch rather than one `run(...)` call per source inside a
+    /// `TaskGroup`. That distinction matters: a `TaskGroup`'s child tasks
+    /// give no guarantee about which one actually reaches the coordinator
+    /// actor first, so spawning one concurrent child per source could let
+    /// two `.normal` sources win both scan slots before a `.selected` one
+    /// ever registers, even though this array puts it first. `runBatch(_:)`
+    /// registers the whole ordered batch in one non-suspending pass before
+    /// anything is allowed to start, so selected-source priority holds
+    /// regardless of how the coordinator's own internal tasks get scheduled
+    /// afterward.
+    ///
+    /// Returns once every listed source's scan has finished, failed, or been
+    /// cancelled.
+    public nonisolated func scanLibraries(
+        _ libraryIDs: [LibraryID],
+        selectedLibraryID: LibraryID?,
+        onEvent: @escaping @Sendable (LibraryID, LibraryScanEvent) async -> Void
+    ) async {
+        guard !libraryIDs.isEmpty else { return }
+
+        var orderedIDs: [LibraryID] = []
+        var seenIDs: Set<LibraryID> = []
+        if let selectedLibraryID, libraryIDs.contains(selectedLibraryID) {
+            orderedIDs.append(selectedLibraryID)
+            seenIDs.insert(selectedLibraryID)
+        }
+        for libraryID in libraryIDs where seenIDs.insert(libraryID).inserted {
+            orderedIDs.append(libraryID)
+        }
+
+        let entries = orderedIDs.map { libraryID in
+            (
+                libraryID: libraryID,
+                priority: (libraryID == selectedLibraryID)
+                    ? MultiSourceScanCoordinator.ScanPriority.selected
+                    : MultiSourceScanCoordinator.ScanPriority.normal,
+                operation: { @Sendable () async -> Void in
+                    for await event in self.scan(libraryID: libraryID) {
+                        await onEvent(libraryID, event)
+                    }
+                }
+            )
+        }
+        await scanCoordinator.runBatch(entries)
+    }
+
     /// Runs one scan against an acknowledging emitter.
     ///
     /// Every `send` below suspends until the UI has taken the event, so the
@@ -373,8 +1379,19 @@ public actor PhotoLibraryService {
             }
         }
 
+        do {
+            try recoverPendingRegistryTransaction()
+        } catch {
+            await emit(.failed(.registryRecoveryRequired))
+            return
+        }
+
         guard let folder = libraries[libraryID] else {
             await emit(.failed(.notFound(libraryID)))
+            return
+        }
+        guard folder.isOnline else {
+            await emit(.failed(.offline(path: folder.lastKnownPath)))
             return
         }
 
@@ -447,7 +1464,7 @@ public actor PhotoLibraryService {
                     let consumerLeft = await emitter.isCancelled
                     if Task.isCancelled || consumerLeft { cancelled = true; break }
 
-                    let outcome = await Self.inspect(
+                    let outcome = await self.inspectWithTimeout(
                         file: file,
                         manifest: manifest,
                         decoder: decoder,
@@ -467,9 +1484,9 @@ public actor PhotoLibraryService {
                     case .success(var asset, let record, let decision):
                         if case .ambiguous = decision { ambiguous += 1 }
                         if case .moved = decision { moved += 1 }
-                        asset.hasEdits = Self.hasStoredEdits(
-                            photoID: asset.id, repository: repository
-                        )
+                        let editState = Self.editState(photoID: asset.id, repository: repository)
+                        asset.hasEdits = editState.hasEdits
+                        asset.lastEditAt = editState.lastEditAt
                         manifest.upsert(record)
                         batch.append(asset)
                         indexed += 1
@@ -496,12 +1513,31 @@ public actor PhotoLibraryService {
                         break
                     }
                     do {
+                        // `emitter.isCancelled` suspended the actor. A
+                        // registry mutation may have failed and left a journal
+                        // while this scan was reentrant, so recovery must be
+                        // rechecked immediately before this synchronous write.
+                        try recoverPendingRegistryTransaction()
                         try index.upsert(photos: batch)
                         await emit(.photosIndexed(batch))
+                    } catch LibraryError.registryRecoveryRequired {
+                        await emit(.failed(.registryRecoveryRequired))
+                        return
                     } catch {
                         await emit(.failed(
                             .indexUnavailable((error as NSError).localizedDescription)
                         ))
+                        // A batch that failed to persist leaves this scan's
+                        // "which photos are still there" picture incomplete
+                        // for at least those photos -- never safe grounds for
+                        // the differential prune below, or for stamping
+                        // `lastScanAt`/the manifest's success timestamp as if
+                        // this run finished cleanly. Folding it into
+                        // `cancelled` reuses the exact same "don't trust an
+                        // incomplete picture" gate a genuine cancellation
+                        // already relies on, rather than inventing a second,
+                        // parallel one.
+                        cancelled = true
                     }
                 }
 
@@ -541,6 +1577,30 @@ public actor PhotoLibraryService {
             return
         }
 
+        // A `FileManager.DirectoryEnumerator` can't tell "ran out of files"
+        // from "the drive disappeared mid-walk" -- both just stop yielding
+        // items, so `cancelled` alone never catches this. Re-checking here,
+        // once, right before anything destructive runs, is what does: a
+        // source that vanished partway through a scan must be reported as
+        // offline -- exactly like the guard at the top of this function that
+        // refuses to even start a scan on an already-offline source -- and
+        // must never be mistaken for "every file this run didn't re-see is
+        // actually gone".
+        if !cancelled, !repository.isAvailable {
+            await emit(.failed(.offline(path: folder.rootURL.path)))
+            return
+        }
+
+        // The scan loop and cancellation checks contain multiple suspension
+        // points. Keep the final index/manifest/memory commit in one actor-
+        // isolated synchronous region, preceded by a fresh recovery gate.
+        do {
+            try recoverPendingRegistryTransaction()
+        } catch {
+            await emit(.failed(.registryRecoveryRequired))
+            return
+        }
+
         // Drop rows for files that disappeared from the drive.
         if !cancelled {
             try? index.removePhotos(inLibrary: libraryID, notSeenSince: scanStartedAt)
@@ -568,7 +1628,10 @@ public actor PhotoLibraryService {
                 updated.lastScanAt = Date()
             }
             updated.photoCount = (try? index.photoCount(inLibrary: libraryID)) ?? indexed
-            updated.isWritable = repository.isWritable
+            // The scan only got this far because the source was reachable
+            // (checked before it started), so writability is the only thing
+            // that can have changed.
+            updated.connectionState = repository.isWritable ? .ready : .readOnly
             libraries[libraryID] = updated
             try? index.upsert(library: updated)
         }
@@ -592,6 +1655,160 @@ public actor PhotoLibraryService {
         /// The caller gave up. Explicitly not a `failure`: a cancelled scan must
         /// never leave the user looking at photos marked damaged (addendum §3.5).
         case cancelled
+    }
+
+    /// A safe, path-free reason for a per-file inspection that never
+    /// answered. Never mentions the file itself -- `.photoFailed(relativePath:reason:)`
+    /// already carries that separately.
+    private static var providerTimeoutMessage: String {
+        L10n.t("LumaHarbor gave up waiting for this file to respond.")
+    }
+
+    /// Bridges three independent signals -- the inspection finishing, the
+    /// timeout elapsing, and the caller of `inspectWithTimeout` itself being
+    /// cancelled -- into one single-resolution `CheckedContinuation`.
+    ///
+    /// The single-resolution shape matches `MultiSourceScanCoordinator`'s
+    /// own `CompletionBox`: whichever signal calls `resolve(_:)` first wins,
+    /// and every later call is silently dropped, so a slow loser can never
+    /// overwrite an already-reported result. `cancel()` additionally
+    /// forwards real cancellation into `inspectTask` via `Task.cancel()` --
+    /// which `Self.inspect`'s own `runOffActor` call observes, so a
+    /// *cooperative* decoder still notices and stops promptly -- while
+    /// resolving immediately with `.cancelled` itself, so `inspectWithTimeout`
+    /// never blocks its own return on how long that decoder actually takes
+    /// to notice. A *non-cooperative* decoder is simply left running,
+    /// forgotten, exactly like the timeout path already treats one
+    /// (addendum §3.5): whatever it eventually reports arrives after this
+    /// box has already resolved, and is dropped by the same guard.
+    ///
+    /// (Codex pre-landing review, Task 8 round: an earlier version raced the
+    /// inspection and the timeout as two unstructured `Task { }`s with no
+    /// cancellation bridge at all, so cancelling the scan never interrupted
+    /// whichever file was currently mid-inspection. A structured `TaskGroup`
+    /// was tried next, but a `TaskGroup` cannot resolve and return before
+    /// *every* child finishes -- which reintroduced exactly the "block on a
+    /// non-cooperative provider" stall this timeout exists to prevent, and
+    /// deadlocked `testNonCooperativeInspectionDiscardsItsResultAndStopsThere`.
+    /// This `withTaskCancellationHandler`-based bridge is what actually
+    /// satisfies both constraints: prompt cancellation response, and never
+    /// waiting on the loser.)
+    private final class InspectionRace: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<InspectionOutcome, Never>?
+        private var inspectTask: Task<Void, Never>?
+        private var isCancelled = false
+
+        func start(
+            continuation: CheckedContinuation<InspectionOutcome, Never>,
+            inspect: @escaping @Sendable () async -> InspectionOutcome,
+            timeout: @escaping @Sendable () async -> InspectionOutcome?
+        ) {
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+
+            let task = Task { [weak self] in
+                let outcome = await inspect()
+                self?.resolve(outcome)
+            }
+
+            // Storing `inspectTask` and reading `isCancelled` inside the
+            // *same* critical section is what closes a race a two-lock
+            // version of this had: `cancel()` (which can run concurrently,
+            // from `onCancel`, on a different thread) also reads/writes
+            // both of these under this same lock, so whichever of `cancel()`
+            // or this section runs first, the other sees a fully consistent
+            // picture -- never "`inspectTask` not stored yet" paired with
+            // "the earlier snapshot said not cancelled." The just-created
+            // task is therefore always cancelled exactly once, from
+            // whichever side notices first, with no window in between.
+            lock.lock()
+            inspectTask = task
+            let cancelledNow = isCancelled
+            lock.unlock()
+
+            if cancelledNow {
+                // The caller was already cancelled by the time this race
+                // began (or `cancel()` won this exact race) -- stop the
+                // inspection immediately rather than letting it run
+                // needlessly, and resolve now since a concurrent `cancel()`
+                // may have found `inspectTask` still nil and been unable to
+                // do either of these itself.
+                task.cancel()
+                resolve(.cancelled)
+                return
+            }
+
+            Task { [weak self] in
+                guard let outcome = await timeout() else { return }
+                self?.resolve(outcome)
+            }
+        }
+
+        func cancel() {
+            lock.lock()
+            isCancelled = true
+            let task = inspectTask
+            lock.unlock()
+            task?.cancel()
+            resolve(.cancelled)
+        }
+
+        func resolve(_ value: InspectionOutcome) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
+    }
+
+    /// Races one file's fingerprint+decode inspection against a fixed
+    /// provider timeout: an unresponsive, cloud-backed Files folder that
+    /// never answers a read must not stall the rest of the scan.
+    ///
+    /// A timeout is reported as an ordinary `.failure`, the same outcome a
+    /// fingerprint I/O error already produces: no `PhotoAsset` is added to
+    /// this scan's batch and the manifest keeps whatever record it already
+    /// had for this path, so a *later* scan -- a fresh generation, not a
+    /// retry loop inside this one -- picks the file up completely fresh. This
+    /// call never retries on its own: one timeout is exactly one
+    /// `.photoFailed` event, and the scan moves straight on to the next file.
+    private func inspectWithTimeout(
+        file: ScannedFile,
+        manifest: LibraryManifest,
+        decoder: any RawDecoding,
+        libraryID: LibraryID
+    ) async -> InspectionOutcome {
+        let sleep = providerTimeoutSleep
+        let race = InspectionRace()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<InspectionOutcome, Never>) in
+                race.start(
+                    continuation: continuation,
+                    inspect: {
+                        await Self.inspect(
+                            file: file, manifest: manifest, decoder: decoder, libraryID: libraryID
+                        )
+                    },
+                    timeout: {
+                        do {
+                            try await sleep(Self.providerRequestTimeout)
+                        } catch {
+                            // The sleep itself was cancelled -- the
+                            // inspection side already won, or the caller was
+                            // cancelled and `onCancel` below already
+                            // resolved this race. Nothing to report.
+                            return nil
+                        }
+                        return .failure(reason: Self.providerTimeoutMessage)
+                    }
+                )
+            }
+        } onCancel: {
+            race.cancel()
+        }
     }
 
     /// Fingerprint, identity and metadata for one file.
@@ -723,12 +1940,19 @@ public actor PhotoLibraryService {
         }
     }
 
-    private static func hasStoredEdits(
+    /// Reconstructs both edit-state columns from the sidecar during a
+    /// rescan: the sidecar is authoritative, SQLite is a rebuildable
+    /// projection of it (spec §8.1). A neutral or absent sidecar maps to
+    /// `(false, nil)`; a non-neutral one carries its own `modifiedAt`
+    /// forward as `lastEditAt`, matching what `saveAdjustments` would have
+    /// projected at save time.
+    private static func editState(
         photoID: PhotoID,
         repository: FileSidecarRepository
-    ) -> Bool {
-        guard let sidecar = try? repository.loadSidecar(for: photoID) else { return false }
-        return !sidecar.adjustments.isNeutral
+    ) -> (hasEdits: Bool, lastEditAt: Date?) {
+        guard let sidecar = try? repository.loadSidecar(for: photoID) else { return (false, nil) }
+        let hasEdits = !sidecar.adjustments.isNeutral
+        return (hasEdits, hasEdits ? sidecar.modifiedAt : nil)
     }
 
     // MARK: - Edits
@@ -736,8 +1960,12 @@ public actor PhotoLibraryService {
     /// Reads a photo's saved adjustments, or neutral when it has never been
     /// edited. Corrupt or newer-schema sidecars throw so the UI can explain.
     public func adjustments(for photo: PhotoAsset) throws -> PhotoAdjustments {
+        try recoverPendingRegistryTransaction()
         guard let folder = libraries[photo.libraryID] else {
             throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
         }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
         do {
@@ -755,8 +1983,12 @@ public actor PhotoLibraryService {
         _ adjustments: PhotoAdjustments,
         for photo: PhotoAsset
     ) throws {
+        try recoverPendingRegistryTransaction()
         guard let folder = libraries[photo.libraryID] else {
             throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
         }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
 
@@ -776,7 +2008,17 @@ public actor PhotoLibraryService {
                 modifiedAt: now
             )
             try repository.write(sidecar: sidecar)
-            try? index.setHasEdits(!adjustments.isNeutral, for: photo.id)
+            // Best-effort by design (spec §8.1): the sidecar write above is
+            // what makes the save real, and SQLite is only a rebuildable
+            // projection of it. A failure here must never turn a
+            // successfully persisted sidecar into an apparently-unsaved
+            // photo, so this doesn't throw and doesn't get folded into the
+            // `catch` below.
+            try? index.setEditState(
+                for: photo.id,
+                hasEdits: !adjustments.isNeutral,
+                lastEditAt: adjustments.isNeutral ? nil : sidecar.modifiedAt
+            )
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
         }

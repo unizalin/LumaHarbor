@@ -4,9 +4,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PadRootView: View {
-    @ObservedObject var model: PadEditorModel
+    let services: PadAppServices
+    @ObservedObject var editor: PadEditorModel
+    @ObservedObject var library: PadLibraryModel
     @State private var isImporting = false
     @State private var isRelinking = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -20,10 +23,30 @@ struct PadRootView: View {
                         // A selection or restore already in flight owns
                         // `document`/`editor` until it settles; starting a
                         // second one here would just be immediately
-                        // pre-empted by the model's own generation check,
+                        // pre-empted by the editor's own generation check,
                         // so disabling this is a UX nicety, not a
                         // correctness requirement.
-                        .disabled(model.isPreparingDocument)
+                        .disabled(editor.isPreparingDocument)
+                    }
+                    ToolbarItem {
+                        Button {
+                            isShowingSettings = true
+                        } label: {
+                            Label(L10n.t("Settings"), systemImage: "gearshape")
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+                .sheet(isPresented: $isShowingSettings) {
+                    NavigationStack {
+                        PadLibrarySettingsView(services: services, userDefaults: services.userDefaults)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button(L10n.t("Close")) {
+                                        isShowingSettings = false
+                                    }
+                                }
+                            }
                     }
                 }
                 .fileImporter(
@@ -34,14 +57,14 @@ struct PadRootView: View {
                     switch result {
                     case .success(let urls):
                         guard let url = urls.first else { return }
-                        model.beginSelecting(url)
+                        editor.beginSelecting(url)
                     case .failure(let error):
                         // A plain user cancellation must stay silent; any
                         // other provider failure needs a safe, actionable
                         // alert instead of being swallowed.
                         let nsError = error as NSError
                         guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
-                            model.reportFileImporterFailure(error)
+                            editor.reportFileImporterFailure(error)
                             return
                         }
                     }
@@ -49,9 +72,9 @@ struct PadRootView: View {
                 .confirmationDialog(
                     L10n.t("How should LumaHarbor use this photo?"),
                     isPresented: Binding(
-                        get: { model.hasPendingSelection },
+                        get: { editor.hasPendingSelection },
                         set: { isPresented in
-                            if !isPresented { model.cancelPendingSelection() }
+                            if !isPresented { editor.cancelPendingSelection() }
                         }
                     ),
                     titleVisibility: .visible
@@ -59,18 +82,18 @@ struct PadRootView: View {
                     // In-place is listed first: it is the default source
                     // mode (spec §5.1).
                     Button(L10n.t("Edit in Place")) {
-                        model.beginOpeningPendingSelection(mode: .inPlace)
+                        editor.beginOpeningPendingSelection(mode: .inPlace)
                     }
                     Button(L10n.t("Copy to This iPad")) {
-                        model.beginOpeningPendingSelection(mode: .appCopy)
+                        editor.beginOpeningPendingSelection(mode: .appCopy)
                     }
                     Button(L10n.t("Cancel"), role: .cancel) {
-                        model.cancelPendingSelection()
+                        editor.cancelPendingSelection()
                     }
                 } message: {
                     Text(L10n.t("The RAW original is never modified."))
                 }
-                .alert(item: $model.alert) { alert in
+                .alert(item: $editor.alert) { alert in
                     Alert(
                         title: Text(alert.title),
                         message: Text(alertBody(alert)),
@@ -90,7 +113,7 @@ struct PadRootView: View {
                     switch result {
                     case .success(let urls):
                         guard let url = urls.first else { return }
-                        model.beginRelinkSelection(url)
+                        editor.beginRelinkSelection(url)
                     case .failure(let error):
                         // Same distinction as the main fileImporter above:
                         // a plain cancellation stays silent, but any other
@@ -98,22 +121,26 @@ struct PadRootView: View {
                         // being swallowed by `try?`.
                         let nsError = error as NSError
                         guard nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError else {
-                            model.reportFileImporterFailure(error)
+                            editor.reportFileImporterFailure(error)
                             return
                         }
                     }
                 }
         }
         .task {
-            model.performStartupSequence()
+            editor.performStartupSequence()
+            await services.refreshAppStorageProjection()
+        }
+        .onChange(of: editor.document?.id) { _, _ in
+            Task { await services.refreshAppStorageProjection() }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if model.document != nil {
-            PadEditorView(model: model)
-        } else if model.pendingRelink != nil {
+        if editor.document != nil {
+            PadEditorView(model: editor)
+        } else if editor.pendingRelink != nil {
             // No "Cancel" here, deliberately: this prompt is the only way
             // back to this specific document, and dismissing the file
             // picker it opens (handled below) already leaves it exactly as
@@ -129,14 +156,10 @@ struct PadRootView: View {
                     isRelinking = true
                 }
             }
-        } else if model.isPreparingDocument {
+        } else if editor.isPreparingDocument {
             ProgressView(L10n.t("Opening photo…"))
         } else {
-            ContentUnavailableView(
-                L10n.t("Open a RAW photo"),
-                systemImage: "photo.badge.plus",
-                description: Text(L10n.t("Choose a photo from Files or an external drive."))
-            )
+            PadLibraryView(library: library, editor: editor, services: services)
         }
     }
 

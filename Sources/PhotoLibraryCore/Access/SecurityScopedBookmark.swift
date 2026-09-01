@@ -85,3 +85,23 @@ public enum SecurityScopedBookmark {
         }
     }
 }
+
+/// Seam over creating security-scoped bookmark data: the production default
+/// always calls `SecurityScopedBookmark.makeBookmarkData(for:)`. Tests inject
+/// a fake so a specific URL's bookmark-data creation can be made to fail
+/// deterministically — including during stale-bookmark refresh, where a
+/// genuine macOS API failure isn't reliably reproducible on demand.
+///
+/// Internal on purpose: this is a test seam, not product API. Injection is
+/// only reachable through `PhotoLibraryService`'s internal initializer.
+protocol BookmarkDataCreating: Sendable {
+    func makeBookmarkData(for url: URL) throws -> Data
+}
+
+struct SystemBookmarkDataCreator: BookmarkDataCreating {
+    init() {}
+
+    func makeBookmarkData(for url: URL) throws -> Data {
+        try SecurityScopedBookmark.makeBookmarkData(for: url)
+    }
+}
