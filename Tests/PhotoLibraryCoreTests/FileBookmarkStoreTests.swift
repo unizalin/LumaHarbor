@@ -8,6 +8,44 @@ import XCTest
 /// entirely: they drive the store with plain `StoredBookmark` values and
 /// synthetic `bookmarkData`, so they're deterministic on any host.
 final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
+    private final class DirectoryReadFailingFileManager: FileManager, @unchecked Sendable {
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []
+        ) throws -> [URL] {
+            throw CocoaError(.fileReadNoPermission)
+        }
+    }
+
+    private final class FalseNegativeDirectoryFileManager: FileManager, @unchecked Sendable {
+        override func fileExists(atPath path: String) -> Bool {
+            false
+        }
+
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []
+        ) throws -> [URL] {
+            throw CocoaError(.fileReadNoPermission)
+        }
+    }
+
+    private final class WrappedPermissionDirectoryFileManager: FileManager, @unchecked Sendable {
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions = []
+        ) throws -> [URL] {
+            throw NSError(
+                domain: NSCocoaErrorDomain,
+                code: CocoaError.Code.fileReadNoPermission.rawValue,
+                userInfo: [NSUnderlyingErrorKey: POSIXError(.ENOENT)]
+            )
+        }
+    }
+
     private func makeStore() -> FileBookmarkStore {
         FileBookmarkStore(directoryURL: temporaryDirectory)
     }
@@ -88,37 +126,97 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         try XCTAssertEqual(store.loadAll(), [])
     }
 
-    // MARK: - Corruption isolation
+    // MARK: - Fail-closed registry loading
 
-    func testACorruptBookmarkFileIsSkippedWhileOthersStillLoad() throws {
-        let store = makeStore()
-        let good1 = stubBookmark(displayName: "Good One", addedAt: Date(timeIntervalSince1970: 100))
-        let good2 = stubBookmark(displayName: "Good Two", addedAt: Date(timeIntervalSince1970: 200))
-        try store.save(good1)
-        try store.save(good2)
+    func testAnyInvalidJSONRecordMakesLoadAllThrow() throws {
+        let invalidRecords: [Data] = [
+            Data("{ not valid json".utf8),
+            Data(),
+            Data(#"{"unrelated":"shape"}"#.utf8)
+        ]
 
-        // Drop a malformed JSON file directly into the bookmarks directory —
-        // this is the "one unreadable bookmark can't cost the user access to
-        // their other folders" guarantee documented on the type.
-        let corruptURL = temporaryDirectory
-            .appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
-        try Data("{ not valid json".utf8).write(to: corruptURL)
+        for (index, invalidRecord) in invalidRecords.enumerated() {
+            let directory = try makeSubdirectory("Invalid-\(index)")
+            let store = FileBookmarkStore(directoryURL: directory)
+            try store.save(stubBookmark(displayName: "Good"))
+            try invalidRecord.write(
+                to: directory.appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
+            )
 
-        let all = try store.loadAll()
-        XCTAssertEqual(Set(all.map(\.displayName)), Set(["Good One", "Good Two"]))
+            XCTAssertThrowsError(try store.loadAll(), "Invalid record at index \(index) must fail the registry")
+        }
     }
 
-    func testAnEmptyFileIsSkippedWhileOthersStillLoad() throws {
-        let store = makeStore()
-        let good = stubBookmark(displayName: "Good")
-        try store.save(good)
+    func testDirectoryReadFailurePropagates() {
+        let store = FileBookmarkStore(
+            directoryURL: temporaryDirectory,
+            fileManager: DirectoryReadFailingFileManager()
+        )
 
-        let emptyURL = temporaryDirectory
-            .appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
-        try Data().write(to: emptyURL)
+        XCTAssertThrowsError(try store.loadAll())
+    }
 
-        let all = try store.loadAll()
-        XCTAssertEqual(all.map(\.displayName), ["Good"])
+    func testFileExistsFalseDoesNotHideDirectoryListingPermissionFailure() {
+        let store = FileBookmarkStore(
+            directoryURL: temporaryDirectory,
+            fileManager: FalseNegativeDirectoryFileManager()
+        )
+
+        XCTAssertThrowsError(try store.loadAll()) { error in
+            XCTAssertEqual((error as? CocoaError)?.code, .fileReadNoPermission)
+        }
+    }
+
+    func testJSONRecordDataReadFailureMakesLoadAllThrow() throws {
+        let recordDirectory = temporaryDirectory.appendingPathComponent(
+            "\(LibraryID().rawValue.uuidString).json",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: recordDirectory,
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertThrowsError(try makeStore().loadAll())
+    }
+
+    func testNoSuchFileClassificationMatrixDoesNotLetKnownPermissionErrorsInheritENOENT() {
+        let cocoaNoSuchFile = CocoaError(.fileReadNoSuchFile)
+        let posixNoSuchFile = POSIXError(.ENOENT)
+        let unknownWrapper = NSError(
+            domain: "LumaHarborTests.UnknownWrapper",
+            code: 1,
+            userInfo: [NSUnderlyingErrorKey: posixNoSuchFile]
+        )
+        let cocoaPermissionWrappingENOENT = NSError(
+            domain: NSCocoaErrorDomain,
+            code: CocoaError.Code.fileReadNoPermission.rawValue,
+            userInfo: [NSUnderlyingErrorKey: posixNoSuchFile]
+        )
+        let posixPermissionWrappingENOENT = NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(EACCES),
+            userInfo: [NSUnderlyingErrorKey: posixNoSuchFile]
+        )
+
+        XCTAssertTrue(FileSystemError.isNoSuchFile(cocoaNoSuchFile))
+        XCTAssertTrue(FileSystemError.isNoSuchFile(posixNoSuchFile))
+        XCTAssertTrue(FileSystemError.isNoSuchFile(unknownWrapper))
+        XCTAssertFalse(FileSystemError.isNoSuchFile(cocoaPermissionWrappingENOENT))
+        XCTAssertFalse(FileSystemError.isNoSuchFile(posixPermissionWrappingENOENT))
+    }
+
+    func testWrappedCocoaPermissionErrorStillMakesLoadAllThrow() {
+        let store = FileBookmarkStore(
+            directoryURL: temporaryDirectory,
+            fileManager: WrappedPermissionDirectoryFileManager()
+        )
+
+        XCTAssertThrowsError(try store.loadAll()) { error in
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, NSCocoaErrorDomain)
+            XCTAssertEqual(nsError.code, CocoaError.Code.fileReadNoPermission.rawValue)
+        }
     }
 
     // MARK: - Ignoring unrelated files
@@ -133,18 +231,6 @@ final class FileBookmarkStoreTests: TemporaryDirectoryTestCase {
         try Data([0x00]).write(
             to: temporaryDirectory.appendingPathComponent(".DS_Store")
         )
-
-        let all = try store.loadAll()
-        XCTAssertEqual(all.map(\.displayName), ["Good"])
-    }
-
-    func testLoadAllIgnoresAJSONFileThatDoesNotDecodeAsAStoredBookmark() throws {
-        let store = makeStore()
-        try store.save(stubBookmark(displayName: "Good"))
-
-        let unrelatedURL = temporaryDirectory
-            .appendingPathComponent("\(LibraryID().rawValue.uuidString).json")
-        try Data(#"{"unrelated":"shape"}"#.utf8).write(to: unrelatedURL)
 
         let all = try store.loadAll()
         XCTAssertEqual(all.map(\.displayName), ["Good"])

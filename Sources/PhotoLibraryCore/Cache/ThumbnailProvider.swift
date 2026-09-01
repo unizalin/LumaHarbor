@@ -220,8 +220,68 @@ public actor ThumbnailProvider {
         await cache.unpin(cacheKey(for: photoID))
     }
 
+    /// Whether `photoID`'s cache entry is currently protected from
+    /// eviction. Test/diagnostic observability for `pin`/`unpin`/
+    /// `withVisiblePin`'s effect on the underlying `DiskCache`.
+    public func isPinned(photoID: PhotoID) async -> Bool {
+        await cache.isPinned(cacheKey(for: photoID))
+    }
+
+    /// Runs `operation` (typically a thumbnail load) under `photoID`'s
+    /// pin, and keeps it pinned for the caller's entire task lifetime
+    /// afterward -- not just while `operation` itself is in flight -- so a
+    /// cell stays protected for as long as it's actually on screen, past
+    /// whatever load first put its thumbnail there.
+    ///
+    /// Owns the *whole* pin/operation/wait/unpin contract as one atomic
+    /// unit rather than leaving a caller to compose `pin()`, its own load,
+    /// and `unpin()` correctly by hand -- two prior review rounds on this
+    /// exact call site got that composition wrong in two different ways:
+    /// unpinning the moment a *sibling* `async let` operation finished
+    /// (protecting only the load's duration, not the display's), and
+    /// running pin and the operation as `async let` siblings with no
+    /// ordering guarantee between them at all (`operation` could start,
+    /// decode, and store -- triggering `DiskCache`'s own immediate
+    /// `evictIfNeeded()` -- before `pin` had actually landed on the cache,
+    /// defeating `DiskCache.store`'s "pin before store" contract that
+    /// `ThumbnailProviderTests.testPinBeforeStoreProtectsTheEntryThatArrivesLater`
+    /// already guards). Pinning and running `operation` are sequential
+    /// statements here, not concurrent siblings, so `operation` can never
+    /// start until `pin`'s effect on the actor is already committed.
+    ///
+    /// After `operation` returns, suspends until this task is cancelled --
+    /// `Task.sleep` is cooperative: cancellation interrupts it immediately
+    /// by throwing `CancellationError`, however long the nominal duration,
+    /// so only being cancelled ever ends the wait, never the duration
+    /// itself -- and only then unpins, awaited directly here in this same
+    /// structured task. A caller never needs its own `async let` or a
+    /// separate unstructured `Task { unpin() }` that could race any of
+    /// this.
+    public func withVisiblePin(photoID: PhotoID, operation: @Sendable () async -> Void) async {
+        await pin(photoID: photoID)
+        await operation()
+        // A cell is never visible for anywhere close to this long -- this
+        // is just "effectively forever, until cancelled." Deliberately not
+        // `.seconds(Int64.max)`: converting a duration that large down to
+        // nanoseconds for the underlying clock overflows `Int64`, crashing
+        // rather than sleeping. A century comfortably avoids that while
+        // still being unreachable in practice.
+        try? await Task.sleep(for: .seconds(60 * 60 * 24 * 365 * 100))
+        await unpin(photoID: photoID)
+    }
+
     public func resetDiagnostics() {
         diagnostics = ThumbnailDiagnostics()
+    }
+
+    /// Forwards to the underlying `DiskCache`'s own `setByteBudget(_:)`,
+    /// which applies the new budget and evicts over-budget entries
+    /// immediately. `cache` is otherwise `private` -- this is the smallest
+    /// passthrough that lets a caller (the iPad app's cache-budget settings
+    /// screen, Task 7) change the budget without this type exposing its
+    /// whole `DiskCache` publicly.
+    public func setByteBudget(_ budget: Int64) async throws {
+        try await cache.setByteBudget(budget)
     }
 
     // MARK: - Producer lifecycle

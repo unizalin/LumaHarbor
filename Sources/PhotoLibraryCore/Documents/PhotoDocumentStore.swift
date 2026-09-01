@@ -173,6 +173,59 @@ public actor PhotoDocumentStore {
         }
     }
 
+    /// Returns an existing committed in-place document for the same
+    /// reachable source file, if one is already known to the store. Used by
+    /// the multi-source library grid: tapping the same external RAW again
+    /// must reopen the document whose sidecar holds the user's edits, not
+    /// mint a new neutral document every time.
+    ///
+    /// Identity is deliberately stricter than just the path: the current
+    /// file's sampled fingerprint and full-content digest must still match
+    /// the record that would be reused. If the external RAW changed in
+    /// place, this returns `nil` and the caller can create a fresh document
+    /// rather than applying stale adjustments to different bytes.
+    public func committedInPlaceDocument(matching sourceURL: URL) throws -> PhotoDocument? {
+        let (fingerprint, digest) = try fingerprintAndDigest(forFileAt: sourceURL)
+        let normalizedSourceURL = sourceURL.standardizedFileURL
+        let matches = try committedDocuments().documents.filter { document in
+            guard document.storageMode == .inPlace else { return false }
+            guard document.sourceURL.standardizedFileURL == normalizedSourceURL
+                    || document.workingURL.standardizedFileURL == normalizedSourceURL else { return false }
+            guard document.sourceFingerprint == fingerprint,
+                  document.workingFingerprint == fingerprint else { return false }
+            guard let expectedDigest = document.contentDigestSHA256 else { return true }
+            return expectedDigest == digest
+        }
+        guard !matches.isEmpty else { return nil }
+
+        return matches
+            .map { document in
+                let sidecar = try? sidecarRepository(documentID: document.id).loadSidecar(for: PhotoID(document.id))
+                return (
+                    document: document,
+                    hasSavedAdjustments: !(sidecar?.adjustments.isNeutral ?? true),
+                    modifiedAt: sidecar?.modifiedAt
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.hasSavedAdjustments != rhs.hasSavedAdjustments {
+                    return lhs.hasSavedAdjustments && !rhs.hasSavedAdjustments
+                }
+                switch (lhs.modifiedAt, rhs.modifiedAt) {
+                case let (left?, right?) where left != right:
+                    return left > right
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    return lhs.document.id.uuidString < rhs.document.id.uuidString
+                }
+            }
+            .first?
+            .document
+    }
+
     /// Copies `sourceURL` into App storage. See the type documentation for
     /// the copy → verify → commit sequence and what happens if any step
     /// fails, the source changes mid-import, or the process is killed or the
@@ -941,6 +994,100 @@ public actor PhotoDocumentStore {
         return nil
     }
 
+    // MARK: - Committed document listing
+
+    /// Every committed, currently-readable document this store knows about
+    /// (Task 4) — used to project App copies into the multi-source library
+    /// via `PhotoLibraryService.refreshAppStorageProjection(from:)`. Both
+    /// storage modes are included; the caller decides what to do with each
+    /// (the app-storage projection itself only ever keeps the `.appCopy`
+    /// ones — see that method).
+    ///
+    /// Enumerates `Records/*.json`, the same directory
+    /// `reconcileOrphanedImports(activePointer:)` reads in its own pass 2,
+    /// with the same lenient per-entry handling: a record this pass cannot
+    /// decode, or whose committed working file is missing, is reported in
+    /// `PhotoDocumentListing.failures` rather than aborting the whole
+    /// listing or being silently dropped. A `.pending` record — still
+    /// mid-import, or interrupted mid-import — is neither promoted nor
+    /// deleted here: it is simply skipped, exactly as
+    /// `reconcileOrphanedImports`'s own documentation already establishes
+    /// for "don't touch a creation this pass didn't itself start." Only
+    /// that dedicated reconciliation pass, gated on the durable
+    /// active-document pointer, is ever allowed to promote or roll one
+    /// back.
+    ///
+    /// This is a plain read: unlike `reconcileOrphanedImports`, it never
+    /// acquires the root import lock or any per-document lease — nothing
+    /// here mutates a record, and every record write elsewhere in this
+    /// store goes through `AtomicFileWriter`, so a reader here only ever
+    /// sees a complete, previously-committed write, never a partial one.
+    ///
+    /// Returned in stable ascending `UUID` order, not filesystem
+    /// enumeration order, so a caller diffing two consecutive calls (or two
+    /// different store instances pointed at the same `rootURL`) sees a
+    /// deterministic sequence rather than one at the mercy of directory
+    /// listing order.
+    ///
+    /// Throws only if `Records/` itself cannot be enumerated (mirroring
+    /// `reconcileOrphanedImports`'s own directory-listing behavior) — a
+    /// missing `Records/` directory is treated as "no documents yet," not
+    /// an error.
+    public func committedDocuments() throws -> PhotoDocumentListing {
+        guard fileManager.fileExists(atPath: recordsDirectoryURL.path) else {
+            return PhotoDocumentListing(documents: [], failures: [:])
+        }
+
+        var documents: [PhotoDocument] = []
+        var failures: [UUID: String] = [:]
+
+        let recordFiles = try fileManager.contentsOfDirectory(at: recordsDirectoryURL, includingPropertiesForKeys: nil)
+        for recordFile in recordFiles {
+            guard recordFile.pathExtension == "json",
+                  let filenameID = UUID(uuidString: recordFile.deletingPathExtension().lastPathComponent) else { continue }
+
+            guard let record = try? SidecarCoding.decode(PhotoDocumentRecord.self, from: Data(contentsOf: recordFile)),
+                  record.id == filenameID else {
+                failures[filenameID] = Self.corruptRecordFailureMessage
+                continue
+            }
+
+            // Never promoted, never deleted here -- see the documentation
+            // above.
+            guard record.effectiveLifecycleState == .committed else { continue }
+
+            let resolved: PhotoDocument
+            if record.storageMode == .appCopy, record.workingPathComponents == nil {
+                guard let migrated = try? migrateLegacyAppCopyRecordIfPossible(record) else {
+                    failures[filenameID] = Self.corruptRecordFailureMessage
+                    continue
+                }
+                resolved = migrated
+            } else {
+                resolved = resolvedDocument(from: record)
+            }
+
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: resolved.workingURL.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                failures[filenameID] = Self.missingWorkingFileFailureMessage
+                continue
+            }
+
+            documents.append(resolved)
+        }
+
+        documents.sort { $0.id.uuidString < $1.id.uuidString }
+        return PhotoDocumentListing(documents: documents, failures: failures)
+    }
+
+    /// Fixed, path-free diagnostics for `committedDocuments()` — same
+    /// reasoning as `orphanCopyRemovalFailureMessage` and friends above:
+    /// never `(error as NSError).localizedDescription`, which can embed an
+    /// absolute path.
+    private static let corruptRecordFailureMessage = "This document's record could not be read."
+    private static let missingWorkingFileFailureMessage = "This document's working file is missing."
+
     // MARK: - Active document pointer
 
     /// Reads the durably persisted active-document pointer — in the same
@@ -1558,5 +1705,26 @@ public struct PhotoDocumentReconciliationReport: Equatable, Sendable {
         self.rolledBackPendingIDs = rolledBackPendingIDs
         self.failures = failures
         self.activePointerWasUnreadable = activePointerWasUnreadable
+    }
+}
+
+/// Result of `PhotoDocumentStore.committedDocuments()`.
+public struct PhotoDocumentListing: Equatable, Sendable {
+    /// Every committed document whose record decoded cleanly and whose
+    /// working file was confirmed present, in stable ascending `UUID`
+    /// order.
+    public let documents: [PhotoDocument]
+    /// Committed-looking records that could not be read back, keyed by the
+    /// `UUID` their filename names, with a fixed, path-free diagnostic —
+    /// never `(error as NSError).localizedDescription`, which can embed an
+    /// absolute path. A `.pending` record is never reported here: it is
+    /// simply absent from both `documents` and `failures`, exactly as
+    /// `reconcileOrphanedImports(activePointer:)` alone is responsible for
+    /// promoting or rolling it back.
+    public let failures: [UUID: String]
+
+    public init(documents: [PhotoDocument], failures: [UUID: String]) {
+        self.documents = documents
+        self.failures = failures
     }
 }

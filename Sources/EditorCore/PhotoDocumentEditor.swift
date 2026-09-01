@@ -901,6 +901,381 @@ public final class PhotoDocumentEditor: ObservableObject {
         }
     }
 
+    // MARK: - Opening a library asset (Task 4)
+
+    /// Local control-flow errors for `openLibraryAsset(_:)`'s two private
+    /// implementations.
+    private enum LibraryAssetOpenError: Error {
+        /// `openLibraryExternalAsset(url:)`: maps any failure to actually
+        /// read/fingerprint an indexed external asset into this one,
+        /// specific outcome, distinct from a genuine cancellation
+        /// (superseded by a newer operation) or a later, unrelated failure
+        /// (e.g. metadata decode) once the source *was* successfully read.
+        case sourceUnreachable
+        /// `openLibraryAppCopy(documentID:)`: the loaded record's
+        /// `storageMode` is not `.appCopy`. `LibraryOpenAsset.appCopy` is a
+        /// distinct case from `.external` precisely because the two need
+        /// different handling (no scope, no bookmark, never re-import vs.
+        /// a full external open) -- silently opening whatever
+        /// `storageMode` a mismatched `documentID` actually has would
+        /// erase that distinction: an `.inPlace` document's `workingURL`
+        /// is an external file that needs a security scope this path never
+        /// acquires.
+        case notAnAppCopy
+    }
+
+    /// Opens `asset`, handed in by the multi-source library browser (Task 5)
+    /// rather than produced by a Files-picker selection. Which case `asset`
+    /// is already decides in-place vs. copy, so this bypasses the
+    /// import-choice dialog entirely -- but otherwise reuses every other
+    /// piece of this controller's existing open machinery: cancellation
+    /// generation, scope acquisition, flush-before-switch, decode, rollback
+    /// and alert handling. No new document ever becomes visible before it
+    /// has been fully built and validated, exactly like a fresh selection
+    /// or a restore.
+    public func openLibraryAsset(_ asset: LibraryOpenAsset) {
+        switch asset {
+        case .external(let url, let scopeURL, _):
+            openLibraryExternalAsset(url: url, scopeURL: scopeURL)
+        case .appCopy(let documentID):
+            openLibraryAppCopy(documentID: documentID)
+        }
+    }
+
+    private func offlineSourceAlert() -> EditorAlert {
+        EditorAlert(
+            title: L10n.t("Couldn't open this photo"),
+            message: L10n.t("LumaHarbor no longer has access to this file."),
+            nextStep: L10n.t("Reconnect the source, then try again.")
+        )
+    }
+
+    /// An indexed photo at an already-authorised external library source --
+    /// opened exactly like a fresh `.inPlace` selection (same two-phase
+    /// switch, same rollback-on-failure, same finalize/active-pointer
+    /// gating as `openFreshSelection(url:scope:mode:)`), minus the
+    /// import-choice dialog: a library-indexed source is always opened in
+    /// place, never copied.
+    ///
+    /// A source that has gone offline since it was indexed (the drive
+    /// unplugged, permission revoked) must never tear down whatever
+    /// document is currently open -- there is nothing to switch to.
+    /// Detected two ways, both mapped to the same actionable alert: the
+    /// security scope itself failing to open, checked immediately and
+    /// before anything else is touched; or -- more likely in practice,
+    /// since a stale sandbox grant can still nominally "open" against a
+    /// volume that is no longer actually reachable -- the attempt to read
+    /// and fingerprint the file inside `PhotoDocumentStore.openInPlace`
+    /// failing for any non-cancellation reason. Either way, nothing here
+    /// mints a token or touches `document`/`openingTask` until the source
+    /// has actually been proven reachable.
+    private func openLibraryExternalAsset(url: URL, scopeURL: URL) {
+        let scope = dependencies.makeScope(scopeURL)
+        guard scope.isAccessing else {
+            scope.stop()
+            alert = offlineSourceAlert()
+            return
+        }
+
+        openingTask?.cancel()
+        let token = mintToken()
+        isPreparingDocument = true
+
+        openingTask = Task { [weak self, dependencies] in
+            guard let self else {
+                scope.stop()
+                return
+            }
+            guard !Task.isCancelled, self.isCurrent(token) else {
+                scope.stop()
+                return
+            }
+
+            var pendingCreation: PhotoDocumentCreation?
+            do {
+                // Best-effort, exactly like `openFreshSelection`'s own
+                // `.inPlace` case: restorability depends on this bookmark,
+                // but a fresh library open can still proceed without one --
+                // it will simply need re-picking after a relaunch, same as
+                // any other bookmark-less `.inPlace` document.
+                let bookmarkData = try? dependencies.makeBookmark(url)
+
+                if let existingDocument = try? await dependencies.store.committedInPlaceDocument(matching: url) {
+                    let (photo, adjustments) = try await self.loadEditorState(for: existingDocument)
+                    guard !Task.isCancelled, self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+
+                    let oldFlushed = await self.flushCurrentDocumentIfDirty()
+                    guard self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+                    guard oldFlushed else {
+                        scope.stop()
+                        self.isPreparingDocument = false
+                        return
+                    }
+
+                    guard await self.retryFinalizeIfNeeded() else {
+                        scope.stop()
+                        guard self.isCurrent(token) else { return }
+                        self.isPreparingDocument = false
+                        self.alert = EditorAlert(
+                            title: L10n.t("Couldn't switch photos"),
+                            message: L10n.t("LumaHarbor couldn't finish saving the photo you had open."),
+                            nextStep: L10n.t("Try again.")
+                        )
+                        return
+                    }
+                    guard self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+
+                    do {
+                        try await self.dependencies.store.saveActiveDocumentID(existingDocument.id)
+                    } catch {
+                        scope.stop()
+                        guard self.isCurrent(token) else { return }
+                        self.isPreparingDocument = false
+                        self.alert = EditorAlert(
+                            title: L10n.t("Couldn't switch photos"),
+                            message: L10n.t("LumaHarbor couldn't remember this photo for next time."),
+                            nextStep: L10n.t("Try again.")
+                        )
+                        return
+                    }
+                    guard self.isCurrent(token) else {
+                        scope.stop()
+                        return
+                    }
+
+                    if let bookmarkData {
+                        do {
+                            try await self.dependencies.store.updateSourceBookmark(bookmarkData, documentID: existingDocument.id)
+                        } catch {
+                            self.cleanupDiagnostic = L10n.t("LumaHarbor couldn't remember access to this photo for next time.")
+                        }
+                    }
+
+                    let previousScope = self.documentScope
+                    self.documentScope = scope
+                    self.document = existingDocument
+                    self.editor.open(
+                        photo: photo, sourceURL: existingDocument.workingURL,
+                        adjustments: adjustments, isReadOnly: false
+                    )
+                    self.isPreparingDocument = false
+                    self.pendingRelink = nil
+                    previousScope?.stop()
+                    return
+                }
+
+                let creation: PhotoDocumentCreation
+                do {
+                    creation = try await dependencies.store.openInPlace(url, bookmarkData: bookmarkData)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    throw LibraryAssetOpenError.sourceUnreachable
+                }
+                pendingCreation = creation
+
+                guard !Task.isCancelled, self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: scope)
+                    return
+                }
+
+                let (photo, adjustments) = try await self.loadEditorState(for: creation.document)
+                guard !Task.isCancelled, self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: scope)
+                    return
+                }
+
+                // PHASE 2: same switch machinery as a fresh open.
+                let oldFlushed = await self.flushCurrentDocumentIfDirty()
+                guard self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: scope)
+                    return
+                }
+                guard oldFlushed else {
+                    await self.discard(creation, sourceScope: scope)
+                    self.isPreparingDocument = false
+                    return
+                }
+
+                guard await self.retryFinalizeIfNeeded() else {
+                    await self.discard(creation, sourceScope: scope)
+                    guard self.isCurrent(token) else { return }
+                    self.isPreparingDocument = false
+                    self.alert = EditorAlert(
+                        title: L10n.t("Couldn't switch photos"),
+                        message: L10n.t("LumaHarbor couldn't finish saving the photo you had open."),
+                        nextStep: L10n.t("Try again.")
+                    )
+                    return
+                }
+                guard self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: scope)
+                    return
+                }
+
+                do {
+                    try await self.dependencies.store.saveActiveDocumentID(creation.document.id)
+                } catch {
+                    await self.discard(creation, sourceScope: scope)
+                    guard self.isCurrent(token) else { return }
+                    self.isPreparingDocument = false
+                    self.alert = EditorAlert(
+                        title: L10n.t("Couldn't switch photos"),
+                        message: L10n.t("LumaHarbor couldn't remember this photo for next time."),
+                        nextStep: L10n.t("Try again.")
+                    )
+                    return
+                }
+                guard self.isCurrent(token) else {
+                    await self.discard(creation, sourceScope: scope)
+                    return
+                }
+
+                let previousScope = self.documentScope
+                self.documentScope = scope
+                self.document = creation.document
+                self.editor.open(
+                    photo: photo, sourceURL: creation.document.workingURL,
+                    adjustments: adjustments, isReadOnly: false
+                )
+                self.isPreparingDocument = false
+                self.pendingRelink = nil
+                previousScope?.stop()
+                self.unfinalizedCreation = creation
+                await self.retryFinalizeIfNeeded()
+            } catch LibraryAssetOpenError.sourceUnreachable {
+                scope.stop()
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                self.alert = self.offlineSourceAlert()
+            } catch is CancellationError {
+                scope.stop()
+                if let pendingCreation {
+                    await self.discard(pendingCreation, sourceScope: nil)
+                }
+            } catch {
+                scope.stop()
+                if let pendingCreation {
+                    await self.discard(pendingCreation, sourceScope: nil)
+                }
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                self.alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't open this photo"), for: error)
+            }
+        }
+    }
+
+    /// An existing, already-`.committed` App-copy document -- opens the
+    /// record directly and never calls `importCopy` again. Structurally
+    /// parallel to `commitDocument(token:document:scope:photo:adjustments:)`
+    /// (used by restore/relink), except this must *also* flush-and-replace
+    /// whatever document is currently open first: unlike restore (runs only
+    /// at startup, before anything is open) and relink (only reachable
+    /// while `document` is already `nil`), opening a library App copy can
+    /// happen at any time, including while a different document is open and
+    /// dirty.
+    ///
+    /// `documentID` is trusted to name an `.appCopy` record only as far as
+    /// `LibraryOpenAsset.appCopy`'s own contract goes -- a caller could, in
+    /// error, pass an `.inPlace` document's id through this case instead of
+    /// `.external`. Loading the record and checking its `storageMode`
+    /// before doing anything else is what keeps that mistake from actually
+    /// reading an external file with no security scope: this path never
+    /// acquires one (`documentScope` is always set to `nil` on success),
+    /// which is only safe because a genuine `.appCopy` document's
+    /// `workingURL` always lives inside the app's own sandbox. A mismatch
+    /// fails closed -- nothing here is touched, and a caller can never see
+    /// this path silently reinterpret an in-place document as a copy.
+    private func openLibraryAppCopy(documentID: UUID) {
+        openingTask?.cancel()
+        let token = mintToken()
+        isPreparingDocument = true
+
+        openingTask = Task { [weak self, dependencies] in
+            guard let self else { return }
+            guard !Task.isCancelled, self.isCurrent(token) else { return }
+
+            do {
+                let loadedDocument = try await dependencies.store.loadDocument(id: documentID)
+                guard !Task.isCancelled, self.isCurrent(token) else { return }
+                guard loadedDocument.storageMode == .appCopy else {
+                    throw LibraryAssetOpenError.notAnAppCopy
+                }
+
+                let (photo, adjustments) = try await self.loadEditorState(for: loadedDocument)
+                guard !Task.isCancelled, self.isCurrent(token) else { return }
+
+                let oldFlushed = await self.flushCurrentDocumentIfDirty()
+                guard self.isCurrent(token) else { return }
+                guard oldFlushed else {
+                    self.isPreparingDocument = false
+                    return
+                }
+
+                guard await self.retryFinalizeIfNeeded() else {
+                    guard self.isCurrent(token) else { return }
+                    self.isPreparingDocument = false
+                    self.alert = EditorAlert(
+                        title: L10n.t("Couldn't switch photos"),
+                        message: L10n.t("LumaHarbor couldn't finish saving the photo you had open."),
+                        nextStep: L10n.t("Try again.")
+                    )
+                    return
+                }
+                guard self.isCurrent(token) else { return }
+
+                do {
+                    try await self.dependencies.store.saveActiveDocumentID(loadedDocument.id)
+                } catch {
+                    guard self.isCurrent(token) else { return }
+                    self.isPreparingDocument = false
+                    self.alert = EditorAlert(
+                        title: L10n.t("Couldn't switch photos"),
+                        message: L10n.t("LumaHarbor couldn't remember this photo for next time."),
+                        nextStep: L10n.t("Try again.")
+                    )
+                    return
+                }
+                guard self.isCurrent(token) else { return }
+
+                let previousScope = self.documentScope
+                self.documentScope = nil
+                self.document = loadedDocument
+                self.editor.open(
+                    photo: photo, sourceURL: loadedDocument.workingURL,
+                    adjustments: adjustments, isReadOnly: false
+                )
+                self.isPreparingDocument = false
+                self.pendingRelink = nil
+                previousScope?.stop()
+            } catch LibraryAssetOpenError.notAnAppCopy {
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                self.alert = EditorAlert(
+                    title: L10n.t("Couldn't open this photo"),
+                    message: L10n.t("This isn't a saved App copy."),
+                    nextStep: nil
+                )
+            } catch is CancellationError {
+                // Superseded before committing -- this document was already
+                // `.committed`, so there is nothing here to roll back.
+            } catch {
+                guard self.isCurrent(token) else { return }
+                self.isPreparingDocument = false
+                self.alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't open this photo"), for: error)
+            }
+        }
+    }
+
     /// Rolls back a creation that was built but must never be shown --
     /// superseded, or the switch it was part of was aborted. `sourceScope`
     /// is the `.inPlace` source scope to stop, if this creation held one

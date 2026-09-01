@@ -228,6 +228,46 @@ final class ScanCancellationTests: TemporaryDirectoryTestCase {
         )
     }
 
+    /// Codex pre-landing review, Task 8 round: `PhotoLibraryService`'s new
+    /// `inspectWithTimeout(...)` (added to race a file's inspection against
+    /// a 30-second provider timeout) originally raced the two sides via
+    /// independent, unstructured `Task { }`s with no bridge back to the
+    /// scan's own cancellation at all -- so cancelling a scan no longer
+    /// actually interrupted whichever file's *cooperative* decoder was
+    /// currently mid-inspection; it simply ran to completion regardless.
+    /// `testCancellingDuringMetadataReadStopsTheScan` above calls
+    /// `gate.release()` immediately after cancelling, which masks exactly
+    /// this: its assertions hold whether or not the in-flight file was
+    /// actually interrupted early, since releasing the gate lets an
+    /// un-cancelled decode finish on its own anyway.
+    ///
+    /// This test never releases the gate at all. `InspectionGate.enterAndWait`
+    /// has its own internal 5-second ceiling as a last resort, so a
+    /// regression here fails this assertion rather than hanging the suite
+    /// forever -- but a cancellation that's actually forwarded settles in
+    /// milliseconds, not seconds; the 1-second budget below is comfortably
+    /// under that ceiling.
+    func testCancellingWhileACooperativeDecodeIsInFlightInterruptsItWithoutEverReleasingTheGate() async throws {
+        try seedPhotos(6)
+        let gate = InspectionGate()
+        let decoder = GatedScanDecoder()
+        decoder.gate = gate
+        decoder.gateAfterFileCount = 1
+
+        let service = try makeService(decoder: decoder)
+        let library = try await addLibrary(service)
+
+        let start = Date()
+        _ = await runScanCancelling(service, libraryID: library.id) { gate.started > 0 }
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(
+            elapsed, 1.0,
+            "cancellation took \(elapsed)s to settle without ever releasing the gate -- "
+                + "it isn't reaching the in-flight cooperative decode promptly"
+        )
+    }
+
     func testCancelledFirstScanLeavesLastScanAtNil() async throws {
         // The UI uses `lastScanAt == nil` to decide a folder still needs its
         // first scan; stamping it after a cancel skips that scan forever.

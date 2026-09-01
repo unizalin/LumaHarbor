@@ -29,6 +29,9 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
     public var lastSeenAt: Date
     /// `true` when a sidecar with non-default adjustments exists.
     public var hasEdits: Bool
+    /// Rebuildable projection of the sidecar's `modifiedAt`. `nil` when the
+    /// photo has no edits or its adjustments are neutral.
+    public var lastEditAt: Date?
 
     public init(
         id: PhotoID,
@@ -39,7 +42,8 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         status: PhotoStatus = .pending,
         failureReason: String? = nil,
         lastSeenAt: Date = Date(),
-        hasEdits: Bool = false
+        hasEdits: Bool = false,
+        lastEditAt: Date? = nil
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -50,6 +54,7 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         self.failureReason = failureReason
         self.lastSeenAt = lastSeenAt
         self.hasEdits = hasEdits
+        self.lastEditAt = lastEditAt
     }
 
     public var filename: String {
