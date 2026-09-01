@@ -2,7 +2,7 @@
 
 Updated: 2026-09-01
 
-Updated by: Codex
+Updated by: Claude (independent V4.3 pre-landing review)
 
 ## Source of truth
 
@@ -31,6 +31,7 @@ The latest full APFS/exFAT/RAW production acceptance runner has now passed at cu
 - Codex owns the active integration branch.
 - Claude completed the Beta Test Kit on `claude/ipad-beta-test-kit`; Codex cherry-picked the reviewed documentation commits onto this branch.
 - Claude independently reviewed Codex RAW fixture baseline commit `f5dce94716d740ede6ad46c1632361ccf03efd8b` and reported `APPROVED` in `docs/testing/reports/2026-08-31-raw-fixture-baseline-review.md`.
+- Claude independently performed the required V4.3 pre-landing review at HEAD `d24eaae85820d120611a6c75bdd8e6c17b907a18` on 2026-09-01 from a fresh session with no prior context, and reported `APPROVED`. See the V4.3 evidence entry below.
 - Product files must never be edited concurrently from two worktrees.
 
 ## Latest verified evidence
@@ -48,7 +49,19 @@ The latest full APFS/exFAT/RAW production acceptance runner has now passed at cu
 - Current-HEAD full production fixture acceptance at `9a798d5852d2688e2b44e87715038d7eb043a091`: `PASS`. The runner reported `Run mode: PRODUCTION`, `Overall result: PASS`, `Exit code: 0`, `Privacy scan: PASS`, 1112 XCTest cases executed with 0 skipped and 0 failures, 6 `MultiSourceBoundedScanTests` executed with 0 skipped and 0 failures, and PASS for strict-concurrency build, iPad Simulator build, MVP preflight, MVP acceptance, and iPad vertical-slice acceptance.
 - V4.1 spec coverage: `PASS` by local Codex review against design spec §§1-19.
 - V4.2 changed-production-file static scan: `PASS` over 34 production Swift files in `150bc7d..HEAD`; no `TBD`, `TODO`, `FIXME`, `fatalError`, `try!`, or `force unwrap` hit, and range `git diff --check` passed.
-- V4.3 local pre-landing review: no unresolved P0/P1 issue found by this Codex session. Strict independent review remains open because it still needs a separate reviewer or fresh independent context.
+- V4.3 local pre-landing review (Codex, same session): no unresolved P0/P1 issue found.
+- V4.3 independent pre-landing review (Claude, fresh session, no prior context, 2026-09-01, at HEAD `d24eaae85820d120611a6c75bdd8e6c17b907a18`): `APPROVED`, no unresolved P0/P1 finding. Review-only: no file was modified, staged, committed, pushed, merged, or rebased during the review itself. Checks performed directly against source, not only against prior reports:
+  - Confirmed branch/HEAD/worktree/dirty-file state matched this file before reviewing; confirmed the four most recent doc commits (`1bebd92`, `2b342ff`, `8b80a06`, `d24eaae`) touch only `docs/coordination/CURRENT.md` and the acceptance report, no product code.
+  - Read `LibrarySourceIdentity.swift` in full: manifest-ID priority, fail-closed-to-`.ambiguous` behavior, and overlap/ancestor/descendant rejection match spec §7.
+  - Read `PhotoLibraryService.removeLibrary`/`relink`/`restoreLibraries`: remove-source only touches the bookmark store and index rows (no `FileSidecarRepository`, no source-file remover); relink and restore re-validate identity and roll back on failure, with no path that mints a duplicate `LibraryID`.
+  - Read the scan-loop prune gate: `index.removePhotos(inLibrary:notSeenSince:)` only runs when `!cancelled`, matching spec §9's "only a fully successful scan may prune" rule.
+  - Confirmed via `rg` that no product code under `Sources/`/`Apps/` writes to a photo's source URL; sidecars are read/written only under `.lumaharbor/*.json`. Read `PhotoDocumentStore.committedInPlaceDocument(matching:)` and confirmed the ARW reopen-persistence fix uses fingerprint + full-content digest before reusing a document.
+  - Read `LibraryBrowserSession`'s `setSort`/`select`/`updateSearchText`: every query-shape change clears `nextCursor` and bumps `queryGeneration`, so `PhotoPageCursor`'s documented "stale cursor" edge case is not reachable through the only production caller.
+  - Confirmed `Scripts/run-ipad-library-acceptance.zsh` only reports a test step `PASS` when `skipped == 0 && failures == 0 && executed != 0`; `docs/testing/beta/RC_CHECKLIST.md` is a blank template with `NOT RUN` placeholders, not a false PASS.
+  - `rg` scan for `/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:` across `docs/Sources/Apps/Tests`: only synthetic test-fixture paths and pre-existing out-of-diff spec files; no real private path or signing ID introduced by this branch.
+  - `git diff --check main..HEAD`: no output (PASS).
+  - Ran locally (no external fixtures, no device): `swift build` PASS; `swift test` PASS, 1112 executed / 9 skipped (fixture-dependent, expected) / 0 failures, consistent with the coordination baseline above. Did not rerun strict-concurrency build, iPad Simulator build, or the full RAW/APFS/exFAT production runner — those stay `NOT RUN` by this review and are carried forward only as previously reported manual/production evidence, not re-verified here.
+  - Did not re-execute the five real-device gates below; their `PASS` status is carried forward from the manual tester reports already on file, not re-confirmed by this review.
 
 ## Required real-device gates
 
@@ -77,4 +90,4 @@ Additional required manual gate:
 
 ## Next action
 
-Run the strict independent V4.3 pre-landing review from a separate reviewer or fresh independent context, then decide whether to land. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+The independent V4.3 pre-landing review is complete and `APPROVED` (see above). Final sign-off decision (land, push, merge) is now the user's call. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
