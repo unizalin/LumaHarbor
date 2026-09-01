@@ -1,16 +1,18 @@
 # Current Coordination State
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
 Updated by: Codex
 
 ## Source of truth
 
 - Active integration branch: `codex/ipad-multi-source-library-durability`
-- Current integrated HEAD at the time of the latest production acceptance run: `0fbca6703a445089cdc9aae00515785b1cd18392`
+- Latest current-branch product/evidence commit validated outside the full fixture runner: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
 - Latest production acceptance run commit: `0fbca6703a445089cdc9aae00515785b1cd18392`
 - Last production fixture-validated product commit: `0fbca6703a445089cdc9aae00515785b1cd18392`
-- Latest documented evidence: the integrated 2026-08-31 production acceptance evidence recorded in this update commit
+- External-library edit persistence fix: `31e707e7773b1c7f504330702d007b87759118a9`
+- Stable iPad Xcode project: `e876b4565325fc06bfb1824ff7eb391aee94345e`
+- Latest real-device evidence update: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
 - RAW fixture baseline correction commit: `f5dce94716d740ede6ad46c1632361ccf03efd8b`
 - Integrated Beta Test Kit commit: `a853f71822fc38584e1d753e6acdd5cbefbee4cf`
 - Integrated RAW baseline review report commit: `2192b4fdbe35aae2951752d4ed64686c9562cffb`
@@ -19,10 +21,10 @@ Updated by: Codex
 - Shared agent entry-point commit: `4fe7574d354067235d872c2c3897a5f2a337c8d2`
 - Base branch: `main`
 - Base commit observed during design: `114b1f669f91968137d8519ef4b71b819f277444`
-- At design approval the integration branch was 69 commits ahead of `main` and 0 commits behind.
+- After this coordination-only update, the integration branch is 85 commits ahead of `main` and 0 commits behind.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
-The production fixture-validated commit recorded above is the latest full APFS/exFAT/RAW production acceptance baseline. Later commits include a local, uncommitted real-device beta fix for external-library edit persistence and save-state UI; rerun the targeted real-device edit gate before final landing.
+The production fixture-validated commit recorded above remains the latest full APFS/exFAT/RAW production acceptance baseline. The later edit-persistence fix and stable Xcode project are committed and have targeted automated plus real-device evidence, but the full production fixture runner has not yet been rerun at current HEAD.
 
 ## Ownership
 
@@ -43,6 +45,8 @@ The production fixture-validated commit recorded above is the latest full APFS/e
 - RAW fixture baseline correction: `Scripts/run-mvp-acceptance.zsh` and `docs/testing/mvp-acceptance-report-template.md` now use the approved 9-test baseline. Runner self-test passed with `executed=8` and `executed=10` failing, and `executed=9` passing.
 - Beta Test Kit: `docs/testing/beta/` now contains tester guide, real-device checklist, bug report template, privacy rules, and RC checklist.
 - Stable iPad Xcode entry point: use `Apps/LumaHarborPad.xcodeproj` for real-device build/run. Do not use `Apps/LumaHarborPad.swiftpm/Package.swift` for ongoing iPad testing because Xcode's App Playground settings can rewrite that generated manifest and remove package-product dependencies.
+- Current-HEAD non-fixture verification at `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`: `swift test` reported 1112 tests, 9 fixture-dependent skips, and 0 failures; strict-concurrency build, iPad Simulator project build, and `git diff --check` passed.
+- Current-HEAD full production fixture acceptance: `NOT RUN`.
 
 ## Required real-device gates
 
@@ -50,13 +54,17 @@ Current manual real-device evidence:
 
 1. M1+ iPad APFS add, scan, and relaunch: `PASS` by manual tester report on 2026-08-31.
 2. exFAT add, unplug, offline state, and relink: `PASS` by manual tester report on 2026-08-31; no duplicate source was created.
-3. Files provider reauthorisation: normal provider-source open flow `PASS`; forced reauthorisation still needs an explicit repeat if final sign-off requires that narrower recovery path.
+3. Files provider reauthorisation: normal provider-source open flow `PASS`; forced authorisation-loss and reauthorisation recovery remains `NOT RUN`.
 4. Three-source aggregate search, sort, and restoration: `PASS` by manual tester report on 2026-08-31.
 5. Sony ARW edit, autosave, reopen, and original-file checksum: `PASS` by manual tester report on 2026-09-01 after `31e707e` and `e876b45`. The corrected app showed save-state text, preserved the adjusted exposure value after close/reopen and app relaunch, and checksum testing found that the original `.ARW` content was not modified.
 
+Additional required manual gate:
+
+- V3 remove-source destructive-safety check, including before/after RAW, sidecar, and manifest evidence: `NOT RUN`.
+
 ## Preserved dirty files
 
-- `Apps/LumaHarborPad.swiftpm/Package.swift`: local Xcode-generated signing team and formatting changes. Do not commit without explicit user authorization.
+- None. The worktree is clean. Xcode-generated signing-team and App Playground manifest noise was removed from the working tree and was not committed.
 
 ## Resolved correction
 
@@ -67,4 +75,4 @@ Current manual real-device evidence:
 
 ## Next action
 
-Use `Apps/LumaHarborPad.xcodeproj` for future real-device installs. Final sign-off still needs the explicit final review gate and any desired forced Files-provider reauthorisation repeat. Do not commit the preserved local `Package.swift` signing change unless the user explicitly authorizes it.
+Run `Scripts/run-ipad-library-acceptance.zsh` with all three private fixtures at current HEAD and record the redacted result. After that, close the forced Files-provider reauthorisation gate, the V3 remove-source safety gate, and the independent V4 pre-landing review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
