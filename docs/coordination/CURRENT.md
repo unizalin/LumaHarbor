@@ -59,7 +59,7 @@ Current manual real-device evidence:
 
 Additional required manual gate:
 
-- V3 remove-source destructive-safety check, including before/after RAW, sidecar, and manifest evidence: `NOT RUN`.
+- V3 remove-source destructive-safety check: `PASS` by manual tester report and Mac-side before/after fingerprint comparison on 2026-09-01. Removing the exFAT source from the iPad app left all checked RAW files, the library manifest, and edit sidecars present with unchanged SHA-256 values.
 
 ## Preserved dirty files
 
@@ -74,4 +74,4 @@ Additional required manual gate:
 
 ## Next action
 
-Close the forced Files-provider reauthorisation gate, the V3 remove-source safety gate, and the independent V4 pre-landing review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+Close the forced Files-provider reauthorisation gate and the independent V4 pre-landing review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
