@@ -10,11 +10,11 @@ Branch: `codex/ipad-multi-source-library-durability`
 
 Tasks 1–9 of the iPad multi-source photo library plan are implemented. The latest branch HEAD is `9a798d5`; it includes the external-library edit-persistence fix, visible save-state UI, a stable Xcode project for real-device deployment, the corresponding real-device checksum evidence, and coordination/report updates.
 
-Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the remaining V2.3 and V4 gates are not complete.
+Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the independent V4 pre-landing review is not complete.
 
 - Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`, reconfirmed PASS at `a539f4a` after the `removeLibrary` durability fix, reconfirmed PASS at integrated HEAD `0fbca67` after the Beta Test Kit and RAW fixture baseline review were integrated, and reconfirmed PASS at current HEAD `9a798d5`.
 - Startup bootstrap failure now renders a user-visible failure state instead of using `try!` at `ed7968d`.
-- Real M1+ iPad manual testing now proves APFS persistence, exFAT offline/relink without duplicate sources, three-source browsing, Sony ARW non-destructive edit persistence, and exFAT remove-source destructive safety. Forced Files-provider reauthorisation remains `NOT RUN`.
+- Real M1+ iPad manual testing now proves APFS persistence, exFAT offline/relink without duplicate sources, Files-provider reauthorisation, three-source browsing, Sony ARW non-destructive edit persistence, and exFAT remove-source destructive safety.
 
 The report keeps the remaining manual/review items as `NOT RUN`; earlier passing evidence is not used to infer a PASS for gates that were not actually rerun.
 
@@ -297,7 +297,12 @@ Post-correction real-device evidence from 2026-09-01:
 - Quitting and reopening the app still preserved the adjusted Exposure value.
 - Checksum testing found that the original `.ARW` content was not modified.
 
-The mandatory Sony ARW edit/autosave/reopen/checksum gate is now PASS by manual real-device evidence. The remaining real-device requirement is the forced Files-provider authorisation-loss/recovery path, which remains `NOT RUN`.
+The mandatory Sony ARW edit/autosave/reopen/checksum gate is now PASS by manual real-device evidence.
+
+Files-provider reauthorisation evidence from 2026-09-01:
+
+- The tester forced Files-provider reauthorisation and then reauthorised the same source.
+- Result: PASS. No duplicate source was created, and photos could be opened after reauthorisation.
 
 V3 remove-source destructive-safety evidence from 2026-09-01:
 
@@ -364,11 +369,40 @@ Post-run checks:
 - Summary explicitly recorded `Privacy scan: PASS`; no private user, mount, or temporary path appeared in the production summary.
 - The runner's built-in real-device checklist remains informational and `NOT RUN`; current manual real-device evidence is tracked separately above.
 
+## V4 local spec coverage and review from 2026-09-01
+
+V4.1 spec coverage was checked against `docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md` §§1-19.
+
+| Spec section | Status | Evidence |
+|---|---|---|
+| §§1-4 purpose, product decisions, user flows | COVERED | Implemented by `PhotoLibraryCore`, `LibraryBrowserSession`, and the iPad views; validated by current-head production runner plus manual APFS, exFAT, Files-provider, three-source, ARW, and remove-source gates. |
+| §5 information architecture and UI | COVERED | `PadLibraryView`, `PadLibrarySidebar`, `PadLibraryGrid`, `PadThumbnailCell`, and `PadLibraryProgressOverlay`; `PadLibraryAccessibilityContractTests` and real-device testing cover sidebar/grid/loading/error behavior. |
+| §6 core boundaries | COVERED | `PhotoLibraryService`, `LibraryBrowserSession`, `LibraryBrowserDependencies`, and `PadLibraryModel` typealias; `PadLibraryCompositionContractTests` verifies the iPad app does not copy the browser state machine. |
+| §7 source identity | COVERED | `LibrarySourceIdentity`, `SecurityScopedBookmark`, `BookmarkStore`, and `PhotoLibraryService.relink`; `LibrarySourceIdentityTests`, `LibrarySourceLifecycleTests`, and `LibrarySourceRecoveryTests` cover same/ambiguous/conflict/overlap behavior. |
+| §8 SQLite schema v2 and query contract | COVERED | `PhotoIndexStore` schema migration and `LibraryQuery`; `PhotoIndexMigrationTests` and `PhotoIndexQueryTests` cover schema, scopes, sort orders, escaped filename search, cursor shape, and keyset paging. |
+| §9 scan consistency | COVERED | `MultiSourceScanCoordinator` and `PhotoLibraryService.scan`; `MultiSourceBoundedScanTests`, `MultiSourceFailureRecoveryTests`, and `ScanCancellationTests` cover bounded scanning, cancellation, partial failures, late generation, and prune safety. |
+| §10 thumbnails, offline, capacity | COVERED | `ThumbnailProvider`, `DiskCache`, `PadLibrarySettingsView`, and offline command gates; `ThumbnailProviderTests`, `DiskCacheTests`, `PadLibraryAccessibilityContractTests`, and manual exFAT offline testing cover this behavior. |
+| §11 errors and recovery | COVERED | `SafeErrorPresentation`, `LibraryBrowserSession`, `PhotoLibraryService`, and registry transactions; `LibraryRegistryTransactionTests`, `LibrarySourceRecoveryTests`, `LibraryBrowserSessionTests`, and manual Files-provider reauthorisation cover recovery paths. |
+| §12 accessibility and localisation | COVERED | English and Traditional Chinese strings plus accessibility contracts in iPad grid/sidebar/progress views; covered by `PadLibraryAccessibilityContractTests` and current-head full `swift test`. |
+| §13 performance/resource boundaries | COVERED | `LibraryBrowserSession.pageSize == 100`, page window cap, SQL-side paging, and synthetic 10,000-row integration tests; covered by `LibraryBrowserSessionTests`, `PhotoIndexQueryTests`, and `MultiSourceBoundedScanTests`. |
+| §§14-16 test strategy, runner, completion gate | COVERED | Current-head production runner PASS, full Swift suite PASS, Simulator build PASS, and manual real-device gates now recorded above. |
+| §17 out of scope | DEFERRED | Rating, albums, batch operations, preset browser UI, non-RAW media management, automatic offline full copies, multi-device sync, new local editing tools, and Mac UI rewrite remain explicitly out of this phase. |
+| §§18-19 delivery slicing and recovery strategy | COVERED | Separate task reports, independent commits, recoverable schema/index design, preserved RAW/sidecar format, and V3 remove-source fingerprint evidence. |
+
+V4.2 changed-production-file static scan was rerun over the 34 production Swift files changed in `150bc7d..HEAD`.
+
+Result: PASS. No changed production Swift file contained `TBD`, `TODO`, `FIXME`, `fatalError`, `try!`, or `force unwrap`; `git diff --check 150bc7d..HEAD` also passed.
+
+V4.3 local pre-landing review:
+
+- Diff reviewed: `150bc7d..HEAD`, excluding the uncommitted local Xcode signing change.
+- Checklist applied locally: SQL/data safety, race/concurrency, enum/value completeness, shell/LLM trust boundaries, column safety, completeness gaps, time-window risks, type-boundary issues, view/frontend concerns, and distribution concerns.
+- Result: local review found no unresolved P0/P1 issue. The strict independent-review requirement is still open because this pass was done by the same Codex session, not a separate reviewer.
+
 ## Final sign-off requirements still open
 
 Before claiming the full iPad multi-source library complete:
 
-1. Force Files-provider authorisation loss, complete reauthorisation, and record the identity-preserving recovery result.
-2. Complete V4.1 spec coverage and an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding. V4.2 static scan is PASS at `17ddba2` and must be rerun if later product code changes.
+1. Complete an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding.
 
 The earlier static-scan hit in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` has been fixed at `ed7968d`: the temporary-root fallback no longer uses `try! PadAppServices(...)`. Application Support failure first attempts a fresh temporary fallback; if that also fails, `PadStartupFailureView` presents localized recovery guidance instead of force-crashing before SwiftUI renders. Gate V4 still needs to rerun the full changed-production-file scan over `150bc7d..HEAD` and document any new hits.
