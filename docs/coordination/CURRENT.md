@@ -12,7 +12,7 @@ Updated by: Codex
 - Last production fixture-validated product commit: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
 - External-library edit persistence fix: `31e707e7773b1c7f504330702d007b87759118a9`
 - Stable iPad Xcode project: `e876b4565325fc06bfb1824ff7eb391aee94345e`
-- Latest real-device evidence update: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
+- Latest real-device evidence update: `1bebd929eb9e1714564a62764ac02c0f0a2374d5`
 - RAW fixture baseline correction commit: `f5dce94716d740ede6ad46c1632361ccf03efd8b`
 - Integrated Beta Test Kit commit: `a853f71822fc38584e1d753e6acdd5cbefbee4cf`
 - Integrated RAW baseline review report commit: `2192b4fdbe35aae2951752d4ed64686c9562cffb`
@@ -21,7 +21,7 @@ Updated by: Codex
 - Shared agent entry-point commit: `4fe7574d354067235d872c2c3897a5f2a337c8d2`
 - Base branch: `main`
 - Base commit observed during design: `114b1f669f91968137d8519ef4b71b819f277444`
-- After this coordination-only update, the integration branch is 85 commits ahead of `main` and 0 commits behind.
+- After this coordination-only update, the integration branch is 88 commits ahead of `main` and 0 commits behind.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
 The latest full APFS/exFAT/RAW production acceptance runner has now passed at current HEAD. Product code has not changed since `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`; later commits through `9a798d5852d2688e2b44e87715038d7eb043a091` are documentation and coordination updates.
@@ -40,7 +40,7 @@ The latest full APFS/exFAT/RAW production acceptance runner has now passed at cu
 - MultiSourceBoundedScanTests: 6 executed, 0 skipped, 0 failures.
 - iPad Simulator build: `PASS`.
 - MVP preflight, MVP acceptance, iPad vertical-slice acceptance, and privacy scan: `PASS`.
-- Evidence source: `docs/testing/reports/2026-08-26-ipad-multi-source-library.md` and the repo-ignored integrated production summary generated on 2026-08-31.
+- Evidence source: `docs/testing/reports/2026-08-26-ipad-multi-source-library.md` and the repo-ignored integrated production summary generated on 2026-09-01.
 - Coordination implementation baseline: `swift test` executed 1111 tests, with 9 fixture-dependent tests skipped and 0 failures. This local run did not replace the production fixture evidence above.
 - RAW fixture baseline correction: `Scripts/run-mvp-acceptance.zsh` and `docs/testing/mvp-acceptance-report-template.md` now use the approved 9-test baseline. Runner self-test passed with `executed=8` and `executed=10` failing, and `executed=9` passing.
 - Beta Test Kit: `docs/testing/beta/` now contains tester guide, real-device checklist, bug report template, privacy rules, and RC checklist.
@@ -63,7 +63,7 @@ Additional required manual gate:
 
 ## Preserved dirty files
 
-- None. The worktree is clean. Xcode-generated signing-team and App Playground manifest noise was removed from the working tree and was not committed.
+- `Apps/LumaHarborPad.xcodeproj/project.pbxproj`: local Xcode signing/project-formatting change created while running the app on the user's iPad. It contains the user's Development Team and must not be committed unless the user explicitly authorizes committing local signing settings.
 
 ## Resolved correction
 
