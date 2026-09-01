@@ -10,7 +10,7 @@ Branch: `codex/ipad-multi-source-library-durability`
 
 Tasks 1–9 of the iPad multi-source photo library plan are implemented. The latest branch HEAD is `9a798d5`; it includes the external-library edit-persistence fix, visible save-state UI, a stable Xcode project for real-device deployment, the corresponding real-device checksum evidence, and coordination/report updates.
 
-Current status: **BLOCKED for final sign-off**, not because a known automated product test is failing, but because the independent V4 pre-landing review is not complete.
+Current status: the independent V4.3 pre-landing review is now complete and **`APPROVED`** (see below). The remaining sign-off decision — whether and when to land, push, or merge — is the user's call, not an open engineering gate.
 
 - Full APFS/exFAT/RAW automated fixture acceptance is now PASS at `ffa2c19`, reconfirmed PASS at `a539f4a` after the `removeLibrary` durability fix, reconfirmed PASS at integrated HEAD `0fbca67` after the Beta Test Kit and RAW fixture baseline review were integrated, and reconfirmed PASS at current HEAD `9a798d5`.
 - Startup bootstrap failure now renders a user-visible failure state instead of using `try!` at `ed7968d`.
@@ -399,10 +399,20 @@ V4.3 local pre-landing review:
 - Checklist applied locally: SQL/data safety, race/concurrency, enum/value completeness, shell/LLM trust boundaries, column safety, completeness gaps, time-window risks, type-boundary issues, view/frontend concerns, and distribution concerns.
 - Result: local review found no unresolved P0/P1 issue. The strict independent-review requirement is still open because this pass was done by the same Codex session, not a separate reviewer.
 
-## Final sign-off requirements still open
+## V4.3 independent pre-landing review (Claude, fresh session)
 
-Before claiming the full iPad multi-source library complete:
+Completed 2026-09-01 from a fresh Claude session with no prior context, at HEAD `d24eaae85820d120611a6c75bdd8e6c17b907a18`. Full evidence trail is recorded in `docs/coordination/CURRENT.md` under "Latest verified evidence"; summary:
 
-1. Complete an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding.
+- Result: `APPROVED`. No unresolved P0/P1 finding.
+- Scope: read `LibrarySourceIdentity.swift`, `PhotoLibraryService.removeLibrary`/`relink`/`restoreLibraries`, the scan-loop prune gate, `PhotoDocumentStore.committedInPlaceDocument(matching:)`, `SidecarRepository.swift`, and `LibraryBrowserSession`'s query/cursor invalidation directly against spec §§7, 9, 10 and 13, not only against prior reports.
+- Confirmed no product code writes to a photo's source URL; sidecars stay under `.lumaharbor/*.json`; remove-source touches only the local bookmark/index; relink/restore re-validate identity and never mint a duplicate `LibraryID`; scan pruning only runs on a fully successful, uncancelled scan.
+- Confirmed via `rg` that the four most recent doc commits (`1bebd92`, `2b342ff`, `8b80a06`, `d24eaae`) touched only coordination/report Markdown, and that no real private path, mount path, or the local signing team ID leaked into any committed file.
+- `git diff --check main..HEAD`: no output. Ran locally (no external fixtures, no device): `swift build` PASS; `swift test` PASS, 1112 executed / 9 skipped (fixture-dependent, expected) / 0 failures.
+- Not re-verified by this review: strict-concurrency build, iPad Simulator build, the full RAW/APFS/exFAT production runner, and the five real-device gates — their `PASS` status is carried forward from the manual/production evidence already on file above, not re-run.
+- Review-only: no file was modified, staged, committed, pushed, merged, or rebased during the review itself.
 
-The earlier static-scan hit in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` has been fixed at `ed7968d`: the temporary-root fallback no longer uses `try! PadAppServices(...)`. Application Support failure first attempts a fresh temporary fallback; if that also fails, `PadStartupFailureView` presents localized recovery guidance instead of force-crashing before SwiftUI renders. Gate V4 still needs to rerun the full changed-production-file scan over `150bc7d..HEAD` and document any new hits.
+## Final sign-off requirements
+
+The one requirement previously left open here — completing an independent V4.3 pre-landing review over `150bc7d..HEAD` with no unresolved P0/P1 finding — is now satisfied by the review above. Whether and when to actually land, push, or merge the branch remains a decision for the user, not an engineering gate tracked in this report.
+
+The earlier static-scan hit in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/LumaHarborPadApp.swift` has been fixed at `ed7968d`: the temporary-root fallback no longer uses `try! PadAppServices(...)`. Application Support failure first attempts a fresh temporary fallback; if that also fails, `PadStartupFailureView` presents localized recovery guidance instead of force-crashing before SwiftUI renders.
