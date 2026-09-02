@@ -2,7 +2,7 @@
 
 Updated: 2026-09-02
 
-Updated by: Claude (real-device manual QA attempt, blocked at code signing after device came back available)
+Updated by: Claude (real-device manual QA attempt, blocked again at code signing — root cause: Xcode's open project window pointed at a different worktree/branch than this one)
 
 ## Source of truth
 
@@ -295,3 +295,15 @@ Real-device manual QA is still blocked on device availability, not on code or re
 ### Next action
 
 Real-device manual QA is now blocked on code signing, not device availability. Before the next attempt, the user needs to open `Apps/LumaHarborPad.xcodeproj` in Xcode, select the `LumaHarborPad` target's Signing & Capabilities tab, and choose a development team (the personal Apple Development identity found above is one option) so `DEVELOPMENT_TEAM` resolves for at least one build configuration reachable by a real-device destination. Once that's done and the resulting local signing change is left uncommitted (per "Preserved dirty files" below and `AGENTS.md`'s signing rule), resume with `xcodebuild ... -destination 'id=<target iPad>' -allowProvisioningUpdates build`, then `devicectl device install app` + launch, then plan §9 / `docs/testing/beta/REAL_DEVICE_CHECKLIST.md`, prioritizing A1/A2, B1/B2, C2-C4, D3/D4, E4-E6, the P1 compact-sheet overlay check, and F1/F12/F13. Do not reuse the pre-existing on-device install found above as evidence for any checklist item — reinstall from a build of current HEAD first.
+
+## Real-device manual QA attempt (2026-09-02, Claude, BLOCKED again at code signing — root cause: wrong Xcode project copy)
+
+- Confirmed branch/HEAD state before attempting anything: `git status --short --branch` clean on `claude/ipad-ui-polish-finish`; `git rev-parse HEAD` → `085dff9c6657d1d92cbdad74b737776312ef14e5`, matching this file's own record above. Latest product commit unchanged at `bb63989d091bbcc1e2025c3161c97376abfff22e`.
+- Ran `xcrun devicectl list devices`: the target iPad (iPad Pro 11-inch 3rd gen) reports `connected`, so device availability is not the blocker this time.
+- Attempted `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'id=<target iPad>' -allowProvisioningUpdates build` from this worktree. Failed at the same signing step as the previous attempt: `error: Signing for "LumaHarborPad" requires a development team.` Confirmed via `grep DEVELOPMENT_TEAM Apps/LumaHarborPad.xcodeproj/project.pbxproj` that both entries in *this worktree's* project file still read `""` (empty), and `git status --short --branch`/`git diff --stat` on that file were clean both before and after the attempt — the user's Xcode team selection never reached this file.
+- Root cause found: asked Xcode (via `osascript`, read-only) which project file its open window actually points at. It reported a path under a **different, unrelated worktree/checkout of this same repository, on a different and much older branch** (`codex/ipad-multi-source-library-durability`, confirmed via `git rev-parse HEAD`/`git branch --show-current` in that other checkout) — not `.worktrees/claude-ipad-ui-polish-finish`, and not this branch. That other checkout's own `project.pbxproj` does have a non-empty `DEVELOPMENT_TEAM` on both entries, confirming the user's Signing & Capabilities selection was applied there, not to the project this branch's QA needs. Per this session's hard rule against modifying or committing any signing setting, did not copy that team ID into this worktree's `project.pbxproj` myself, and did not open or alter the other checkout in any way beyond the read-only `git`/`grep` checks above.
+- No product file was modified. `Apps/LumaHarborPad.xcodeproj/project.pbxproj` in this worktree was read (`grep`) but not written. No checklist item in `docs/testing/beta/REAL_DEVICE_CHECKLIST.md` was exercised; all remain `NOT RUN`.
+
+### Next action
+
+Real-device manual QA is blocked on which Xcode project window has the signing team applied, not on device availability or anything code-related. Before the next attempt, the user needs to: (1) in Xcode, close or ignore the window currently open on the other checkout's `LumaHarborPad.xcodeproj`, (2) open **this worktree's** project file specifically — the one at the absolute path of `.worktrees/claude-ipad-ui-polish-finish/Apps/LumaHarborPad.xcodeproj` in this repository — and (3) select the development team in that window's `LumaHarborPad` target Signing & Capabilities tab. Once `grep DEVELOPMENT_TEAM Apps/LumaHarborPad.xcodeproj/project.pbxproj` in this worktree shows a non-empty team, resume with `xcodebuild ... -destination 'id=<target iPad>' -allowProvisioningUpdates build`, then `devicectl device install app` + launch, then plan §9 / `docs/testing/beta/REAL_DEVICE_CHECKLIST.md`, prioritizing A1/A2, B1/B2, C2-C4, D3/D4, E4-E6, the P1 compact-sheet overlay check, and F1/F12/F13.
