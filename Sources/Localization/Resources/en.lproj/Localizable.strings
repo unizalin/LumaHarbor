@@ -118,6 +118,7 @@
 "Green" = "Green";
 "Group (optional, use / for nesting)" = "Group (optional, use / for nesting)";
 "Highlights" = "Highlights";
+"Histogram" = "Histogram";
 "Hold to compare with the original, or click to pin it" = "Hold to compare with the original, or click to pin it";
 "How should LumaHarbor use this photo?" = "How should LumaHarbor use this photo?";
 "ISO" = "ISO";
@@ -175,6 +176,7 @@
 "Next Photo" = "Next Photo";
 "No capture time" = "No capture time";
 "No files were selected." = "No files were selected.";
+"No histogram available yet" = "No histogram available yet";
 "No photos match this search" = "No photos match this search";
 "No presets yet" = "No presets yet";
 "No RAW files found in this folder" = "No RAW files found in this folder";
