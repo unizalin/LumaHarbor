@@ -27,7 +27,19 @@ public enum ExportMetadataBuilder {
         }
         if !exif.isEmpty { properties[kCGImagePropertyExifDictionary] = exif }
 
-        if let orientation = metadata.orientation { properties[kCGImagePropertyOrientation] = orientation }
+        // `metadata.orientation` is the *source RAW file's own* un-rotated
+        // EXIF tag, read straight off disk by `CoreImageRawDecoder
+        // .readMetadata`/`decode`, independent of `CIRAWFilter`. The pixels
+        // this builder's properties get attached to are `CIRAWFilter
+        // .outputImage`'s output, which is already rotated to display
+        // orientation (see `RawFixtureTests
+        // .testFullResolutionExportMatchesTheSourceDimensions`'s own
+        // "orientation may swap the axes" comment for corroborating
+        // evidence from this codebase's decode-side tests). Writing the
+        // source's tag onto already-corrected pixels would tell an
+        // EXIF-aware viewer to rotate an already-upright image a second
+        // time, so this is deliberately never written -- omitting it is the
+        // correct "no further rotation needed" state.
 
         return properties
     }

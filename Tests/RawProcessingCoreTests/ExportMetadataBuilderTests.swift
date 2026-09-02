@@ -33,10 +33,31 @@ final class ExportMetadataBuilderTests: XCTestCase {
         XCTAssertEqual(exif[kCGImagePropertyExifFocalLength] as? Double, 50)
     }
 
-    func testOrientationLandsAtTheTopLevel() {
-        let metadata = RawMetadata(orientation: 6)
-        let properties = ExportMetadataBuilder.imageProperties(from: metadata)
-        XCTAssertEqual(properties[kCGImagePropertyOrientation] as? Int, 6)
+    /// P1 fix (independent review finding): `metadata.orientation` is the
+    /// *source RAW file's own* un-rotated EXIF tag (read straight off disk
+    /// by `CoreImageRawDecoder.readMetadata`/`decode`'s `properties` lookup,
+    /// completely independent of `CIRAWFilter`). But the pixels this builder's
+    /// properties end up attached to (via `PhotoExporter`/`ImageRenderService
+    /// .writeExport`) are `CIRAWFilter.outputImage`'s pixels, which are
+    /// already rotated to the correct display orientation -- confirmed by
+    /// this codebase's own `RawFixtureTests.
+    /// testFullResolutionExportMatchesTheSourceDimensions` comment ("Orientation
+    /// may swap the axes, so compare the pair rather than each side").
+    /// Writing the source's raw tag onto already-corrected pixels tells any
+    /// EXIF-aware viewer to rotate an already-upright image a second time.
+    /// The fix: never write `kCGImagePropertyOrientation` here at all, for
+    /// any value -- omitting it is the semantically correct "already
+    /// oriented, no further rotation needed" state, and never special-casing
+    /// "value happens to be 1" keeps the rule simple and the test stable.
+    func testOrientationIsNeverWrittenSincePixelsAreAlreadyOrientedBeforeThisRuns() {
+        for orientation in [1, 3, 6, 8, nil] {
+            let metadata = RawMetadata(orientation: orientation)
+            let properties = ExportMetadataBuilder.imageProperties(from: metadata)
+            XCTAssertNil(
+                properties[kCGImagePropertyOrientation],
+                "orientation \(String(describing: orientation)) must never be written: the exported pixels are already rotated"
+            )
+        }
     }
 
     /// Round-trips through `RawMetadata.from(imageProperties:)` -- the
