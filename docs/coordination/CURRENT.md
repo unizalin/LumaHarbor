@@ -2,7 +2,17 @@
 
 Updated: 2026-09-02
 
-Updated by: Claude (Phase 1 Task 4: single-photo export options foundation)
+Updated by: Claude (Phase 1 Task 5: full verification and report)
+
+## Phase 1 Task 5 (2026-09-02, Claude, verification-only, in this worktree/branch)
+
+- **Status**: `DONE` (automated verification). Branch `codex/awayphotoraweditor-parity-phase1`. No product code changed in this round — verification and `docs/testing/reports/2026-09-02-awayphotoraweditor-parity-phase1.md` only, on top of Task 4's `d942ac6`.
+- **Full report**: `docs/testing/reports/2026-09-02-awayphotoraweditor-parity-phase1.md` — read that file for the complete gate-by-gate table; this entry only summarizes.
+- **Result**: focused Task 1–4 tests PASS (14 + 9 + 31 + 66 = 120 tests across the four tasks' own suites). Full `swift test` PASS: 1212 executed, 9 skipped (unchanged `RawFixtureTests` fixture-dependent baseline), 0 failures. `git diff --check` PASS on the working tree; the full `8a400ed..HEAD` range flags pre-existing Markdown whitespace in `a8c1c2c` (a docs commit that predates Task 1, using intentional trailing-double-space line breaks) — not a regression from Tasks 1–4. Privacy scan PASS: zero hits for signing/device-specific patterns; the only `/Users/`-pattern hits are this worktree's own already-public path (as Codex's pre-existing `CURRENT.md`/roadmap entries already used) and `/private/tmp/...DerivedData` build paths. `swift build` (Mac app) PASS. `xcodebuild` iOS generic build (`CODE_SIGNING_ALLOWED=NO`) PASS. As extra diligence beyond the plan's own checklist, a strict-concurrency build (`-Xswiftc -strict-concurrency=complete`, isolated build directory to force a genuine recompile) also succeeded, surfacing 2 non-blocking `Sendable` warnings in Task 1's `EditorMetadataSnapshot.swift` and Task 3's `AdjustmentSliderRow.swift` — not fixed in this verification-only round, flagged as a follow-up.
+- **`NOT RUN`**: every real-device/Simulator manual check for Tasks 1–4 (no device or Simulator available in this environment) — this covers actually seeing the metadata/histogram/adjustment panels render, exercising the export sheet's controls by hand, and confirming an exported file's RAW-original checksum stability on hardware. The 9 `RawFixtureTests` skips are `SKIPPED` (fixture-dependent, expected), not `NOT RUN`.
+- **Independent review**: not yet performed by a second agent/fresh session for this phase (`8a400ed..HEAD`). Per the plan's own Task 5 step and this repo's established practice, this phase should not be treated as ready to land until that happens — see the report's "Independent review" section for suggested focus areas.
+- **Local signing/project file**: `Apps/LumaHarborPad.xcodeproj/project.pbxproj` never appeared dirty in `git status` at any point this round.
+- **Next action**: request independent review of `8a400ed..HEAD` (the report names specific focus areas). This branch remains unpushed and unmerged; do not push, merge, rebase, remove this worktree, or commit any signing setting without explicit user authorization.
 
 ## Phase 1 Task 4 (2026-09-02, Claude, TDD, in this worktree/branch)
 
