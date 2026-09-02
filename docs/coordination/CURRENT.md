@@ -7,7 +7,8 @@ Updated by: Claude (finished the iPad UI polish branch: Task 1/2 review fixes, T
 ## Source of truth
 
 - Active integration branch: `claude/ipad-ui-polish-finish`, a separate worktree/branch that started from the exact same HEAD as `codex/ipad-ui-ux-state-feedback-polish` (`819ea8cad5c6f83bad739d5bf8e67f16a6195e62`) and has since progressed further. `codex/ipad-ui-ux-state-feedback-polish` itself was not moved by this work.
-- Latest validated commit on `claude/ipad-ui-polish-finish`: `ebdbeb0a245b6af419081a37718703bebb6726c8` (full HEAD SHA; 2 commits ahead of `819ea8c`: `aad02df93d297092cbc6af183f72189ccb52a8b7` then `ebdbeb0a245b6af419081a37718703bebb6726c8`).
+- **Commit-range correction (2026-09-02, Codex review finding)**: earlier entries below say things like "final HEAD: `ebdbeb0`" or cite the reviewable range as `819ea8c..ebdbeb0`. That was always imprecise: `ebdbeb0a245b6af419081a37718703bebb6726c8` is the last *product* commit from that round, but `244306109f5a212d502b11f342b65fbecc52d4ae` (`docs: record iPad UI polish verification`, adding this file's own evidence entries and the verification report) was committed on top of it in the same round and was already the actual branch HEAD by the time this file described `ebdbeb0` as final. Treat every `ebdbeb0`-as-HEAD reference below as meaning "last product commit `ebdbeb0`, actual HEAD at the time `2443061`" — not corrected line-by-line below to preserve the historical record.
+- Actual current HEAD as of this entry: `bb63989d091bbcc1e2025c3161c97376abfff22e` (`fix: show sidebar operation overlay inside the compact sheet`), 1 product commit ahead of `2443061` — see the dated evidence bullet near the bottom of "Latest verified evidence" for what changed and why.
 - Previous integration branch landed and pushed to `main`: `f38f3ad7968b2d5faaffa96dda17f308a982846d`
 - Active UI/UX polish design spec: `docs/superpowers/specs/2026-09-01-ipad-ui-ux-state-feedback-polish-design.md`
 - Active UI/UX polish implementation plan: `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md`
@@ -85,6 +86,14 @@ The latest full APFS/exFAT/RAW production acceptance runner passed at `9a798d585
 - **Task 4 full verification at `ebdbeb0a245b6af419081a37718703bebb6726c8`**: `swift test` (full suite) — 1125 executed, 9 skipped (fixture-dependent, unchanged baseline), 0 failures. `git diff --check` — clean, no output. Privacy scan (`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM" docs Sources Apps Tests`) — every hit is a pre-existing synthetic test-fixture path, a pre-existing out-of-diff doc/spec/report, or `DEVELOPMENT_TEAM = "";` (empty) in `project.pbxproj`; the only hit inside this round's own diff (`git diff aad02df^..ebdbeb0`) is the new test's own synthetic `/Volumes/NewDrive` fixture path, matching the same convention every other test in that file already uses — `PASS`. `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/LumaHarbor-iPadUIPolish-Claude-DerivedData CODE_SIGNING_ALLOWED=NO build` — `** BUILD SUCCEEDED **`; this run compiled `PadLibraryView.swift`, `PadLibrarySidebar.swift`, `PadLibraryGrid.swift`, and `PadEditorView.swift` for `arm64-apple-ios17.0`, closing the compile gate the Task 1/2 handoff had flagged `NOT RUN`. Report: `docs/testing/reports/2026-09-01-ipad-ui-ux-state-feedback-polish.md`.
 - **Still `NOT RUN`**: every real-device/Simulator manual check for this entire branch (Task 1 through Task 4) — no device or Simulator was available in this environment. Do not upgrade to `PASS` without actually running the plan's own §9 checklist on hardware.
 
+### `claude/ipad-ui-polish-finish` Codex review P1 fix (2026-09-02, Claude, TDD, from the isolated worktree `.worktrees/claude-ipad-ui-polish-finish`)
+
+- **Codex review finding (P1, blocking)**: reviewing this branch, Codex found that the review fix above (`aad02df`, item 2) removed `PadLibrarySidebar`'s local overlay *unconditionally*. That's correct at regular width (where `PadLibraryView`'s global `operationState` overlay already covers the sidebar, mounted side by side in one `HStack`), but at compact width `PadLibraryView` presents the sidebar inside a `.sheet`, which sits visually *above* that global overlay. With no sidebar-local overlay left, a reconnect/remove kicked off from inside that sheet was invisible until the user dismissed the sheet — a regression against spec §5.2/§5.3's "any operation longer than a tap must have visible text" requirement, exactly on the two most consequential operations (reconnect, remove).
+- **Fix** (`bb63989d091bbcc1e2025c3161c97376abfff22e`, `fix: show sidebar operation overlay inside the compact sheet`): `PadLibrarySidebar` now takes a `showsOperationOverlay: Bool` the caller controls. `PadLibraryView` passes `false` for the regular-width `HStack` call site (unchanged behavior — global overlay still covers it) and `true` for the compact-width `.sheet` call site (new — closes the gap). The sidebar's own overlay content is derived from a private `operationOverlayContent` computed property that switches on `library.operationState` — the exact same `LibraryBrowserSession.operationState` `PadLibraryView`'s own `activeLibraryOverlay` reads — not a second, independent state; `reconnectingSourceID`/`removingSourceID` were not reintroduced. RED confirmed by running the new `PadLibraryAccessibilityContractTests/testSidebarOperationOverlayIsOnlyEnabledForTheCompactSheet` against the pre-fix sidebar/view (4 assertion failures: no `showsOperationOverlay` flag, no conditional overlay, no `operationState`-derived content, no differentiated call sites), then implementing until GREEN.
+- `PadLibraryAccessibilityContractTests`: 30 executed, 0 failures (29 pre-existing minus the replaced `testSidebarDoesNotDuplicateGlobalOperationOverlay` plus the new `testSidebarOperationOverlayIsOnlyEnabledForTheCompactSheet` — net even; two other pre-existing tests' doc comments were updated for accuracy, not their assertions). Full `swift test`: 1125 executed, 9 skipped, 0 failures, confirmed on two consecutive clean runs (one earlier run showed 1 failure that did not reproduce on retry or on either of the two clean runs after — not traced further, since it did not touch any file this fix changed; flagged here rather than silently discarded). `git diff --check`: clean. Privacy scan (`/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM`) over this fix's own diff: no hits. Changed exactly: `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadLibrarySidebar.swift`, `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadLibraryView.swift`, `Tests/AdjustmentUITests/PadLibraryAccessibilityContractTests.swift`.
+- `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/LumaHarbor-iPadUIPolish-P1Fix-DerivedData CODE_SIGNING_ALLOWED=NO build` — `** BUILD SUCCEEDED **`, re-run for this specific fix (not merely carried forward from `ebdbeb0`/`2443061`); this compiled the new `showsOperationOverlay` stored property, the new `operationOverlayContent` computed property, and both updated `PadLibrarySidebar(` call sites in `PadLibraryView.swift` through `swiftc` for `arm64-apple-ios17.0` — the class of error source-parsing contract tests cannot catch.
+- **`NOT RUN`**: every real-device/Simulator manual check (plan §9) remains `NOT RUN`, now also covering whether the compact-sheet overlay is actually visible on hardware.
+
 ## Required real-device gates
 
 Current manual real-device evidence:
@@ -112,7 +121,7 @@ Additional required manual gate:
 
 ## Next action
 
-All four tasks of `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md` are now done on `claude/ipad-ui-polish-finish` at `ebdbeb0a245b6af419081a37718703bebb6726c8` (Task 1/Task 2 were already committed before this round; the review fixes, Task 3, and Task 4 were completed in this round — see the dated evidence bullets above and `docs/testing/reports/2026-09-01-ipad-ui-ux-state-feedback-polish.md`). Next action is **Codex review**: no second agent has yet independently reviewed any of this branch's four commits (`83ff071`, `bbbac51`, `aad02df`, `ebdbeb0`) from a fresh session with no prior context, mirroring the same independent-review gate the multi-source durability work went through before landing. After that review, the remaining gap before this branch could be considered fully done is the real-device/Simulator manual checklist (plan §9), which is `NOT RUN` in this environment. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization; `codex/ipad-ui-ux-state-feedback-polish` itself was not touched by this round and still points at `819ea8c`.
+All four tasks of `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md`, plus one Codex-review P1 fix on top, are now done on `claude/ipad-ui-polish-finish` at `bb63989d091bbcc1e2025c3161c97376abfff22e` (Task 1/Task 2 were already committed before the review-fixes/Task 3/Task 4 round; that round's own P1 finding — the sidebar's compact-sheet overlay visibility gap — is fixed in the newest commit; see the dated evidence bullets above and `docs/testing/reports/2026-09-01-ipad-ui-ux-state-feedback-polish.md`). Next action is **Codex re-review**: Codex already reviewed once and correctly found the P1; it should confirm the fix (`bb63989`) actually closes that finding and that no other finding from its review remains open, from a fresh session with no prior context. After that, the remaining gap before this branch could be considered fully done is the real-device/Simulator manual checklist (plan §9), which is `NOT RUN` in this environment — this specifically now includes confirming the compact-sheet overlay is actually visible on hardware. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization; `codex/ipad-ui-ux-state-feedback-polish` itself was not touched by this round and still points at `819ea8c`.
 
 The next major product direction is now documented in `docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`: LumaHarbor should target functional parity with AwayPhotoRawEditor while staying a native Swift/SwiftUI/Core Image implementation. Do not start large parity implementation work until the current UI polish branch is closed cleanly and a phase-specific implementation plan is written.
 
@@ -179,7 +188,7 @@ Full closing report for the rest of `docs/superpowers/plans/2026-09-01-ipad-ui-u
 
 - Source branch: `claude/ipad-ui-polish-finish`, in worktree `.worktrees/claude-ipad-ui-polish-finish`.
 - Starting HEAD for this round: `819ea8cad5c6f83bad739d5bf8e67f16a6195e62` (identical to `codex/ipad-ui-ux-state-feedback-polish` at the time).
-- Final HEAD: `ebdbeb0a245b6af419081a37718703bebb6726c8`.
+- Final HEAD **at the time this handoff section was written**: `ebdbeb0a245b6af419081a37718703bebb6726c8` (the last product commit of that round). **This was already inaccurate when written** — `244306109f5a212d502b11f342b65fbecc52d4ae` (`docs: record iPad UI polish verification`, this file's own evidence entries plus the report) was committed in the same round on top of `ebdbeb0` and was the actual branch HEAD by the time this section existed. See the "Handoff to Codex (2026-09-02, P1 review-fix round)" section below for the branch's actual current HEAD.
 - Base branch: `main`, at `f38f3ad7968b2d5faaffa96dda17f308a982846d`.
 - 2 new commits on top of the previous 5-commits-ahead-of-`main` baseline (now 7 ahead, 0 behind).
 - No configured upstream. No push, merge, rebase, or cherry-pick occurred during this work.
@@ -214,3 +223,50 @@ Codex (or another fresh-context reviewer) independently reviews `819ea8c..ebdbeb
 
 - `receiving-code-review` / independent review workflow for the fresh-context Codex review above.
 - `handoff` again once ownership changes (e.g. to whoever runs the real-device checklist).
+
+## Handoff to Codex (2026-09-02, from Claude — P1 review-fix round)
+
+Full closing report for the P1 finding from Codex's review of `819ea8c..ebdbeb0`/`2443061`, per `docs/coordination/HANDOFF_TEMPLATE.md`.
+
+### Status
+
+`DONE` for the P1 finding. `NOT RUN` for every real-device/Simulator manual gate, unchanged from before.
+
+### Git state
+
+- Source branch: `claude/ipad-ui-polish-finish`, in worktree `.worktrees/claude-ipad-ui-polish-finish`.
+- Starting HEAD for this round: `244306109f5a212d502b11f342b65fbecc52d4ae` (the actual HEAD when Codex's review ran, though the review itself targeted the product code through `ebdbeb0`).
+- Final HEAD: `bb63989d091bbcc1e2025c3161c97376abfff22e`.
+- Base branch: `main`, at `f38f3ad7968b2d5faaffa96dda17f308a982846d`.
+- 1 new commit on top of `2443061`.
+- No configured upstream. No push, merge, rebase, or cherry-pick occurred during this work.
+
+### Changes
+
+- `bb63989` `fix: show sidebar operation overlay inside the compact sheet` — see the dated evidence bullet above ("Codex review P1 fix") for exact files, RED/GREEN detail, and design rationale.
+- Also fixed, committed alongside this file's own docs commit: the `ebdbeb0`-as-HEAD imprecision the user's review-fix request explicitly called out — this file's own commit-range corrections (the "Commit-range correction" bullet near the top of "Source of truth", and the "Final HEAD **at the time...**" correction under the previous handoff's Git state) and `docs/testing/reports/2026-09-01-ipad-ui-ux-state-feedback-polish.md`'s review-request line, which cited `819ea8c..ebdbeb0` as if that were the branch's final range.
+
+### Verification
+
+See the "Codex review P1 fix" evidence bullet above for exact commands and counts. Summary: `PadLibraryAccessibilityContractTests` 30/30. Full `swift test` 1125/9-skipped/0-failures on two consecutive clean runs (one earlier run had 1 unrelated, non-reproducing failure — noted, not silently dropped). `git diff --check` clean. Privacy scan over this fix's diff: no hits. `xcodebuild` generic iOS build re-run for this fix specifically: `** BUILD SUCCEEDED **`.
+
+### Dirty files
+
+- `Apps/LumaHarborPad.xcodeproj/project.pbxproj`: unchanged by this round.
+- No other dirty file. `git status --short --branch` was clean immediately after the commit.
+
+### Concerns and blockers
+
+- **Resolved**: the P1 finding (compact-sheet overlay visibility gap) is fixed and covered by a new test that would fail if it regressed.
+- **Carried forward, still open**: no second agent has independently reviewed `bb63989` itself yet — Codex found the P1 in the commit before it, but has not seen the fix.
+- **Carried forward, still open**: every real-device/Simulator manual check (plan §9) remains `NOT RUN`. This specifically now includes confirming the compact-sheet overlay is actually visible on a real device or Simulator, which is the one thing none of this session's automated evidence can prove — a source-parsing test can confirm the code *would* render the overlay, not that a user sees it correctly positioned inside a `.sheet` on real hardware.
+- **New, minor**: `PadLibrarySidebar.swift` and `PadLibraryView.swift` each now contain their own copy of the `operationState`-to-`(title, message)` mapping (not a shared helper), a deliberate tradeoff to avoid touching `PadLibraryView.swift`'s existing case-branch text that `PadLibraryCompositionContractTests/testPadLibraryViewRendersDistinctSourceOperationOverlayTitles` already locks in. If a future change adds a sixth `LibraryBrowserOperationState` case, both copies need updating together — worth flagging for whoever touches that enum next.
+
+### Next action
+
+Codex re-reviews `bb63989` specifically (or the full `819ea8c..bb63989` range if starting fresh) to confirm the P1 finding is actually closed and no other finding remains. After that, the real-device/Simulator manual checklist (plan §9) is the last gap before this branch could be considered fully done. Still prohibited without explicit user authorization: push, merge, rebase, removing the worktree, committing `Apps/LumaHarborPad.xcodeproj/project.pbxproj` or any signing setting.
+
+### Suggested skills
+
+- `receiving-code-review` for the Codex re-review above.
+- `handoff` again once ownership changes.
