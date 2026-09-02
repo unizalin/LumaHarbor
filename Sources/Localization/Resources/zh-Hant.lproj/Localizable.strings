@@ -16,6 +16,7 @@
 "Adjustments" = "調整";
 "All" = "全部";
 "App Copies" = "App 複本";
+"Aperture" = "光圈";
 "Applies this preset using the current merge or replace mode" = "依目前的合併或取代模式套用此 Preset";
 "Apply mode" = "套用模式";
 "Apply preset" = "套用 Preset";
@@ -25,9 +26,11 @@
 "Back to the library grid" = "回到相片庫網格";
 "Blacks" = "黑色";
 "Blue" = "藍";
+"Camera" = "相機";
 "Can't open this photo" = "無法開啟這張照片";
 "Cancel" = "取消";
 "Can't verify this photo" = "無法驗證這張照片";
+"Capture Date" = "拍攝時間";
 "Choose a different output location." = "選擇其他輸出位置。";
 "Choose a photo from Files or an external drive." = "從「檔案」App 或外接磁碟選擇一張照片。";
 "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them." = "選擇磁碟上的一個資料夾。LumaHarbor 會直接讀取原位置的 RAW 檔案，永遠不會搬移或修改它們。";
@@ -79,6 +82,7 @@
 "Decoding RAW…" = "正在解碼 RAW…";
 "Delete the local index and rescan your folders to rebuild it." = "刪除本機索引，然後重新掃描你的資料夾即可重建。";
 "Delete" = "刪除";
+"Dimensions" = "尺寸";
 "Double-click the row to reset" = "雙擊這一列可重設";
 "Drag to move this panel." = "拖曳可移動此面板。";
 "Edit in Place" = "原地編輯";
@@ -97,10 +101,14 @@
 "Favorite" = "收藏";
 "Favorites" = "收藏";
 "Fields included:" = "包含欄位數：";
+"File Size" = "檔案大小";
+"Filename" = "檔名";
 "Filename (A–Z)" = "檔名（A–Z）";
 "Filename (Z–A)" = "檔名（Z–A）";
 "Filter presets" = "篩選 Preset";
+"Focal Length" = "焦距";
 "Focus Mode" = "專注模式";
+"Format" = "格式";
 "found" = "張照片";
 "Free up space on the drive, then retry." = "騰出磁碟空間，然後重試。";
 "Free up space on your startup disk, or lower the cache limit in Settings." = "騰出開機磁碟的空間，或在設定中調低快取上限。";
@@ -112,6 +120,7 @@
 "Highlights" = "亮部";
 "Hold to compare with the original, or click to pin it" = "按住可對照原圖，點一下可固定顯示";
 "How should LumaHarbor use this photo?" = "LumaHarbor 該如何使用這張照片？";
+"ISO" = "ISO";
 "Import Develop Presets" = "匯入開發預設";
 "Import develop presets" = "匯入開發預設";
 "Import" = "匯入";
@@ -121,6 +130,7 @@
 "JPEG quality" = "JPEG 品質";
 "Keep the file in your library — support may arrive in a future macOS release." = "先把檔案留在相片庫中──未來的 macOS 版本可能會支援。";
 "Large" = "大";
+"Lens" = "鏡頭";
 "Library" = "圖庫";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor 可以顯示已快取的縮圖，但編輯需要原始檔案。";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor 啟動時無法檢查是否有中斷的匯入。";
@@ -155,6 +165,7 @@
 "Medium" = "中";
 "Merge keeps fields the preset doesn't set; Replace starts from neutral" = "合併會保留 Preset 未設定的欄位；取代則從中性值重新開始";
 "Merge" = "合併";
+"Metadata" = "詮釋資料";
 "More preset actions" = "更多 Preset 操作";
 "My Presets" = "我的 Preset";
 "Name" = "名稱";
@@ -181,6 +192,7 @@
 "Open RAW…" = "開啟 RAW…";
 "Opening photo…" = "正在開啟照片…";
 "Orange" = "橙";
+"Orientation" = "方向";
 "Original" = "原圖";
 "Partial issue" = "部分項目發生問題";
 "Photo Folders" = "照片資料夾";
@@ -257,6 +269,7 @@
 "Sharpening" = "銳化";
 "Show in Finder" = "在 Finder 中顯示";
 "Show Original" = "顯示原圖";
+"Shutter Speed" = "快門速度";
 "Size" = "尺寸";
 "skipped" = "張跳過";
 "Small" = "小";

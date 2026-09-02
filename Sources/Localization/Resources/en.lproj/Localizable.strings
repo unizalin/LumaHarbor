@@ -16,6 +16,7 @@
 "Adjustments" = "Adjustments";
 "All" = "All";
 "App Copies" = "App Copies";
+"Aperture" = "Aperture";
 "Applies this preset using the current merge or replace mode" = "Applies this preset using the current merge or replace mode";
 "Apply mode" = "Apply mode";
 "Apply preset" = "Apply preset";
@@ -25,9 +26,11 @@
 "Back to the library grid" = "Back to the library grid";
 "Blacks" = "Blacks";
 "Blue" = "Blue";
+"Camera" = "Camera";
 "Can't open this photo" = "Can't open this photo";
 "Cancel" = "Cancel";
 "Can't verify this photo" = "Can't verify this photo";
+"Capture Date" = "Capture Date";
 "Choose a different output location." = "Choose a different output location.";
 "Choose a photo from Files or an external drive." = "Choose a photo from Files or an external drive.";
 "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them." = "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them.";
@@ -79,6 +82,7 @@
 "Decoding RAW…" = "Decoding RAW…";
 "Delete the local index and rescan your folders to rebuild it." = "Delete the local index and rescan your folders to rebuild it.";
 "Delete" = "Delete";
+"Dimensions" = "Dimensions";
 "Double-click the row to reset" = "Double-click the row to reset";
 "Drag to move this panel." = "Drag to move this panel.";
 "Edit in Place" = "Edit in Place";
@@ -97,10 +101,14 @@
 "Favorite" = "Favorite";
 "Favorites" = "Favorites";
 "Fields included:" = "Fields included:";
+"File Size" = "File Size";
+"Filename" = "Filename";
 "Filename (A–Z)" = "Filename (A–Z)";
 "Filename (Z–A)" = "Filename (Z–A)";
 "Filter presets" = "Filter presets";
+"Focal Length" = "Focal Length";
 "Focus Mode" = "Focus Mode";
+"Format" = "Format";
 "found" = "found";
 "Free up space on the drive, then retry." = "Free up space on the drive, then retry.";
 "Free up space on your startup disk, or lower the cache limit in Settings." = "Free up space on your startup disk, or lower the cache limit in Settings.";
@@ -112,6 +120,7 @@
 "Highlights" = "Highlights";
 "Hold to compare with the original, or click to pin it" = "Hold to compare with the original, or click to pin it";
 "How should LumaHarbor use this photo?" = "How should LumaHarbor use this photo?";
+"ISO" = "ISO";
 "Import Develop Presets" = "Import Develop Presets";
 "Import develop presets" = "Import develop presets";
 "Import" = "Import";
@@ -121,6 +130,7 @@
 "JPEG quality" = "JPEG quality";
 "Keep the file in your library — support may arrive in a future macOS release." = "Keep the file in your library — support may arrive in a future macOS release.";
 "Large" = "Large";
+"Lens" = "Lens";
 "Library" = "Library";
 "LumaHarbor can show cached thumbnails, but editing needs the original file." = "LumaHarbor can show cached thumbnails, but editing needs the original file.";
 "LumaHarbor couldn't check for interrupted imports on launch." = "LumaHarbor couldn't check for interrupted imports on launch.";
@@ -155,6 +165,7 @@
 "Medium" = "Medium";
 "Merge keeps fields the preset doesn't set; Replace starts from neutral" = "Merge keeps fields the preset doesn't set; Replace starts from neutral";
 "Merge" = "Merge";
+"Metadata" = "Metadata";
 "More preset actions" = "More preset actions";
 "My Presets" = "My Presets";
 "Name" = "Name";
@@ -181,6 +192,7 @@
 "Open RAW…" = "Open RAW…";
 "Opening photo…" = "Opening photo…";
 "Orange" = "Orange";
+"Orientation" = "Orientation";
 "Original" = "Original";
 "Partial issue" = "Partial issue";
 "Photo Folders" = "Photo Folders";
@@ -257,6 +269,7 @@
 "Sharpening" = "Sharpening";
 "Show in Finder" = "Show in Finder";
 "Show Original" = "Show Original";
+"Shutter Speed" = "Shutter Speed";
 "Size" = "Size";
 "skipped" = "skipped";
 "Small" = "Small";
