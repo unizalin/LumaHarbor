@@ -118,6 +118,7 @@
 "Green" = "綠";
 "Group (optional, use / for nesting)" = "群組（選填，使用 / 表示巢狀層級）";
 "Highlights" = "亮部";
+"Histogram" = "直方圖";
 "Hold to compare with the original, or click to pin it" = "按住可對照原圖，點一下可固定顯示";
 "How should LumaHarbor use this photo?" = "LumaHarbor 該如何使用這張照片？";
 "ISO" = "ISO";
@@ -175,6 +176,7 @@
 "Next Photo" = "下一張照片";
 "No capture time" = "沒有拍攝時間";
 "No files were selected." = "未選擇任何檔案。";
+"No histogram available yet" = "目前沒有可顯示的直方圖";
 "No photos match this search" = "找不到符合搜尋條件的照片";
 "No presets yet" = "尚無 Preset";
 "No RAW files found in this folder" = "這個資料夾裡沒有找到 RAW 檔案";

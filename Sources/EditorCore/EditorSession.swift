@@ -59,6 +59,14 @@ public final class EditorSession: ObservableObject {
     /// decoding forever).
     @Published public private(set) var decodeFailed = false
 
+    /// The RGB histogram of the currently displayed preview frame -- parity
+    /// design spec §6.2: it must track `previewImage`, not the RAW file's
+    /// own fixed metadata. `nil` before anything has rendered, after a
+    /// decode failure, or once the photo closes; never a stale histogram
+    /// left over from a previous photo or a superseded frame (see
+    /// `scheduleHistogramComputation(for:generation:)`).
+    @Published public private(set) var histogram: HistogramData?
+
     @Published public private(set) var saveState: SaveState = .unchanged
     @Published public private(set) var canUndo = false
     @Published public private(set) var canRedo = false
@@ -88,6 +96,7 @@ public final class EditorSession: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
     private var autosaveTask: Task<Void, Never>?
+    private var histogramTask: Task<Void, Never>?
     private var originalRenderTask: Task<Void, Never>?
     private var interactiveThrottleTask: Task<Void, Never>?
     private var lastInteractiveSubmit: ContinuousClock.Instant?
@@ -198,6 +207,7 @@ public final class EditorSession: ObservableObject {
         eventTask?.cancel()
         settleTask?.cancel()
         autosaveTask?.cancel()
+        histogramTask?.cancel()
         originalRenderTask?.cancel()
         interactiveThrottleTask?.cancel()
     }
@@ -225,6 +235,7 @@ public final class EditorSession: ObservableObject {
         self.isReadOnlyLibrary = isReadOnly
         self.previewImage = nil
         self.decodeFailed = false
+        self.histogram = nil
         self.originalImage = nil
         self.isShowingOriginal = false
         self.saveState = .unchanged
@@ -253,6 +264,7 @@ public final class EditorSession: ObservableObject {
         sourceURL = nil
         previewImage = nil
         decodeFailed = false
+        histogram = nil
         originalImage = nil
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
@@ -583,6 +595,7 @@ public final class EditorSession: ObservableObject {
             lastDisplayedGeneration = result.token.generation
             previewImage = result.image.cgImage
             decodeFailed = false
+            scheduleHistogramComputation(for: result.image.cgImage, generation: result.token.generation)
             previewQuality = result.quality
             if let baseline = result.image.whiteBalanceBaseline {
                 whiteBalanceBaseline = baseline
@@ -623,6 +636,8 @@ public final class EditorSession: ObservableObject {
             // here, not just the preview-only path above.
             previewImage = nil
             decodeFailed = true
+            histogramTask?.cancel()
+            histogram = nil
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't show this photo"), for: error)
         }
     }
@@ -632,6 +647,30 @@ public final class EditorSession: ObservableObject {
     /// for preset-application diagnostics).
     private static func previewFailureMessage(for error: Error) -> String {
         L10n.t("This preset's preview couldn't be rendered right now.")
+    }
+
+    // MARK: - Histogram
+
+    /// Kicks off the histogram computation for a just-accepted preview frame
+    /// off the main actor (`EditorDependencies.computeHistogram`'s own
+    /// default already hops off it). Cancelling the previous
+    /// `histogramTask` here is best-effort only -- `HistogramComputer`'s
+    /// tight per-pixel loop has no cancellation checkpoints of its own, so
+    /// the real staleness guard is the `generation` comparison below, the
+    /// same pattern `previewContextRelevance` already establishes for
+    /// preset previews: an already-in-flight computation for a frame the
+    /// user has since moved on from must never overwrite what's actually
+    /// displayed now, regardless of which one happens to finish last.
+    private func scheduleHistogramComputation(for image: CGImage, generation: UInt64) {
+        guard let services else { return }
+        histogramTask?.cancel()
+        let compute = services.computeHistogram
+        histogramTask = Task { [weak self] in
+            let computed = await compute(image)
+            guard let self, !Task.isCancelled else { return }
+            guard generation == self.lastDisplayedGeneration else { return }
+            self.histogram = computed
+        }
     }
 
     // MARK: - Saving
@@ -727,10 +766,12 @@ public final class EditorSession: ObservableObject {
     private func cancelPendingWork() {
         settleTask?.cancel()
         autosaveTask?.cancel()
+        histogramTask?.cancel()
         originalRenderTask?.cancel()
         interactiveThrottleTask?.cancel()
         settleTask = nil
         autosaveTask = nil
+        histogramTask = nil
         originalRenderTask = nil
         interactiveThrottleTask = nil
         lastInteractiveSubmit = nil

@@ -2,6 +2,7 @@ import AdjustmentUI
 import EditorCore
 import PhotoLibraryCore
 import Localization
+import RawProcessingCore
 import SwiftUI
 
 /// Right pane: the shared basic adjustments alongside Mac-only preset controls.
@@ -16,6 +17,8 @@ struct InspectorView: View {
             if let photo = model.editor.photo {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        HistogramPanel(histogram: model.editor.histogram)
+                        Divider()
                         MetadataPanel(snapshot: EditorMetadataSnapshot(photo: photo))
                         Divider()
                         PresetBrowserView()
@@ -82,6 +85,57 @@ private struct MetadataPanel: View {
             Text(value ?? "—")
         }
         .font(.caption)
+    }
+}
+
+/// AwayPhotoRawEditor parity Phase 1 Task 2: the histogram block (design
+/// spec §6.2, §8.1). `histogram` comes straight from `EditorSession
+/// .histogram`, which tracks the currently displayed *rendered* preview
+/// frame, not the RAW file's own fixed statistics -- this view only draws
+/// whatever it's handed and shows localized fallback text while there is
+/// nothing to draw yet (no preview has rendered, or the last one failed).
+private struct HistogramPanel: View {
+    let histogram: HistogramData?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.t("Histogram"))
+                .font(.headline)
+            if let histogram {
+                Canvas { context, size in
+                    Self.draw(histogram.red, color: .red, in: context, size: size)
+                    Self.draw(histogram.green, color: .green, in: context, size: size)
+                    Self.draw(histogram.blue, color: .blue, in: context, size: size)
+                }
+                .frame(height: 80)
+                .background(Color.black.opacity(0.05))
+            } else {
+                Text(L10n.t("No histogram available yet"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
+                    .background(Color.black.opacity(0.05))
+            }
+        }
+    }
+
+    /// One channel's own filled curve over the composite's shared axes --
+    /// three of these overlaid (one per channel) is the "RGB composite" the
+    /// plan calls for, without a separate view per bin.
+    private static func draw(_ bins: [Int], color: Color, in context: GraphicsContext, size: CGSize) {
+        guard let maxCount = bins.max(), maxCount > 0 else { return }
+        var path = Path()
+        let stepX = size.width / CGFloat(bins.count)
+        path.move(to: CGPoint(x: 0, y: size.height))
+        for (index, count) in bins.enumerated() {
+            let x = CGFloat(index) * stepX
+            let normalized = CGFloat(count) / CGFloat(maxCount)
+            let y = size.height - (normalized * size.height)
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+        path.addLine(to: CGPoint(x: size.width, y: size.height))
+        path.closeSubpath()
+        context.fill(path, with: .color(color.opacity(0.35)))
     }
 }
 
