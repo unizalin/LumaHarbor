@@ -545,9 +545,19 @@ public final class LibraryBrowserSession: ObservableObject {
 
     // MARK: - Source lifecycle
 
+    /// Sets `operationState` back to `.idle` only if it still holds the
+    /// exact value this call set -- a second, newer source-lifecycle call
+    /// (add/relink/remove/scan) may have already overwritten it with its own
+    /// state, and that must not be clobbered by this one finishing later.
+    /// Mirrors the scan-completion guard in `scanSource(_:)` below.
+    private func clearOperationState(ifStill expected: LibraryBrowserOperationState) {
+        if operationState == expected {
+            operationState = .idle
+        }
+    }
+
     public func addSource(at url: URL, sourceKind: LibrarySourceKind) async {
         operationState = .addingSource
-        defer { operationState = .idle }
         do {
             let folder = try await dependencies.addSource(url, sourceKind)
             sources.append(folder)
@@ -555,11 +565,11 @@ public final class LibraryBrowserSession: ObservableObject {
         } catch {
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't add this source"), for: error)
         }
+        clearOperationState(ifStill: .addingSource)
     }
 
     public func relinkSource(_ libraryID: LibraryID, to url: URL) async {
         operationState = .reconnectingSource(libraryID)
-        defer { operationState = .idle }
         do {
             let folder = try await dependencies.relinkSource(libraryID, url)
             if let index = sources.firstIndex(where: { $0.id == libraryID }) {
@@ -568,15 +578,16 @@ public final class LibraryBrowserSession: ObservableObject {
         } catch {
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't reconnect this source"), for: error)
         }
+        clearOperationState(ifStill: .reconnectingSource(libraryID))
     }
 
     public func removeSource(_ libraryID: LibraryID) async {
         operationState = .removingSource(libraryID)
-        defer { operationState = .idle }
         do {
             try await dependencies.removeSource(libraryID)
         } catch {
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't remove this source"), for: error)
+            clearOperationState(ifStill: .removingSource(libraryID))
             return
         }
         sources.removeAll { $0.id == libraryID }
@@ -585,6 +596,7 @@ public final class LibraryBrowserSession: ObservableObject {
         if isSelectionWithin(libraryID) {
             select(.smart(.all))
         }
+        clearOperationState(ifStill: .removingSource(libraryID))
     }
 
     private func isSelectionWithin(_ libraryID: LibraryID) -> Bool {
@@ -624,13 +636,7 @@ public final class LibraryBrowserSession: ObservableObject {
                 await self?.handle(event, for: libraryID)
             }
             self.scanTasks.removeValue(forKey: libraryID)
-            // Only this scan's own completion may clear `operationState` --
-            // a second `scanSource(_:)` call for a different source may have
-            // already overwritten it with its own `.scanningSource`, and
-            // that must not be clobbered by this one finishing later.
-            if self.operationState == .scanningSource(libraryID) {
-                self.operationState = .idle
-            }
+            self.clearOperationState(ifStill: .scanningSource(libraryID))
         }
     }
 

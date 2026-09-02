@@ -1463,6 +1463,50 @@ final class LibraryBrowserSessionTests: XCTestCase {
         }
     }
 
+    /// Reproduces the stale-`defer` bug: `addSource` and `relinkSource` used
+    /// to unconditionally reset `operationState = .idle` when they finished,
+    /// even if a newer operation (started after them) had already
+    /// overwritten `operationState` with its own value. This asserts that an
+    /// `addSource` call that finishes late does not clobber a
+    /// `relinkSource` call for a different source that started later and is
+    /// still in flight -- only the operation that actually set the current
+    /// state may clear it, mirroring `scanSource(_:)`'s own completion
+    /// guard.
+    func testAddSourceCompletionDoesNotClobberNewerReconnectOperationState() async throws {
+        let environment = FakeLibraryEnvironment()
+        let existingSourceID = LibraryID()
+        let existingSource = makeFolder(id: existingSourceID, connectionState: .needsAuthorization)
+        await environment.setSourcesResult(.success([existingSource]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        let newFolder = makeFolder(name: "New Drive")
+        await environment.setAddSourceResult(.success(newFolder))
+        await environment.setAddSourceGated(true)
+        await environment.setRelinkResult(.success(makeFolder(id: existingSourceID, connectionState: .ready)))
+        await environment.setRelinkGated(true)
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.sources.count == 1 }
+
+        let addTask = Task { await session.addSource(at: URL(fileURLWithPath: "/Volumes/NewDrive"), sourceKind: .externalFolder) }
+        try await waitUntil { session.operationState == .addingSource }
+
+        let relinkTask = Task { await session.relinkSource(existingSourceID, to: existingSource.rootURL) }
+        try await waitUntil { session.operationState == .reconnectingSource(existingSourceID) }
+
+        await environment.openAddSourceGate()
+        await addTask.value
+        XCTAssertEqual(
+            session.operationState,
+            .reconnectingSource(existingSourceID),
+            "addSource finishing must not clobber the still in-flight relinkSource's operation state"
+        )
+
+        await environment.openRelinkGate()
+        await relinkTask.value
+        XCTAssertEqual(session.operationState, .idle)
+    }
+
     func testOperationStateDoesNotChangeSourceProgressSemantics() async throws {
         let environment = FakeLibraryEnvironment()
         let sourceID = LibraryID()
