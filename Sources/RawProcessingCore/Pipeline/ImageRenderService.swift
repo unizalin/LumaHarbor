@@ -126,6 +126,60 @@ public final class ImageRenderService: @unchecked Sendable {
         }
     }
 
+    /// Format-aware single-photo export write (design spec §6.11): JPEG,
+    /// PNG, TIFF or HEIC, with quality (JPEG/HEIC only), bit depth (TIFF
+    /// only), DPI metadata and an EXIF/TIFF properties dictionary.
+    ///
+    /// Goes through `CGImageDestination` directly rather than `CIContext`'s
+    /// `...Representation` convenience methods: those only honor a small
+    /// documented allowlist of `CIImageRepresentationOption`s (compression
+    /// quality among them) and silently drop arbitrary ImageIO property
+    /// keys like `kCGImagePropertyTIFFDictionary` or `kCGImagePropertyDPIWidth`
+    /// -- confirmed by hand, the exact reason `writeJPEG(_:to:quality:)`
+    /// above can't simply grow more options. `CGImageDestinationAddImage`'s
+    /// properties dictionary is the documented, general mechanism for
+    /// writing this metadata, for every format ImageIO can encode.
+    public func writeExport(
+        _ image: CIImage,
+        to url: URL,
+        format: ExportFormat,
+        quality: Double,
+        bitDepth: ExportBitDepth,
+        dpi: Double?,
+        exifProperties: [CFString: Any]
+    ) throws {
+        guard !image.extent.isInfinite, !image.extent.isEmpty else {
+            throw ImageRenderError.renderFailed
+        }
+
+        let pixelFormat: CIFormat = format.supportsBitDepthChoice ? bitDepth.pixelFormat : .RGBA8
+        guard let cgImage = context.createCGImage(
+            image, from: image.extent, format: pixelFormat, colorSpace: Self.outputColorSpace
+        ) else {
+            throw ImageRenderError.renderFailed
+        }
+
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, format.utTypeIdentifier as CFString, 1, nil
+        ) else {
+            throw ImageRenderError.destinationNotWritable(path: url.deletingLastPathComponent().path)
+        }
+
+        var properties = exifProperties
+        if format.usesQuality {
+            properties[kCGImageDestinationLossyCompressionQuality] = Self.clampQuality(quality)
+        }
+        if let dpi {
+            properties[kCGImagePropertyDPIWidth] = dpi
+            properties[kCGImagePropertyDPIHeight] = dpi
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw ImageRenderError.encodingFailed
+        }
+    }
+
     /// Releases GPU-side caches. Called when the app switches photos so a long
     /// browsing session doesn't accumulate intermediates.
     public func clearCaches() {

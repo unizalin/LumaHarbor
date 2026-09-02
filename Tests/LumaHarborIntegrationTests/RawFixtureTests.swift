@@ -151,13 +151,13 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
         let destination = try makeSubdirectory("Exports")
         let metadata = try CoreImageRawDecoder().readMetadata(at: url)
 
-        let exporter = JPEGExporter()
+        let exporter = PhotoExporter()
         let outcome = try await exporter.export(ExportRequest(
             sourceURL: url,
             adjustments: PhotoAdjustments(exposure: 0.3, contrast: 15, vibrance: 20),
             destinationDirectory: destination,
             baseFilename: url.deletingPathExtension().lastPathComponent,
-            jpegQuality: 0.9
+            quality: 0.9
         ))
 
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
@@ -184,12 +184,12 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
         let fingerprintBefore = try FingerprintCalculator.fingerprint(forFileAt: url)
         let attributesBefore = try FileManager.default.attributesOfItem(atPath: url.path)
 
-        _ = try await JPEGExporter().export(ExportRequest(
+        _ = try await PhotoExporter().export(ExportRequest(
             sourceURL: url,
             adjustments: PhotoAdjustments(exposure: 1),
             destinationDirectory: destination,
             baseFilename: "roundtrip",
-            jpegQuality: 0.8
+            quality: 0.8
         ))
 
         let fingerprintAfter = try FingerprintCalculator.fingerprint(forFileAt: url)

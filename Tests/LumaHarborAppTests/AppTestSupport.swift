@@ -237,7 +237,7 @@ class AppViewModelTestCase: XCTestCase {
                 cache: cache, decoder: decoder, renderService: renderService
             ),
             previewScheduler: PreviewScheduler(renderer: renderer),
-            exporter: JPEGExporter(decoder: decoder, renderService: renderService),
+            exporter: PhotoExporter(decoder: decoder, renderService: renderService),
             decoder: decoder,
             renderService: renderService,
             previewRenderer: renderer,

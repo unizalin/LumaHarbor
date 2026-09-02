@@ -16,7 +16,7 @@ struct AppServices {
     let myPresetsRepository: any PresetRepository
     let thumbnailProvider: ThumbnailProvider
     let previewScheduler: PreviewScheduler
-    let exporter: JPEGExporter
+    let exporter: PhotoExporter
     let decoder: any RawDecoding
     let renderService: ImageRenderService
     let previewRenderer: any PreviewRendering
@@ -75,7 +75,7 @@ struct AppServices {
                 renderService: renderService
             ),
             previewScheduler: PreviewScheduler(renderer: previewRenderer),
-            exporter: JPEGExporter(
+            exporter: PhotoExporter(
                 decoder: decoder,
                 pipeline: pipeline,
                 renderService: renderService
