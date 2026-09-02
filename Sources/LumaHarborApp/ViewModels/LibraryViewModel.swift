@@ -33,6 +33,31 @@ struct ExportState: Equatable {
     var resultPath: String?
 }
 
+/// Every user-facing choice `ExportSheet` collects, bundled so
+/// `LibraryViewModel.export(photo:to:options:)` takes one value instead of a
+/// long positional-argument list. 1:1 with `RawProcessingCore.ExportRequest`'s
+/// own new fields (design spec §6.11); `LibraryViewModel` maps this straight
+/// across when it builds the request.
+struct MacExportOptions: Equatable {
+    var format: ExportFormat
+    var quality: Double
+    var bitDepth: ExportBitDepth
+    var maximumWidth: Int?
+    var maximumHeight: Int?
+    var dpi: Double?
+    var exifRetentionPolicy: ExifRetentionPolicy
+
+    static let `default` = MacExportOptions(
+        format: .jpeg,
+        quality: 0.9,
+        bitDepth: .eightBit,
+        maximumWidth: nil,
+        maximumHeight: nil,
+        dpi: nil,
+        exifRetentionPolicy: .preserveAll
+    )
+}
+
 /// Owns library-level state: which folders exist, which photos are in them, and
 /// which photo is open.
 @MainActor
@@ -575,10 +600,10 @@ public final class LibraryViewModel: ObservableObject {
 
     // MARK: - Export
 
-    func presentExportPanel(quality: Double) {
+    func presentExportPanel(options: MacExportOptions) {
         guard let photo = selectedPhoto else { return }
         let panel = NSOpenPanel()
-        panel.title = L10n.t("Export JPEG")
+        panel.title = L10n.t("Export Photo")
         panel.message = L10n.t("Choose where to save the exported photo.")
         panel.prompt = L10n.t("Export Here")
         panel.canChooseFiles = false
@@ -587,10 +612,10 @@ public final class LibraryViewModel: ObservableObject {
         panel.allowsMultipleSelection = false
 
         guard panel.runModal() == .OK, let directory = panel.url else { return }
-        export(photo: photo, to: directory, quality: quality)
+        export(photo: photo, to: directory, options: options)
     }
 
-    func export(photo: PhotoAsset, to directory: URL, quality: Double) {
+    func export(photo: PhotoAsset, to directory: URL, options: MacExportOptions) {
         guard let services, let library = selectedLibrary else { return }
 
         exportTask?.cancel()
@@ -606,7 +631,13 @@ public final class LibraryViewModel: ObservableObject {
             adjustments: editor.adjustments,
             destinationDirectory: directory,
             baseFilename: photo.baseFilename,
-            jpegQuality: quality
+            format: options.format,
+            quality: options.quality,
+            bitDepth: options.bitDepth,
+            maximumWidth: options.maximumWidth,
+            maximumHeight: options.maximumHeight,
+            dpi: options.dpi,
+            exifRetentionPolicy: options.exifRetentionPolicy
         )
 
         exportTask = Task { [weak self] in

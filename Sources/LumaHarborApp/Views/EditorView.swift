@@ -136,7 +136,7 @@ struct EditorView: View {
                 Label(L10n.t("Export"), systemImage: "square.and.arrow.up")
             }
             .disabled(model.selectedPhoto == nil)
-            .help(L10n.t("Export a full-resolution JPEG"))
+            .help(L10n.t("Export a full-resolution photo"))
         }
     }
 }

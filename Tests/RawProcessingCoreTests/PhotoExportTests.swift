@@ -48,6 +48,23 @@ final class DecodeGate: @unchecked Sendable {
     }
 }
 
+/// Records every decode request an exporter under test made, so a test can
+/// assert *how* the export decoded (Phase 1 Task 4: "ensure export renders
+/// from full-resolution source, not preview cache") without depending on
+/// timing. A plain class, not the `struct` decoder itself, since the decoder
+/// is handed to the exporter by value and a struct can't accumulate state
+/// across calls that way.
+final class DecodeRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var requests: [RawDecodeRequest] = []
+
+    func record(_ request: RawDecodeRequest) {
+        lock.lock()
+        requests.append(request)
+        lock.unlock()
+    }
+}
+
 /// Stands in for `CoreImageRawDecoder` so export behaviour can be tested
 /// without a Sony `.ARW` and without Apple's RAW decoder.
 struct SyntheticRawDecoder: RawDecoding {
@@ -59,11 +76,20 @@ struct SyntheticRawDecoder: RawDecoding {
     /// the temp file is already on disk. Deliberately deaf to cancellation.
     var metadataGate: DecodeGate?
     var failure: RawDecodingError?
+    /// EXIF fields the decode reports, beyond pixel size -- `nil` keeps the
+    /// old size-only default so every pre-existing test is unaffected.
+    var metadataOverride: RawMetadata?
+    var recorder: DecodeRequestRecorder?
 
     /// Built directly rather than via `readMetadata`, so gating the metadata
     /// stage doesn't also stall the decode stage.
     private var syntheticMetadata: RawMetadata {
-        RawMetadata(pixelWidth: Int(pixelSize.width), pixelHeight: Int(pixelSize.height))
+        if var override = metadataOverride {
+            override.pixelWidth = Int(pixelSize.width)
+            override.pixelHeight = Int(pixelSize.height)
+            return override
+        }
+        return RawMetadata(pixelWidth: Int(pixelSize.width), pixelHeight: Int(pixelSize.height))
     }
 
     func supportsFile(at url: URL) -> Bool { failure == nil }
@@ -75,6 +101,7 @@ struct SyntheticRawDecoder: RawDecoding {
     }
 
     func decode(_ request: RawDecodeRequest) throws -> DecodedRawImage {
+        recorder?.record(request)
         gate?.enterAndWait()
         try Task.checkCancellation()
         if let failure { throw failure }
@@ -94,14 +121,14 @@ struct SyntheticRawDecoder: RawDecoding {
 
 /// Spec §6.3 and §12.2: full-resolution export, serial-numbered filenames,
 /// cancellation, and no partial output left behind.
-final class JPEGExportTests: XCTestCase {
+final class PhotoExportTests: XCTestCase {
     private var directory: URL!
     private var sourceURL: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("JPEGExportTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("PhotoExportTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         sourceURL = directory.appendingPathComponent("DSC0001.ARW")
         try Data(repeating: 0x22, count: 256).write(to: sourceURL)
@@ -122,14 +149,27 @@ final class JPEGExportTests: XCTestCase {
     private func makeRequest(
         destination: URL? = nil,
         baseFilename: String = "DSC0001",
-        adjustments: PhotoAdjustments = .neutral
+        adjustments: PhotoAdjustments = .neutral,
+        format: ExportFormat = .jpeg,
+        quality: Double = 0.9,
+        bitDepth: ExportBitDepth = .eightBit,
+        maximumWidth: Int? = nil,
+        maximumHeight: Int? = nil,
+        dpi: Double? = nil,
+        exifRetentionPolicy: ExifRetentionPolicy = .preserveAll
     ) -> ExportRequest {
         ExportRequest(
             sourceURL: sourceURL,
             adjustments: adjustments,
             destinationDirectory: destination ?? directory,
             baseFilename: baseFilename,
-            jpegQuality: 0.9
+            format: format,
+            quality: quality,
+            bitDepth: bitDepth,
+            maximumWidth: maximumWidth,
+            maximumHeight: maximumHeight,
+            dpi: dpi,
+            exifRetentionPolicy: exifRetentionPolicy
         )
     }
 
@@ -142,7 +182,7 @@ final class JPEGExportTests: XCTestCase {
     // MARK: - Happy path
 
     func testExportWritesAJPEGAtFullResolution() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let outcome = try await exporter.export(makeRequest())
 
         XCTAssertEqual(outcome.url.lastPathComponent, "DSC0001.jpg")
@@ -154,7 +194,7 @@ final class JPEGExportTests: XCTestCase {
     }
 
     func testExportedFileIsARealJPEG() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let outcome = try await exporter.export(makeRequest())
 
         let data = try Data(contentsOf: outcome.url)
@@ -168,7 +208,7 @@ final class JPEGExportTests: XCTestCase {
 
     func testExportedFileIsTaggedSRGB() async throws {
         // Spec §13.7: the exported JPEG must carry an sRGB profile.
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let outcome = try await exporter.export(makeRequest())
 
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
@@ -182,7 +222,7 @@ final class JPEGExportTests: XCTestCase {
     }
 
     func testAdjustmentsReachTheExportedPixels() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let plain = try await exporter.export(makeRequest(baseFilename: "plain"))
         let bright = try await exporter.export(
             makeRequest(baseFilename: "bright", adjustments: PhotoAdjustments(exposure: 2))
@@ -194,7 +234,7 @@ final class JPEGExportTests: XCTestCase {
     }
 
     func testLeavesNoTemporaryFileBehindOnSuccess() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         _ = try await exporter.export(makeRequest())
         let leftovers = try leftoverTemporaryFiles()
         XCTAssertEqual(leftovers, [])
@@ -203,7 +243,7 @@ final class JPEGExportTests: XCTestCase {
     // MARK: - Collisions
 
     func testASecondExportGetsASerialSuffixRatherThanOverwriting() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let first = try await exporter.export(makeRequest())
         let firstBytes = try Data(contentsOf: first.url)
 
@@ -216,7 +256,7 @@ final class JPEGExportTests: XCTestCase {
     }
 
     func testCollisionCountingContinuesPastTheFirstSuffix() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         _ = try await exporter.export(makeRequest())
         _ = try await exporter.export(makeRequest())
         let third = try await exporter.export(makeRequest())
@@ -227,7 +267,7 @@ final class JPEGExportTests: XCTestCase {
 
     func testCancellingAnExportStopsItAndRemovesThePartialOutput() async throws {
         let gate = DecodeGate()
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder(gate: gate))
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(gate: gate))
 
         let task = Task { try await exporter.export(makeRequest()) }
         await waitUntil("the decode to start") { gate.started > 0 }
@@ -260,7 +300,7 @@ final class JPEGExportTests: XCTestCase {
         // guard for the bridge that makes it propagate. Without it the export
         // would run to completion and this test would time out on the gate.
         let gate = DecodeGate()
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder(gate: gate))
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(gate: gate))
 
         let started = Date()
         let task = Task { try await exporter.export(makeRequest()) }
@@ -282,7 +322,7 @@ final class JPEGExportTests: XCTestCase {
         // never polls. It hands back a valid value after the caller has given
         // up, and the export must still refuse to publish the .jpg.
         let metadataGate = DecodeGate()
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder(metadataGate: metadataGate))
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(metadataGate: metadataGate))
 
         let task = Task { try await exporter.export(makeRequest()) }
 
@@ -314,7 +354,7 @@ final class JPEGExportTests: XCTestCase {
         // cancellation, so the rename must go through. Without this, the test
         // above would still pass if the exporter simply never published.
         let metadataGate = DecodeGate()
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder(metadataGate: metadataGate))
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(metadataGate: metadataGate))
 
         let task = Task { try await exporter.export(makeRequest()) }
         await waitUntil("the metadata read to start") { metadataGate.started > 0 }
@@ -332,7 +372,7 @@ final class JPEGExportTests: XCTestCase {
     func testAReadOnlyDestinationIsRefusedUpFront() async throws {
         try XCTSkipUnless(getuid() != 0, "Test must not run as root")
 
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         try FileManager.default.setAttributes(
             [.posixPermissions: NSNumber(value: 0o555)],
             ofItemAtPath: directory.path
@@ -351,7 +391,7 @@ final class JPEGExportTests: XCTestCase {
     }
 
     func testAMissingDestinationIsReportedAsUnavailable() async throws {
-        let exporter = JPEGExporter(decoder: SyntheticRawDecoder())
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let missing = directory.appendingPathComponent("NotMounted", isDirectory: true)
 
         do {
@@ -365,7 +405,7 @@ final class JPEGExportTests: XCTestCase {
     }
 
     func testADecodeFailureIsSurfacedAndLeavesNothingBehind() async throws {
-        let exporter = JPEGExporter(
+        let exporter = PhotoExporter(
             decoder: SyntheticRawDecoder(failure: .corruptedFile(path: "/tmp/x.ARW"))
         )
 
@@ -391,11 +431,209 @@ final class JPEGExportTests: XCTestCase {
             .couldNotFindUniqueName(baseName: "DSC0001"),
             .insufficientDiskSpace,
             .decoding(.corruptedFile(path: "/tmp/x.ARW")),
-            .rendering(.insufficientDiskSpace)
+            .rendering(.insufficientDiskSpace),
+            .formatNotSupported(.heic)
         ]
         for error in errors {
             XCTAssertNotNil(error.errorDescription, "\(error)")
             XCTAssertNotNil(error.recoverySuggestion, "\(error)")
         }
+    }
+
+    // MARK: - Format-aware export (Phase 1 Task 4)
+
+    func testExportsAsPNG() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .png))
+
+        XCTAssertEqual(outcome.url.lastPathComponent, "DSC0001.png")
+        let data = try Data(contentsOf: outcome.url)
+        XCTAssertEqual(Array(data.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "Missing PNG signature")
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 64)
+        XCTAssertEqual(image.height, 48)
+    }
+
+    func testExportsAsTIFF() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .tiff))
+
+        XCTAssertEqual(outcome.url.lastPathComponent, "DSC0001.tiff")
+        let data = try Data(contentsOf: outcome.url)
+        let isLittleEndianTIFF = Array(data.prefix(4)) == [0x49, 0x49, 0x2A, 0x00]
+        let isBigEndianTIFF = Array(data.prefix(4)) == [0x4D, 0x4D, 0x00, 0x2A]
+        XCTAssertTrue(isLittleEndianTIFF || isBigEndianTIFF, "Missing TIFF signature")
+    }
+
+    func testExportsAsHEIC() async throws {
+        try XCTSkipUnless(ExportFormat.heic.isSupported(), "This machine's ImageIO build can't encode HEIC")
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .heic))
+
+        XCTAssertEqual(outcome.url.lastPathComponent, "DSC0001.heic")
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        XCTAssertEqual(CGImageSourceGetType(source) as String?, ExportFormat.heic.utTypeIdentifier)
+    }
+
+    /// Existing JPEG behaviour must survive the generalization untouched --
+    /// this is the same assertion `testExportWritesAJPEGAtFullResolution`
+    /// already makes with an explicit `format: .jpeg` request instead of
+    /// relying only on the default.
+    func testExplicitJPEGFormatMatchesTheDefaultBehaviour() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .jpeg))
+        XCTAssertEqual(outcome.url.lastPathComponent, "DSC0001.jpg")
+        let data = try Data(contentsOf: outcome.url)
+        XCTAssertEqual(Array(data.prefix(2)), [0xFF, 0xD8])
+    }
+
+    // MARK: - Capability guard
+
+    /// Plan: "if a platform cannot encode one format, show disabled/
+    /// unsupported UI instead of pretending success." The exporter itself
+    /// must refuse before touching disk, not fail midway or silently
+    /// downgrade to another format.
+    func testUnsupportedFormatIsRejectedBeforeWritingAnything() async throws {
+        let exporter = PhotoExporter(
+            decoder: SyntheticRawDecoder(),
+            encodableTypeIdentifiers: { [] }
+        )
+
+        do {
+            _ = try await exporter.export(makeRequest(format: .heic))
+            XCTFail("An unsupported format must not report success")
+        } catch let error as ExportError {
+            guard case .formatNotSupported(.heic) = error else {
+                return XCTFail("Expected .formatNotSupported(.heic), got \(error)")
+            }
+        }
+
+        // `directory` also holds the synthetic source fixture written in
+        // `setUpWithError` -- the guard must reject before writing an
+        // *export* output, not before the directory exists at all.
+        let contents = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        XCTAssertEqual(contents, [sourceURL.lastPathComponent], "The capability guard must reject before writing anything: \(contents)")
+    }
+
+    func testASupportedFormatIsUnaffectedByAnUnrelatedCapabilityGap() async throws {
+        // JPEG stays supported even when the injected capability set is
+        // missing HEIC -- the guard checks the *requested* format only.
+        let exporter = PhotoExporter(
+            decoder: SyntheticRawDecoder(),
+            encodableTypeIdentifiers: { [ExportFormat.jpeg.utTypeIdentifier] }
+        )
+        let outcome = try await exporter.export(makeRequest(format: .jpeg))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outcome.url.path))
+    }
+
+    // MARK: - Resizing
+
+    func testMaximumWidthResizesTheExportedPixels() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 3_000)))
+        let outcome = try await exporter.export(makeRequest(format: .png, maximumWidth: 2_000))
+
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 2_000, height: 1_500))
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 2_000)
+        XCTAssertEqual(image.height, 1_500)
+    }
+
+    func testNoResizeCapKeepsTheFullNativeSize() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 3_000)))
+        let outcome = try await exporter.export(makeRequest(format: .png))
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 4_000, height: 3_000))
+    }
+
+    // MARK: - DPI metadata
+
+    func testDPIIsWrittenToTheExportedFile() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .png, dpi: 300))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        XCTAssertEqual(properties[kCGImagePropertyDPIWidth] as? Double, 300)
+        XCTAssertEqual(properties[kCGImagePropertyDPIHeight] as? Double, 300)
+    }
+
+    func testNoDPIRequestLeavesTheEncodersOwnDefault() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .png, dpi: nil))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        // Not asserting a specific fallback value (that's the encoder's own
+        // business) -- only that requesting no DPI didn't crash and still
+        // produced a valid, readable file.
+        XCTAssertNotNil(properties[kCGImagePropertyPixelWidth])
+    }
+
+    // MARK: - Bit depth
+
+    func testSixteenBitTIFFProducesASixteenBitPerChannelFile() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .tiff, bitDepth: .sixteenBit))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.bitsPerComponent, 16)
+    }
+
+    func testEightBitTIFFProducesAnEightBitPerChannelFile() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .tiff, bitDepth: .eightBit))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.bitsPerComponent, 8)
+    }
+
+    /// Bit depth only means something for TIFF in this foundation version --
+    /// requesting 16-bit against a JPEG must not crash or change JPEG's own
+    /// (always 8-bit) output.
+    func testBitDepthIsIgnoredForFormatsThatDontSupportAChoice() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(format: .jpeg, bitDepth: .sixteenBit))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.bitsPerComponent, 8)
+    }
+
+    // MARK: - EXIF retention
+
+    func testPreserveAllWritesCameraMetadataIntoTheExportedFile() async throws {
+        let decoder = SyntheticRawDecoder(metadataOverride: RawMetadata(cameraMake: "SONY", cameraModel: "ILCE-7M4"))
+        let exporter = PhotoExporter(decoder: decoder)
+        let outcome = try await exporter.export(makeRequest(format: .tiff, exifRetentionPolicy: .preserveAll))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        let tiff = try XCTUnwrap(properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any])
+        XCTAssertEqual(tiff[kCGImagePropertyTIFFMake] as? String, "SONY")
+    }
+
+    func testRemoveAllStripsCameraMetadataFromTheExportedFile() async throws {
+        let decoder = SyntheticRawDecoder(metadataOverride: RawMetadata(cameraMake: "SONY", cameraModel: "ILCE-7M4"))
+        let exporter = PhotoExporter(decoder: decoder)
+        let outcome = try await exporter.export(makeRequest(format: .tiff, exifRetentionPolicy: .removeAll))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        XCTAssertNil(tiff?[kCGImagePropertyTIFFMake], "removeAll must not leak the camera make into the exported file")
+    }
+
+    // MARK: - Full resolution, not the preview cache
+
+    func testExportAlwaysRequestsAFullQualityDecodeRegardlessOfPreviewState() async throws {
+        let recorder = DecodeRequestRecorder()
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(recorder: recorder))
+        _ = try await exporter.export(makeRequest())
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(recorder.requests.first?.quality, .full, "Export must never reuse a preview-sized decode")
     }
 }
