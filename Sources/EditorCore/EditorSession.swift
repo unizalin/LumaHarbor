@@ -299,6 +299,22 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    /// General entry point for editing fields `setAdjustment(_:to:)` can't
+    /// reach -- `hsl`, `advancedToneCurve`, `sharpening`, `noiseReduction`,
+    /// `vignette` and `grain` have no `AdjustmentKind` case of their own, so
+    /// the Color/Curve/Detail/Effects inspector panels (Phase 1 Task 3) go
+    /// through this instead. Goes through exactly the same undo/autosave
+    /// path as `setAdjustment(_:to:)`: `history.record` is a no-op when the
+    /// transform doesn't actually change anything, and `clamped()` keeps a
+    /// caller-supplied out-of-range value from reaching the render pipeline.
+    public func updateAdjustments(_ transform: (inout PhotoAdjustments) -> Void) {
+        guard photo != nil else { return }
+        var updated = history.current
+        transform(&updated)
+        guard history.record(updated.clamped()) else { return }
+        didChangeAdjustments()
+    }
+
     public func undo() {
         guard history.undo() != nil else { return }
         didChangeAdjustments()

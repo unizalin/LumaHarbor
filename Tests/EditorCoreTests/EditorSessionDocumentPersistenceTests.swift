@@ -216,4 +216,34 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
         XCTAssertEqual(onDisk.exposure, 0, "a failed save must not be visible on disk as the new value")
         XCTAssertEqual(try Data(contentsOf: rawURL), original)
     }
+
+    /// AwayPhotoRawEditor parity Phase 1 Task 3: the grouped Color/Detail/
+    /// Effects panels edit through `updateAdjustments(_:)` instead of
+    /// `setAdjustment(_:to:)` -- it must autosave exactly the same way, not
+    /// a parallel path that silently skips the sidecar.
+    func testUpdateAdjustmentsAutosavesLikeSetAdjustmentDoes() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rawURL = root.appendingPathComponent("fixture.ARW")
+        try Data(repeating: 0x42, count: 4096).write(to: rawURL)
+        let original = try Data(contentsOf: rawURL)
+
+        let store = PhotoDocumentStore(rootURL: root.appendingPathComponent("Store"))
+        let document = try await store.openInPlace(rawURL, bookmarkData: nil).document
+        let editor = makeEditor(store: store)
+        editor.open(
+            photo: photo(for: document),
+            sourceURL: document.workingURL,
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+        editor.updateAdjustments { $0.vignette.amount = -25 }
+
+        try await waitUntil {
+            try await store.loadAdjustments(documentID: document.id).vignette.amount == -25
+        }
+        let saved = try await store.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(saved.vignette.amount, -25)
+        XCTAssertEqual(try Data(contentsOf: rawURL), original, "updateAdjustments + autosave must never touch the RAW original")
+    }
 }
