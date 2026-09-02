@@ -35,7 +35,7 @@ struct PadLibraryView: View {
                     }
                     .sheet(isPresented: $isSidebarPresented) {
                         NavigationStack {
-                            PadLibrarySidebar(library: library, onAddSource: presentAddSourcePicker)
+                            PadLibrarySidebar(library: library, onAddSource: presentAddSourcePicker, showsOperationOverlay: true)
                                 .toolbar {
                                     ToolbarItem(placement: .confirmationAction) {
                                         Button(L10n.t("Close")) {
@@ -47,7 +47,7 @@ struct PadLibraryView: View {
                     }
             } else {
                 HStack(spacing: 0) {
-                    PadLibrarySidebar(library: library, onAddSource: presentAddSourcePicker)
+                    PadLibrarySidebar(library: library, onAddSource: presentAddSourcePicker, showsOperationOverlay: false)
                         .frame(width: 280)
                     Divider()
                     content

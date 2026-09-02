@@ -372,11 +372,13 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
 
     /// Real-device UX follow-up: removing an external source can touch the
     /// local index/bookmark store and should not look like a dead tap after
-    /// the destructive confirmation is accepted. `PadLibraryView`'s global
-    /// `operationState` overlay is the single source of truth for this
-    /// progress feedback (see `testSidebarDoesNotDuplicateGlobalOperationOverlay`
-    /// below) -- the sidebar only needs to actually call `removeSource(_:)`
-    /// after confirmation, and the confirmation copy itself must keep
+    /// the destructive confirmation is accepted. `library.operationState` is
+    /// the single *data* source for this progress feedback -- rendered by
+    /// `PadLibraryView`'s global overlay and, only while presented as a
+    /// compact-width sheet, the sidebar's own overlay too (see
+    /// `testSidebarOperationOverlayIsOnlyEnabledForTheCompactSheet` below).
+    /// This test only needs the sidebar to actually call `removeSource(_:)`
+    /// after confirmation, and the confirmation copy itself to keep
     /// reinforcing that RAW files are not deleted.
     func testRemovingSourceCallsRemoveSourceAfterConfirmation() throws {
         let source = try Self.loadSource("PadLibrarySidebar.swift")
@@ -392,10 +394,11 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
     }
 
     /// Reconnecting a source can spend visible time validating the selected
-    /// folder's identity. `PadLibraryView`'s global `operationState` overlay
-    /// (`.reconnectingSource`) is the single source of truth for this
-    /// progress feedback -- the sidebar only needs to actually call
-    /// `relinkSource(_:to:)` once a replacement folder is picked.
+    /// folder's identity. `library.operationState`'s `.reconnectingSource`
+    /// case is the single data source for this progress feedback (see
+    /// `testSidebarOperationOverlayIsOnlyEnabledForTheCompactSheet`) -- this
+    /// test only needs the sidebar to actually call `relinkSource(_:to:)`
+    /// once a replacement folder is picked.
     func testReconnectingSourceCallsRelinkSourceAfterPickingAFolder() throws {
         let source = try Self.loadSource("PadLibrarySidebar.swift")
 
@@ -405,29 +408,65 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
     }
 
-    /// Task 1/2 follow-up review finding: `PadLibrarySidebar` used to keep
-    /// its own local `reconnectingSourceID`/`removingSourceID` overlay state
-    /// alongside `PadLibraryView`'s global `operationState`-driven overlay,
-    /// so at regular (non-compact) width -- where both views are mounted at
-    /// once in an `HStack` -- a user could see two near-duplicate progress
-    /// overlays simultaneously. `LibraryBrowserSession.operationState` is
-    /// now the single source of truth: this asserts the sidebar no longer
-    /// mounts its own `PadLibraryProgressOverlay` or tracks its own
-    /// per-operation `LibraryID` state.
-    func testSidebarDoesNotDuplicateGlobalOperationOverlay() throws {
-        let source = try Self.loadSource("PadLibrarySidebar.swift")
+    /// Codex review P1 (2026-09-02): the earlier fix that removed
+    /// `PadLibrarySidebar`'s local `reconnectingSourceID`/`removingSourceID`
+    /// overlay entirely also removed its *only* overlay, unconditionally.
+    /// That's correct at regular width, where `PadLibraryView`'s own global
+    /// `operationState` overlay already covers the sidebar (both are
+    /// mounted side by side in one `HStack`) -- but at compact width,
+    /// `PadLibraryView` presents this view inside a `.sheet`, which sits
+    /// visually *above* that global overlay. Without a sidebar-local
+    /// overlay, a reconnect/remove kicked off from inside that sheet was
+    /// invisible until the user dismissed the sheet, violating spec
+    /// §5.2/§5.3. The fix is not a second, independent state source: the
+    /// sidebar's own overlay is gated by a caller-controlled
+    /// `showsOperationOverlay` flag, but its content still derives from
+    /// `library.operationState` -- the exact same single source of truth
+    /// `PadLibraryView` reads. This asserts: the flag exists and actually
+    /// gates the overlay (not unconditional, which would reintroduce the
+    /// regular-width duplicate); the overlay's content comes from
+    /// `library.operationState`; the sidebar still tracks no local
+    /// `removingSourceID`/`reconnectingSourceID`; and `PadLibraryView`
+    /// wires `true` for the compact sheet and `false` for the regular-width
+    /// layout, in that source order.
+    func testSidebarOperationOverlayIsOnlyEnabledForTheCompactSheet() throws {
+        let sidebarSource = try Self.loadSource("PadLibrarySidebar.swift")
 
-        XCTAssertFalse(
-            source.contains("PadLibraryProgressOverlay("),
-            "PadLibrarySidebar must not mount its own progress overlay -- PadLibraryView's global operationState overlay is the single source of truth"
+        XCTAssertTrue(
+            sidebarSource.contains("let showsOperationOverlay: Bool"),
+            "PadLibrarySidebar must accept a caller-controlled flag for whether it mounts its own overlay"
+        )
+        XCTAssertTrue(
+            sidebarSource.contains("if showsOperationOverlay") && sidebarSource.contains("PadLibraryProgressOverlay("),
+            "the sidebar's own overlay must be conditional on showsOperationOverlay, not unconditional"
+        )
+        XCTAssertTrue(
+            sidebarSource.contains("library.operationState"),
+            "the sidebar's own overlay must derive its content from the session's operationState, not a local flag"
         )
         XCTAssertFalse(
-            source.contains("removingSourceID"),
+            sidebarSource.contains("removingSourceID"),
             "PadLibrarySidebar must not keep its own local removingSourceID state"
         )
         XCTAssertFalse(
-            source.contains("reconnectingSourceID"),
+            sidebarSource.contains("reconnectingSourceID"),
             "PadLibrarySidebar must not keep its own local reconnectingSourceID state"
+        )
+
+        let viewSource = try Self.loadSource("PadLibraryView.swift")
+        guard let sheetMarkerRange = viewSource.range(of: ".sheet(isPresented: $isSidebarPresented)"),
+              let elseMarkerRange = viewSource.range(of: "} else {"),
+              let trueRange = viewSource.range(of: "showsOperationOverlay: true"),
+              let falseRange = viewSource.range(of: "showsOperationOverlay: false") else {
+            return XCTFail("PadLibraryView must wire showsOperationOverlay differently for its compact sheet and regular-width layouts")
+        }
+        XCTAssertTrue(
+            sheetMarkerRange.upperBound < trueRange.lowerBound && trueRange.lowerBound < elseMarkerRange.lowerBound,
+            "the compact-width sheet's PadLibrarySidebar call must pass showsOperationOverlay: true, since it sits above the global overlay"
+        )
+        XCTAssertTrue(
+            elseMarkerRange.upperBound < falseRange.lowerBound,
+            "the regular-width PadLibrarySidebar call must pass showsOperationOverlay: false, since the global overlay already covers it"
         )
     }
 

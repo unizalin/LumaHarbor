@@ -24,6 +24,17 @@ import UniformTypeIdentifiers
 struct PadLibrarySidebar: View {
     @ObservedObject var library: PadLibraryModel
     let onAddSource: () -> Void
+    /// Whether this instance mounts its own operation-state overlay. Both
+    /// call sites share `library.operationState` as their single data
+    /// source (Codex review P1 fix) -- this flag only controls *where*
+    /// that state gets rendered, never a second state source of its own.
+    /// `PadLibraryView` passes `false` at regular width, where this view
+    /// and the grid are mounted side by side under `PadLibraryView`'s own
+    /// global overlay; it passes `true` for the compact-width `.sheet`
+    /// presentation, which sits visually *above* that global overlay and
+    /// would otherwise hide a reconnect/remove already in progress until
+    /// the user dismisses the sheet (spec §5.2/§5.3).
+    let showsOperationOverlay: Bool
     /// The source a remove confirmation is currently pending for. Non-nil
     /// drives `.confirmationDialog` below; set back to `nil` on every path
     /// out (confirm, cancel, or the dialog's own dismiss).
@@ -63,6 +74,14 @@ struct PadLibrarySidebar: View {
         }
         .listStyle(.sidebar)
         .navigationTitle(L10n.t("Library"))
+        .overlay {
+            if showsOperationOverlay, let overlay = operationOverlayContent {
+                PadLibraryProgressOverlay(
+                    title: overlay.title,
+                    message: overlay.message
+                )
+            }
+        }
         .toolbar {
             ToolbarItem {
                 Button {
@@ -128,6 +147,42 @@ struct PadLibrarySidebar: View {
                 L10n.t("LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are.")
                     + " " + L10n.t("The source's .lumaharbor manifest is not deleted either.")
             )
+        }
+    }
+
+    /// Mirrors `PadLibraryView.activeLibraryOverlay`'s non-idle cases,
+    /// driven by the same `library.operationState` -- this view only needs
+    /// its own copy of *where* to render that state while presented as a
+    /// compact-width sheet (see `showsOperationOverlay` above), not a
+    /// second idea of what it means. `.idle` always returns `nil` here: the
+    /// `sourceProgress`-driven scanning fallback for an operationState-less
+    /// scan stays `PadLibraryView`'s own responsibility, since every
+    /// production path that starts a scan (`scanSource(_:)`) already sets
+    /// `operationState` to `.scanningSource` itself.
+    private var operationOverlayContent: (title: String, message: String)? {
+        switch library.operationState {
+        case .addingSource:
+            return (
+                L10n.t("Adding source…"),
+                L10n.t("LumaHarbor is registering this folder without moving or changing your RAW files.")
+            )
+        case .scanningSource:
+            return (
+                L10n.t("Scanning source…"),
+                L10n.t("Refreshing the library index without changing your RAW files.")
+            )
+        case .reconnectingSource:
+            return (
+                L10n.t("Reconnecting source…"),
+                L10n.t("Checking this folder matches the original source.")
+            )
+        case .removingSource:
+            return (
+                L10n.t("Removing source…"),
+                L10n.t("RAW files and sidecars stay exactly where they are.")
+            )
+        case .idle:
+            return nil
         }
     }
 
