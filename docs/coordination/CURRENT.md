@@ -322,3 +322,15 @@ Real-device manual QA is blocked on which Xcode project window has the signing t
 ### Next action
 
 A1 is now genuinely `PASS` against current HEAD (`1012238`, product commit `bb63989`) on the physical target iPad. Someone with hands on the device needs to pick up from here and, while looking at the actual screen, walk through the remaining plan §9 / `docs/testing/beta/REAL_DEVICE_CHECKLIST.md` items — the app is already installed and running from this session's build, so no rebuild is needed unless the app is relaunched from a stale state. Priority order unchanged: A2, B1/B2, C2-C4, D3/D4, E4-E6, the P1 compact-sheet overlay check (reconnect/remove from the compact-width sidebar sheet must show a `Reconnecting source…`/`Removing source…` overlay, and regular width must not show two overlays at once), and F1/F12/F13 with a real Sony `.ARW` fixture and before/after checksum comparison. Still prohibited without explicit user authorization: push, merge, rebase, removing the worktree, committing `Apps/LumaHarborPad.xcodeproj/project.pbxproj` or any signing setting.
+
+## Real-device manual QA completion (2026-09-02, user-reported, all requested checks PASS)
+
+- After Claude installed and launched the current branch build on the physical target iPad, the user manually continued the real-device checklist on the iPad screen and reported that all listed items succeeded.
+- Result: `PASS` for `docs/testing/beta/REAL_DEVICE_CHECKLIST.md` items A1 through F13, including installation/launch, empty-state/add-source visibility, APFS source flow, exFAT offline/relink/wrong-folder rejection flow, Files-provider authorization recovery, multi-source iPad layout checks, Sony `.ARW` non-destructive editing, autosave persistence, and RAW size/checksum stability.
+- P1 overlay-specific result: `PASS` by user report. In compact-width/sidebar-sheet presentation, reconnect/remove operations showed the expected `Reconnecting source…` / `Removing source…` progress overlay; in regular-width presentation, the same operation did not show duplicate overlays.
+- Evidence classification: user-reported manual/visual QA on the installed physical iPad build. Codex and Claude did not directly capture screenshots or touch events from the device in this environment; the earlier tool-verifiable A1 build/install/launch evidence remains recorded above.
+- Remaining blockers for the iPad UI/UX state-feedback polish branch: none known. `Apps/LumaHarborPad.xcodeproj/project.pbxproj` remains a local signing/Xcode settings change and must not be committed unless the user explicitly authorizes signing-setting commits.
+
+### Next action
+
+The iPad UI/UX state-feedback polish branch is ready for merge/landing review from a product, automated-test, and user-reported real-device QA perspective. Before merging, preserve or discard the local signing-only `project.pbxproj` dirty state deliberately; do not include it in the landing commit by accident.
