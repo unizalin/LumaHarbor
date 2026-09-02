@@ -18,6 +18,11 @@ public struct RawMetadata: Codable, Equatable, Sendable {
     public var aperture: Double?
     /// TIFF orientation, 1...8.
     public var orientation: Int?
+    /// Focal length in millimeters, as reported by the lens/body -- not the
+    /// 35mm-equivalent value. `nil` metadata cached before this field
+    /// existed decodes safely to `nil` (synthesized `Decodable` treats a
+    /// missing key for an `Optional` property as `nil`, never a crash).
+    public var focalLengthMillimeters: Double?
 
     public init(
         pixelWidth: Int = 0,
@@ -29,7 +34,8 @@ public struct RawMetadata: Codable, Equatable, Sendable {
         isoSpeed: Int? = nil,
         shutterSpeed: Double? = nil,
         aperture: Double? = nil,
-        orientation: Int? = nil
+        orientation: Int? = nil,
+        focalLengthMillimeters: Double? = nil
     ) {
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
@@ -41,6 +47,7 @@ public struct RawMetadata: Codable, Equatable, Sendable {
         self.shutterSpeed = shutterSpeed
         self.aperture = aperture
         self.orientation = orientation
+        self.focalLengthMillimeters = focalLengthMillimeters
     }
 
     public var cameraDisplayName: String? {
@@ -85,6 +92,7 @@ extension RawMetadata {
             }
             metadata.shutterSpeed = (exif[kCGImagePropertyExifExposureTime] as? NSNumber)?.doubleValue
             metadata.aperture = (exif[kCGImagePropertyExifFNumber] as? NSNumber)?.doubleValue
+            metadata.focalLengthMillimeters = (exif[kCGImagePropertyExifFocalLength] as? NSNumber)?.doubleValue
             if let lens = exif[kCGImagePropertyExifLensModel] as? String {
                 metadata.lensModel = lens.trimmingCharacters(in: .whitespaces)
             }
