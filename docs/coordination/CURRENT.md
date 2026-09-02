@@ -1,8 +1,8 @@
 # Current Coordination State
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
-Updated by: Codex (UI/UX state feedback polish spec)
+Updated by: Claude (Task 1 + Task 2 TDD implementation, handoff to Codex)
 
 ## Source of truth
 
@@ -10,6 +10,8 @@ Updated by: Codex (UI/UX state feedback polish spec)
 - Previous integration branch landed and pushed to `main`: `f38f3ad7968b2d5faaffa96dda17f308a982846d`
 - Active UI/UX polish design spec: `docs/superpowers/specs/2026-09-01-ipad-ui-ux-state-feedback-polish-design.md`
 - Active UI/UX polish implementation plan: `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md`
+- Task 1 (library operation state contract) commit: `83ff071b434d430a9a8cc878d3b5b8dbde5cfc67`
+- Task 2 (library UI copy and source-state rendering) commit: `bbbac5172f3989aa8b8dc395622276defc147aad`
 - Latest current-branch product/evidence commit validated by the full fixture runner: `9a798d5852d2688e2b44e87715038d7eb043a091`
 - Latest production acceptance run commit: `9a798d5852d2688e2b44e87715038d7eb043a091`
 - Last production fixture-validated product commit: `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`
@@ -24,18 +26,18 @@ Updated by: Codex (UI/UX state feedback polish spec)
 - Shared agent entry-point commit: `4fe7574d354067235d872c2c3897a5f2a337c8d2`
 - Base branch: `main`
 - Base commit observed during design: `114b1f669f91968137d8519ef4b71b819f277444`
-- The integration branch is ahead of `main` and 0 commits behind as of the latest local check; run `git rev-list --count main..HEAD` for the exact local ahead count.
+- As of 2026-09-02, the integration branch is 4 commits ahead of `main` and 0 behind (`git rev-list --left-right --count main...HEAD` → `0	4`; the 4 commits are `7eee325`, `ec8797b`, `83ff071`, `bbbac51`).
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
-The latest full APFS/exFAT/RAW production acceptance runner has now passed at current HEAD. Product code has not changed since `17ddba26f5934d27a05d3e8eccb962ae6b96b1d1`; later commits through `9a798d5852d2688e2b44e87715038d7eb043a091` are documentation and coordination updates.
+The latest full APFS/exFAT/RAW production acceptance runner passed at `9a798d5852d2688e2b44e87715038d7eb043a091`, the commit where the previous (multi-source durability) branch landed on `main` as `f38f3ad`. The 4 commits ahead of `main` on this branch are the new UI/UX state feedback polish work (design/plan docs, then Task 1 and Task 2); they have not been re-run through that production fixture runner or on a real device yet.
 
 ## Ownership
 
-- Codex owns the active UI/UX polish branch.
-- User reported Claude completed the UI/UX polish spec review; no Claude review commit or report artifact is present on this branch as of this update.
+- Codex owns the active UI/UX polish branch and authored its design spec and implementation plan (`7eee325`, `ec8797b`).
+- **Deviation from the design spec's own §11 division of labor** ("Codex: spec/plan/first TDD round; Claude: independent review"): at the user's explicit, detailed instruction, Claude directly executed the implementation plan's Task 1 and Task 2 using TDD, from the shared worktree `/Users/private-builder/github/LumaHarbor` on this same branch (not a separate Claude worktree), and committed both (`83ff071`, `bbbac51`). Codex has not yet independently reviewed this Task 1/Task 2 diff — treat it as implemented-and-tested-by-Claude, not yet reviewed by a second agent.
 - Claude completed the Beta Test Kit on `claude/ipad-beta-test-kit`; Codex cherry-picked the reviewed documentation commits onto this branch.
 - Claude independently reviewed Codex RAW fixture baseline commit `f5dce94716d740ede6ad46c1632361ccf03efd8b` and reported `APPROVED` in `docs/testing/reports/2026-08-31-raw-fixture-baseline-review.md`.
-- Claude independently performed the required V4.3 pre-landing review at HEAD `d24eaae85820d120611a6c75bdd8e6c17b907a18` on 2026-09-01 from a fresh session with no prior context, and reported `APPROVED`. See the V4.3 evidence entry below.
+- Claude independently performed the required V4.3 pre-landing review at HEAD `d24eaae85820d120611a6c75bdd8e6c17b907a18` on 2026-09-01 from a fresh session with no prior context, and reported `APPROVED`. See the V4.3 evidence entry below. This review predates and does not cover Task 1/Task 2.
 - Product files must never be edited concurrently from two worktrees.
 
 ## Latest verified evidence
@@ -66,6 +68,10 @@ The latest full APFS/exFAT/RAW production acceptance runner has now passed at cu
   - `git diff --check main..HEAD`: no output (PASS).
   - Ran locally (no external fixtures, no device): `swift build` PASS; `swift test` PASS, 1112 executed / 9 skipped (fixture-dependent, expected) / 0 failures, consistent with the coordination baseline above. Did not rerun strict-concurrency build, iPad Simulator build, or the full RAW/APFS/exFAT production runner — those stay `NOT RUN` by this review and are carried forward only as previously reported manual/production evidence, not re-verified here.
   - Did not re-execute the five real-device gates below; their `PASS` status is carried forward from the manual tester reports already on file, not re-confirmed by this review.
+- UI/UX polish Task 1 (`83ff071b434d430a9a8cc878d3b5b8dbde5cfc67`, Claude, TDD): added `LibraryBrowserOperationState` (`.idle`/`.addingSource`/`.scanningSource(LibraryID)`/`.reconnectingSource(LibraryID)`/`.removingSource(LibraryID)`) and a published `LibraryBrowserSession.operationState`, set/reset around `addSource`/`relinkSource`/`removeSource`/`scanSource`. RED confirmed via genuine compile failures (`operationState` did not exist) before implementation. `LibraryBrowserSessionTests`: 42 executed, 0 failures (34 pre-existing + 8 new, including failure-path and `sourceProgress`-semantics-preserved cases beyond the plan's own minimum). Full `swift test`: 1119 executed, 9 skipped (fixture-dependent, unchanged baseline), 0 failures. `git diff --check`: clean. Only `Sources/EditorCore/LibraryBrowserSession.swift` and `Tests/EditorCoreTests/LibraryBrowserSessionTests.swift` changed.
+- UI/UX polish Task 2 (`bbbac5172f3989aa8b8dc395622276defc147aad`, Claude, TDD): `PadLibraryView`'s global operation overlay now derives from `library.operationState` first (distinct title/message per case), falling back to `sourceProgress`-driven scan feedback only while `operationState == .idle`; removed the now-redundant `isRegisteringSource` view-local flag. `PadLibrarySidebar` source rows now distinguish a partially-failed scan (`Partial issue`, when `indexedCount > 0 || failedCount > 0`) from a fully-failed one (`Scan problem`), and the remove-source confirmation dialog now explicitly names the `.lumaharbor` manifest alongside RAW files/sidecars. `PadLibraryGrid`'s empty state now branches on the selected source's own connection state (offline / needs-authorization / no-supported-RAW), search-text-present, or no-sources-at-all — a `.smart` (aggregate) selection is never misattributed to one source's offline/needs-access state, and `.folder` scope resolves the same as `.source`. RED confirmed by stashing only the three `.swiftpm` app files (`git stash push -u -m "task2-red-check-appfiles"`, SHA `af8fd89f87d09075f2134dc7d1b983acefb1102f`) and running the new tests against the pre-Task-2 implementation before restoring via `git stash apply` (not `pop`) and dropping the entry. `PadLibraryCompositionContractTests`: 6 executed, 0 failures. `PadLibraryAccessibilityContractTests`: 29 executed, 0 failures (25 pre-existing, 4 of which were updated in place because they hard-coded implementation details Task 2 intentionally superseded — e.g. `libraryProgressTitle`/`isRegisteringSource` no longer exist, and the sidebar's `Scan problem`-only branch is now `Partial issue`/`Scan problem` — plus 1 genuinely new required test). Full `swift test`: 1122 executed, 9 skipped, 0 failures. `git diff --check`: clean. `rg` privacy scan (`/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM`) over the Task 2 diff: no hits. Changed exactly the 7 files the task authorized: `PadLibraryView.swift`, `PadLibrarySidebar.swift`, `PadLibraryGrid.swift`, both `Localizable.strings` (15 new keys each, en + zh-Hant, verified equal unique-key counts), `PadLibraryCompositionContractTests.swift`, `PadLibraryAccessibilityContractTests.swift`.
+- **`NOT RUN` for both Task 1 and Task 2**: `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' build` (the implementation plan's own Task 4 Step 2 gate). Neither Task 1 nor Task 2 touched a file `swift build`/`swift test` actually compiles from `Apps/LumaHarborPad.swiftpm` — those three views are only checked by source-parsing contract tests — so an actual Swift-compiler pass over `PadLibraryView.swift`/`PadLibrarySidebar.swift`/`PadLibraryGrid.swift` has not happened yet. Do not treat the passing contract tests as proof the app package compiles.
+- **`NOT RUN`**: any real-device or Simulator check of the new Task 1/Task 2 UI copy itself (the `Adding source…`/`Scanning source…`/`Reconnecting source…`/`Removing source…` overlay, the `Partial issue`/`Scan problem` row text, the new empty-grid states). The five real-device gates below cover the underlying multi-source library feature, not this UI polish round.
 
 ## Required real-device gates
 
@@ -94,4 +100,55 @@ Additional required manual gate:
 
 ## Next action
 
-Execute `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md` from Task 1 using TDD, then hand the resulting diff to Claude for independent review. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+Task 1 and Task 2 of `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md` are done (see the Handoff section below for full evidence). Codex's next bounded objective is Task 3 (Editor RAW open and save-state copy, in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift` — rename `Not saved` to `Save failed`, add the RAW-safety hint), then Task 4 (final verification, the `docs/testing/reports/2026-09-01-ipad-ui-ux-state-feedback-polish.md` report, and this file). Given the Ownership-section deviation from the design spec's original division of labor, Codex should decide for itself whether to review the Task 1/Task 2 diff (`83ff071..bbbac51`) before continuing, or continue Task 3 directly and let a later review cover all three tasks together — either is acceptable; this file does not mandate one. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+
+## Handoff to Codex (2026-09-02, from Claude)
+
+Full closing report for Task 1 + Task 2, per `docs/coordination/HANDOFF_TEMPLATE.md`.
+
+### Status
+
+`DONE` for Task 1 and Task 2 of the implementation plan. `NOT RUN`/not started for Task 3 and Task 4.
+
+### Git state
+
+- Source branch: `codex/ipad-ui-ux-state-feedback-polish`.
+- HEAD: `bbbac5172f3989aa8b8dc395622276defc147aad`.
+- Base branch: `main`, at `f38f3ad7968b2d5faaffa96dda17f308a982846d` (the already-landed multi-source durability work).
+- 4 commits ahead of `main`, 0 behind.
+- No configured upstream.
+- No push, merge, rebase, or cherry-pick occurred during this work.
+
+### Changes
+
+- `7eee325` `docs: specify iPad UI state feedback polish` and `ec8797b` `docs: plan iPad UI state feedback polish` — pre-existing, authored by Codex before this handoff.
+- `83ff071` `feat: expose iPad library operation state` (Task 1, Claude): see the Task 1 evidence bullet above for the exact behavior change and files.
+- `bbbac51` `feat: clarify iPad library feedback states` (Task 2, Claude): see the Task 2 evidence bullet above for the exact behavior change and files.
+- No file outside the plan's Task 1/Task 2 file lists was touched.
+
+### Verification
+
+See the two Task 1/Task 2 bullets under "Latest verified evidence" above for exact commands, executed/skipped/failure counts, and the `NOT RUN` items (`xcodebuild` generic iOS build; real-device/Simulator check of the new UI copy). Do not upgrade either `NOT RUN` item to `PASS` without actually running it.
+
+### Dirty files
+
+- `Apps/LumaHarborPad.xcodeproj/project.pbxproj`: unchanged by this handoff. Still the user's local Xcode signing state (see "Preserved dirty files" below) — do not commit it.
+- No other dirty file. `git status --short --branch` was clean immediately after each of the two commits above.
+
+### Concerns and blockers
+
+- Neither Task 1 nor Task 2 has been independently reviewed by a second agent (see the Ownership-section deviation note above). Not a blocker for continuing Task 3, but should be resolved before final sign-off.
+- `xcodebuild` generic iOS build has not been run against either commit — the three modified `.swiftpm` app files are not compiled by `swift build`/`swift test` at all, only source-parsed by contract tests. A real compile error in `PadLibraryView.swift`/`PadLibrarySidebar.swift`/`PadLibraryGrid.swift` would not be caught by anything that has actually run so far.
+- The new UI copy has not been exercised on a real device or Simulator. The plan's own Task 4 Step 1-2 and its manual-verification section are the gates that would catch this.
+- `PadLibrarySidebar` still keeps its own local `reconnectingSourceID`/`removingSourceID` overlay (pre-existing, locked in by existing passing tests) alongside the new global `operationState`-driven overlay in `PadLibraryView`. At regular (non-compact) width, both can show near-duplicate text at once. Not fixed in Task 2 because doing so would require loosening tests outside Task 2's stated scope; flagged here for whoever picks this up next to decide whether it's worth a follow-up.
+- The localization key `"Scanning this folder so photos can appear as they are indexed."` is now unreferenced by any Swift file (its only caller, `PadLibraryView`'s old `libraryProgressMessage`, was removed in Task 1/2's refactor) but was left in both `Localizable.strings` files rather than deleted, since Task 2's scope was additive strings work, not cleanup.
+
+### Next action
+
+Continue with Task 3 of `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md` — files in scope: `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift`, both `Localizable.strings` files, `Tests/EditorCoreTests/PadLibraryCompositionContractTests.swift`, `Tests/EditorCoreTests/EditorSessionDocumentPersistenceTests.swift`. Use TDD (RED before implementation, as demonstrated for Task 1/Task 2 above). Verification gates in scope: the plan's own Task 3 Step 5 focused tests, then this file's usual `swift test` + `git diff --check`. Still prohibited without explicit user authorization: push, merge, rebase, removing the worktree, committing `Apps/LumaHarborPad.xcodeproj/project.pbxproj` or any signing setting.
+
+### Suggested skills
+
+- `test-driven-development` for Task 3's implementation.
+- `verification-before-completion` before reporting Task 3 done.
+- `handoff` again once Task 3 (or Task 3+4) ownership changes.
