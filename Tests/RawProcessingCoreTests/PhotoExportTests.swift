@@ -626,6 +626,67 @@ final class PhotoExportTests: XCTestCase {
         XCTAssertNil(tiff?[kCGImagePropertyTIFFMake], "removeAll must not leak the camera make into the exported file")
     }
 
+    /// P1 fix (independent review finding): `SyntheticRawDecoder`'s
+    /// `metadataOverride` stands in for the *source RAW file's own*
+    /// un-rotated EXIF orientation tag (e.g. 6 for a portrait shot) --
+    /// exactly what `CoreImageRawDecoder.decode(_:)` reads straight off
+    /// disk, independent of what `CIRAWFilter.outputImage` itself does to
+    /// the pixels. Real `CIRAWFilter` output is already rotated to display
+    /// orientation, so writing that same source tag onto the exported
+    /// (already-rotated) pixels would tell any EXIF-aware viewer to rotate
+    /// an already-upright image a second time. Neither `preserveAll` nor
+    /// `partial` may let that tag reach the exported file. Asserts "absent
+    /// or 1 (normal)" rather than strictly absent: some encoders (TIFF,
+    /// confirmed by hand) stamp their own default orientation of 1 even when
+    /// the caller writes nothing at all -- 1 is exactly the semantically
+    /// correct "no further rotation needed" value for already-oriented
+    /// pixels, so it is an acceptable outcome, unlike the source's actual 6.
+    func testPreserveAllNeverWritesTheSourcesOrientationTagIntoTheExportedFile() async throws {
+        let decoder = SyntheticRawDecoder(metadataOverride: RawMetadata(orientation: 6))
+        let exporter = PhotoExporter(decoder: decoder)
+        let outcome = try await exporter.export(makeRequest(format: .tiff, exifRetentionPolicy: .preserveAll))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        assertExportedOrientationIsNeverTheSourcesNonNormalValue(properties)
+    }
+
+    func testPartialNeverWritesTheSourcesOrientationTagIntoTheExportedFile() async throws {
+        let decoder = SyntheticRawDecoder(metadataOverride: RawMetadata(orientation: 6))
+        let exporter = PhotoExporter(decoder: decoder)
+        let outcome = try await exporter.export(makeRequest(format: .tiff, exifRetentionPolicy: .partial))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        assertExportedOrientationIsNeverTheSourcesNonNormalValue(properties)
+    }
+
+    /// Regression guard: `removeAll` already happened to avoid this bug (it
+    /// drops all metadata including orientation), and the P1 fix must not
+    /// change that.
+    func testRemoveAllStillNeverWritesOrientation() async throws {
+        let decoder = SyntheticRawDecoder(metadataOverride: RawMetadata(orientation: 6))
+        let exporter = PhotoExporter(decoder: decoder)
+        let outcome = try await exporter.export(makeRequest(format: .tiff, exifRetentionPolicy: .removeAll))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        assertExportedOrientationIsNeverTheSourcesNonNormalValue(properties)
+    }
+
+    private func assertExportedOrientationIsNeverTheSourcesNonNormalValue(
+        _ properties: [CFString: Any],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let value = properties[kCGImagePropertyOrientation] as? Int
+        XCTAssertTrue(
+            value == nil || value == 1,
+            "exported orientation must be absent or 1 (normal), never the source RAW's own tag -- got \(String(describing: value))",
+            file: file, line: line
+        )
+    }
+
     // MARK: - Full resolution, not the preview cache
 
     func testExportAlwaysRequestsAFullQualityDecodeRegardlessOfPreviewState() async throws {
