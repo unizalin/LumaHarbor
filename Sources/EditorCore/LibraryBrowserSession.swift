@@ -45,6 +45,18 @@ public enum LibraryBrowserLoadState: Sendable, Equatable {
     case failed(EditorAlert)
 }
 
+/// What the library browser's source lifecycle is currently doing, beyond
+/// ordinary page fetching -- lets a view render precise add/scan/reconnect/
+/// remove copy directly from session state instead of guessing from a
+/// view-local flag plus `sourceProgress`/`loadState` combinations.
+public enum LibraryBrowserOperationState: Sendable, Equatable {
+    case idle
+    case addingSource
+    case scanningSource(LibraryID)
+    case reconnectingSource(LibraryID)
+    case removingSource(LibraryID)
+}
+
 /// What the grid needs to restore its scroll position after a round trip
 /// through the editor: the exact query that was showing, and which photo to
 /// scroll back to. Carries only a `PhotoID`, matching `PhotoPageCursor`'s
@@ -125,6 +137,10 @@ public final class LibraryBrowserSession: ObservableObject {
     /// Keyed by `LibraryID`, present only for a source this session has
     /// actually scanned (via `scanSource(_:)`) since it launched.
     @Published public private(set) var sourceProgress: [LibraryID: LibrarySourceScanProgress] = [:]
+    /// Add/scan/reconnect/remove source lifecycle state. Set synchronously
+    /// by the owning call, reset once that call completes -- see each
+    /// source-lifecycle method below for exactly when.
+    @Published public private(set) var operationState: LibraryBrowserOperationState = .idle
     /// One-off action failures (add/relink/remove a source, open gated by
     /// an offline source, resolving an asset) -- distinct from
     /// `loadState`'s `.failed`, which is specifically a page-fetch failure.
@@ -530,6 +546,8 @@ public final class LibraryBrowserSession: ObservableObject {
     // MARK: - Source lifecycle
 
     public func addSource(at url: URL, sourceKind: LibrarySourceKind) async {
+        operationState = .addingSource
+        defer { operationState = .idle }
         do {
             let folder = try await dependencies.addSource(url, sourceKind)
             sources.append(folder)
@@ -540,6 +558,8 @@ public final class LibraryBrowserSession: ObservableObject {
     }
 
     public func relinkSource(_ libraryID: LibraryID, to url: URL) async {
+        operationState = .reconnectingSource(libraryID)
+        defer { operationState = .idle }
         do {
             let folder = try await dependencies.relinkSource(libraryID, url)
             if let index = sources.firstIndex(where: { $0.id == libraryID }) {
@@ -551,6 +571,8 @@ public final class LibraryBrowserSession: ObservableObject {
     }
 
     public func removeSource(_ libraryID: LibraryID) async {
+        operationState = .removingSource(libraryID)
+        defer { operationState = .idle }
         do {
             try await dependencies.removeSource(libraryID)
         } catch {
@@ -595,12 +617,20 @@ public final class LibraryBrowserSession: ObservableObject {
     public func scanSource(_ libraryID: LibraryID) {
         guard scanTasks[libraryID] == nil else { return }
         sourceProgress[libraryID] = LibrarySourceScanProgress(phase: .scanning)
+        operationState = .scanningSource(libraryID)
         scanTasks[libraryID] = Task { [weak self] in
             guard let self else { return }
             await self.dependencies.runScan(libraryID) { [weak self] event in
                 await self?.handle(event, for: libraryID)
             }
             self.scanTasks.removeValue(forKey: libraryID)
+            // Only this scan's own completion may clear `operationState` --
+            // a second `scanSource(_:)` call for a different source may have
+            // already overwritten it with its own `.scanningSource`, and
+            // that must not be clobbered by this one finishing later.
+            if self.operationState == .scanningSource(libraryID) {
+                self.operationState = .idle
+            }
         }
     }
 
