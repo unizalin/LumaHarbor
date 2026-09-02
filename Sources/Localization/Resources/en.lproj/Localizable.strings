@@ -6,6 +6,7 @@
 "512 MB" = "512 MB";
 "A cached preview couldn't be written." = "A cached preview couldn't be written.";
 "A larger cache keeps more thumbnails available offline, but uses more storage." = "A larger cache keeps more thumbnails available offline, but uses more storage.";
+"Add a folder to start browsing RAW files" = "Add a folder to start browsing RAW files";
 "Add a photo folder" = "Add a photo folder";
 "Add Folder" = "Add Folder";
 "Add Photo Folder…" = "Add Photo Folder…";
@@ -36,11 +37,13 @@
 "Choose Files…" = "Choose Files…";
 "Choose one or more .xmp develop preset files to see what LumaHarbor can import." = "Choose one or more .xmp develop preset files to see what LumaHarbor can import.";
 "Choose the folder again to restore access to your photos." = "Choose the folder again to restore access to your photos.";
+"Choose the original folder again so LumaHarbor can verify it is the same source." = "Choose the original folder again so LumaHarbor can verify it is the same source.";
 "Choose the photo folder again to restore access." = "Choose the photo folder again to restore access.";
 "Choose where to save the exported photo." = "Choose where to save the exported photo.";
 "Close" = "Close";
 "Checking file access before opening the editor." = "Checking file access before opening the editor.";
 "Color" = "Color";
+"Connect the drive again, or make the Files location available, then reconnect the source." = "Connect the drive again, or make the Files location available, then reconnect the source.";
 "Contrast" = "Contrast";
 "Choose the file again from Files." = "Choose the file again from Files.";
 "Copy to This iPad" = "Copy to This iPad";
@@ -135,6 +138,8 @@
 "LumaHarbor couldn't start up" = "LumaHarbor couldn't start up";
 "LumaHarbor gave up waiting for this file to respond." = "LumaHarbor gave up waiting for this file to respond.";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor is already importing or cleaning up another photo.";
+"LumaHarbor is registering this folder without moving or changing your RAW files." = "LumaHarbor is registering this folder without moving or changing your RAW files.";
+"LumaHarbor only reads RAW files in that folder — it never moves, overwrites, or deletes them." = "LumaHarbor only reads RAW files in that folder — it never moves, overwrites, or deletes them.";
 "LumaHarbor couldn't open local storage." = "LumaHarbor couldn't open local storage.";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor looks for camera RAW files such as Sony .ARW.";
 "LumaHarbor no longer has access to this file." = "LumaHarbor no longer has access to this file.";
@@ -159,11 +164,14 @@
 "Next Photo" = "Next Photo";
 "No capture time" = "No capture time";
 "No files were selected." = "No files were selected.";
+"No photos match this search" = "No photos match this search";
 "No presets yet" = "No presets yet";
 "No RAW files found in this folder" = "No RAW files found in this folder";
 "No sources yet" = "No sources yet";
+"No supported RAW files found" = "No supported RAW files found";
 "Noise Reduction" = "Noise Reduction";
 "None of the selected files could be read as develop presets." = "None of the selected files could be read as develop presets.";
+"None of your sources currently contain RAW files LumaHarbor can open." = "None of your sources currently contain RAW files LumaHarbor can open.";
 "Not saved" = "Not saved";
 "Offline — reconnect the drive to edit or export" = "Offline — reconnect the drive to edit or export";
 "Offline" = "Offline";
@@ -174,6 +182,7 @@
 "Opening photo…" = "Opening photo…";
 "Orange" = "Orange";
 "Original" = "Original";
+"Partial issue" = "Partial issue";
 "Photo Folders" = "Photo Folders";
 "Photo" = "Photo";
 "photos" = "photos";
@@ -189,6 +198,7 @@
 "Quit and reopen LumaHarbor to rebuild the index." = "Quit and reopen LumaHarbor to rebuild the index.";
 "Quit and reopen LumaHarbor, then try again." = "Quit and reopen LumaHarbor, then try again.";
 "Quit and reopen LumaHarbor, then check whether the folder still appears before trying again." = "Quit and reopen LumaHarbor, then check whether the folder still appears before trying again.";
+"RAW files and sidecars stay exactly where they are." = "RAW files and sidecars stay exactly where they are.";
 "RAW files stay exactly where they are." = "RAW files stay exactly where they are.";
 "Read-only" = "Read-only";
 "Read-only drive — edits can't be saved here" = "Read-only drive — edits can't be saved here";
@@ -280,6 +290,7 @@
 "The RAW file couldn't be decoded." = "The RAW file couldn't be decoded.";
 "The RAW original is never modified." = "The RAW original is never modified.";
 "The saved edits for this photo are damaged." = "The saved edits for this photo are damaged.";
+"The source's .lumaharbor manifest is not deleted either." = "The source's .lumaharbor manifest is not deleted either.";
 "The system RAW decoder returned no image." = "The system RAW decoder returned no image.";
 "The thumbnail couldn't be rendered." = "The thumbnail couldn't be rendered.";
 "There isn't enough free space to cache previews." = "There isn't enough free space to cache previews.";
@@ -302,7 +313,10 @@
 "This library's index file is damaged." = "This library's index file is damaged.";
 "This photo has saved adjustments" = "This photo has saved adjustments";
 "This source couldn't finish scanning." = "This source couldn't finish scanning.";
+"This source doesn't contain any RAW files LumaHarbor can open yet." = "This source doesn't contain any RAW files LumaHarbor can open yet.";
+"This source is offline" = "This source is offline";
 "This source isn't currently reachable." = "This source isn't currently reachable.";
+"This source needs access" = "This source needs access";
 "This photo hasn't been cached yet and its drive isn't connected." = "This photo hasn't been cached yet and its drive isn't connected.";
 "This preset has no adjustments LumaHarbor can apply yet." = "This preset has no adjustments LumaHarbor can apply yet.";
 "This preset's preview couldn't be rendered right now." = "This preset's preview couldn't be rendered right now.";
@@ -313,6 +327,7 @@
 "Toggle favorite" = "Toggle favorite";
 "Tone Curve" = "Tone Curve";
 "Tone" = "Tone";
+"Try a different filename, or clear the search to see all photos." = "Try a different filename, or clear the search to see all photos.";
 "Try again, or re-copy this file from the memory card." = "Try again, or re-copy this file from the memory card.";
 "Try again." = "Try again.";
 "Try copying this photo again." = "Try copying this photo again.";

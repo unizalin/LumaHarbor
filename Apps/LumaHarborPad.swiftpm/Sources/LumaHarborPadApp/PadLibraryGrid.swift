@@ -109,14 +109,85 @@ struct PadLibraryGrid: View {
         }
     }
 
+    /// Which empty-grid copy to show, chosen from `library.selection`'s own
+    /// source first -- a specific source's `offline`/`needsAuthorization`
+    /// state always wins over every other reason the grid could be empty.
+    /// `.smart` (`.all`/`.recentlyEdited`/`.appStorage`) never resolves to a
+    /// source here, so an aggregate scope spanning sources in different
+    /// states never gets misattributed to just one of them; it falls
+    /// through to the generic "no sources"/"no supported RAW" copy instead.
+    private var emptyStateContent: (title: String, description: String, systemImage: String, showsAddSource: Bool) {
+        if !library.searchText.isEmpty {
+            return (
+                L10n.t("No photos match this search"),
+                L10n.t("Try a different filename, or clear the search to see all photos."),
+                "magnifyingglass",
+                false
+            )
+        }
+        if let folder = selectedFolder {
+            switch folder.connectionState {
+            case .offline:
+                return (
+                    L10n.t("This source is offline"),
+                    L10n.t("Connect the drive again, or make the Files location available, then reconnect the source."),
+                    "externaldrive.badge.xmark",
+                    false
+                )
+            case .needsAuthorization:
+                return (
+                    L10n.t("This source needs access"),
+                    L10n.t("Choose the original folder again so LumaHarbor can verify it is the same source."),
+                    "lock",
+                    false
+                )
+            case .ready, .readOnly:
+                return (
+                    L10n.t("No supported RAW files found"),
+                    L10n.t("This source doesn't contain any RAW files LumaHarbor can open yet."),
+                    "photo.on.rectangle.angled",
+                    false
+                )
+            }
+        }
+        if library.sources.isEmpty {
+            return (
+                L10n.t("Add a folder to start browsing RAW files"),
+                L10n.t("LumaHarbor only reads RAW files in that folder — it never moves, overwrites, or deletes them."),
+                "photo.on.rectangle.angled",
+                true
+            )
+        }
+        return (
+            L10n.t("No supported RAW files found"),
+            L10n.t("None of your sources currently contain RAW files LumaHarbor can open."),
+            "photo.on.rectangle.angled",
+            false
+        )
+    }
+
+    /// The source `library.selection` currently points at -- `.source` and
+    /// `.folder` both resolve to their owning source; every `.smart` scope
+    /// is `nil` here, since it draws from more than one source at once.
+    private var selectedFolder: LibraryFolder? {
+        switch library.selection {
+        case .source(let id): return library.folder(for: id)
+        case .folder(let id, _): return library.folder(for: id)
+        case .smart: return nil
+        }
+    }
+
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(L10n.t("No RAW files found in this folder"), systemImage: "photo.on.rectangle.angled")
+        let content = emptyStateContent
+        return ContentUnavailableView {
+            Label(content.title, systemImage: content.systemImage)
         } description: {
-            Text(L10n.t("Add a photo folder"))
+            Text(content.description)
         } actions: {
-            Button(L10n.t("Add Source"), action: onAddSource)
-                .frame(minWidth: 44, minHeight: 44)
+            if content.showsAddSource {
+                Button(L10n.t("Add Source"), action: onAddSource)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
         }
     }
 

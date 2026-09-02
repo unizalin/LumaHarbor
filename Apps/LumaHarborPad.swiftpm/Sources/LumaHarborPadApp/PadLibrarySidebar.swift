@@ -152,7 +152,10 @@ struct PadLibrarySidebar: View {
                 pendingRemoval = nil
             }
         } message: { _ in
-            Text(L10n.t("LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are."))
+            Text(
+                L10n.t("LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are.")
+                    + " " + L10n.t("The source's .lumaharbor manifest is not deleted either.")
+            )
         }
     }
 
@@ -243,7 +246,14 @@ struct PadLibrarySidebar: View {
         if let progress = library.sourceProgress[source.id] {
             switch progress.phase {
             case .scanning: return L10n.t("Scanning…")
-            case .failed: return L10n.t("Scan problem")
+            case .failed:
+                // A scan that already indexed or individually failed some
+                // photos left usable, partial results behind -- distinct
+                // from a scan that never got anywhere, which the sidebar
+                // must not soften into the same "partial" wording.
+                return progress.indexedCount > 0 || progress.failedCount > 0
+                    ? L10n.t("Partial issue")
+                    : L10n.t("Scan problem")
             case .finished: break
             }
         }
