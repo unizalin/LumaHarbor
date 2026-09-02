@@ -239,6 +239,7 @@
 "Save Adjustments" = "儲存調整";
 "Save to" = "儲存至";
 "Save" = "儲存";
+"Save failed" = "儲存失敗";
 "Saved" = "已儲存";
 "Saving…" = "儲存中…";
 "Scan problem" = "掃描發生問題";
@@ -351,3 +352,4 @@
 "Yellow" = "黃";
 "Your edits couldn't be saved." = "無法儲存你的編輯。";
 "Your photos are still browsable." = "你的照片仍然可以瀏覽。";
+"Your RAW original was not changed." = "你的 RAW 原始檔沒有被修改。";
