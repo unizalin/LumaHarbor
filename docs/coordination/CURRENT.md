@@ -270,3 +270,14 @@ Run the real-device/Simulator manual checklist (plan §9). Codex re-review of `b
 
 - `receiving-code-review` for the Codex re-review above.
 - `handoff` again once ownership changes.
+
+## Real-device manual QA attempt (2026-09-02, Claude, BLOCKED before any device work)
+
+- Confirmed branch/HEAD state before attempting anything: `git status --short --branch` clean on `claude/ipad-ui-polish-finish`; `git rev-parse HEAD` → `5ee2a6cb2c428ab0dac8678f07b0e2756ec8f5ad`, matching this file's own record above.
+- Ran `xcrun devicectl list devices`: the target iPad (iPad Pro 11-inch 3rd gen, device identifier intentionally omitted) reported state `unavailable`, same as the last known state. The paired iPhone also reported `unavailable`.
+- Per the user's explicit instruction, stopped immediately on `unavailable` and did not attempt any build, install, or manual checklist item. No checklist item in `docs/testing/beta/REAL_DEVICE_CHECKLIST.md` or the plan's §9 was exercised; all remain `NOT RUN`.
+- No file other than this coordination note was touched. `Apps/LumaHarborPad.xcodeproj/project.pbxproj` was not opened or modified.
+
+### Next action
+
+Real-device manual QA is still blocked on device availability, not on code or reviews (all automated/code-review evidence above already reads `PASS`/`DONE`). Whoever has physical access to the iPad needs to, before the next attempt: (1) connect the iPad via USB or ensure it's reachable over the network so CoreDevice/`devicectl` can see it, (2) unlock the iPad and keep the screen on for the duration of the session, (3) tap "Trust This Computer" if prompted, (4) confirm Developer Mode is enabled in iPad Settings, and (5) have an APFS source, an exFAT source, a Files-provider source, and real Sony `.ARW` test fixtures ready if a full checklist run is wanted. Once `xcrun devicectl list devices` shows the iPad as available, resume from plan §9 / `docs/testing/beta/REAL_DEVICE_CHECKLIST.md`, prioritizing A1/A2, B1/B2, C2-C4, D3/D4, E4-E6, and the P1 compact-sheet overlay check, plus F1/F12/F13 for RAW integrity.
