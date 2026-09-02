@@ -372,50 +372,62 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
 
     /// Real-device UX follow-up: removing an external source can touch the
     /// local index/bookmark store and should not look like a dead tap after
-    /// the destructive confirmation is accepted. The visible copy must also
-    /// keep reinforcing that RAW files are not deleted.
-    func testRemovingSourceShowsVisibleProgressAndRawSafetyCopy() throws {
+    /// the destructive confirmation is accepted. `PadLibraryView`'s global
+    /// `operationState` overlay is the single source of truth for this
+    /// progress feedback (see `testSidebarDoesNotDuplicateGlobalOperationOverlay`
+    /// below) -- the sidebar only needs to actually call `removeSource(_:)`
+    /// after confirmation, and the confirmation copy itself must keep
+    /// reinforcing that RAW files are not deleted.
+    func testRemovingSourceCallsRemoveSourceAfterConfirmation() throws {
         let source = try Self.loadSource("PadLibrarySidebar.swift")
 
         XCTAssertTrue(
-            source.contains("@State private var removingSourceID: LibraryID?"),
-            "PadLibrarySidebar must track the source currently being removed"
+            source.contains("await library.removeSource(source.id)"),
+            "PadLibrarySidebar's remove confirmation must call removeSource(_:) after the user confirms"
         )
         XCTAssertTrue(
-            source.contains("PadLibraryProgressOverlay("),
-            "PadLibrarySidebar must show a visible progress overlay while removing a source"
-        )
-        XCTAssertTrue(
-            source.contains("L10n.t(\"Removing source…\")"),
-            "the remove-source progress overlay must have user-visible text"
-        )
-        XCTAssertTrue(
-            source.contains("L10n.t(\"RAW files stay exactly where they are.\")"),
-            "the remove-source progress copy must reassure users that RAW files are not deleted"
+            source.contains("L10n.t(\"LumaHarbor only forgets this source here. The RAW files and sidecars stay exactly where they are.\")"),
+            "the remove confirmation copy must reassure users that RAW files are not deleted"
         )
     }
 
     /// Reconnecting a source can spend visible time validating the selected
-    /// folder's identity. The UI should say that explicitly so users do not
-    /// tap again or assume LumaHarbor accepted a same-named wrong drive.
-    func testReconnectingSourceShowsVisibleProgressAndIdentityCopy() throws {
+    /// folder's identity. `PadLibraryView`'s global `operationState` overlay
+    /// (`.reconnectingSource`) is the single source of truth for this
+    /// progress feedback -- the sidebar only needs to actually call
+    /// `relinkSource(_:to:)` once a replacement folder is picked.
+    func testReconnectingSourceCallsRelinkSourceAfterPickingAFolder() throws {
         let source = try Self.loadSource("PadLibrarySidebar.swift")
 
         XCTAssertTrue(
-            source.contains("@State private var reconnectingSourceID: LibraryID?"),
-            "PadLibrarySidebar must track the source currently being reconnected"
-        )
-        XCTAssertTrue(
-            source.contains("L10n.t(\"Reconnecting source…\")"),
-            "the reconnect progress overlay must have user-visible text"
-        )
-        XCTAssertTrue(
-            source.contains("L10n.t(\"Checking this folder matches the original source.\")"),
-            "the reconnect progress copy must explain identity verification"
-        )
-        XCTAssertTrue(
             source.contains("await library.relinkSource(target.id, to: url)"),
-            "the reconnect progress state must wrap the existing relink call"
+            "picking a replacement folder must call relinkSource(_:to:)"
+        )
+    }
+
+    /// Task 1/2 follow-up review finding: `PadLibrarySidebar` used to keep
+    /// its own local `reconnectingSourceID`/`removingSourceID` overlay state
+    /// alongside `PadLibraryView`'s global `operationState`-driven overlay,
+    /// so at regular (non-compact) width -- where both views are mounted at
+    /// once in an `HStack` -- a user could see two near-duplicate progress
+    /// overlays simultaneously. `LibraryBrowserSession.operationState` is
+    /// now the single source of truth: this asserts the sidebar no longer
+    /// mounts its own `PadLibraryProgressOverlay` or tracks its own
+    /// per-operation `LibraryID` state.
+    func testSidebarDoesNotDuplicateGlobalOperationOverlay() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertFalse(
+            source.contains("PadLibraryProgressOverlay("),
+            "PadLibrarySidebar must not mount its own progress overlay -- PadLibraryView's global operationState overlay is the single source of truth"
+        )
+        XCTAssertFalse(
+            source.contains("removingSourceID"),
+            "PadLibrarySidebar must not keep its own local removingSourceID state"
+        )
+        XCTAssertFalse(
+            source.contains("reconnectingSourceID"),
+            "PadLibrarySidebar must not keep its own local reconnectingSourceID state"
         )
     }
 

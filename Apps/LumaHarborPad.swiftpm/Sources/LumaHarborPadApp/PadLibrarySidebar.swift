@@ -28,16 +28,6 @@ struct PadLibrarySidebar: View {
     /// drives `.confirmationDialog` below; set back to `nil` on every path
     /// out (confirm, cancel, or the dialog's own dismiss).
     @State private var pendingRemoval: LibraryFolder?
-    /// The source currently being removed from LumaHarbor's local library
-    /// records. Non-nil keeps a visible progress overlay mounted after the
-    /// destructive confirmation so the UI never looks inert while the
-    /// bookmark/index store is being updated.
-    @State private var removingSourceID: LibraryID?
-    /// The source currently being reconnected after the user picked a new
-    /// folder. Non-nil keeps progress visible while core validates the
-    /// selected folder's identity before attaching it to the existing
-    /// `LibraryID`.
-    @State private var reconnectingSourceID: LibraryID?
     /// The source a folder picker was opened to reconnect. Non-nil drives
     /// its own `.fileImporter`, distinct from `isAddingSource`'s.
     @State private var relinkTarget: LibraryFolder?
@@ -73,16 +63,6 @@ struct PadLibrarySidebar: View {
         }
         .listStyle(.sidebar)
         .navigationTitle(L10n.t("Library"))
-        .overlay {
-            if let progress = activeLifecycleProgress {
-                PadLibraryProgressOverlay(
-                    title: progress.title,
-                    message: progress.message
-                )
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: removingSourceID)
-        .animation(.easeInOut(duration: 0.2), value: reconnectingSourceID)
         .toolbar {
             ToolbarItem {
                 Button {
@@ -106,12 +86,8 @@ struct PadLibrarySidebar: View {
             switch result {
             case .success(let urls):
                 guard let url = urls.first else { return }
-                reconnectingSourceID = target.id
                 Task {
                     await library.relinkSource(target.id, to: url)
-                    await MainActor.run {
-                        reconnectingSourceID = nil
-                    }
                 }
             case .failure(let error):
                 let nsError = error as NSError
@@ -140,12 +116,8 @@ struct PadLibrarySidebar: View {
         ) { source in
             Button(L10n.t("Remove from LumaHarbor"), role: .destructive) {
                 pendingRemoval = nil
-                removingSourceID = source.id
                 Task {
                     await library.removeSource(source.id)
-                    await MainActor.run {
-                        removingSourceID = nil
-                    }
                 }
             }
             Button(L10n.t("Cancel"), role: .cancel) {
@@ -157,22 +129,6 @@ struct PadLibrarySidebar: View {
                     + " " + L10n.t("The source's .lumaharbor manifest is not deleted either.")
             )
         }
-    }
-
-    private var activeLifecycleProgress: (title: String, message: String)? {
-        if reconnectingSourceID != nil {
-            return (
-                L10n.t("Reconnecting source…"),
-                L10n.t("Checking this folder matches the original source.")
-            )
-        }
-        if removingSourceID != nil {
-            return (
-                L10n.t("Removing source…"),
-                L10n.t("RAW files stay exactly where they are.")
-            )
-        }
-        return nil
     }
 
     @ViewBuilder
