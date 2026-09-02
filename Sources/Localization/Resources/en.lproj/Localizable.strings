@@ -239,6 +239,7 @@
 "Save Adjustments" = "Save Adjustments";
 "Save to" = "Save to";
 "Save" = "Save";
+"Save failed" = "Save failed";
 "Saved" = "Saved";
 "Saving…" = "Saving…";
 "Scan problem" = "Scan problem";
@@ -351,3 +352,4 @@
 "Yellow" = "Yellow";
 "Your edits couldn't be saved." = "Your edits couldn't be saved.";
 "Your photos are still browsable." = "Your photos are still browsable.";
+"Your RAW original was not changed." = "Your RAW original was not changed.";

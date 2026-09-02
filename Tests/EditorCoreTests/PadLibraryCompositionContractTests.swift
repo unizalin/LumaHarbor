@@ -153,6 +153,21 @@ final class PadLibraryCompositionContractTests: XCTestCase {
         XCTAssertTrue(source.contains("Choose the original folder again"))
     }
 
+    /// Task 3: a failed save must never read as neutral "not saved" -- it
+    /// must say `Save failed` plainly and immediately reassure the user the
+    /// RAW original is untouched, matching spec §5.4's save-state model and
+    /// the plan's own Task 3 interface. Also confirms the editor's RAW
+    /// decode-in-progress state keeps its own distinct, already-shipped
+    /// `Decoding RAW…` copy rather than being folded into a generic spinner.
+    func testPadEditorUsesSaveFailedCopyAndRawSafetyHint() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("PadEditorView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("L10n.t(\"Save failed\")"))
+        XCTAssertFalse(source.contains("L10n.t(\"Not saved\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Your RAW original was not changed.\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Decoding RAW…\")"))
+    }
+
     // MARK: - Root-package compile/behavior contract
 
     /// Mirrors `PadAppServices.init` exactly (short of the two `Pad*Model`

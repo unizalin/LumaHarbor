@@ -385,9 +385,17 @@ struct PadEditorView: View {
                 Text(L10n.t("Saving…"))
             }
             .foregroundStyle(.secondary)
-        case .failed:
-            Label(L10n.t("Not saved"), systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 4) {
+                Label(L10n.t("Save failed"), systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.t("Your RAW original was not changed."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
