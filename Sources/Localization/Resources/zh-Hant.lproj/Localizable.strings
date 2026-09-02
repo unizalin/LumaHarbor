@@ -6,6 +6,7 @@
 "512 MB" = "512 MB";
 "A cached preview couldn't be written." = "無法寫入快取的預覽圖。";
 "A larger cache keeps more thumbnails available offline, but uses more storage." = "較大的快取能在離線時保留更多縮圖，但會占用更多儲存空間。";
+"Add a folder to start browsing RAW files" = "加入資料夾以開始瀏覽 RAW 檔案";
 "Add a photo folder" = "加入照片資料夾";
 "Add Folder" = "加入資料夾";
 "Add Photo Folder…" = "加入照片資料夾…";
@@ -37,11 +38,13 @@
 "Choose one or more .xmp develop preset files to see what LumaHarbor can import." = "選擇一或多個 .xmp 開發預設檔案，查看 LumaHarbor 可以匯入的內容。";
 "Choose the file again from Files." = "請重新從「檔案」App 選擇這個檔案。";
 "Choose the folder again to restore access to your photos." = "重新選擇這個資料夾以恢復照片的存取權限。";
+"Choose the original folder again so LumaHarbor can verify it is the same source." = "請重新選擇原本的資料夾，讓 LumaHarbor 確認這是同一個來源。";
 "Choose the photo folder again to restore access." = "重新選擇這個照片資料夾以恢復存取權限。";
 "Choose where to save the exported photo." = "選擇要儲存匯出照片的位置。";
 "Checking file access before opening the editor." = "正在確認檔案存取權，接著會開啟編輯器。";
 "Close" = "關閉";
 "Color" = "色彩";
+"Connect the drive again, or make the Files location available, then reconnect the source." = "請重新連接外接磁碟，或確認「檔案」App 中的位置可用，然後重新連接來源。";
 "Contrast" = "對比";
 "Copy to This iPad" = "複製到這台 iPad";
 "Couldn't add that folder" = "無法加入這個資料夾";
@@ -135,6 +138,8 @@
 "LumaHarbor couldn't start up" = "LumaHarbor 無法啟動";
 "LumaHarbor gave up waiting for this file to respond." = "LumaHarbor 已放棄等待這個檔案回應。";
 "LumaHarbor is already importing or cleaning up another photo." = "LumaHarbor 正在匯入或清理另一張照片。";
+"LumaHarbor is registering this folder without moving or changing your RAW files." = "LumaHarbor 正在登記這個資料夾，不會搬移或修改你的 RAW 檔案。";
+"LumaHarbor only reads RAW files in that folder — it never moves, overwrites, or deletes them." = "LumaHarbor 只會讀取該資料夾中的 RAW 檔案，不會搬移、覆蓋或刪除它們。";
 "LumaHarbor couldn't open local storage." = "LumaHarbor 無法開啟本機儲存空間。";
 "LumaHarbor looks for camera RAW files such as Sony .ARW." = "LumaHarbor 會尋找相機 RAW 檔案，例如 Sony .ARW。";
 "LumaHarbor no longer has access to this file." = "LumaHarbor 已經不再擁有這個檔案的存取權限。";
@@ -159,11 +164,14 @@
 "Next Photo" = "下一張照片";
 "No capture time" = "沒有拍攝時間";
 "No files were selected." = "未選擇任何檔案。";
+"No photos match this search" = "找不到符合搜尋條件的照片";
 "No presets yet" = "尚無 Preset";
 "No RAW files found in this folder" = "這個資料夾裡沒有找到 RAW 檔案";
 "No sources yet" = "尚無來源";
+"No supported RAW files found" = "找不到支援的 RAW 檔案";
 "Noise Reduction" = "降噪";
 "None of the selected files could be read as develop presets." = "所選檔案皆無法讀取為開發預設。";
+"None of your sources currently contain RAW files LumaHarbor can open." = "目前沒有任何來源包含 LumaHarbor 能開啟的 RAW 檔案。";
 "Not saved" = "未儲存";
 "Offline — reconnect the drive to edit or export" = "離線──重新連接磁碟才能編輯或匯出";
 "Offline" = "離線";
@@ -174,6 +182,7 @@
 "Opening photo…" = "正在開啟照片…";
 "Orange" = "橙";
 "Original" = "原圖";
+"Partial issue" = "部分項目發生問題";
 "Photo Folders" = "照片資料夾";
 "Photo" = "相片";
 "photos" = "張照片";
@@ -189,6 +198,7 @@
 "Quit and reopen LumaHarbor to rebuild the index." = "結束並重新開啟 LumaHarbor 即可重建索引。";
 "Quit and reopen LumaHarbor, then try again." = "結束並重新開啟 LumaHarbor，然後再試一次。";
 "Quit and reopen LumaHarbor, then check whether the folder still appears before trying again." = "結束並重新開啟 LumaHarbor，確認資料夾是否仍出現在清單後再試一次。";
+"RAW files and sidecars stay exactly where they are." = "RAW 檔案與 sidecar 會留在原本的位置，不會被刪除或修改。";
 "RAW files stay exactly where they are." = "RAW 檔案會留在原本的位置。";
 "Read-only" = "唯讀";
 "Read-only drive — edits can't be saved here" = "唯讀磁碟──在這裡無法儲存編輯";
@@ -280,6 +290,7 @@
 "The RAW file couldn't be decoded." = "無法解碼這個 RAW 檔案。";
 "The RAW original is never modified." = "原始 RAW 檔案永遠不會被修改。";
 "The saved edits for this photo are damaged." = "這張照片已儲存的編輯已經損壞。";
+"The source's .lumaharbor manifest is not deleted either." = "來源資料夾中的 .lumaharbor manifest 也不會被刪除。";
 "The system RAW decoder returned no image." = "系統的 RAW 解碼器沒有傳回任何影像。";
 "The thumbnail couldn't be rendered." = "無法產生縮圖。";
 "There isn't enough free space to cache previews." = "空間不足，無法快取預覽圖。";
@@ -301,7 +312,10 @@
 "This Library" = "此照片庫";
 "This library's index file is damaged." = "這個相片庫的索引檔案已經損壞。";
 "This source couldn't finish scanning." = "這個來源無法完成掃描。";
+"This source doesn't contain any RAW files LumaHarbor can open yet." = "這個來源目前沒有 LumaHarbor 能開啟的 RAW 檔案。";
+"This source is offline" = "此來源目前離線";
 "This source isn't currently reachable." = "目前無法連接這個來源。";
+"This source needs access" = "此來源需要重新授權";
 "This photo has saved adjustments" = "這張照片有已儲存的調整";
 "This photo hasn't been cached yet and its drive isn't connected." = "這張照片還沒有快取，而且它所在的磁碟未連接。";
 "This preset has no adjustments LumaHarbor can apply yet." = "這個 Preset 目前沒有 LumaHarbor 可套用的調整。";
@@ -313,6 +327,7 @@
 "Toggle favorite" = "切換收藏狀態";
 "Tone Curve" = "色調曲線";
 "Tone" = "色調範圍";
+"Try a different filename, or clear the search to see all photos." = "請嘗試其他檔名，或清除搜尋以顯示所有照片。";
 "Try again, or re-copy this file from the memory card." = "再試一次，或從記憶卡重新複製這個檔案。";
 "Try again." = "再試一次。";
 "Try copying this photo again." = "再試一次複製這張照片。";

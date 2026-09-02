@@ -108,6 +108,51 @@ final class PadLibraryCompositionContractTests: XCTestCase {
         )
     }
 
+    /// Task 2: the global operation overlay must be driven by `LibraryBrowserSession
+    /// .operationState` (Task 1), with a distinct title for each lifecycle
+    /// state -- never one shared generic "Loading…" string standing in for
+    /// add/scan/reconnect/remove -- and a RAW-safety message.
+    func testPadLibraryViewRendersDistinctSourceOperationOverlayTitles() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("PadLibraryView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(
+            source.contains("library.operationState"),
+            "the overlay must be derived from the session's operationState"
+        )
+        XCTAssertTrue(source.contains("L10n.t(\"Adding source…\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Scanning source…\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Reconnecting source…\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Removing source…\")"))
+        XCTAssertTrue(
+            source.contains("without moving or changing your RAW files") ||
+            source.contains("RAW files and sidecars stay exactly where they are"),
+            "the overlay must include a RAW-safety message"
+        )
+        XCTAssertTrue(
+            source.contains("case .addingSource:") &&
+            source.contains("case .scanningSource:") &&
+            source.contains("case .reconnectingSource:") &&
+            source.contains("case .removingSource:"),
+            "each operation must branch to its own distinct title, not a shared generic case"
+        )
+    }
+
+    /// Task 2: the main content area's empty grid must distinguish "no
+    /// sources at all" from an offline/needs-access selected source, an
+    /// empty search, and a source with no supported RAW files -- and give
+    /// each state a concrete next step, not just a title.
+    func testPadLibraryGridHasDistinctEmptyOfflineAccessAndSearchStates() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("PadLibraryGrid.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("Add a folder to start browsing RAW files"))
+        XCTAssertTrue(source.contains("This source is offline"))
+        XCTAssertTrue(source.contains("This source needs access"))
+        XCTAssertTrue(source.contains("No photos match this search"))
+        XCTAssertTrue(source.contains("No supported RAW files found"))
+        XCTAssertTrue(source.contains("Connect the drive again"))
+        XCTAssertTrue(source.contains("Choose the original folder again"))
+    }
+
     // MARK: - Root-package compile/behavior contract
 
     /// Mirrors `PadAppServices.init` exactly (short of the two `Pad*Model`

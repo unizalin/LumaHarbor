@@ -238,9 +238,13 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
     func testAddSourceRegistrationShowsAVisibleLoadingOverlay() throws {
         let source = try Self.loadSource("PadLibraryView.swift")
 
+        // Task 2: registration progress is no longer tracked by a
+        // view-local flag -- `LibraryBrowserSession.addSource(at:sourceKind:)`
+        // itself publishes `.addingSource` for the whole duration (Task 1),
+        // so PadLibraryView only needs to read `library.operationState`.
         XCTAssertTrue(
-            source.contains("@State private var isRegisteringSource = false"),
-            "PadLibraryView must track the post-picker source registration/loading state"
+            source.contains("library.operationState"),
+            "PadLibraryView must derive its overlay from the session's operationState"
         )
         XCTAssertTrue(
             source.contains("PadLibraryProgressOverlay("),
@@ -271,9 +275,12 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
             source.contains("case .scanning: return true"),
             "the scan overlay must stay mounted while a source is scanning"
         )
+        // Task 2: `hasActiveSourceScan` is now only consulted as a fallback
+        // once `library.operationState` is `.idle` -- a non-idle
+        // operationState (add/scan/reconnect/remove) always takes priority.
         XCTAssertTrue(
-            source.contains("isRegisteringSource || hasActiveSourceScan"),
-            "the overlay condition must cover both registration and the follow-up scan"
+            source.contains("case .idle:") && source.contains("guard hasActiveSourceScan else { return nil }"),
+            "the overlay must fall back to sourceProgress-driven scanning only once operationState is idle"
         )
     }
 
@@ -284,15 +291,19 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         let source = try Self.loadSource("PadLibraryView.swift")
 
         XCTAssertTrue(
-            source.contains("private var libraryProgressTitle: String"),
-            "PadLibraryView must derive the overlay title from the current operation"
+            source.contains("private var activeLibraryOverlay: (title: String, message: String)?"),
+            "PadLibraryView must derive the overlay title/message from a single operationState-driven property"
+        )
+        XCTAssertTrue(
+            source.contains("case .scanningSource:"),
+            "scanning must be its own operationState case, distinct from adding a source"
         )
         XCTAssertTrue(
             source.contains("L10n.t(\"Scanning source…\")"),
             "active source scans must use scan-specific visible text"
         )
         XCTAssertTrue(
-            source.contains("title: libraryProgressTitle"),
+            source.contains("title: overlay.title"),
             "the progress overlay must use the derived title rather than hard-coding add-source text"
         )
     }
@@ -422,9 +433,34 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
             source.contains("case .scanning: return L10n.t(\"Scanning…\")"),
             "source rows must show visible scanning text"
         )
+        // Task 2: a failed scan that still left usable partial results
+        // (something indexed, or an individual per-photo failure) must read
+        // differently from a scan that never got anywhere.
+        XCTAssertTrue(source.contains("case .failed:"), "source rows must branch on scan failure")
         XCTAssertTrue(
-            source.contains("case .failed: return L10n.t(\"Scan problem\")"),
-            "source rows must show persistent scan failure text"
+            source.contains("L10n.t(\"Partial issue\")") && source.contains("L10n.t(\"Scan problem\")"),
+            "source rows must distinguish a partially-failed scan from a fully-failed one"
+        )
+    }
+
+    /// Task 2: source rows must expose every lifecycle state the spec
+    /// requires as its own distinct, visible text -- never one state
+    /// standing in for another -- and the remove confirmation must
+    /// explicitly promise the RAW files, sidecars, and the source's own
+    /// `.lumaharbor` manifest are untouched.
+    func testSourceRowsExposeDistinctLifecycleText() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        for key in ["Read-only", "Offline", "Needs Access", "Scanning…", "Partial issue", "Scan problem"] {
+            XCTAssertTrue(source.contains("L10n.t(\"\(key)\")"), "missing \(key)")
+        }
+        XCTAssertTrue(
+            source.contains("RAW files and sidecars stay exactly where they are"),
+            "the remove confirmation must state that RAW files and sidecars are untouched"
+        )
+        XCTAssertTrue(
+            source.contains("manifest"),
+            "the remove confirmation must also mention the source's .lumaharbor manifest is untouched"
         )
     }
 

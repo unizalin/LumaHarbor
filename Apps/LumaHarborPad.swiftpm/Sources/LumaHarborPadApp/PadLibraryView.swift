@@ -19,7 +19,6 @@ struct PadLibraryView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isSidebarPresented = false
     @State private var isAddingSource = false
-    @State private var isRegisteringSource = false
 
     var body: some View {
         Group {
@@ -56,14 +55,14 @@ struct PadLibraryView: View {
             }
         }
         .overlay {
-            if isRegisteringSource || hasActiveSourceScan {
+            if let overlay = activeLibraryOverlay {
                 PadLibraryProgressOverlay(
-                    title: libraryProgressTitle,
-                    message: libraryProgressMessage
+                    title: overlay.title,
+                    message: overlay.message
                 )
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: isRegisteringSource)
+        .animation(.easeInOut(duration: 0.2), value: activeLibraryOverlay != nil)
         .task {
             library.start()
             library.restoreGridPosition()
@@ -72,12 +71,8 @@ struct PadLibraryView: View {
             FolderDocumentPicker(
                 onPick: { url in
                     isAddingSource = false
-                    isRegisteringSource = true
                     Task {
                         await addSourceFromPickedFolder(at: url)
-                        await MainActor.run {
-                            isRegisteringSource = false
-                        }
                     }
                 },
                 onCancel: {
@@ -107,18 +102,43 @@ struct PadLibraryView: View {
         }
     }
 
-    private var libraryProgressTitle: String {
-        if isRegisteringSource {
-            return L10n.t("Adding source…")
+    /// The single global operation overlay, derived from `library
+    /// .operationState` (Task 1) first -- a non-idle `operationState` always
+    /// wins and gets its own distinct title/message, never a shared generic
+    /// "Loading…" string. `sourceProgress` is only consulted as a fallback
+    /// while `operationState` is `.idle`, so a rescan kicked off from the
+    /// sidebar's context menu (which doesn't go through `addSource`, the
+    /// only producer of `.addingSource`) still shows visible scan feedback
+    /// here.
+    private var activeLibraryOverlay: (title: String, message: String)? {
+        switch library.operationState {
+        case .addingSource:
+            return (
+                L10n.t("Adding source…"),
+                L10n.t("LumaHarbor is registering this folder without moving or changing your RAW files.")
+            )
+        case .scanningSource:
+            return (
+                L10n.t("Scanning source…"),
+                L10n.t("Refreshing the library index without changing your RAW files.")
+            )
+        case .reconnectingSource:
+            return (
+                L10n.t("Reconnecting source…"),
+                L10n.t("Checking this folder matches the original source.")
+            )
+        case .removingSource:
+            return (
+                L10n.t("Removing source…"),
+                L10n.t("RAW files and sidecars stay exactly where they are.")
+            )
+        case .idle:
+            guard hasActiveSourceScan else { return nil }
+            return (
+                L10n.t("Scanning source…"),
+                L10n.t("Refreshing the library index without changing your RAW files.")
+            )
         }
-        return L10n.t("Scanning source…")
-    }
-
-    private var libraryProgressMessage: String {
-        if isRegisteringSource {
-            return L10n.t("Scanning this folder so photos can appear as they are indexed.")
-        }
-        return L10n.t("Refreshing the library index without changing your RAW files.")
     }
 
     private func presentAddSourcePicker() {
