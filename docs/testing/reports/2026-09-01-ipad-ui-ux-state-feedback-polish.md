@@ -8,10 +8,13 @@ Base: `f38f3ad7968b2d5faaffa96dda17f308a982846d`
 
 Status: AUTOMATED VERIFICATION COMPLETE. This report covers Task 1/2 review-fix work plus Task 3 (editor save-failure copy) and Task 4 (this report). Real-device/Simulator manual verification remains `NOT RUN` — see "Manual iPad verification" below.
 
+**Update (2026-09-02, after this report's own commit `2443061`):** Codex reviewed this diff and found one P1: removing `PadLibrarySidebar`'s local overlay (row 2 of "Review fixes" below) also removed the *only* overlay visible while that sidebar is presented as a compact-width `.sheet`, since `PadLibraryView`'s global overlay sits behind that sheet. Fixed in `bb63989d091bbcc1e2025c3161c97376abfff22e` (`fix: show sidebar operation overlay inside the compact sheet`) — full evidence in `docs/coordination/CURRENT.md`'s "Codex review P1 fix" section, not repeated in this report's own tables below.
+
 ## Commits
 
 - `aad02df93d297092cbc6af183f72189ccb52a8b7` — `fix: keep iPad library operation state scoped`
 - `ebdbeb0a245b6af419081a37718703bebb6726c8` — `feat: clarify iPad editor save failure feedback`
+- `bb63989d091bbcc1e2025c3161c97376abfff22e` — `fix: show sidebar operation overlay inside the compact sheet` (Codex review P1 fix; added after this report's own first version — see the Summary update above)
 
 (Task 1 `83ff071b434d430a9a8cc878d3b5b8dbde5cfc67` and Task 2 `bbbac5172f3989aa8b8dc395622276defc147aad` were already committed on the branch before this handoff; see `docs/coordination/CURRENT.md` for their own evidence.)
 
@@ -50,7 +53,7 @@ Status: `NOT RUN`. No real device or Simulator session was available in this env
 
 ## Claude review request
 
-This round of implementation and its own fixes were both done by Claude in the same session (no separate independent reviewer). Codex (or another fresh-context reviewer) should independently check this diff (`819ea8c..ebdbeb0`) against `docs/superpowers/specs/2026-09-01-ipad-ui-ux-state-feedback-polish-design.md`, focusing on:
+This round of implementation and its own fixes were both done by Claude in the same session (no separate independent reviewer). Codex (or another fresh-context reviewer) should independently check this diff against `docs/superpowers/specs/2026-09-01-ipad-ui-ux-state-feedback-polish-design.md`. **Commit-range note**: `819ea8c..ebdbeb0` is the last-*product*-commit range this report's own evidence table covers, but `2443061` (this report's own commit, `docs: record iPad UI polish verification`) was already the actual branch HEAD by the time this report existed — review `819ea8c..2443061` for the full state this report describes. Focus areas:
 
 - whether the `clearOperationState(ifStill:)` guard actually closes every stale-clobber path (add/relink/remove/scan), not just the one covered by the new test;
 - whether removing `PadLibrarySidebar`'s local overlay state changed any user-visible behavior beyond removing the duplicate (e.g. whether the global overlay's `.reconnectingSource`/`.removingSource` messages are equally reachable from every place the sidebar's local overlay used to appear, including the compact-width sheet presentation);
