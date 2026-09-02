@@ -2,7 +2,7 @@
 
 Updated: 2026-09-02
 
-Updated by: Claude (Task 1 + Task 2 TDD implementation, handoff to Codex)
+Updated by: Codex (AwayPhotoRawEditor parity spec)
 
 ## Source of truth
 
@@ -10,6 +10,7 @@ Updated by: Claude (Task 1 + Task 2 TDD implementation, handoff to Codex)
 - Previous integration branch landed and pushed to `main`: `f38f3ad7968b2d5faaffa96dda17f308a982846d`
 - Active UI/UX polish design spec: `docs/superpowers/specs/2026-09-01-ipad-ui-ux-state-feedback-polish-design.md`
 - Active UI/UX polish implementation plan: `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md`
+- Next product-scope parity spec: `docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`
 - Task 1 (library operation state contract) commit: `83ff071b434d430a9a8cc878d3b5b8dbde5cfc67`
 - Task 2 (library UI copy and source-state rendering) commit: `bbbac5172f3989aa8b8dc395622276defc147aad`
 - Latest current-branch product/evidence commit validated by the full fixture runner: `9a798d5852d2688e2b44e87715038d7eb043a091`
@@ -26,7 +27,7 @@ Updated by: Claude (Task 1 + Task 2 TDD implementation, handoff to Codex)
 - Shared agent entry-point commit: `4fe7574d354067235d872c2c3897a5f2a337c8d2`
 - Base branch: `main`
 - Base commit observed during design: `114b1f669f91968137d8519ef4b71b819f277444`
-- As of 2026-09-02, the integration branch is 4 commits ahead of `main` and 0 behind (`git rev-list --left-right --count main...HEAD` → `0	4`; the 4 commits are `7eee325`, `ec8797b`, `83ff071`, `bbbac51`).
+- As of the pre-parity-spec baseline on 2026-09-02, the integration branch was 5 commits ahead of `main` and 0 behind (`git rev-list --left-right --count main...HEAD` → `0	5`; the 5 commits were `7eee325`, `ec8797b`, `83ff071`, `bbbac51`, `0cca8e0`). The parity spec is a coordination/product-scope addition on top of that baseline, not a new validated product commit.
 - The integration branch has no configured upstream. Do not push it without explicit user authorization.
 
 The latest full APFS/exFAT/RAW production acceptance runner passed at `9a798d5852d2688e2b44e87715038d7eb043a091`, the commit where the previous (multi-source durability) branch landed on `main` as `f38f3ad`. The 4 commits ahead of `main` on this branch are the new UI/UX state feedback polish work (design/plan docs, then Task 1 and Task 2); they have not been re-run through that production fixture runner or on a real device yet.
@@ -101,6 +102,8 @@ Additional required manual gate:
 ## Next action
 
 Task 1 and Task 2 of `docs/superpowers/plans/2026-09-01-ipad-ui-ux-state-feedback-polish.md` are done (see the Handoff section below for full evidence). Codex's next bounded objective is Task 3 (Editor RAW open and save-state copy, in `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift` — rename `Not saved` to `Save failed`, add the RAW-safety hint), then Task 4 (final verification, the `docs/testing/reports/2026-09-01-ipad-ui-ux-state-feedback-polish.md` report, and this file). Given the Ownership-section deviation from the design spec's original division of labor, Codex should decide for itself whether to review the Task 1/Task 2 diff (`83ff071..bbbac51`) before continuing, or continue Task 3 directly and let a later review cover all three tasks together — either is acceptable; this file does not mandate one. Do not push, merge, rebase, remove the worktree, or commit personal signing settings without explicit user authorization.
+
+The next major product direction is now documented in `docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`: LumaHarbor should target functional parity with AwayPhotoRawEditor while staying a native Swift/SwiftUI/Core Image implementation. Do not start large parity implementation work until the current UI polish branch is closed cleanly and a phase-specific implementation plan is written.
 
 ## Handoff to Codex (2026-09-02, from Claude)
 
