@@ -51,18 +51,73 @@ private actor FakeLibraryEnvironment {
         return try sourcesResult.get()
     }
 
-    func addSource(_ url: URL, _ sourceKind: LibrarySourceKind) throws -> LibraryFolder {
+    /// Gates for `addSource`/`relinkSource`/`removeSource`, each mirroring
+    /// `restoreSources`'s own gate above -- a test opens the matching gate
+    /// once it has observed the in-flight `operationState` it's asserting
+    /// on.
+    private var isAddSourceGated = false
+    private var isAddSourceGateOpen = false
+    private var addSourceGateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func setAddSourceGated(_ gated: Bool) { isAddSourceGated = gated }
+
+    func openAddSourceGate() {
+        isAddSourceGateOpen = true
+        for waiter in addSourceGateWaiters { waiter.resume() }
+        addSourceGateWaiters = []
+    }
+
+    func addSource(_ url: URL, _ sourceKind: LibrarySourceKind) async throws -> LibraryFolder {
         addSourceCalls.append((url, sourceKind))
+        if isAddSourceGated, !isAddSourceGateOpen {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                addSourceGateWaiters.append(continuation)
+            }
+        }
         return try addSourceResult.get()
     }
 
-    func relinkSource(_ libraryID: LibraryID, _ url: URL) throws -> LibraryFolder {
+    private var isRelinkGated = false
+    private var isRelinkGateOpen = false
+    private var relinkGateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func setRelinkGated(_ gated: Bool) { isRelinkGated = gated }
+
+    func openRelinkGate() {
+        isRelinkGateOpen = true
+        for waiter in relinkGateWaiters { waiter.resume() }
+        relinkGateWaiters = []
+    }
+
+    func relinkSource(_ libraryID: LibraryID, _ url: URL) async throws -> LibraryFolder {
         relinkCalls.append((libraryID, url))
+        if isRelinkGated, !isRelinkGateOpen {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                relinkGateWaiters.append(continuation)
+            }
+        }
         return try relinkResult.get()
     }
 
-    func removeSource(_ libraryID: LibraryID) throws {
+    private var isRemoveGated = false
+    private var isRemoveGateOpen = false
+    private var removeGateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func setRemoveGated(_ gated: Bool) { isRemoveGated = gated }
+
+    func openRemoveGate() {
+        isRemoveGateOpen = true
+        for waiter in removeGateWaiters { waiter.resume() }
+        removeGateWaiters = []
+    }
+
+    func removeSource(_ libraryID: LibraryID) async throws {
         removeCalls.append(libraryID)
+        if isRemoveGated, !isRemoveGateOpen {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                removeGateWaiters.append(continuation)
+            }
+        }
         if let removeError { throw removeError }
     }
 
@@ -166,8 +221,29 @@ private actor FakeLibraryEnvironment {
         scanScripts[libraryID] = events
     }
 
+    /// Suspends before any scripted event is delivered -- a test can
+    /// observe the session's `operationState` while a scan is stuck here,
+    /// then open the gate to let the scripted events (including
+    /// `.finished`) run to completion.
+    private var isScanGated = false
+    private var isScanGateOpen = false
+    private var scanGateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func setScanGated(_ gated: Bool) { isScanGated = gated }
+
+    func openScanGate() {
+        isScanGateOpen = true
+        for waiter in scanGateWaiters { waiter.resume() }
+        scanGateWaiters = []
+    }
+
     func runScan(_ libraryID: LibraryID, _ handler: @Sendable (LibraryScanEvent) async -> Void) async {
         runScanCalls.append(libraryID)
+        if isScanGated, !isScanGateOpen {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                scanGateWaiters.append(continuation)
+            }
+        }
         for event in scanScripts[libraryID] ?? [] {
             await handler(event)
         }
@@ -1255,5 +1331,156 @@ final class LibraryBrowserSessionTests: XCTestCase {
         try await waitUntil { session.selection == .smart(.all) }
 
         XCTAssertTrue(session.sources.isEmpty)
+    }
+
+    // MARK: 9. Operation state
+
+    func testAddSourcePublishesAddingSourceWhileDependencyIsSuspended() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        let newFolder = makeFolder(name: "New Drive")
+        await environment.setAddSourceResult(.success(newFolder))
+        await environment.setAddSourceGated(true)
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+        XCTAssertEqual(session.operationState, .idle)
+
+        let addTask = Task { await session.addSource(at: URL(fileURLWithPath: "/Volumes/NewDrive"), sourceKind: .externalFolder) }
+        try await waitUntil { session.operationState == .addingSource }
+
+        await environment.openAddSourceGate()
+        await addTask.value
+        XCTAssertEqual(session.operationState, .idle)
+        XCTAssertEqual(session.sources.map(\.id), [newFolder.id])
+    }
+
+    func testAddSourceReturnsToIdleAfterFailure() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setAddSourceResult(.failure(FakeEnvironmentError.unconfigured))
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+
+        await session.addSource(at: URL(fileURLWithPath: "/Volumes/NewDrive"), sourceKind: .externalFolder)
+
+        XCTAssertEqual(session.operationState, .idle)
+        XCTAssertNotNil(session.alert)
+    }
+
+    func testRelinkAndRemovePublishDistinctOperationStates() async throws {
+        let environment = FakeLibraryEnvironment()
+        let sourceID = LibraryID()
+        let source = makeFolder(id: sourceID, connectionState: .needsAuthorization)
+        await environment.setSourcesResult(.success([source]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setRelinkResult(.success(makeFolder(id: sourceID, connectionState: .ready)))
+        await environment.setRelinkGated(true)
+        await environment.setRemoveGated(true)
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.sources.count == 1 }
+
+        let relinkTask = Task { await session.relinkSource(sourceID, to: source.rootURL) }
+        try await waitUntil { session.operationState == .reconnectingSource(sourceID) }
+        await environment.openRelinkGate()
+        await relinkTask.value
+        XCTAssertEqual(session.operationState, .idle)
+
+        let removeTask = Task { await session.removeSource(sourceID) }
+        try await waitUntil { session.operationState == .removingSource(sourceID) }
+        await environment.openRemoveGate()
+        await removeTask.value
+        XCTAssertEqual(session.operationState, .idle)
+        XCTAssertTrue(session.sources.isEmpty)
+    }
+
+    func testRelinkAndRemoveReturnToIdleAfterFailure() async throws {
+        let environment = FakeLibraryEnvironment()
+        let sourceID = LibraryID()
+        await environment.setSourcesResult(.success([makeFolder(id: sourceID)]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setRelinkResult(.failure(FakeEnvironmentError.unconfigured))
+        await environment.setRemoveError(FakeEnvironmentError.unconfigured)
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.sources.count == 1 }
+
+        await session.relinkSource(sourceID, to: URL(fileURLWithPath: "/Volumes/Drive"))
+        XCTAssertEqual(session.operationState, .idle)
+        XCTAssertNotNil(session.alert)
+
+        session.alert = nil
+        await session.removeSource(sourceID)
+        XCTAssertEqual(session.operationState, .idle)
+        XCTAssertNotNil(session.alert)
+    }
+
+    func testScanPublishesScanningSourceOperationState() async throws {
+        let environment = FakeLibraryEnvironment()
+        let sourceID = LibraryID()
+        await environment.setSourcesResult(.success([makeFolder(id: sourceID)]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setScanScript(for: sourceID, events: [.started(sourceID), .finished(makeScanResult(libraryID: sourceID))])
+        await environment.setScanGated(true)
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.sources.count == 1 }
+        XCTAssertEqual(session.operationState, .idle)
+
+        session.scanSource(sourceID)
+        try await waitUntil { session.operationState == .scanningSource(sourceID) }
+
+        await environment.openScanGate()
+        try await waitUntil { session.operationState == .idle }
+        XCTAssertEqual(session.sourceProgress[sourceID]?.phase, .finished)
+    }
+
+    func testScanReturnsToIdleAfterFailure() async throws {
+        let environment = FakeLibraryEnvironment()
+        let sourceID = LibraryID()
+        await environment.setSourcesResult(.success([makeFolder(id: sourceID)]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setScanScript(for: sourceID, events: [.failed(.indexUnavailable("fixture"))])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.sources.count == 1 }
+
+        session.scanSource(sourceID)
+        try await waitUntil { session.operationState == .idle }
+
+        guard case .failed = session.sourceProgress[sourceID]?.phase else {
+            return XCTFail("expected a failed scan phase")
+        }
+    }
+
+    func testOperationStateDoesNotChangeSourceProgressSemantics() async throws {
+        let environment = FakeLibraryEnvironment()
+        let sourceID = LibraryID()
+        await environment.setSourcesResult(.success([makeFolder(id: sourceID)]))
+        await environment.setPages(for: LibraryQuery(scope: .all, sort: .captureDateDescending), pages: [[]])
+        await environment.setScanScript(
+            for: sourceID,
+            events: [.started(sourceID), .photosIndexed([makePhoto(libraryID: sourceID)]), .finished(makeScanResult(libraryID: sourceID))]
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.sources.count == 1 }
+
+        session.scanSource(sourceID)
+        try await waitUntil { session.operationState == .idle }
+
+        XCTAssertEqual(session.sourceProgress[sourceID]?.indexedCount, 1)
+        XCTAssertEqual(session.sourceProgress[sourceID]?.phase, .finished)
     }
 }
