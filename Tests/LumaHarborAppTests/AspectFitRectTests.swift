@@ -60,4 +60,35 @@ final class AspectFitRectTests: XCTestCase {
         XCTAssertFalse(rect.width.isNaN)
         XCTAssertFalse(rect.height.isNaN)
     }
+
+    // MARK: - imagePixel(at:imageFrame:imageSize:) -- Phase 2 Task 2.4 (eyedropper)
+
+    func testImagePixelMapsTheFramesTopLeftToPixelZeroZero() {
+        let frame = CGRect(x: 16, y: 16, width: 100, height: 100)
+        let pixel = AspectFitRect.imagePixel(at: CGPoint(x: 16, y: 16), imageFrame: frame, imageSize: CGSize(width: 200, height: 200))
+        XCTAssertEqual(pixel, .zero)
+    }
+
+    func testImagePixelMapsTheFramesCentreToTheImagesCentre() {
+        let frame = CGRect(x: 16, y: 16, width: 100, height: 100)
+        let pixel = AspectFitRect.imagePixel(at: CGPoint(x: 66, y: 66), imageFrame: frame, imageSize: CGSize(width: 200, height: 200))
+        XCTAssertEqual(pixel, CGPoint(x: 100, y: 100))
+    }
+
+    func testImagePixelScalesNonSquareImagesCorrectly() {
+        let frame = CGRect(x: 0, y: 0, width: 100, height: 50)
+        let pixel = AspectFitRect.imagePixel(at: CGPoint(x: 25, y: 25), imageFrame: frame, imageSize: CGSize(width: 400, height: 200))
+        XCTAssertEqual(pixel, CGPoint(x: 100, y: 100))
+    }
+
+    func testImagePixelClampsAPointOutsideTheFrameToTheNearestEdge() {
+        let frame = CGRect(x: 16, y: 16, width: 100, height: 100)
+        let pixel = AspectFitRect.imagePixel(at: CGPoint(x: -50, y: 500), imageFrame: frame, imageSize: CGSize(width: 200, height: 200))
+        XCTAssertEqual(pixel, CGPoint(x: 0, y: 200))
+    }
+
+    func testImagePixelWithAZeroSizedFrameIsANoOpRatherThanDividingByZero() {
+        let pixel = AspectFitRect.imagePixel(at: CGPoint(x: 10, y: 10), imageFrame: .zero, imageSize: CGSize(width: 200, height: 200))
+        XCTAssertEqual(pixel, .zero)
+    }
 }

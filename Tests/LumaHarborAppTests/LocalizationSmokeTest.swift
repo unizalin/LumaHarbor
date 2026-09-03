@@ -95,4 +95,18 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// AwayPhotoRawEditor parity Phase 2 Task 2.4: every new user-facing
+    /// string the white balance eyedropper introduces must have landed in
+    /// both `.lproj` directories.
+    func testEveryEyedropperStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "White Balance Eyedropper", "Cancel Eyedropper", "Click a point that should be neutral gray"
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }

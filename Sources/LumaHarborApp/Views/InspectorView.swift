@@ -26,7 +26,11 @@ struct InspectorView: View {
                         Text(L10n.t("Basic")).font(.headline)
                         BasicAdjustmentPanel(editor: model.editor)
                         Divider()
-                        Text(L10n.t("Color")).font(.headline)
+                        HStack {
+                            Text(L10n.t("Color")).font(.headline)
+                            Spacer()
+                            WhiteBalanceEyedropperButton(editor: model.editor)
+                        }
                         ColorAdjustmentPanel(editor: model.editor)
                         Divider()
                         Text(L10n.t("Curve")).font(.headline)

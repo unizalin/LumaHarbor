@@ -421,3 +421,6 @@
 "Square" = "Square";
 "Reset Crop" = "Reset Crop";
 "Geometry adjustments are non-destructive." = "Geometry adjustments are non-destructive.";
+"White Balance Eyedropper" = "White Balance Eyedropper";
+"Cancel Eyedropper" = "Cancel Eyedropper";
+"Click a point that should be neutral gray" = "Click a point that should be neutral gray";

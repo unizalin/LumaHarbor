@@ -165,4 +165,137 @@ final class EditorSessionEditingTests: XCTestCase {
 
         XCTAssertEqual(editor.toolMode, .adjust)
     }
+
+    // MARK: - White balance eyedropper (Phase 2 Task 2.4)
+
+    /// Design spec §6.4: "使用者必須能取消滴管，不得在 hover / preview 階段寫入
+    /// sidecar" -- previewing must change what's *displayed* without
+    /// touching `history`/`saveState`/Undo at all, the same contract
+    /// `previewPreset(_:mode:)` already guarantees for presets
+    /// (`PresetWorkflowTests`).
+    func testPreviewEyedropperChangesDisplayedAdjustmentsButNotCommittedAdjustments() {
+        let editor = makeOpenEditor()
+        let warmSample = WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4)
+
+        editor.previewEyedropper(sample: warmSample)
+
+        XCTAssertNotEqual(editor.displayedAdjustments.temperature, 0)
+        XCTAssertEqual(editor.adjustments, .neutral, "the committed adjustments must be untouched by a preview")
+    }
+
+    func testPreviewEyedropperDoesNotDirtySaveStateOrTouchUndo() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+
+        XCTAssertEqual(editor.saveState, .unchanged)
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testCancellingAnEyedropperPreviewRestoresTheCommittedAdjustments() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+        XCTAssertNotEqual(editor.displayedAdjustments, .neutral)
+
+        editor.cancelEyedropperPreview()
+
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+        XCTAssertEqual(editor.saveState, .unchanged)
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testCancellingWithNoActiveEyedropperPreviewIsHarmless() {
+        let editor = makeOpenEditor()
+        editor.cancelEyedropperPreview() // must not crash or change anything
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+    }
+
+    func testCommittingAnEyedropperSampleAppliesItAndCreatesExactlyOneUndoEntry() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+
+        editor.commitEyedropper()
+
+        XCTAssertNotEqual(editor.adjustments.temperature, 0, "the sampled delta must land on the committed adjustments")
+        XCTAssertEqual(editor.displayedAdjustments, editor.adjustments)
+        XCTAssertTrue(editor.canUndo)
+
+        editor.undo()
+        XCTAssertEqual(editor.adjustments.temperature, 0, "exactly one undo entry, regardless of how the preview updated along the way")
+    }
+
+    func testCommittingAnEyedropperSampleMarksTheEditDirty() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+        editor.commitEyedropper()
+        XCTAssertEqual(editor.saveState, .pending)
+    }
+
+    func testCommittingWithNoActivePreviewIsANoOp() {
+        let editor = makeOpenEditor()
+        editor.commitEyedropper()
+        XCTAssertEqual(editor.adjustments, .neutral)
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    /// An already-neutral sample resolves to no delta at all
+    /// (`WhiteBalanceEyedropperTests.testAnAlreadyNeutralSampleProducesNoDelta`),
+    /// so committing it must add no history entry -- same "no-op transform
+    /// pushes nothing to Undo" contract every other edit path in this class
+    /// already has.
+    func testCommittingANeutralSampleAddsNoHistoryEntry() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.5, green: 0.5, blue: 0.5))
+        editor.commitEyedropper()
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testPreviewingASecondSampleReplacesTheFirstRatherThanCompounding() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+        let firstPreviewTemperature = editor.displayedAdjustments.temperature
+
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.7, green: 0.5, blue: 0.3))
+
+        XCTAssertNotEqual(
+            editor.displayedAdjustments.temperature, firstPreviewTemperature + firstPreviewTemperature,
+            "re-sampling must not stack the two deltas together"
+        )
+    }
+
+    func testPreviewEyedropperDoesNothingWithoutAnOpenPhoto() {
+        let editor = EditorSession()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+    }
+
+    func testOpeningAPhotoClearsAnyActiveEyedropperPreview() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+        XCTAssertNotEqual(editor.displayedAdjustments, .neutral)
+
+        let secondPhoto = PhotoAsset(
+            id: PhotoID(),
+            libraryID: LibraryID(),
+            relativePath: "second.ARW",
+            fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "second"),
+            status: .ready
+        )
+        editor.open(
+            photo: secondPhoto,
+            sourceURL: URL(fileURLWithPath: "/second.ARW"),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+    }
+
+    func testClosingClearsAnyActiveEyedropperPreview() {
+        let editor = makeOpenEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
+
+        editor.close()
+
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+    }
 }
