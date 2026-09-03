@@ -327,14 +327,30 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    /// Independent review of Task 3.3: a batch's other selected photos must
+    /// hear about a reset the same way they hear about a drag on that same
+    /// field -- otherwise resetting one of the ten basic sliders (via the
+    /// context menu, a double-click, or "Reset All") silently leaves the
+    /// rest of the batch stuck at whatever value the last real drag synced,
+    /// with no way for the user to tell the two have diverged. Brackets its
+    /// own change with the same begin/end hooks a drag fires, using the
+    /// value from just before the reset as the baseline.
     public func resetAdjustment(_ kind: AdjustmentKind) {
-        guard photo != nil, history.resetAdjustment(kind) else { return }
+        guard photo != nil else { return }
+        let baseline = history.current
+        guard history.resetAdjustment(kind) else { return }
+        services?.onBeginAdjustmentGesture?(baseline)
         didChangeAdjustments()
+        services?.onEndAdjustmentGesture?(history.current)
     }
 
     public func resetAll() {
-        guard photo != nil, history.resetToNeutral() else { return }
+        guard photo != nil else { return }
+        let baseline = history.current
+        guard history.resetToNeutral() else { return }
+        services?.onBeginAdjustmentGesture?(baseline)
         didChangeAdjustments()
+        services?.onEndAdjustmentGesture?(history.current)
     }
 
     /// General entry point for editing fields `setAdjustment(_:to:)` can't

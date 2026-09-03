@@ -454,4 +454,66 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(began?.exposure, 0, "begin must capture the value before this drag's own change")
         XCTAssertEqual(ended?.exposure, 2.0, "end must capture the value after this drag's own change")
     }
+
+    /// Independent review of Task 3.3: `resetAdjustment(_:)`/`resetAll()`
+    /// are reachable through the very same ten basic sliders the gesture
+    /// hooks are wired to (a context-menu "Reset <field>", a double-click
+    /// on the row, or "Reset All Adjustments") -- but neither method fired
+    /// either hook, so a batch's other selected photos silently never heard
+    /// about a reset, even though a drag on that same field would have
+    /// synced it. Reset must bracket its own change with begin/end the same
+    /// way a drag does, using the value from just before the reset as the
+    /// baseline.
+    func testResetAdjustmentFiresBeginAndEndGestureHooksBracketingTheReset() {
+        var began: PhotoAdjustments?
+        var ended: PhotoAdjustments?
+        let editor = makeOpenEditorWithGestureHooks(
+            onBeginAdjustmentGesture: { began = $0 },
+            onEndAdjustmentGesture: { ended = $0 }
+        )
+        editor.updateAdjustments { $0.exposure = 1.5 }
+
+        editor.resetAdjustment(.exposure)
+
+        XCTAssertEqual(began?.exposure, 1.5, "begin must capture the value from just before the reset")
+        XCTAssertEqual(ended?.exposure, 0, "end must capture the value after the reset")
+    }
+
+    func testResetAdjustmentDoesNotFireGestureHooksWhenTheFieldIsAlreadyNeutral() {
+        var fired = false
+        let editor = makeOpenEditorWithGestureHooks(onBeginAdjustmentGesture: { _ in fired = true })
+
+        editor.resetAdjustment(.exposure)
+
+        XCTAssertFalse(fired, "resetting an already-neutral field changes nothing -- there is nothing for a batch to sync")
+    }
+
+    func testResetAllFiresBeginAndEndGestureHooksBracketingEveryFieldItResets() {
+        var began: PhotoAdjustments?
+        var ended: PhotoAdjustments?
+        let editor = makeOpenEditorWithGestureHooks(
+            onBeginAdjustmentGesture: { began = $0 },
+            onEndAdjustmentGesture: { ended = $0 }
+        )
+        editor.updateAdjustments {
+            $0.exposure = 1.5
+            $0.contrast = 30
+        }
+
+        editor.resetAll()
+
+        XCTAssertEqual(began?.exposure, 1.5, "begin must capture every field's value from just before resetAll")
+        XCTAssertEqual(began?.contrast, 30)
+        XCTAssertEqual(ended?.exposure, 0, "end must capture every field's value after resetAll")
+        XCTAssertEqual(ended?.contrast, 0)
+    }
+
+    func testResetAllDoesNotFireGestureHooksWhenAlreadyNeutral() {
+        var fired = false
+        let editor = makeOpenEditorWithGestureHooks(onBeginAdjustmentGesture: { _ in fired = true })
+
+        editor.resetAll()
+
+        XCTAssertFalse(fired, "resetting an already-neutral photo changes nothing -- there is nothing for a batch to sync")
+    }
 }
