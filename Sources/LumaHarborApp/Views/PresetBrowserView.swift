@@ -1,5 +1,6 @@
 import AppKit
 import Localization
+import PhotoLibraryCore
 import PresetCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -216,6 +217,27 @@ struct PresetBrowserView: View {
                 }
                 .help(L10n.t("Import develop presets"))
                 .accessibilityLabel(L10n.t("Import develop presets"))
+
+                // Task 3.2: backup/restore a whole scope at once -- distinct
+                // from Export…/Import above, which are one preset at a time.
+                Menu {
+                    Button(L10n.t("Backup My Presets…")) { backupPresets(scope: .mine) }
+                    if presetLibrary.hasLibraryScope {
+                        Button(L10n.t("Backup This Library's Presets…")) { backupPresets(scope: .library) }
+                    }
+                    Divider()
+                    // Restore always targets "My Presets" -- the one scope
+                    // guaranteed to exist, matching `confirmImport`'s own
+                    // `.keepBoth` policy so a restore can never silently
+                    // overwrite an existing preset.
+                    Button(L10n.t("Restore Presets…")) { restorePresets() }
+                } label: {
+                    Image(systemName: "tray.and.arrow.up")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 20)
+                .help(L10n.t("Backup or restore presets"))
+                .accessibilityLabel(L10n.t("Backup or restore presets"))
             }
         }
     }
@@ -342,6 +364,65 @@ struct PresetBrowserView: View {
         } catch {
             exportError = UserAlert(title: L10n.t("Couldn't export this preset"), error: error)
         }
+    }
+
+    /// Whole-scope backup, distinct from `exportPreset` above (one preset).
+    /// `.lhpresetbackup`, `PresetCore.PresetBackupArchive`'s own file
+    /// extension convention (Task 3.2).
+    private func backupPresets(scope: PresetScopeKind) {
+        let panel = NSSavePanel()
+        panel.title = L10n.t("Backup Presets")
+        panel.nameFieldStringValue = "\(scope.title) Backup"
+        panel.allowedContentTypes = [.init(filenameExtension: "lhpresetbackup") ?? .data]
+        panel.allowsOtherFileTypes = true
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                let data = try await presetLibrary.exportBackup(scope: scope)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                exportError = UserAlert(title: L10n.t("Couldn't back up presets"), error: error)
+            }
+        }
+    }
+
+    /// Always restores into "My Presets" -- the one scope guaranteed to
+    /// exist -- under `.keepBoth`, the same never-overwrite policy
+    /// `confirmImport` already uses for `.xmp`/`.lhpreset` import. A picker
+    /// for restore's destination scope or conflict policy is a documented
+    /// scope boundary for this round, not an omission: `restorePresets`
+    /// (`PhotoLibraryCore`) and `PresetRestoreTests` already support every
+    /// policy, so widening this to a picker later needs no engine changes.
+    private func restorePresets() {
+        let panel = NSOpenPanel()
+        panel.title = L10n.t("Restore Presets")
+        panel.allowedContentTypes = [.init(filenameExtension: "lhpresetbackup") ?? .data]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            guard let data = try? Data(contentsOf: url) else {
+                exportError = UserAlert(
+                    title: L10n.t("Couldn't restore this backup"),
+                    message: L10n.t("That file couldn't be read.")
+                )
+                return
+            }
+            guard let summary = await presetLibrary.restoreBackup(data, into: .mine, conflict: .keepBoth) else {
+                return // presetLibrary's own `.alert` already reports this failure.
+            }
+            exportError = UserAlert(title: L10n.t("Restore complete"), message: restoreSummaryMessage(summary))
+        }
+    }
+
+    private func restoreSummaryMessage(_ summary: PresetRestoreSummary) -> String {
+        var parts: [String] = []
+        if summary.created > 0 { parts.append("\(summary.created) \(L10n.t("added"))") }
+        if summary.keptBoth > 0 { parts.append("\(summary.keptBoth) \(L10n.t("kept as a copy"))") }
+        if summary.duplicateSkipped > 0 { parts.append("\(summary.duplicateSkipped) \(L10n.t("already present"))") }
+        if summary.failed > 0 { parts.append("\(summary.failed) \(L10n.t("failed"))") }
+        return parts.isEmpty ? L10n.t("Nothing to restore.") : parts.joined(separator: ", ")
     }
 }
 

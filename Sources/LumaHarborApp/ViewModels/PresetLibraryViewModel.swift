@@ -354,10 +354,19 @@ final class PresetLibraryViewModel: ObservableObject {
         for url in urls {
             do {
                 let data = try Data(contentsOf: url)
-                let preview = try importer.preview(
-                    data: data,
-                    suggestedName: url.deletingPathExtension().lastPathComponent
-                )
+                let suggestedName = url.deletingPathExtension().lastPathComponent
+                // Task 3.2: import also accepts LumaHarbor's own `.lhpreset`
+                // files, not just `.xmp` -- distinct from `.lhpresetbackup`
+                // (a whole-scope archive, see `exportBackup`/`restoreBackup`
+                // below), this is a single preset. Like the `.xmp` path, a
+                // fresh identity is always minted (`PresetDocument.init`'s
+                // own default `UUID()`) rather than reusing the file's own
+                // `id` -- import always creates a new preset, it never
+                // silently adopts another preset's identity; that's what
+                // backup/restore is for.
+                let preview: XMPImportPreview = url.pathExtension.lowercased() == "lhpreset"
+                    ? try Self.previewLHPreset(data: data, suggestedName: suggestedName)
+                    : try importer.preview(data: data, suggestedName: suggestedName)
                 newItems.append(PresetImportItem(sourceURL: url, preview: preview))
             } catch {
                 failureCount += 1
@@ -443,5 +452,78 @@ final class PresetLibraryViewModel: ObservableObject {
 
     func exportAsNativePreset(_ document: PresetDocument) throws -> Data {
         try SidecarCoding.encode(document)
+    }
+
+    /// Wraps an `.lhpreset` file's own decoded document into the same
+    /// `XMPImportPreview` shape the XMP path already produces, so
+    /// `ImportPresetSheet`'s summary UI works unchanged for either kind of
+    /// file (Task 3.2: "Add UI for import/export `.lhpreset` and `.xmp`" --
+    /// `.xmp` import already existed; `.lhpreset` import did not). A native
+    /// preset has no approximate-vs-preserved distinction to make -- every
+    /// field already present in its own `patch` is exactly as native as
+    /// LumaHarbor's own patch format gets.
+    private static func previewLHPreset(data: Data, suggestedName: String) throws -> XMPImportPreview {
+        let decoded = try SidecarCoding.decode(PresetDocument.self, from: data)
+        let nativeFields = AdjustmentFieldID.allCases.filter { decoded.patch.contains($0) }
+        let proposedPreset = PresetDocument(
+            name: decoded.name.isEmpty ? suggestedName : decoded.name,
+            groupPath: decoded.groupPath,
+            patch: decoded.patch
+        )
+        return XMPImportPreview(
+            proposedPreset: proposedPreset,
+            nativeFields: nativeFields,
+            approximateFields: [],
+            preservedProperties: [],
+            diagnostics: []
+        )
+    }
+
+    // MARK: - Backup / restore (spec: "備份、還原 preset", Task 3.2)
+
+    /// Bundles every preset currently in `scope` into one portable
+    /// `PresetBackupArchive`, encoded the same way `.lhpreset` files are
+    /// (`PresetBackupCoding`, `PresetCore`) -- distinct from a single-preset
+    /// `.lhpreset`/`.xmp` export above. Throws rather than returning `nil`
+    /// on an unavailable scope, matching `list()`'s own contract; the caller
+    /// (a save panel action) has nothing useful to show for a partial
+    /// backup, so there is no "best effort" version of this.
+    func exportBackup(scope: PresetScopeKind) async throws -> Data {
+        guard let source = repository(for: scope) else {
+            throw PresetError.destinationUnavailable(scope.title)
+        }
+        let archive = PresetBackupArchive(documents: try await source.list())
+        return try PresetBackupCoding.encode(archive)
+    }
+
+    /// Decodes `data` as a `PresetBackupArchive` and replays every document
+    /// into `scope` via `restorePresets` (`PhotoLibraryCore`), one `save`
+    /// per document under `conflict` -- the exact same per-document
+    /// conflict machinery `save`/`PresetConflictResolution` already define
+    /// and `PresetRestoreTests` already covers against a real repository.
+    /// Returns `nil` (and sets `alert`) on a malformed archive or an
+    /// unavailable destination scope; a per-document failure inside a
+    /// otherwise-valid archive is instead tallied into the returned
+    /// `PresetRestoreSummary.failed`, since one bad preset in a large backup
+    /// must not hide what did restore.
+    @discardableResult
+    func restoreBackup(_ data: Data, into scope: PresetScopeKind, conflict: PresetConflictResolution) async -> PresetRestoreSummary? {
+        guard let destination = repository(for: scope) else {
+            alert = UserAlert(
+                title: L10n.t("Couldn't restore this backup"),
+                message: L10n.t("That destination isn't available right now.")
+            )
+            return nil
+        }
+        let archive: PresetBackupArchive
+        do {
+            archive = try PresetBackupCoding.decode(data)
+        } catch {
+            alert = UserAlert(title: L10n.t("Couldn't restore this backup"), error: error)
+            return nil
+        }
+        let summary = await restorePresets(archive.documents, into: destination, conflict: conflict)
+        await load()
+        return summary
     }
 }

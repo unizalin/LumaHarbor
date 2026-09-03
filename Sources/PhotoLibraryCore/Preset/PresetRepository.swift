@@ -148,6 +148,54 @@ private func safeCopiedSourceRetainedReason(for error: Error) -> String {
     return L10n.t("The copy at the new location is safe, but the original couldn't be removed from its previous location.")
 }
 
+/// The outcome of restoring a whole `PresetBackupArchive` into one
+/// repository (Phase 3 Task 3.2) -- one document at a time, via the same
+/// per-document conflict resolution `save`/`PresetStoreResult` already
+/// define, tallied rather than surfaced individually since a restore can
+/// easily cover dozens of presets at once.
+public struct PresetRestoreSummary: Sendable, Equatable {
+    public var created = 0
+    public var replaced = 0
+    public var keptBoth = 0
+    public var duplicateSkipped = 0
+    public var cancelled = 0
+    /// A document that failed validation (`PresetDocument.validated()`) or
+    /// hit a repository-level error (e.g. restoring into a read-only scope)
+    /// -- counted, never thrown, so one bad document in a large archive
+    /// doesn't abort every other document's restore.
+    public var failed = 0
+
+    public init() {}
+}
+
+/// Replays every document from a decoded `PresetBackupArchive` into
+/// `destination`, one `save` per document under the same `conflict` policy,
+/// tallying what happened rather than stopping at the first problem -- a
+/// restore is expected to run over many presets at once, and one invalid or
+/// conflicting document must not hide the rest.
+public func restorePresets(
+    _ documents: [PresetDocument],
+    into destination: any PresetRepository,
+    conflict: PresetConflictResolution
+) async -> PresetRestoreSummary {
+    var summary = PresetRestoreSummary()
+    for document in documents {
+        do {
+            let validated = try document.validated()
+            switch try await destination.save(validated, conflict: conflict) {
+            case .created: summary.created += 1
+            case .replaced: summary.replaced += 1
+            case .keptBoth: summary.keptBoth += 1
+            case .duplicateSkipped: summary.duplicateSkipped += 1
+            case .cancelled: summary.cancelled += 1
+            }
+        } catch {
+            summary.failed += 1
+        }
+    }
+    return summary
+}
+
 /// Content equality that ignores identity/timestamps: two documents are the
 /// "same preset" if everything a user or the render pipeline could observe is
 /// identical, regardless of *when* each copy was created/modified.

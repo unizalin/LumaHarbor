@@ -3,10 +3,13 @@ import PresetCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Spec §9.3: pick one or more `.xmp` files, see a preview summary (native /
-/// approximate / preserved counts, with approximate leaves the user can
-/// uncheck), then confirm into a chosen scope. Nothing is written until
-/// confirmed, and cancelling at any point writes nothing.
+/// Spec §9.3: pick one or more `.xmp` (or, since Task 3.2, LumaHarbor's own
+/// `.lhpreset`) files, see a preview summary (native / approximate /
+/// preserved counts, with approximate leaves the user can uncheck), then
+/// confirm into a chosen scope. Nothing is written until confirmed, and
+/// cancelling at any point writes nothing. An `.lhpreset` file always
+/// previews as 100% native fields -- see
+/// `PresetLibraryViewModel.previewLHPreset(data:suggestedName:)`.
 struct ImportPresetSheet: View {
     @EnvironmentObject private var model: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
@@ -85,7 +88,10 @@ struct ImportPresetSheet: View {
         .frame(width: 520)
         .fileImporter(
             isPresented: $isShowingFilePicker,
-            allowedContentTypes: [.xml, .init(filenameExtension: "xmp") ?? .xml],
+            allowedContentTypes: [
+                .xml, .init(filenameExtension: "xmp") ?? .xml,
+                .init(filenameExtension: "lhpreset") ?? .data
+            ],
             allowsMultipleSelection: true
         ) { result in
             if case .success(let urls) = result {
@@ -104,7 +110,7 @@ struct ImportPresetSheet: View {
     }
 
     private var emptyState: some View {
-        Text(L10n.t("Choose one or more .xmp develop preset files to see what LumaHarbor can import."))
+        Text(L10n.t("Choose one or more .xmp or .lhpreset files to see what LumaHarbor can import."))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, minHeight: 120)
     }
