@@ -73,6 +73,12 @@ public final class EditorSession: ObservableObject {
     @Published public var isShowingOriginal = false
     @Published public var alert: EditorAlert?
 
+    /// Which on-canvas tool is active right now (design spec §6.5). Reset to
+    /// `.adjust` on every `open()`/`close()` so switching photos never
+    /// leaves a crop overlay armed against a photo the user didn't ask to
+    /// crop.
+    @Published public private(set) var toolMode: EditorToolMode = .adjust
+
     /// Longest edge the preview should cover, in backing-store pixels.
     @Published public var previewPixelDimension = 1_600
 
@@ -247,6 +253,7 @@ public final class EditorSession: ObservableObject {
         self.previewIntentVersion += 1
         self.previewRequestGeneration = nil
         self.previewImageReflectsAPreview = false
+        self.toolMode = .adjust
         refreshUndoState()
 
         submitInteractivePreview()
@@ -275,6 +282,7 @@ public final class EditorSession: ObservableObject {
         previewIntentVersion += 1
         previewRequestGeneration = nil
         previewImageReflectsAPreview = false
+        toolMode = .adjust
         refreshUndoState()
         if let scheduler = services?.previewScheduler {
             Task { await scheduler.cancelAll() }
@@ -318,6 +326,13 @@ public final class EditorSession: ObservableObject {
     public func undo() {
         guard history.undo() != nil else { return }
         didChangeAdjustments()
+    }
+
+    /// Switches the on-canvas interaction mode. Purely UI state -- it never
+    /// touches `history`, `saveState` or the preview, unlike every other
+    /// method in this section.
+    public func setToolMode(_ mode: EditorToolMode) {
+        toolMode = mode
     }
 
     public func redo() {

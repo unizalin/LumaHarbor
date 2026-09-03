@@ -47,7 +47,8 @@ final class InspectorAdjustmentGroupsContractTests: XCTestCase {
             ("Color", "ColorAdjustmentPanel(editor:"),
             ("Curve", "CurveAdjustmentPanel(editor:"),
             ("Detail", "DetailAdjustmentPanel(editor:"),
-            ("Effects", "EffectsAdjustmentPanel(editor:")
+            ("Effects", "EffectsAdjustmentPanel(editor:"),
+            ("Geometry", "GeometryAdjustmentPanel(editor:")
         ]
         for group in groups {
             XCTAssertTrue(
@@ -65,7 +66,10 @@ final class InspectorAdjustmentGroupsContractTests: XCTestCase {
     /// a public view in `AdjustmentUI` -- catches a header added with no
     /// corresponding panel ever built.
     func testEveryNewAdjustmentPanelSourceFileExists() throws {
-        for filename in ["ColorAdjustmentPanel.swift", "CurveAdjustmentPanel.swift", "DetailAdjustmentPanel.swift", "EffectsAdjustmentPanel.swift"] {
+        for filename in [
+            "ColorAdjustmentPanel.swift", "CurveAdjustmentPanel.swift", "DetailAdjustmentPanel.swift",
+            "EffectsAdjustmentPanel.swift", "GeometryAdjustmentPanel.swift"
+        ] {
             let source = try Self.loadSource("Sources/AdjustmentUI/\(filename)")
             XCTAssertTrue(source.contains("public struct"), "\(filename) must define a public SwiftUI view usable from LumaHarborApp")
         }
