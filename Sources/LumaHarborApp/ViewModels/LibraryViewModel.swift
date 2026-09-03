@@ -292,6 +292,15 @@ public final class LibraryViewModel: ObservableObject {
     /// fix) means a target already reverted by the first attempt no longer
     /// matches its recorded `after` value and is `skipped`, not re-reverted,
     /// on the retry.
+    ///
+    /// Independent review of the Task 3.4 follow-up round itself, Finding 1:
+    /// a brand-new, unrelated batch sync landing in `endBatchGesture` while
+    /// this `await` is in flight replaces `lastBatchTransaction` with its
+    /// own transaction -- this function must only write back to
+    /// `lastBatchTransaction` if it's still the exact transaction (by `id`)
+    /// this call started with, or it would clear/leave-for-retry a
+    /// completely different, newer transaction the user never asked to
+    /// touch.
     @discardableResult
     func undoLastBatchTransaction() async -> BatchAdjustmentSyncService.BatchUndoSummary? {
         guard !isUndoingLastBatchTransaction, let transaction = lastBatchTransaction else { return nil }
@@ -299,7 +308,7 @@ public final class LibraryViewModel: ObservableObject {
         defer { isUndoingLastBatchTransaction = false }
 
         let summary = await batchSyncService.undo(transaction)
-        if summary.failed == 0 {
+        if summary.failed == 0, lastBatchTransaction?.id == transaction.id {
             lastBatchTransaction = nil
         }
         for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {

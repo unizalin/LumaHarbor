@@ -438,6 +438,120 @@ final class BatchAdjustmentGestureIntegrationTests: AppViewModelTestCase {
         XCTAssertEqual(reverted.exposure, 0)
     }
 
+    /// Independent review of the Task 3.4 follow-up round itself, Finding 1:
+    /// `undoLastBatchTransaction()` reads `lastBatchTransaction` into a
+    /// local, awaits `batchSyncService.undo(_:)`, then writes back to
+    /// `lastBatchTransaction` based on the outcome -- with no check that
+    /// `lastBatchTransaction` is still the *same* transaction it started
+    /// with. A brand-new, completely unrelated batch sync that lands while
+    /// the first undo is still in flight replaces `lastBatchTransaction`
+    /// with its own transaction; the first undo's completion must not then
+    /// stomp on it.
+    func testUndoLastBatchTransactionDoesNotClobberAnUnrelatedTransactionThatLandsWhileItIsInFlight() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW", "DSC0003.ARW", "DSC0004.ARW"])
+        let log = ServiceCallLog()
+        let store = AdjustmentStore()
+        actor Gate {
+            private var armedFor: PhotoID?
+            private var hasArrived = false
+            private var arrivedContinuation: CheckedContinuation<Void, Never>?
+            private var isReleased = false
+            private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+            func arm(for id: PhotoID) { armedFor = id }
+
+            /// A no-op for any photo other than the armed one -- lets every
+            /// other save (the setup syncs, T2's own sync) through
+            /// untouched.
+            func passThroughOrPause(_ id: PhotoID) async {
+                guard armedFor == id else { return }
+                hasArrived = true
+                arrivedContinuation?.resume()
+                arrivedContinuation = nil
+                guard !isReleased else { return }
+                await withCheckedContinuation { releaseContinuation = $0 }
+            }
+
+            func waitForArrival() async {
+                guard !hasArrived else { return }
+                await withCheckedContinuation { arrivedContinuation = $0 }
+            }
+
+            func release() {
+                isReleased = true
+                releaseContinuation?.resume()
+                releaseContinuation = nil
+            }
+        }
+        let gate = Gate()
+        let services = try makeServices(
+            loadAdjustments: { photo in await store.get(photo.id) },
+            saveAdjustments: { adjustments, photo in
+                await gate.passThroughOrPause(photo.id)
+                await store.set(photo.id, adjustments)
+                await log.recordSave(photo.id, adjustments)
+            }
+        )
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let sourceA = model.photos[0]
+        let targetB = model.photos[1]
+        let sourceC = model.photos[2]
+        let targetD = model.photos[3]
+
+        // T1: A (source) -> B, an ordinary batch sync.
+        model.requestSelectPhoto(sourceA.id)
+        await waitUntilAppCondition("A to open") {
+            await MainActor.run { model.editor.photo?.id == sourceA.id }
+        }
+        model.toggleMultiSelect(targetB.id)
+        model.editor.beginAdjustmentGesture()
+        model.editor.setAdjustment(.exposure, to: 1.5)
+        model.editor.endAdjustmentGesture()
+        await waitUntilAppCondition("B to receive T1's synced save") {
+            await log.saveCount >= 1
+        }
+        let t1ID = try XCTUnwrap(model.lastBatchTransaction?.id)
+
+        // Start undoing T1, but pause it right as it's about to write B's
+        // reverted value back.
+        await gate.arm(for: targetB.id)
+        async let firstUndoSummary = model.undoLastBatchTransaction()
+        await gate.waitForArrival() // T1's own undo is now paused mid-write.
+
+        // While T1's undo is still in flight, an entirely unrelated batch
+        // sync (T2: C -> D) completes normally. Waits on D's own save
+        // specifically -- not a raw save count -- since switching away from
+        // A also flushes A's own pending autosave through the same log,
+        // which would otherwise satisfy a plain count too early, before D
+        // (and therefore T2's own `endBatchGesture`) has actually landed.
+        model.requestSelectPhoto(sourceC.id)
+        await waitUntilAppCondition("C to open") {
+            await MainActor.run { model.editor.photo?.id == sourceC.id }
+        }
+        model.toggleMultiSelect(targetD.id)
+        model.editor.beginAdjustmentGesture()
+        model.editor.setAdjustment(.contrast, to: 20)
+        model.editor.endAdjustmentGesture()
+        await waitUntilAppCondition("D to receive T2's synced save") {
+            await log.savedAdjustments.contains { $0.0 == targetD.id }
+        }
+        let t2ID = try XCTUnwrap(model.lastBatchTransaction?.id)
+        XCTAssertNotEqual(t1ID, t2ID, "T2 must be its own, distinct transaction")
+
+        // Now let T1's undo finish.
+        await gate.release()
+        let firstResult = await firstUndoSummary
+        XCTAssertEqual(firstResult?.failed, 0, "T1's own undo must still succeed once released")
+
+        XCTAssertEqual(
+            model.lastBatchTransaction?.id, t2ID,
+            "T1's undo completing after T2 landed must not clobber T2 -- it must still be the thing 'Undo Batch Sync' would revert next"
+        )
+    }
+
     func testUndoLastBatchTransactionWithNothingToUndoReturnsNil() async throws {
         try seedPhotos(["DSC0001.ARW"])
         let services = try makeServices()
