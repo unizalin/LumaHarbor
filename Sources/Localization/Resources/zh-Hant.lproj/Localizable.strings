@@ -12,9 +12,11 @@
 "Add Photo Folder…" = "加入照片資料夾…";
 "Add Source" = "加入來源";
 "Adding source…" = "正在加入來源…";
+"added" = "已新增";
 "Add the folder again." = "重新加入這個資料夾。";
 "Adjustments" = "調整";
 "All" = "全部";
+"already present" = "已存在";
 "Amount" = "數量";
 "Basic" = "基本";
 "Curve" = "曲線";
@@ -62,6 +64,10 @@
 "Aqua" = "水藍";
 "Back to Library" = "回到相片庫";
 "Back to the library grid" = "回到相片庫網格";
+"Backup My Presets…" = "備份我的 Preset…";
+"Backup or restore presets" = "備份或還原 Preset";
+"Backup Presets" = "備份 Preset";
+"Backup This Library's Presets…" = "備份這個照片庫的 Preset…";
 "Blacks" = "黑色";
 "Blue" = "藍";
 "Built-In" = "內建";
@@ -77,7 +83,7 @@
 "Choose Destination…" = "選擇目的地…";
 "Choose develop preset files to import" = "選擇要匯入的開發預設檔案";
 "Choose Files…" = "選擇檔案…";
-"Choose one or more .xmp develop preset files to see what LumaHarbor can import." = "選擇一或多個 .xmp 開發預設檔案，查看 LumaHarbor 可以匯入的內容。";
+"Choose one or more .xmp or .lhpreset files to see what LumaHarbor can import." = "選擇一或多個 .xmp 或 .lhpreset 檔案，查看 LumaHarbor 可以匯入的內容。";
 "Choose the file again from Files." = "請重新從「檔案」App 選擇這個檔案。";
 "Choose the folder again to restore access to your photos." = "重新選擇這個資料夾以恢復照片的存取權限。";
 "Choose the original folder again so LumaHarbor can verify it is the same source." = "請重新選擇原本的資料夾，讓 LumaHarbor 確認這是同一個來源。";
@@ -91,6 +97,8 @@
 "Copy to This iPad" = "複製到這台 iPad";
 "Couldn't add that folder" = "無法加入這個資料夾";
 "Couldn't add this source" = "無法加入這個來源";
+"Couldn't back up presets" = "無法備份 Preset";
+"Couldn't restore this backup" = "無法還原這個備份";
 "Couldn't copy this preset" = "無法複製這個 Preset";
 "Couldn't create this preset" = "無法建立這個 Preset";
 "Couldn't delete this preset" = "無法刪除這個 Preset";
@@ -150,6 +158,7 @@
 "Filename (Z–A)" = "檔名（Z–A）";
 "Filter presets" = "篩選 Preset";
 "Focal Length" = "焦距";
+"failed" = "失敗";
 "Focus Mode" = "專注模式";
 "Format" = "格式";
 "found" = "張照片";
@@ -174,6 +183,7 @@
 "is read-only." = "是唯讀的。";
 "JPEG quality" = "JPEG 品質";
 "Keep the file in your library — support may arrive in a future macOS release." = "先把檔案留在相片庫中──未來的 macOS 版本可能會支援。";
+"kept as a copy" = "保留為副本";
 "Large" = "大";
 "Lens" = "鏡頭";
 "Library" = "圖庫";
@@ -223,6 +233,7 @@
 "No histogram available yet" = "目前沒有可顯示的直方圖";
 "No photos match this search" = "找不到符合搜尋條件的照片";
 "No presets yet" = "尚無 Preset";
+"Nothing to restore." = "沒有可還原的內容。";
 "No RAW files found in this folder" = "這個資料夾裡沒有找到 RAW 檔案";
 "No sources yet" = "尚無來源";
 "No supported RAW files found" = "找不到支援的 RAW 檔案";
@@ -284,6 +295,9 @@
 "Rename Preset" = "重新命名 Preset";
 "Rename…" = "重新命名…";
 "Replace" = "取代";
+"Restore complete" = "還原完成";
+"Restore Presets" = "還原 Preset";
+"Restore Presets…" = "還原 Preset…";
 "Refreshing the library index without changing your RAW files." = "正在更新圖庫索引，不會變更你的 RAW 檔案。";
 "Rescan Folder" = "重新掃描資料夾";
 "Rescan" = "重新掃描";
@@ -327,6 +341,7 @@
 "Stop" = "停止";
 "Temperature" = "色溫";
 "That export location is read-only." = "這個匯出位置是唯讀的。";
+"That file couldn't be read." = "無法讀取這個檔案。";
 "That location can't be written to." = "無法寫入這個位置。";
 "That photo folder is no longer in your library list." = "這個照片資料夾已經不在你的相片庫清單中。";
 "That's not the same photo" = "這不是同一張照片";

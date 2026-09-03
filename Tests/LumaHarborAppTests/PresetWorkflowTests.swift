@@ -858,4 +858,107 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertFalse(saved)
         XCTAssertNotNil(sut.alert)
     }
+
+    // MARK: - Backup/restore and .lhpreset import (Phase 3 Task 3.2)
+
+    private func writeFixtureLHPreset(document: PresetDocument, name: String = "Fixture") throws -> URL {
+        let url = temporaryDirectory.appendingPathComponent("\(name).lhpreset")
+        try SidecarCoding.encode(document).write(to: url)
+        return url
+    }
+
+    func testExportBackupProducesAnArchiveContainingExactlyThatScopesDocuments() async throws {
+        let mine = RecordingPresetRepository(seed: [makeDocument(name: "A"), makeDocument(name: "B")])
+        let library = RecordingPresetRepository(seed: [makeDocument(name: "Library Only")])
+        let sut = PresetLibraryViewModel(myRepository: mine, libraryRepository: library)
+
+        let data = try await sut.exportBackup(scope: .mine)
+        let archive = try PresetBackupCoding.decode(data)
+
+        XCTAssertEqual(Set(archive.documents.map(\.name)), ["A", "B"])
+    }
+
+    func testExportBackupThrowsWhenTheScopesRepositoryIsUnavailable() async throws {
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository()) // no libraryRepository
+        do {
+            _ = try await sut.exportBackup(scope: .library)
+            XCTFail("Expected exportBackup to throw for an unavailable scope")
+        } catch {
+            // Expected -- no repository to list from.
+        }
+    }
+
+    func testRestoreBackupAppliesEveryDocumentAndReloadsItems() async throws {
+        let mine = RecordingPresetRepository()
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: BuiltInPresetRepository(documents: []))
+        let archive = PresetBackupArchive(documents: [makeDocument(name: "Restored A"), makeDocument(name: "Restored B")])
+        let data = try PresetBackupCoding.encode(archive)
+
+        let summary = await sut.restoreBackup(data, into: .mine, conflict: .replace)
+
+        XCTAssertEqual(summary?.created, 2)
+        let saved = await mine.savedDocuments
+        XCTAssertEqual(Set(saved.map(\.name)), ["Restored A", "Restored B"])
+        XCTAssertEqual(sut.items.count, 2, "restoreBackup must reload items so the browser reflects what was restored")
+    }
+
+    func testRestoreBackupWithMalformedDataSetsAlertAndReturnsNil() async throws {
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
+        XCTAssertNil(sut.alert)
+
+        let summary = await sut.restoreBackup(Data("not an archive".utf8), into: .mine, conflict: .replace)
+
+        XCTAssertNil(summary)
+        XCTAssertNotNil(sut.alert)
+    }
+
+    func testRestoreBackupIntoAnUnavailableScopeSetsAlertAndReturnsNil() async throws {
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository()) // no libraryRepository
+        let archive = PresetBackupArchive(documents: [makeDocument()])
+        let data = try PresetBackupCoding.encode(archive)
+
+        let summary = await sut.restoreBackup(data, into: .library, conflict: .replace)
+
+        XCTAssertNil(summary)
+        XCTAssertNotNil(sut.alert)
+    }
+
+    func testPreviewImportAcceptsALhpresetFileAndProposesItsExactPatchAsAllNativeFields() async throws {
+        let document = makeDocument(name: "Native Fixture")
+        let fixture = try writeFixtureLHPreset(document: document)
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
+
+        await sut.previewImport([fixture])
+
+        XCTAssertEqual(sut.importState, .preview)
+        let item = try XCTUnwrap(sut.importItems.first)
+        XCTAssertEqual(item.preview.proposedPreset.name, "Native Fixture")
+        XCTAssertEqual(item.preview.proposedPreset.patch, document.patch)
+        XCTAssertEqual(Set(item.preview.nativeFields), [.basicExposure])
+        XCTAssertTrue(item.preview.approximateFields.isEmpty)
+        XCTAssertTrue(item.preview.preservedProperties.isEmpty)
+    }
+
+    func testPreviewImportOfALhpresetFileMintsAFreshIdentityRatherThanReusingTheFiles() async throws {
+        let document = makeDocument()
+        let fixture = try writeFixtureLHPreset(document: document)
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
+
+        await sut.previewImport([fixture])
+
+        let item = try XCTUnwrap(sut.importItems.first)
+        XCTAssertNotEqual(item.preview.proposedPreset.id, document.id, "importing must never silently adopt the source file's own identity")
+    }
+
+    func testPreviewImportOfACorruptLhpresetFileCountsAsAFailureLikeACorruptXMPFile() async throws {
+        let url = temporaryDirectory.appendingPathComponent("Corrupt.lhpreset")
+        try Data("not json".utf8).write(to: url)
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
+
+        await sut.previewImport([url])
+
+        guard case .failed = sut.importState else {
+            return XCTFail("Expected .failed, got \(sut.importState)")
+        }
+    }
 }

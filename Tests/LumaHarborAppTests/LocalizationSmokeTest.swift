@@ -131,4 +131,22 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// Phase 3 Task 3.2: every new user-facing string backup/restore and
+    /// `.lhpreset` import introduce must have landed in both `.lproj`
+    /// directories.
+    func testEveryPresetBackupRestoreStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Backup My Presets…", "Backup This Library's Presets…", "Restore Presets…",
+            "Backup or restore presets", "Backup Presets", "Restore Presets",
+            "Couldn't back up presets", "Couldn't restore this backup", "That file couldn't be read.",
+            "Restore complete", "Nothing to restore.", "added", "kept as a copy", "already present", "failed",
+            "Choose one or more .xmp or .lhpreset files to see what LumaHarbor can import."
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }

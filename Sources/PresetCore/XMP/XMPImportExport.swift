@@ -10,6 +10,23 @@ public struct XMPImportPreview: Equatable, Sendable {
     public var preservedProperties: [XMPPropertyID]
     public var diagnostics: [XMPDiagnostic]
 
+    /// Public since Task 3.2's `.lhpreset` import path builds this cross-module,
+    /// in `LumaHarborApp` -- a native preset has no XMP packet to parse, so it
+    /// has no need for `XMPImporter.preview` itself, only the preview shape.
+    public init(
+        proposedPreset: PresetDocument,
+        nativeFields: [AdjustmentFieldID],
+        approximateFields: [AdjustmentFieldID],
+        preservedProperties: [XMPPropertyID],
+        diagnostics: [XMPDiagnostic]
+    ) {
+        self.proposedPreset = proposedPreset
+        self.nativeFields = nativeFields
+        self.approximateFields = approximateFields
+        self.preservedProperties = preservedProperties
+        self.diagnostics = diagnostics
+    }
+
     /// Spec §9.3: "no applicable adjustments yet" is a valid, non-error
     /// outcome the UI must label explicitly, not silently drop.
     public var hasApplicableAdjustments: Bool { !nativeFields.isEmpty || !approximateFields.isEmpty }

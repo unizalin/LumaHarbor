@@ -92,4 +92,22 @@ final class PresetBrowserFoundationContractTests: XCTestCase {
         )
         XCTAssertTrue(createSource.contains("enum PresetFieldGroup"))
     }
+
+    // MARK: - .lhpreset import (Phase 3 Task 3.2: "Add UI for import/export .lhpreset and .xmp")
+
+    func testImportPresetSheetAcceptsLHPresetFilesNotOnlyXMP() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/Views/ImportPresetSheet.swift")
+        XCTAssertTrue(
+            source.contains("lhpreset"),
+            "the file picker must accept LumaHarbor's own .lhpreset files, not just .xmp"
+        )
+    }
+
+    // MARK: - Backup / restore (Phase 3 Task 3.2)
+
+    func testPresetBrowserOffersBackupAndRestoreEntryPoints() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/Views/PresetBrowserView.swift")
+        XCTAssertTrue(source.contains("presetLibrary.exportBackup("), "there must be a reachable UI path to back up presets")
+        XCTAssertTrue(source.contains("presetLibrary.restoreBackup("), "there must be a reachable UI path to restore presets")
+    }
 }
