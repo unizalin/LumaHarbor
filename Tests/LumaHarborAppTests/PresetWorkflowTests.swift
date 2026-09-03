@@ -784,6 +784,48 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertTrue(savedNames.contains(item.document.name))
     }
 
+    /// Independent-review finding (2026-09-03): `BuiltInPresetRepository`'s
+    /// documents carry fixed UUIDs that are never file-backed anywhere --
+    /// forwarding a built-in preset's own `id` into a real, file-backed
+    /// scope on copy would give the still-present `.builtIn` row and the
+    /// newly-copied `.mine` row the same `PresetListItem.id` (SwiftUI
+    /// `Identifiable` collision, since `id` is just `document.id`,
+    /// unqualified by scope), permanently, on disk. Copying a built-in
+    /// preset must mint a brand-new identity, the same way `.xmp`/`.lhpreset`
+    /// import already does for the same underlying reason -- it must never
+    /// reuse the source's own id.
+    func testCopyingABuiltInPresetMintsAFreshIdentityRatherThanReusingTheBuiltInsUUID() async throws {
+        let builtIn = BuiltInPresetRepository()
+        let mine = RecordingPresetRepository()
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: builtIn)
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first { $0.scope == .builtIn })
+
+        await sut.copy(item, to: .mine)
+
+        let savedDocuments = await mine.savedDocuments
+        let saved = try XCTUnwrap(savedDocuments.first)
+        XCTAssertNotEqual(saved.id, item.document.id, "copying a built-in preset must never reuse its fixed, permanently-built-in UUID")
+    }
+
+    /// A copy between the two *real*, file-backed scopes is a different
+    /// situation -- `presetDocumentsAreCanonicallyEqual`/`.keepBoth`'s own
+    /// duplicate detection at the repository layer depends on identity
+    /// staying stable across a "My Presets" <-> "This Library" copy, so this
+    /// pins that the built-in-only fix above does not regress that existing,
+    /// already-tested behavior (`testCopyWritesToTheOtherScopeWithoutDeletingTheSource`).
+    func testCopyingABetweenMineAndLibraryPreservesIdentity() async throws {
+        let document = makeDocument()
+        let mine = RecordingPresetRepository(seed: [document])
+        let library = RecordingPresetRepository()
+        let sut = PresetLibraryViewModel(myRepository: mine, libraryRepository: library)
+
+        await sut.copy(PresetListItem(document: document, scope: .mine), to: .library)
+
+        let librarySaved = await library.savedDocuments
+        XCTAssertEqual(librarySaved.map(\.id), [document.id])
+    }
+
     // MARK: - Edit an existing preset / sparse patch removal (Phase 3 Task 3.1)
 
     func testUpdatePresetRemovesUncheckedFieldsFromThePatch() async throws {
@@ -937,6 +979,33 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertEqual(Set(item.preview.nativeFields), [.basicExposure])
         XCTAssertTrue(item.preview.approximateFields.isEmpty)
         XCTAssertTrue(item.preview.preservedProperties.isEmpty)
+    }
+
+    /// Independent-review finding (2026-09-03): a `.lhpreset` file that was
+    /// itself originally imported from Adobe XMP (so it carries `source:
+    /// .adobeXMP` and an `xmpEnvelope` preserving the full original packet,
+    /// unmapped properties included) must not silently become a plain
+    /// native preset on re-import -- that would both drop the "Imported"
+    /// source badge (Task 3.1) and, if later re-exported to `.xmp`, fall
+    /// back to a blank envelope and permanently lose everything
+    /// `xmpEnvelope` was preserving (exactly what Task 3.2's own "preserve
+    /// unknown XMP fields" work exists to prevent).
+    func testPreviewImportOfALhpresetFilePreservesItsSourceAndXMPEnvelope() async throws {
+        let envelope = XMPEnvelope(originalPacketUTF8: "<xmp>unmapped-content</xmp>", documentKind: .developPreset)
+        let document = PresetDocument(
+            name: "Reimported",
+            source: .adobeXMP(tool: "Lightroom", version: "15.4"),
+            patch: AdjustmentPatch(basic: BasicAdjustmentPatch(exposure: 1.0)),
+            xmpEnvelope: envelope
+        )
+        let fixture = try writeFixtureLHPreset(document: document)
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
+
+        await sut.previewImport([fixture])
+
+        let item = try XCTUnwrap(sut.importItems.first)
+        XCTAssertEqual(item.preview.proposedPreset.source, document.source)
+        XCTAssertEqual(item.preview.proposedPreset.xmpEnvelope, envelope)
     }
 
     func testPreviewImportOfALhpresetFileMintsAFreshIdentityRatherThanReusingTheFiles() async throws {
