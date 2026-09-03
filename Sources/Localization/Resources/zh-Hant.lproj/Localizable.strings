@@ -68,6 +68,7 @@
 "Backup or restore presets" = "備份或還原 Preset";
 "Backup Presets" = "備份 Preset";
 "Backup This Library's Presets…" = "備份這個照片庫的 Preset…";
+"Batch Sync Undone" = "批次同步已復原";
 "Blacks" = "黑色";
 "Blue" = "藍";
 "Built-In" = "內建";
@@ -235,6 +236,7 @@
 "No photos match this search" = "找不到符合搜尋條件的照片";
 "No presets yet" = "尚無 Preset";
 "Nothing to restore." = "沒有可還原的內容。";
+"Nothing to undo." = "沒有可復原的內容。";
 "No RAW files found in this folder" = "這個資料夾裡沒有找到 RAW 檔案";
 "No sources yet" = "尚無來源";
 "No supported RAW files found" = "找不到支援的 RAW 檔案";
@@ -299,6 +301,7 @@
 "Restore complete" = "還原完成";
 "Restore Presets" = "還原 Preset";
 "Restore Presets…" = "還原 Preset…";
+"reverted" = "張已還原";
 "Refreshing the library index without changing your RAW files." = "正在更新圖庫索引，不會變更你的 RAW 檔案。";
 "Rescan Folder" = "重新掃描資料夾";
 "Rescan" = "重新掃描";
@@ -411,6 +414,7 @@
 "Try re-copying this file from the memory card." = "試著從記憶卡重新複製這個檔案。";
 "Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo." = "取消勾選欄位可將它從這個 Preset 中移除。只能透過從已開啟的照片建立 Preset 來新增欄位。";
 "Undo" = "復原";
+"Undo Batch Sync" = "復原批次同步";
 "Unknown" = "未知";
 "Unlock the drive or copy the library somewhere writable, then retry." = "解鎖磁碟，或把相片庫複製到可寫入的位置，然後重試。";
 "Unlock the drive to save changes back to it." = "解鎖磁碟即可把變更存回去。";
