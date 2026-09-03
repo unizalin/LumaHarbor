@@ -581,7 +581,13 @@ final class PhotoExportTests: XCTestCase {
         adjustments.geometry.rotationDegrees = 90
         let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
 
-        // Crop first: 2000x1000. A 90deg rotate then swaps to 1000x2000.
+        // Rotate first: 4000x2000 -> swapped to 2000x4000. Crop 0.5x0.5 of
+        // *that* -> 1000x2000 (a symmetric crop fraction, so this
+        // particular case happens to land on the same numbers either
+        // order -- see GeometryRendererTests
+        // .testAppliedPixelSizeCombinesRotateAndCrop for an asymmetric
+        // crop that actually distinguishes rotate-then-crop from the
+        // reverse).
         XCTAssertEqual(outcome.pixelSize, CGSize(width: 1_000, height: 2_000))
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
