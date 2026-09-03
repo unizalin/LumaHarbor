@@ -282,6 +282,162 @@ final class BatchAdjustmentGestureIntegrationTests: AppViewModelTestCase {
         XCTAssertEqual(revertedB.exposure, 1.5)
     }
 
+    /// Independent review of Task 3.4's own independent-review fix round,
+    /// Finding 4: a partial failure inside `undo(_:)` must not discard the
+    /// only record of what's still safe to revert. Keeping
+    /// `lastBatchTransaction` around lets "Undo Batch Sync" be chosen again
+    /// once the underlying problem clears, retrying just the target that
+    /// failed -- the target that already reverted successfully must not be
+    /// touched a second time.
+    func testUndoLastBatchTransactionKeepsTheTransactionForRetryAfterAPartialFailure() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW", "DSC0003.ARW"])
+        let log = ServiceCallLog()
+        let store = AdjustmentStore()
+        actor FailureSwitch {
+            private var failingID: PhotoID?
+            func fail(for id: PhotoID) { failingID = id }
+            func clear() { failingID = nil }
+            func shouldFail(_ id: PhotoID) -> Bool { failingID == id }
+        }
+        struct SimulatedWriteFailure: Error {}
+        let failureSwitch = FailureSwitch()
+        let services = try makeServices(
+            loadAdjustments: { photo in await store.get(photo.id) },
+            saveAdjustments: { adjustments, photo in
+                guard await !failureSwitch.shouldFail(photo.id) else { throw SimulatedWriteFailure() }
+                await store.set(photo.id, adjustments)
+                await log.recordSave(photo.id, adjustments)
+            }
+        )
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let source = model.photos[0]
+        let targetA = model.photos[1]
+        let targetB = model.photos[2]
+
+        model.requestSelectPhoto(source.id)
+        await waitUntilAppCondition("the source photo to open") {
+            await MainActor.run { model.editor.photo?.id == source.id }
+        }
+        model.toggleMultiSelect(targetA.id)
+        model.toggleMultiSelect(targetB.id)
+
+        model.editor.beginAdjustmentGesture()
+        model.editor.setAdjustment(.exposure, to: 1.5)
+        model.editor.endAdjustmentGesture()
+        await waitUntilAppCondition("both targets to receive the synced save") {
+            await log.saveCount >= 2
+        }
+
+        // Target B's own revert write will fail this first attempt.
+        await failureSwitch.fail(for: targetB.id)
+        let firstSummary = await model.undoLastBatchTransaction()
+
+        XCTAssertEqual(firstSummary?.affected, 1, "target A must still revert normally")
+        XCTAssertEqual(firstSummary?.failed, 1, "target B's revert write failed")
+        XCTAssertNotNil(model.lastBatchTransaction, "a partial failure must stay retryable, not be discarded")
+        let afterFirstA = await store.get(targetA.id)
+        XCTAssertEqual(afterFirstA.exposure, 0, "A already reverted")
+        let afterFirstB = await store.get(targetB.id)
+        XCTAssertEqual(afterFirstB.exposure, 1.5, "B's failed revert must leave it exactly as the original sync left it")
+
+        // The underlying problem clears; the user retries.
+        await failureSwitch.clear()
+        let secondSummary = await model.undoLastBatchTransaction()
+
+        XCTAssertEqual(secondSummary?.affected, 1, "target B is now revertible")
+        XCTAssertEqual(secondSummary?.skipped, 1, "target A was already reverted on the first attempt -- its synced field no longer matches what the sync wrote, so the retry must not touch it again")
+        XCTAssertNil(model.lastBatchTransaction, "a fully-clean retry finally consumes the transaction")
+        let afterSecondB = await store.get(targetB.id)
+        XCTAssertEqual(afterSecondB.exposure, 0, "B must now be reverted too")
+    }
+
+    /// Independent review of Task 3.4's own independent-review fix round,
+    /// Finding 4: a second call to `undoLastBatchTransaction()` made while
+    /// the first is still running (a double-click on "Undo Batch Sync"
+    /// before the menu has re-disabled itself) must be ignored outright,
+    /// not started as its own, redundant revert of the same transaction.
+    func testUndoLastBatchTransactionIgnoresASecondCallWhileTheFirstIsStillRunning() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW"])
+        let log = ServiceCallLog()
+        let store = AdjustmentStore()
+        actor Gate {
+            private var armed = false
+            private var hasArrived = false
+            private var arrivedContinuation: CheckedContinuation<Void, Never>?
+            private var isReleased = false
+            private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+            func arm() { armed = true }
+
+            /// A no-op before `arm()` -- lets the setup sync's own save
+            /// through untouched; only pauses once armed, right before the
+            /// two concurrent undo calls this test drives.
+            func passThroughOrPause() async {
+                guard armed else { return }
+                hasArrived = true
+                arrivedContinuation?.resume()
+                arrivedContinuation = nil
+                guard !isReleased else { return }
+                await withCheckedContinuation { releaseContinuation = $0 }
+            }
+
+            func waitForArrival() async {
+                guard !hasArrived else { return }
+                await withCheckedContinuation { arrivedContinuation = $0 }
+            }
+
+            func release() {
+                isReleased = true
+                releaseContinuation?.resume()
+                releaseContinuation = nil
+            }
+        }
+        let gate = Gate()
+        let services = try makeServices(
+            loadAdjustments: { photo in await store.get(photo.id) },
+            saveAdjustments: { adjustments, photo in
+                await gate.passThroughOrPause()
+                await store.set(photo.id, adjustments)
+                await log.recordSave(photo.id, adjustments)
+            }
+        )
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let source = model.photos[0]
+        let target = model.photos[1]
+
+        model.requestSelectPhoto(source.id)
+        await waitUntilAppCondition("the source photo to open") {
+            await MainActor.run { model.editor.photo?.id == source.id }
+        }
+        model.toggleMultiSelect(target.id)
+
+        model.editor.beginAdjustmentGesture()
+        model.editor.setAdjustment(.exposure, to: 1.5)
+        model.editor.endAdjustmentGesture()
+        await waitUntilAppCondition("the target to receive the synced save") {
+            await log.saveCount >= 1
+        }
+
+        await gate.arm()
+        async let firstSummary = model.undoLastBatchTransaction()
+        await gate.waitForArrival() // the first call is now paused inside its own revert save.
+
+        let secondSummary = await model.undoLastBatchTransaction()
+        XCTAssertNil(secondSummary, "a second call while the first is still running must be ignored, not started as its own revert")
+
+        await gate.release()
+        let firstResult = await firstSummary
+        XCTAssertEqual(firstResult?.affected, 1, "the one call that was actually allowed to run must still succeed")
+        let reverted = await store.get(target.id)
+        XCTAssertEqual(reverted.exposure, 0)
+    }
+
     func testUndoLastBatchTransactionWithNothingToUndoReturnsNil() async throws {
         try seedPhotos(["DSC0001.ARW"])
         let services = try makeServices()
