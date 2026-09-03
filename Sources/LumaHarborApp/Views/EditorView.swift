@@ -42,6 +42,17 @@ struct EditorView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .padding(16)
+
+                    if model.editor.toolMode == .crop {
+                        CropOverlayView(
+                            editor: model.editor,
+                            imageFrame: AspectFitRect.fitting(
+                                imageSize: CGSize(width: image.width, height: image.height),
+                                in: geometry.size,
+                                padding: 16
+                            )
+                        )
+                    }
                 } else if model.editor.decodeFailed {
                     // Distinct from the spinner below: nothing is actually
                     // running (isRendering is false too), so showing

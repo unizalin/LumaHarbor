@@ -96,4 +96,41 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(source.contains("isIdentity"))
         XCTAssertTrue(source.contains("editor.updateAdjustments"))
     }
+
+    /// Phase 2 Task 2.3: rotate/flip/straighten write through
+    /// `updateAdjustments(_:)` like every other grouped panel; "Edit Crop"
+    /// is the one control that instead switches `EditorSession.toolMode`
+    /// (§6.5 needs an on-canvas overlay, not a slider, for the crop rect
+    /// itself -- see `CropOverlayView`). The panel must also carry the
+    /// required non-destructive safety copy and its own visible, disableable
+    /// Reset, matching every other group's affordances.
+    func testGeometryPanelCoversRotateFlipStraightenCropAndSafetyCopy() throws {
+        let source = try Self.loadSource("GeometryAdjustmentPanel.swift")
+
+        XCTAssertTrue(source.contains("rotatedClockwise()"), "must expose a rotate-right action")
+        XCTAssertTrue(source.contains("rotatedCounterclockwise()"), "must expose a rotate-left action")
+        XCTAssertTrue(source.contains("flippingHorizontal()"))
+        XCTAssertTrue(source.contains("flippingVertical()"))
+        XCTAssertTrue(source.contains("L10n.t(\"Straighten\")"))
+        XCTAssertTrue(source.contains(".straightenDegrees"))
+        XCTAssertTrue(source.contains("editor.updateAdjustments"), "rotate/flip/straighten must go through the same undo/autosave path every other panel uses")
+
+        XCTAssertTrue(source.contains("editor.setToolMode("), "the crop tool must switch EditorSession.toolMode, not draw its own overlay logic here")
+        XCTAssertTrue(source.contains(".crop"), "must be able to enter the .crop tool mode")
+        XCTAssertTrue(source.contains("L10n.t(\"Edit Crop\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Aspect Ratio\")"))
+        XCTAssertTrue(source.contains("CropAspectRatio.freeform"))
+        XCTAssertTrue(source.contains("CropAspectRatio.square"))
+
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Geometry adjustments are non-destructive.\")"),
+            "the panel must state the edit is non-destructive"
+        )
+        XCTAssertTrue(
+            source.contains("L10n.t(\"Your RAW original was not changed.\")"),
+            "the panel must state the RAW original is unchanged"
+        )
+        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset\")"))
+        XCTAssertTrue(source.contains("isIdentity"), "the panel's own Reset must disable once geometry is already neutral")
+    }
 }

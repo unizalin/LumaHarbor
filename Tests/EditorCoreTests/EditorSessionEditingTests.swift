@@ -101,4 +101,68 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.grain.amount, 10)
         XCTAssertFalse(editor.adjustments.advancedToneCurve.isIdentity)
     }
+
+    // MARK: - Tool mode (Phase 2 Task 2.3)
+
+    func testToolModeDefaultsToAdjust() {
+        let editor = makeOpenEditor()
+        XCTAssertEqual(editor.toolMode, .adjust)
+    }
+
+    func testSetToolModeSwitchesToCropAndBack() {
+        let editor = makeOpenEditor()
+
+        editor.setToolMode(.crop)
+        XCTAssertEqual(editor.toolMode, .crop)
+
+        editor.setToolMode(.adjust)
+        XCTAssertEqual(editor.toolMode, .adjust)
+    }
+
+    /// Purely UI state -- switching tools must never touch the undo stack,
+    /// save state, or an unrelated adjustment.
+    func testSettingToolModeDoesNotCreateAnUndoEntryOrDirtyTheSaveState() {
+        let editor = makeOpenEditor()
+        XCTAssertFalse(editor.canUndo)
+
+        editor.setToolMode(.crop)
+
+        XCTAssertFalse(editor.canUndo)
+        XCTAssertEqual(editor.saveState, .unchanged)
+        XCTAssertEqual(editor.adjustments, .neutral)
+    }
+
+    /// Opening a different photo while the crop tool is active must not
+    /// leave a crop overlay armed against a photo the user never asked to
+    /// crop.
+    func testOpeningAPhotoResetsToolModeToAdjust() {
+        let editor = makeOpenEditor()
+        editor.setToolMode(.crop)
+        XCTAssertEqual(editor.toolMode, .crop)
+
+        let secondPhoto = PhotoAsset(
+            id: PhotoID(),
+            libraryID: LibraryID(),
+            relativePath: "second.ARW",
+            fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "second"),
+            status: .ready
+        )
+        editor.open(
+            photo: secondPhoto,
+            sourceURL: URL(fileURLWithPath: "/second.ARW"),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+
+        XCTAssertEqual(editor.toolMode, .adjust)
+    }
+
+    func testClosingResetsToolModeToAdjust() {
+        let editor = makeOpenEditor()
+        editor.setToolMode(.crop)
+
+        editor.close()
+
+        XCTAssertEqual(editor.toolMode, .adjust)
+    }
 }

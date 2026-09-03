@@ -76,4 +76,23 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// AwayPhotoRawEditor parity Phase 2 Task 2.3: every new user-facing
+    /// string the Mac crop/rotate/straighten tool introduces must have
+    /// landed in both `.lproj` directories, not just `en`. "Reset" and
+    /// "Your RAW original was not changed." are deliberately reused from
+    /// existing keys rather than duplicated, so they aren't repeated here.
+    func testEveryGeometryToolStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Geometry", "Rotate & Flip", "Rotate Left", "Rotate Right",
+            "Flip Horizontal", "Flip Vertical", "Straighten", "Crop",
+            "Edit Crop", "Done", "Aspect Ratio", "Freeform", "Square",
+            "Reset Crop", "Geometry adjustments are non-destructive."
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }
