@@ -220,26 +220,33 @@ final class GeometryRendererTests: XCTestCase {
 
     // MARK: - Crop then rotate (documented order)
 
-    func testCropThenRotateAppliesCropInTheSourcesOwnCoordinateSpace() throws {
+    /// Independent-review P1 fix: crop must happen *last*, in the same
+    /// already-rotated/flipped/straightened coordinate space
+    /// `CropOverlayView` (Task 2.3) actually shows and drags against --
+    /// `editor.displayedImage` is always the fully rotated preview, never
+    /// the pre-rotation source, so a crop rect the user draws on it must be
+    /// interpreted against that same rotated frame, not the original.
+    func testRotateThenCropAppliesCropInTheAlreadyRotatedCoordinateSpace() throws {
         let source = makeQuadrantImage()
-        // Crop to the visual top half (red + green), then rotate 90deg CW.
-        // Documented order: crop happens first, in the un-rotated source's
-        // own coordinates, so this must crop the *original* top half, not
-        // whatever ends up "on top" after rotating.
+        // Rotate 90deg CW first, then crop the visual top half of the
+        // *already rotated* frame.
         let geometry = GeometryAdjustments(
             crop: NormalizedCropRect(x: 0, y: 0, width: 1, height: 0.5),
             rotationDegrees: 90
         )
         let output = GeometryRenderer.apply(geometry, to: source)
 
-        XCTAssertEqual(output.extent.width, 4, accuracy: 0.01, "cropped height (4) becomes the rotated width")
-        XCTAssertEqual(output.extent.height, 8, accuracy: 0.01, "cropped width (8) becomes the rotated height")
-        // Top half was red (left) + green (right); rotating that strip 90
-        // CW puts red at the top and green at the bottom.
-        try assertColor(sample(.topLeft, of: output), isApproximately: red, tolerance: 2)
+        XCTAssertEqual(output.extent.width, 8, accuracy: 0.01, "the rotated frame's own width is unchanged by a height-only crop")
+        XCTAssertEqual(output.extent.height, 4, accuracy: 0.01, "cropped to half the rotated frame's own height")
+        // After rotating 90 CW, topLeft=blue and topRight=red
+        // (testRotateClockwise90MovesTheTopLeftMarkerToTheTopRight); cropping
+        // the top half of *that* keeps exactly those two colours, left/right
+        // unchanged, top-to-bottom now uniform since the crop only kept the
+        // rotated frame's own top half.
+        try assertColor(sample(.topLeft, of: output), isApproximately: blue, tolerance: 2)
+        try assertColor(sample(.bottomLeft, of: output), isApproximately: blue, tolerance: 2)
         try assertColor(sample(.topRight, of: output), isApproximately: red, tolerance: 2)
-        try assertColor(sample(.bottomLeft, of: output), isApproximately: green, tolerance: 2)
-        try assertColor(sample(.bottomRight, of: output), isApproximately: green, tolerance: 2)
+        try assertColor(sample(.bottomRight, of: output), isApproximately: red, tolerance: 2)
     }
 
     // MARK: - Straighten (tolerance / property-based)
@@ -380,14 +387,20 @@ final class GeometryRendererTests: XCTestCase {
         XCTAssertEqual(size, CGSize(width: 4_000, height: 3_000))
     }
 
-    func testAppliedPixelSizeCombinesCropAndRotate() {
+    /// Independent-review P1 fix: rotate happens *before* crop now, so an
+    /// asymmetric crop fraction must be scaled against the already-swapped
+    /// (rotated) native size, not the original -- a symmetric 0.5x0.5 crop
+    /// would (mis)pass either order, so this deliberately uses an
+    /// asymmetric one to actually distinguish them.
+    func testAppliedPixelSizeCombinesRotateAndCrop() {
         let geometry = GeometryAdjustments(
-            crop: NormalizedCropRect(x: 0, y: 0, width: 0.5, height: 0.5),
+            crop: NormalizedCropRect(x: 0, y: 0, width: 0.25, height: 0.5),
             rotationDegrees: 90
         )
         let size = GeometryRenderer.appliedPixelSize(of: CGSize(width: 4_000, height: 2_000), geometry: geometry)
-        // Crop first: 2000x1000. Then a 90deg rotate swaps to 1000x2000.
-        XCTAssertEqual(size, CGSize(width: 1_000, height: 2_000))
+        // Rotate first: 4000x2000 -> swapped to 2000x4000. Then crop
+        // 0.25x0.5 of *that* -> 500x2000.
+        XCTAssertEqual(size, CGSize(width: 500, height: 2_000))
     }
 
     func testAppliedPixelSizeIsUnchangedByStraightenOrPerspectiveAlone() {

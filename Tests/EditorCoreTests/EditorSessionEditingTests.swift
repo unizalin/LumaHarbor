@@ -166,6 +166,57 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(editor.toolMode, .adjust)
     }
 
+    // MARK: - Crop tool preview (independent-review P1 fix)
+
+    /// `CropOverlayView` (Task 2.3) draws and drags against `editor
+    /// .displayedImage`, which is rendered from `displayedAdjustments` --
+    /// that image must show the fully rotated/flipped/straightened frame
+    /// *without* the crop applied while the crop tool is active, or the
+    /// overlay has no correct frame to reference (re-editing an existing
+    /// crop would show an already-cropped-and-filled preview with no way to
+    /// see what was cropped away). The *committed* crop
+    /// (`editor.adjustments.geometry.crop`) must stay untouched throughout
+    /// -- only what's rendered changes, not what's stored.
+    func testDisplayedAdjustmentsStripTheCropWhileTheCropToolIsActive() {
+        let editor = makeOpenEditor()
+        editor.updateAdjustments { $0.geometry.crop = NormalizedCropRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5) }
+        XCTAssertNotNil(editor.displayedAdjustments.geometry.crop, "outside the crop tool, the committed crop is what's displayed")
+
+        editor.setToolMode(.crop)
+
+        XCTAssertNil(editor.displayedAdjustments.geometry.crop, "the crop tool's own preview must show the pre-crop frame")
+        XCTAssertNotNil(editor.adjustments.geometry.crop, "the committed crop itself must be untouched")
+    }
+
+    func testDisplayedAdjustmentsRestoreTheCropWhenLeavingTheCropTool() {
+        let editor = makeOpenEditor()
+        editor.updateAdjustments { $0.geometry.crop = NormalizedCropRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5) }
+        editor.setToolMode(.crop)
+        XCTAssertNil(editor.displayedAdjustments.geometry.crop)
+
+        editor.setToolMode(.adjust)
+
+        XCTAssertNotNil(editor.displayedAdjustments.geometry.crop)
+        XCTAssertEqual(editor.displayedAdjustments, editor.adjustments)
+    }
+
+    /// The crop-stripping is purely a display-time transform; it must not
+    /// touch every other geometry field (rotation especially -- the whole
+    /// point of the independent-review fix is that rotate/flip/straighten
+    /// stay applied while cropping).
+    func testDisplayedAdjustmentsInCropToolModeKeepEveryOtherGeometryField() {
+        let editor = makeOpenEditor()
+        editor.updateAdjustments {
+            $0.geometry.crop = NormalizedCropRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5)
+            $0.geometry.rotationDegrees = 90
+            $0.geometry.flipHorizontal = true
+        }
+        editor.setToolMode(.crop)
+
+        XCTAssertEqual(editor.displayedAdjustments.geometry.rotationDegrees, 90)
+        XCTAssertTrue(editor.displayedAdjustments.geometry.flipHorizontal)
+    }
+
     // MARK: - White balance eyedropper (Phase 2 Task 2.4)
 
     /// Design spec §6.4: "使用者必須能取消滴管，不得在 hover / preview 階段寫入

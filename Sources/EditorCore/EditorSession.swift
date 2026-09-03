@@ -206,8 +206,23 @@ public final class EditorSession: ObservableObject {
     /// committed edit. Both preview kinds are gated on mutually exclusive
     /// `toolMode`s in practice, so precedence between them is not expected
     /// to matter in normal use.
+    ///
+    /// Independent-review P1 fix: while the crop tool is active, the crop
+    /// itself is stripped from what's rendered (though never from what's
+    /// committed -- `adjustments.geometry.crop` is untouched). `GeometryRenderer
+    /// .apply(_:to:)` applies crop *last*, in the already-rotated/flipped/
+    /// straightened frame, which is exactly the frame `CropOverlayView`
+    /// draws and drags against -- so the crop tool's own preview must show
+    /// that same pre-crop, post-rotate frame, not the already-cropped-and-
+    /// filled result a committed crop would otherwise produce. Without
+    /// this, re-editing an existing crop had no correct frame to reference
+    /// at all.
     public var displayedAdjustments: PhotoAdjustments {
-        previewedEyedropperAdjustments ?? previewedPresetAdjustments ?? history.current
+        var adjustments = previewedEyedropperAdjustments ?? previewedPresetAdjustments ?? history.current
+        if toolMode == .crop {
+            adjustments.geometry.crop = nil
+        }
+        return adjustments
     }
 
     public var hasEdits: Bool { !history.current.isNeutral }

@@ -6,16 +6,35 @@ import Foundation
 /// Applies `GeometryAdjustments` to an already-decoded image (design spec
 /// §6.5, roadmap Phase 2 "Task 2.2: Geometry render pipeline").
 ///
-/// Documented transform order (roadmap):
+/// Transform order:
 ///   1. orientation normalize -- already done before this runs: the decoder
 ///      (`CoreImageRawDecoder`) rotates `CIRAWFilter.outputImage` to display
 ///      orientation itself (see `ExportMetadataBuilder`'s P1-fix doc comment
 ///      for the corroborating finding), so this type never reads EXIF
 ///      orientation.
-///   2. crop, in the source image's own (pre-rotate) normalized coordinates
-///   3. rotate 90°/flip, then the fine-angle straighten
-///   4. perspective
+///   2. rotate 90°/flip, then the fine-angle straighten
+///   3. perspective
+///   4. crop, in that already-rotated/flipped/straightened frame's own
+///      normalized coordinates
 ///   5. resize/export -- the caller's job (`ExportResizing`, `PhotoExporter`)
+///
+/// Independent-review P1 fix, corrected from the roadmap's own originally
+/// *suggested* order (crop before rotate, in the un-rotated source's
+/// coordinates): `EditorSession.displayedImage` -- what `CropOverlayView`
+/// (Task 2.3) actually shows and drags a crop rect against -- is always the
+/// fully rotated/flipped/straightened preview, never the pre-rotation
+/// source. Cropping in un-rotated coordinates meant a crop rect the user
+/// drew on the rotated preview did not correspond to the crop that actually
+/// got applied whenever any rotation/flip was already active, and re-editing
+/// an *existing* crop was worse still: the displayed preview already showed
+/// the cropped-and-filled result, so the overlay had no correct frame to
+/// reference at all. Putting crop last means it always operates in exactly
+/// the coordinate space the user is looking at, matching how virtually
+/// every other photo editor's crop tool behaves, and `EditorSession
+/// .displayedAdjustments` strips `geometry.crop` while `toolMode == .crop`
+/// so the crop tool's own preview shows the correct pre-crop (but
+/// post-rotate) reference frame, for both a first crop and an edit to one
+/// already committed.
 ///
 /// Both `CoreImagePreviewRenderer` and `PhotoExporter` call this in the same
 /// place in their own pipelines, so the preview a user drags a crop handle
@@ -25,10 +44,6 @@ public enum GeometryRenderer {
         guard !geometry.isIdentity else { return image }
 
         var working = image
-
-        if let crop = geometry.crop, !crop.isFull {
-            working = cropped(working, to: crop)
-        }
 
         if geometry.rotationDegrees != 0 || geometry.flipHorizontal || geometry.flipVertical {
             working = rotatedAndFlipped(
@@ -51,6 +66,10 @@ public enum GeometryRenderer {
             )
         }
 
+        if let crop = geometry.crop, !crop.isFull {
+            working = cropped(working, to: crop)
+        }
+
         return working
     }
 
@@ -69,14 +88,14 @@ public enum GeometryRenderer {
     public static func appliedPixelSize(of nativeSize: CGSize, geometry: GeometryAdjustments) -> CGSize {
         guard nativeSize.width > 0, nativeSize.height > 0 else { return nativeSize }
         var size = nativeSize
-        if let crop = geometry.crop, !crop.isFull {
-            size = CGSize(
-                width: (nativeSize.width * crop.width).rounded(),
-                height: (nativeSize.height * crop.height).rounded()
-            )
-        }
         if geometry.rotationDegrees == 90 || geometry.rotationDegrees == 270 {
             size = CGSize(width: size.height, height: size.width)
+        }
+        if let crop = geometry.crop, !crop.isFull {
+            size = CGSize(
+                width: (size.width * crop.width).rounded(),
+                height: (size.height * crop.height).rounded()
+            )
         }
         return size
     }
