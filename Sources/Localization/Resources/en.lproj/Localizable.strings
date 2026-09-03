@@ -392,6 +392,7 @@
 "This Library" = "This Library";
 "This library's index file is damaged." = "This library's index file is damaged.";
 "This photo has saved adjustments" = "This photo has saved adjustments";
+"This photo isn't a virtual copy." = "This photo isn't a virtual copy.";
 "This source couldn't finish scanning." = "This source couldn't finish scanning.";
 "This source doesn't contain any RAW files LumaHarbor can open yet." = "This source doesn't contain any RAW files LumaHarbor can open yet.";
 "This source is offline" = "This source is offline";

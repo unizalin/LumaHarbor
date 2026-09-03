@@ -195,6 +195,8 @@ public enum SafeErrorPresentation {
             return L10n.t("The photo folder couldn't be removed cleanly.")
         case .registryRecoveryRequired:
             return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
+        case .notAVirtualCopy:
+            return L10n.t("This photo isn't a virtual copy.")
         }
     }
 
