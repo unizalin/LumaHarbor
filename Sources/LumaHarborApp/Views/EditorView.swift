@@ -53,6 +53,18 @@ struct EditorView: View {
                             )
                         )
                     }
+
+                    if model.editor.toolMode == .whiteBalance {
+                        EyedropperOverlayView(
+                            editor: model.editor,
+                            imageFrame: AspectFitRect.fitting(
+                                imageSize: CGSize(width: image.width, height: image.height),
+                                in: geometry.size,
+                                padding: 16
+                            ),
+                            image: image
+                        )
+                    }
                 } else if model.editor.decodeFailed {
                     // Distinct from the spinner below: nothing is actually
                     // running (isRendering is false too), so showing

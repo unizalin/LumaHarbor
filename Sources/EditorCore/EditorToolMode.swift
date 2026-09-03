@@ -6,11 +6,12 @@ import Foundation
 /// tool). `.adjust` is the default, ordinary browsing/slider-editing state;
 /// every other case adds a gesture-driven overlay on top of the preview.
 ///
-/// `.crop` is the only case Phase 2 Task 2.3 implements; `.whiteBalance`
-/// (the eyedropper, Task 2.4) and future local-adjustment modes extend this
+/// `.crop` (Task 2.3) and `.whiteBalance` (the eyedropper, Task 2.4) are the
+/// two cases implemented so far; future local-adjustment modes extend this
 /// same switch rather than inventing a second, parallel "what am I doing
 /// right now" flag.
 public enum EditorToolMode: Equatable, Sendable {
     case adjust
     case crop
+    case whiteBalance
 }

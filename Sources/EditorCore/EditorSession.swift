@@ -123,6 +123,14 @@ public final class EditorSession: ObservableObject {
     /// `saveState` or autosave (spec §5.3/§9.1) -- only what's drawn changes.
     private var previewedPresetAdjustments: PhotoAdjustments?
 
+    /// A white balance eyedropper sample applied via `previewEyedropper
+    /// (sample:)`, not yet committed. Same non-committing contract as
+    /// `previewedPresetAdjustments` (spec §6.4: "使用者必須能取消滴管，不得在
+    /// hover / preview 階段寫入 sidecar"), kept as its own field rather than
+    /// reusing the preset one so an eyedropper drag and a preset-browser
+    /// hover can never clobber each other's preview state.
+    private var previewedEyedropperAdjustments: PhotoAdjustments?
+
     /// What `previewPreset(_:mode:)` reported about the *currently previewed*
     /// preset -- e.g. a contextual leaf skipped for lack of a white-balance
     /// baseline yet. Published (not thrown away like `applying(_:mode:)`
@@ -193,9 +201,14 @@ public final class EditorSession: ObservableObject {
 
     public var adjustments: PhotoAdjustments { history.current }
 
-    /// What the preview pipeline should actually render: a live preset
-    /// preview if one is active, otherwise the committed edit.
-    public var displayedAdjustments: PhotoAdjustments { previewedPresetAdjustments ?? history.current }
+    /// What the preview pipeline should actually render: a live eyedropper
+    /// preview if one is active, else a live preset preview, else the
+    /// committed edit. Both preview kinds are gated on mutually exclusive
+    /// `toolMode`s in practice, so precedence between them is not expected
+    /// to matter in normal use.
+    public var displayedAdjustments: PhotoAdjustments {
+        previewedEyedropperAdjustments ?? previewedPresetAdjustments ?? history.current
+    }
 
     public var hasEdits: Bool { !history.current.isNeutral }
 
@@ -248,6 +261,7 @@ public final class EditorSession: ObservableObject {
         self.lastDisplayedGeneration = 0
         self.whiteBalanceBaseline = nil
         self.previewedPresetAdjustments = nil
+        self.previewedEyedropperAdjustments = nil
         self.presetPreviewDiagnostics = []
         self.previewRenderFailureMessage = nil
         self.previewIntentVersion += 1
@@ -277,6 +291,7 @@ public final class EditorSession: ObservableObject {
         saveState = .unchanged
         whiteBalanceBaseline = nil
         previewedPresetAdjustments = nil
+        previewedEyedropperAdjustments = nil
         presetPreviewDiagnostics = []
         previewRenderFailureMessage = nil
         previewIntentVersion += 1
@@ -469,6 +484,57 @@ public final class EditorSession: ObservableObject {
         )
     }
 
+    // MARK: - White balance eyedropper
+
+    /// Shows what sampling `sample` would do to temperature/tint, without
+    /// touching `history`, `saveState` or autosave (spec §6.4: "使用者必須能
+    /// 取消滴管，不得在 hover / preview 階段寫入 sidecar") -- the same
+    /// non-committing contract `previewPreset(_:mode:)` already guarantees
+    /// for presets. `WhiteBalanceEyedropper.delta(neutralizing:)` returns an
+    /// *additive* delta, so repeated sampling (e.g. dragging across the
+    /// photo before releasing) refines the previous preview rather than
+    /// compounding onto it -- each call replaces `previewedEyedropperAdjustments`
+    /// from `history.current`, never from the previous preview.
+    public func previewEyedropper(sample: WhiteBalanceEyedropper.Sample) {
+        guard photo != nil else { return }
+        previewIntentVersion += 1
+        let delta = WhiteBalanceEyedropper.delta(neutralizing: sample)
+        var updated = history.current
+        updated[.temperature] = history.current[.temperature] + delta.temperature
+        updated[.tint] = history.current[.tint] + delta.tint
+        previewedEyedropperAdjustments = updated
+        guard updated != history.current else { return }
+        requestInteractivePreview()
+    }
+
+    /// Restores the render to the committed edit. Safe to call even if no
+    /// eyedropper preview is active.
+    public func cancelEyedropperPreview() {
+        guard previewedEyedropperAdjustments != nil else { return }
+        previewedEyedropperAdjustments = nil
+        previewIntentVersion += 1
+        // Same reasoning as `cancelPresetPreview()`: only submit a
+        // restoring decode if the preview actually changed what's on
+        // screen.
+        guard previewImageReflectsAPreview else { return }
+        previewImageReflectsAPreview = false
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// Commits the current eyedropper preview as one undoable step. A no-op
+    /// if nothing is being previewed, or if the sample happened to resolve
+    /// to exactly the current temperature/tint (`history.record` itself is
+    /// the no-op guard, same as every other edit path in this class).
+    public func commitEyedropper() {
+        guard let previewed = previewedEyedropperAdjustments else { return }
+        previewedEyedropperAdjustments = nil
+        previewIntentVersion += 1
+        previewImageReflectsAPreview = false
+        guard history.record(previewed.clamped()) else { return }
+        didChangeAdjustments()
+    }
+
     private func didChangeAdjustments() {
         refreshUndoState()
         // Interactive first so the slider keeps up (spec §11), then the good one
@@ -499,14 +565,15 @@ public final class EditorSession: ObservableObject {
         guard let photo, let sourceURL, let services else { return }
         isRendering = true
         // Captured synchronously, before the `await` below -- this is
-        // exactly what distinguishes "a decode requested while a preset
-        // preview is active" from a normal/committed one, regardless of how
-        // this call was reached (directly, or via the interactive-preview
-        // throttle's delayed `Task`, by which point a hover may have already
-        // been cancelled or replaced -- either way, whatever
-        // `previewedPresetAdjustments`/`previewIntentVersion` are *right
-        // now* is the truth for this submission).
-        let isPreviewContext = previewedPresetAdjustments != nil
+        // exactly what distinguishes "a decode requested while a preset or
+        // eyedropper preview is active" from a normal/committed one,
+        // regardless of how this call was reached (directly, or via the
+        // interactive-preview throttle's delayed `Task`, by which point a
+        // hover may have already been cancelled or replaced -- either way,
+        // whatever `previewedPresetAdjustments`/`previewedEyedropperAdjustments`/
+        // `previewIntentVersion` are *right now* is the truth for this
+        // submission).
+        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil
         let intentVersion = previewIntentVersion
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),

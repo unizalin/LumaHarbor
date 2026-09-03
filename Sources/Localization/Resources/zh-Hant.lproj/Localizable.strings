@@ -421,3 +421,6 @@
 "Square" = "正方形";
 "Reset Crop" = "重設裁切";
 "Geometry adjustments are non-destructive." = "幾何調整為非破壞式。";
+"White Balance Eyedropper" = "白平衡滴管";
+"Cancel Eyedropper" = "取消滴管";
+"Click a point that should be neutral gray" = "點選畫面上應該是中性灰的位置";
