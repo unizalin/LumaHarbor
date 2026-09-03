@@ -95,6 +95,10 @@ public enum LibraryError: Error, Equatable, Sendable {
         indexFailure: String,
         rollbackFailure: String
     )
+    /// Phase 3 Task 3.5: `deleteVirtualCopy(_:)` refuses to run against a
+    /// `PhotoAsset` that isn't itself a virtual copy (`variantOf == nil`) --
+    /// this is never a "delete the original photo" operation.
+    case notAVirtualCopy(PhotoID)
     /// A pending local registry transaction could not be rolled back. The
     /// journal remains in Application Support and all registry mutations stay
     /// blocked until a later recovery attempt succeeds.
@@ -139,6 +143,8 @@ extension LibraryError: LocalizedError {
             return L10n.t("The photo folder couldn't be removed cleanly.")
         case .registryRecoveryRequired:
             return L10n.t("LumaHarbor couldn't safely recover a pending library change.")
+        case .notAVirtualCopy:
+            return L10n.t("This photo isn't a virtual copy.")
         }
     }
 
@@ -164,6 +170,8 @@ extension LibraryError: LocalizedError {
             return L10n.t("Quit and reopen LumaHarbor, then check whether the folder still appears before trying again.")
         case .registryRecoveryRequired:
             return L10n.t("Quit and reopen LumaHarbor, then try again.")
+        case .notAVirtualCopy:
+            return nil
         }
     }
 }
@@ -2022,5 +2030,122 @@ public actor PhotoLibraryService {
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
         }
+    }
+
+    // MARK: - Virtual copies
+
+    /// Creates a new, independently-editable "virtual copy" of `photo`
+    /// (Phase 3 Task 3.5): a fresh `PhotoID` sharing `photo`'s own
+    /// `relativePath`/`fingerprint`/`metadata` -- the same underlying RAW
+    /// file, never duplicated on disk -- starting from a copy of `photo`'s
+    /// own current adjustments (ordinary "duplicate" semantics: identical
+    /// now, independent from this point on). Works whether `photo` is
+    /// itself an original or another virtual copy; either way the new
+    /// copy's `variantOf` points at `photo.id` directly, never chased back
+    /// to some "root" original -- Task 3.5's scope has no concept of nested
+    /// copy trees, only a flat original/copy relationship.
+    public func createVirtualCopy(
+        of photo: PhotoAsset,
+        named name: String? = nil
+    ) throws -> PhotoAsset {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+
+        let copyID = PhotoID()
+        let now = Date()
+        var copy = PhotoAsset(
+            id: copyID,
+            libraryID: photo.libraryID,
+            relativePath: photo.relativePath,
+            fingerprint: photo.fingerprint,
+            metadata: photo.metadata,
+            status: photo.status,
+            lastSeenAt: now,
+            variantOf: photo.id,
+            variantName: name
+        )
+
+        do {
+            let sourceAdjustments = try repository.loadSidecar(for: photo.id)?.adjustments ?? .neutral
+            let sidecar = PhotoSidecar(
+                photoID: copyID,
+                sourceRelativePath: photo.relativePath,
+                sourceFingerprint: photo.fingerprint,
+                decoder: DecoderDescriptor(decoder.identifier),
+                adjustments: sourceAdjustments,
+                createdAt: now,
+                modifiedAt: now,
+                variantOf: photo.id
+            )
+            try repository.write(sidecar: sidecar)
+            copy.hasEdits = !sourceAdjustments.isNeutral
+            copy.lastEditAt = copy.hasEdits ? now : nil
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+
+        // Best-effort, matching every scan's own tolerance for a manifest
+        // write failing on a read-only drive (spec §10): the sidecar above
+        // is what makes the copy real, and library.json is a portable cache
+        // of it, re-derivable by a future successful write or rescan.
+        if var manifest = try? repository.loadManifest() {
+            manifest.upsert(PhotoRecord(
+                photoID: copyID,
+                relativePath: photo.relativePath,
+                fingerprint: photo.fingerprint,
+                lastSeenAt: now,
+                variantOf: photo.id,
+                variantName: name
+            ))
+            try? repository.write(manifest: manifest)
+        }
+
+        try index.upsert(photo: copy)
+        return copy
+    }
+
+    /// Deletes `copy` -- its own sidecar and index row only. Never touches
+    /// the shared RAW file, or the manifest record, sidecar or index row of
+    /// the original or any other virtual copy (Phase 3 Task 3.5). Refuses
+    /// anything that isn't itself a virtual copy: this is not a "delete the
+    /// original photo" operation.
+    public func deleteVirtualCopy(_ copy: PhotoAsset) throws {
+        guard copy.variantOf != nil else {
+            throw LibraryError.notAVirtualCopy(copy.id)
+        }
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[copy.libraryID] else {
+            throw LibraryError.notFound(copy.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+
+        // The sidecar is this copy's only authoritative record (spec §8.1)
+        // -- removing it is what makes the deletion real, so it's the one
+        // step allowed to throw and leave everything else untouched.
+        do {
+            try repository.removeSidecar(for: copy.id)
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+
+        // Best-effort, same reasoning as createVirtualCopy's own manifest
+        // write: the sidecar is already gone, so the deletion already
+        // succeeded from the user's point of view; a stale manifest entry
+        // self-heals on the next successful write.
+        if var manifest = try? repository.loadManifest() {
+            manifest.remove(photoID: copy.id)
+            try? repository.write(manifest: manifest)
+        }
+
+        try index.removePhotos(ids: [copy.id])
     }
 }
