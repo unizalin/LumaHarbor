@@ -227,9 +227,14 @@ public actor BatchAdjustmentSyncService {
     /// One target's revert failing doesn't stop the rest, mirroring
     /// `commitGesture`'s own per-target fault tolerance. A target already
     /// mid-write from a concurrent `commitGesture`/`undo` call (see
-    /// `targetsInFlight`) is tallied `failed` rather than raced -- there
-    /// *is* something to fix on disk, same as any other revert-write
-    /// failure, it just needs a retry once the conflicting operation clears.
+    /// `targetsInFlight`) is tallied `failed` rather than raced -- a
+    /// deliberately conservative label, not a precise one: this call never
+    /// got far enough to load the target and compare it against
+    /// `syncedPatch`, so a retry once the conflicting operation clears may
+    /// well re-tally the same target as `skipped` instead (e.g. if the
+    /// operation that was in flight turns out to have been what changed
+    /// this field again). Reported as `failed` anyway because there's
+    /// nothing safe to conclude yet, and `failed` is what invites a retry.
     public func undo(_ transaction: BatchAdjustmentTransaction) async -> BatchUndoSummary {
         var summary = BatchUndoSummary()
         guard !transaction.modifiedFieldIDs.isEmpty else { return summary }
