@@ -371,6 +371,98 @@ final class BatchAdjustmentSyncServiceTests: XCTestCase {
         XCTAssertEqual(current.contrast, 20, "an unrelated later edit must survive the undo")
     }
 
+    /// Independent review of Task 3.4's own independent-review fix round,
+    /// Finding 2: `commitGesture`/`undo` each run a target's own
+    /// `load → merge → save` cycle across several `await` points -- actor
+    /// isolation guarantees only one call's *unsuspended* code runs at a
+    /// time, not that a whole such cycle is atomic against another call
+    /// into this same actor that starts while the first is suspended. A
+    /// rendezvous (`Interleaver` below) deterministically forces the
+    /// interleaving a real timing race would only sometimes produce: a
+    /// second batch sync (T2) is paused *inside* its own `loadAdjustments`
+    /// call for `target`, `undo` (of an earlier transaction T1, sharing the
+    /// same target) is driven to completion while T2 is still suspended
+    /// there, then T2 is released to finish. Without `targetsInFlight`,
+    /// `undo`'s own load would have raced ahead of T2's paused one, read
+    /// the pre-T2 value, and its later `saveAdjustments` would have landed
+    /// *after* T2's own save -- silently erasing T2's result.
+    func testUndoDoesNotRaceAConcurrentCommitGestureOnTheSameTarget() async throws {
+        actor Interleaver {
+            private var hasArrived = false
+            private var arrivedContinuation: CheckedContinuation<Void, Never>?
+            private var isReleased = false
+            private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+            /// Called from inside the paused operation: signals arrival,
+            /// then suspends until `release()`.
+            func arriveAndWaitForRelease() async {
+                hasArrived = true
+                arrivedContinuation?.resume()
+                arrivedContinuation = nil
+                guard !isReleased else { return }
+                await withCheckedContinuation { releaseContinuation = $0 }
+            }
+
+            /// Called from the test: suspends until `arriveAndWaitForRelease()`
+            /// has actually been entered by the other task.
+            func waitForArrival() async {
+                guard !hasArrived else { return }
+                await withCheckedContinuation { arrivedContinuation = $0 }
+            }
+
+            func release() {
+                isReleased = true
+                releaseContinuation?.resume()
+                releaseContinuation = nil
+            }
+        }
+
+        let source = PhotoID()
+        let target = PhotoID()
+        let store = Store([target: .neutral])
+
+        // T1: an ordinary, ungated sync that produces the transaction this
+        // test will later undo.
+        let setupService = makeService(store)
+        let baseline = PhotoAdjustments.neutral
+        var afterT1 = baseline
+        afterT1.exposure = 1.5
+        await setupService.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: baseline)
+        let committedT1 = await setupService.commitGesture(sourceAfter: afterT1)
+        let transaction = try XCTUnwrap(committedT1)
+
+        // A second service instance sharing the same store/target, standing
+        // in for "another in-flight batch sync (T2)" -- gated so its own
+        // load for `target` pauses on command.
+        let interleaver = Interleaver()
+        let service = BatchAdjustmentSyncService(
+            loadAdjustments: { id in
+                if id == target { await interleaver.arriveAndWaitForRelease() }
+                return try await store.load(id)
+            },
+            saveAdjustments: { value, id in try await store.save(value, id) }
+        )
+        var afterT2 = afterT1
+        afterT2.contrast = 20 // a field T1 never touched
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: afterT1)
+
+        let t2Task = Task { await service.commitGesture(sourceAfter: afterT2) }
+        await interleaver.waitForArrival() // T2 is now paused inside its own load for `target`.
+
+        let undoSummary = await service.undo(transaction)
+
+        await interleaver.release()
+        let t2Result = await t2Task.value
+        let t2Transaction = try XCTUnwrap(t2Result)
+
+        XCTAssertEqual(undoSummary.affected, 0, "undo must back off rather than race T2's in-flight write")
+        XCTAssertEqual(undoSummary.failed, 1)
+        XCTAssertEqual(t2Transaction.results[target], .success, "T2 itself must still complete normally once released")
+        let final = await store.current(target)
+        XCTAssertEqual(final.contrast, 20, "T2's own sync must land")
+        XCTAssertEqual(final.exposure, 1.5, "T1's value (T2's own baseline) must survive -- not clobbered by undo racing in")
+    }
+
     func testUndoOfATransactionWithNoModifiedFieldsIsANoOp() async throws {
         let source = PhotoID()
         let target = PhotoID()

@@ -84,6 +84,16 @@ public actor BatchAdjustmentSyncService {
     private let saveAdjustments: Saver
     private let applicator = PresetApplicator()
     private var activeGesture: ActiveGesture?
+    /// Independent review of Task 3.4: a target's own `load → merge → save`
+    /// cycle (in either `commitGesture` or `undo`) spans several `await`
+    /// points, so actor isolation alone doesn't make it atomic -- a second
+    /// call into this actor (e.g. `undo` invoked while a still-in-flight
+    /// `commitGesture` is mid-write for a target they share) can otherwise
+    /// interleave with it and lose whichever write finishes first. Every
+    /// per-target cycle registers here for its own duration; a target
+    /// already present is left alone by whichever call finds it that way,
+    /// rather than racing.
+    private var targetsInFlight: Set<PhotoID> = []
 
     public init(loadAdjustments: @escaping Loader, saveAdjustments: @escaping Saver) {
         self.loadAdjustments = loadAdjustments
@@ -148,6 +158,12 @@ public actor BatchAdjustmentSyncService {
         var results: [PhotoID: BatchWriteResult] = [:]
 
         for targetID in gesture.targetPhotoIDs {
+            guard !targetsInFlight.contains(targetID) else {
+                results[targetID] = .failure(Self.conflictingOperationMessage)
+                continue
+            }
+            targetsInFlight.insert(targetID)
+            defer { targetsInFlight.remove(targetID) }
             do {
                 let current = try await loadAdjustments(targetID)
                 before[targetID] = AdjustmentPatch.extracting(modifiedFields, from: current)
@@ -209,7 +225,11 @@ public actor BatchAdjustmentSyncService {
     /// means the target moved on since, so this undo leaves it alone
     /// entirely (`skipped`) rather than guessing which part is still safe.
     /// One target's revert failing doesn't stop the rest, mirroring
-    /// `commitGesture`'s own per-target fault tolerance.
+    /// `commitGesture`'s own per-target fault tolerance. A target already
+    /// mid-write from a concurrent `commitGesture`/`undo` call (see
+    /// `targetsInFlight`) is tallied `failed` rather than raced -- there
+    /// *is* something to fix on disk, same as any other revert-write
+    /// failure, it just needs a retry once the conflicting operation clears.
     public func undo(_ transaction: BatchAdjustmentTransaction) async -> BatchUndoSummary {
         var summary = BatchUndoSummary()
         guard !transaction.modifiedFieldIDs.isEmpty else { return summary }
@@ -222,6 +242,12 @@ public actor BatchAdjustmentSyncService {
                 summary.skipped += 1
                 continue
             }
+            guard !targetsInFlight.contains(targetID) else {
+                summary.failed += 1
+                continue
+            }
+            targetsInFlight.insert(targetID)
+            defer { targetsInFlight.remove(targetID) }
             do {
                 let current = try await loadAdjustments(targetID)
                 guard AdjustmentPatch.extracting(modifiedFields, from: current) == syncedPatch else {
@@ -238,6 +264,8 @@ public actor BatchAdjustmentSyncService {
 
         return summary
     }
+
+    private static let conflictingOperationMessage = "a conflicting batch operation is already in progress for this photo"
 
     private static func safeDescription(for error: Error) -> String {
         if let presetError = error as? PresetError, let description = presetError.errorDescription {

@@ -267,18 +267,41 @@ public final class LibraryViewModel: ObservableObject {
         }
     }
 
+    /// Guards `undoLastBatchTransaction()` against a second, concurrent
+    /// call while the first is still running (e.g. a double-click on "Undo
+    /// Batch Sync" before the menu has re-disabled itself) -- both calls
+    /// would otherwise start reverting the *same* transaction, and while
+    /// `BatchAdjustmentSyncService`'s own `targetsInFlight` guard (Task 3.4
+    /// independent review, Finding 2) stops that from corrupting any
+    /// target's data, it would still surface a confusing spurious "1
+    /// failed" from the second call alone racing the first.
+    private var isUndoingLastBatchTransaction = false
+
     /// Phase 3 Task 3.4: reverts `lastBatchTransaction` (`before[id]` merged
     /// back onto each target's *current* adjustments -- not a blind
     /// overwrite, so anything a target picked up since the sync survives),
     /// then refreshes the grid's edit badge for every target the original
     /// sync actually wrote to, from the ground truth left on disk rather
-    /// than assuming the revert made it neutral. Consumes the transaction
-    /// either way -- a compound batch undo is one-shot, not its own stack.
+    /// than assuming the revert made it neutral.
+    ///
+    /// Independent review of Task 3.4, Finding 4: only consumes the
+    /// transaction when every target it touched reverted cleanly
+    /// (`summary.failed == 0`). A partial failure keeps `lastBatchTransaction`
+    /// around so choosing "Undo Batch Sync" again retries -- safely, since
+    /// `BatchAdjustmentSyncService.undo(_:)`'s own conflict check (Finding 1's
+    /// fix) means a target already reverted by the first attempt no longer
+    /// matches its recorded `after` value and is `skipped`, not re-reverted,
+    /// on the retry.
     @discardableResult
     func undoLastBatchTransaction() async -> BatchAdjustmentSyncService.BatchUndoSummary? {
-        guard let transaction = lastBatchTransaction else { return nil }
-        lastBatchTransaction = nil
+        guard !isUndoingLastBatchTransaction, let transaction = lastBatchTransaction else { return nil }
+        isUndoingLastBatchTransaction = true
+        defer { isUndoingLastBatchTransaction = false }
+
         let summary = await batchSyncService.undo(transaction)
+        if summary.failed == 0 {
+            lastBatchTransaction = nil
+        }
         for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
             guard let (services, asset) = batchSyncTarget(for: targetID) else { continue }
             if let reverted = try? await services.loadAdjustments(asset) {
