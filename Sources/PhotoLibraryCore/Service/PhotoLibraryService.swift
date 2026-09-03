@@ -2044,6 +2044,7 @@ public actor PhotoLibraryService {
     /// copy's `variantOf` points at `photo.id` directly, never chased back
     /// to some "root" original -- Task 3.5's scope has no concept of nested
     /// copy trees, only a flat original/copy relationship.
+    @discardableResult
     public func createVirtualCopy(
         of photo: PhotoAsset,
         named name: String? = nil

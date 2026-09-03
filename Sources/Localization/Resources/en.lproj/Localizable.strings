@@ -101,8 +101,10 @@
 "Couldn't back up presets" = "Couldn't back up presets";
 "Couldn't restore this backup" = "Couldn't restore this backup";
 "Couldn't copy this preset" = "Couldn't copy this preset";
+"Couldn't create a virtual copy" = "Couldn't create a virtual copy";
 "Couldn't create this preset" = "Couldn't create this preset";
 "Couldn't delete this preset" = "Couldn't delete this preset";
+"Couldn't delete this virtual copy" = "Couldn't delete this virtual copy";
 "Couldn't export this preset" = "Couldn't export this preset";
 "Couldn't close this photo" = "Couldn't close this photo";
 "Couldn't find an unused filename for" = "Couldn't find an unused filename for";

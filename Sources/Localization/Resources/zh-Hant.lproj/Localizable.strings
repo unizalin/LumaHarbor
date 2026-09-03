@@ -101,8 +101,10 @@
 "Couldn't back up presets" = "無法備份 Preset";
 "Couldn't restore this backup" = "無法還原這個備份";
 "Couldn't copy this preset" = "無法複製這個 Preset";
+"Couldn't create a virtual copy" = "無法建立虛擬副本";
 "Couldn't create this preset" = "無法建立這個 Preset";
 "Couldn't delete this preset" = "無法刪除這個 Preset";
+"Couldn't delete this virtual copy" = "無法刪除這個虛擬副本";
 "Couldn't export this preset" = "無法匯出這個 Preset";
 "Couldn't close this photo" = "無法關閉這張照片";
 "Couldn't find an unused filename for" = "找不到可用的檔名：";
