@@ -64,6 +64,7 @@
 "Back to the library grid" = "Back to the library grid";
 "Blacks" = "Blacks";
 "Blue" = "Blue";
+"Built-In" = "Built-In";
 "Camera" = "Camera";
 "Can't open this photo" = "Can't open this photo";
 "Cancel" = "Cancel";
@@ -115,6 +116,7 @@
 "Couldn't show this photo" = "Couldn't show this photo";
 "Couldn't start LumaHarbor" = "Couldn't start LumaHarbor";
 "Couldn't update the cache size" = "Couldn't update the cache size";
+"Couldn't update this preset" = "Couldn't update this preset";
 "Create a preset from this photo" = "Create a preset from this photo";
 "Create Preset" = "Create Preset";
 "Decoding RAW…" = "Decoding RAW…";
@@ -124,6 +126,8 @@
 "Double-click the row to reset" = "Double-click the row to reset";
 "Drag to move this panel." = "Drag to move this panel.";
 "Edit in Place" = "Edit in Place";
+"Edit Preset" = "Edit Preset";
+"Edit…" = "Edit…";
 "Edited" = "Edited";
 "Export a full-resolution JPEG" = "Export a full-resolution JPEG";
 "Export failed" = "Export failed";
@@ -138,6 +142,7 @@
 "Exposure" = "Exposure";
 "Favorite" = "Favorite";
 "Favorites" = "Favorites";
+"Fields in this preset" = "Fields in this preset";
 "Fields included:" = "Fields included:";
 "File Size" = "File Size";
 "Filename" = "Filename";
@@ -163,6 +168,7 @@
 "Import Develop Presets" = "Import Develop Presets";
 "Import develop presets" = "Import develop presets";
 "Import" = "Import";
+"Imported" = "Imported";
 "Imported %d of %d files." = "Imported %d of %d files.";
 "Include in this preset" = "Include in this preset";
 "is read-only." = "is read-only.";
@@ -387,6 +393,7 @@
 "Try copying this photo again." = "Try copying this photo again.";
 "Try exporting again." = "Try exporting again.";
 "Try re-copying this file from the memory card." = "Try re-copying this file from the memory card.";
+"Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo." = "Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo.";
 "Undo" = "Undo";
 "Unknown" = "Unknown";
 "Unlock the drive or copy the library somewhere writable, then retry." = "Unlock the drive or copy the library somewhere writable, then retry.";

@@ -64,6 +64,7 @@
 "Back to the library grid" = "回到相片庫網格";
 "Blacks" = "黑色";
 "Blue" = "藍";
+"Built-In" = "內建";
 "Camera" = "相機";
 "Can't open this photo" = "無法開啟這張照片";
 "Cancel" = "取消";
@@ -115,6 +116,7 @@
 "Couldn't show this photo" = "無法顯示這張照片";
 "Couldn't start LumaHarbor" = "無法啟動 LumaHarbor";
 "Couldn't update the cache size" = "無法更新快取大小";
+"Couldn't update this preset" = "無法更新這個 Preset";
 "Create a preset from this photo" = "從這張照片建立 Preset";
 "Create Preset" = "建立 Preset";
 "Decoding RAW…" = "正在解碼 RAW…";
@@ -124,6 +126,8 @@
 "Double-click the row to reset" = "雙擊這一列可重設";
 "Drag to move this panel." = "拖曳可移動此面板。";
 "Edit in Place" = "原地編輯";
+"Edit Preset" = "編輯 Preset";
+"Edit…" = "編輯…";
 "Edited" = "已編輯";
 "Export a full-resolution JPEG" = "匯出全解析度 JPEG";
 "Export failed" = "匯出失敗";
@@ -138,6 +142,7 @@
 "Exposure" = "曝光";
 "Favorite" = "收藏";
 "Favorites" = "收藏";
+"Fields in this preset" = "這個 Preset 中的欄位";
 "Fields included:" = "包含欄位數：";
 "File Size" = "檔案大小";
 "Filename" = "檔名";
@@ -163,6 +168,7 @@
 "Import Develop Presets" = "匯入開發預設";
 "Import develop presets" = "匯入開發預設";
 "Import" = "匯入";
+"Imported" = "已匯入";
 "Imported %d of %d files." = "已匯入 %d／%d 個檔案。";
 "Include in this preset" = "納入這個 Preset";
 "is read-only." = "是唯讀的。";
@@ -387,6 +393,7 @@
 "Try copying this photo again." = "再試一次複製這張照片。";
 "Try exporting again." = "重新嘗試匯出。";
 "Try re-copying this file from the memory card." = "試著從記憶卡重新複製這個檔案。";
+"Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo." = "取消勾選欄位可將它從這個 Preset 中移除。只能透過從已開啟的照片建立 Preset 來新增欄位。";
 "Undo" = "復原";
 "Unknown" = "未知";
 "Unlock the drive or copy the library somewhere writable, then retry." = "解鎖磁碟，或把相片庫複製到可寫入的位置，然後重試。";
