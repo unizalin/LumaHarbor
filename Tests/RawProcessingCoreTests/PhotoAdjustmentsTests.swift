@@ -57,7 +57,7 @@ final class PhotoAdjustmentsTests: XCTestCase {
                 "exposure", "temperature", "tint", "contrast", "highlights",
                 "shadows", "whites", "blacks", "vibrance", "saturation",
                 "advancedToneCurve", "hsl", "splitToning", "sharpening",
-                "noiseReduction", "vignette", "grain"
+                "noiseReduction", "vignette", "grain", "geometry"
             ]
         )
     }
@@ -107,6 +107,7 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(adjustments.noiseReduction, .neutral)
         XCTAssertEqual(adjustments.vignette, .neutral)
         XCTAssertEqual(adjustments.grain, .neutral)
+        XCTAssertEqual(adjustments.geometry, .neutral)
     }
 
     func testOldSidecarWithoutNewFieldsDecodesToNeutralExpansions() throws {
@@ -124,6 +125,22 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(decoded.noiseReduction, .neutral)
         XCTAssertEqual(decoded.vignette, .neutral)
         XCTAssertEqual(decoded.grain, .neutral)
+        XCTAssertEqual(decoded.geometry, .neutral)
+    }
+
+    /// The most realistic backward-compat case: a sidecar written by Phase 1
+    /// (every pre-geometry key present) but with no "geometry" key at all —
+    /// exactly what every real sidecar on disk looks like before this task.
+    func testPhase1SidecarWithoutGeometryKeyDecodesToNeutralGeometry() throws {
+        let json = Data(#"""
+        {"exposure": 1.0, "temperature": 0, "tint": 0, "contrast": 0, "highlights": 0,
+         "shadows": 0, "whites": 0, "blacks": 0, "vibrance": 0, "saturation": 0,
+         "advancedToneCurve": {}, "hsl": {}, "splitToning": {},
+         "sharpening": {}, "noiseReduction": {}, "vignette": {}, "grain": {}}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.exposure, 1.0)
+        XCTAssertEqual(decoded.geometry, .neutral)
     }
 
     func testRoundTripsNewFieldsThroughJSON() throws {
@@ -131,6 +148,7 @@ final class PhotoAdjustmentsTests: XCTestCase {
         original.sharpening = Sharpening(amount: 40)
         original.hsl.red = HSLBand(hue: 10, saturation: 20, luminance: -5)
         original.vignette = Vignette(amount: -30)
+        original.geometry = GeometryAdjustments(rotationDegrees: 90, flipHorizontal: true)
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
         XCTAssertEqual(decoded, original)

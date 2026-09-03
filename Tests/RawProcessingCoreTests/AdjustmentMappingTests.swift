@@ -207,4 +207,38 @@ final class AdjustmentMappingTests: XCTestCase {
     func testNeutralHSLIsIdentity() {
         XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isHSLIdentity)
     }
+
+    // MARK: - Geometry (Phase 2 Task 1: model/sidecar only, not wired into rendering yet)
+
+    /// `RenderParameters` has no geometry field, and `renderParameters(for:)`
+    /// never reads `PhotoAdjustments.geometry` — this pins that on purpose.
+    /// Wiring crop/rotate/flip/straighten/perspective into the render chain
+    /// is Task 2.2's job; until then, two adjustments differing only in
+    /// `geometry` (neutral or not) must render identically, so adding the
+    /// field cannot change any existing photo's output.
+    func testGeometryNeverAffectsRenderParameters() {
+        var withGeometry = PhotoAdjustments(exposure: 0.5, contrast: 20)
+        withGeometry.geometry = GeometryAdjustments(
+            crop: NormalizedCropRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5),
+            rotationDegrees: 90,
+            flipHorizontal: true,
+            straightenDegrees: 15
+        )
+        var withoutGeometry = PhotoAdjustments(exposure: 0.5, contrast: 20)
+        withoutGeometry.geometry = .neutral
+
+        XCTAssertEqual(
+            AdjustmentMapping.renderParameters(for: withGeometry),
+            AdjustmentMapping.renderParameters(for: withoutGeometry)
+        )
+    }
+
+    func testNeutralGeometryDoesNotChangeTheNeutralIdentityRenderParameters() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.geometry = .neutral
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertTrue(parameters.isExposureIdentity)
+        XCTAssertTrue(parameters.isContrastIdentity)
+        XCTAssertEqual(parameters, AdjustmentMapping.renderParameters(for: .neutral))
+    }
 }
