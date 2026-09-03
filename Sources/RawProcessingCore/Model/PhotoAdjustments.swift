@@ -23,6 +23,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     public var noiseReduction: NoiseReduction
     public var vignette: Vignette
     public var grain: Grain
+    public var geometry: GeometryAdjustments
 
     public init(
         exposure: Double = 0,
@@ -41,7 +42,8 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         sharpening: Sharpening = .neutral,
         noiseReduction: NoiseReduction = .neutral,
         vignette: Vignette = .neutral,
-        grain: Grain = .neutral
+        grain: Grain = .neutral,
+        geometry: GeometryAdjustments = .neutral
     ) {
         self.exposure = AdjustmentCatalog.definition(for: .exposure).clamp(exposure)
         self.temperature = AdjustmentCatalog.definition(for: .temperature).clamp(temperature)
@@ -60,6 +62,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.noiseReduction = noiseReduction
         self.vignette = vignette
         self.grain = grain
+        self.geometry = geometry
     }
 
     /// All sliders at their documented default — the "no edit applied" state.
@@ -119,7 +122,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
             vibrance: vibrance, saturation: saturation,
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
-            grain: grain
+            grain: grain, geometry: geometry
         )
     }
 
@@ -136,6 +139,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         case exposure, temperature, tint, contrast, highlights
         case shadows, whites, blacks, vibrance, saturation
         case advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
+        case geometry
     }
 
     /// Missing keys fall back to the catalogue default and out-of-range values
@@ -167,6 +171,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.noiseReduction = try container.decodeIfPresent(NoiseReduction.self, forKey: .noiseReduction) ?? .neutral
         self.vignette = try container.decodeIfPresent(Vignette.self, forKey: .vignette) ?? .neutral
         self.grain = try container.decodeIfPresent(Grain.self, forKey: .grain) ?? .neutral
+        self.geometry = try container.decodeIfPresent(GeometryAdjustments.self, forKey: .geometry) ?? .neutral
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -190,5 +195,6 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(noiseReduction, forKey: .noiseReduction)
         try container.encode(vignette, forKey: .vignette)
         try container.encode(grain, forKey: .grain)
+        try container.encode(geometry, forKey: .geometry)
     }
 }
