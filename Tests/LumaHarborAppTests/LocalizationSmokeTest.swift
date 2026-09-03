@@ -162,7 +162,7 @@ final class LocalizationSmokeTest: XCTestCase {
     /// its report copy introduce.
     func testEveryBatchUndoStringHasAChineseTranslation() {
         let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
-        let keys = ["Undo Batch Sync", "Batch Sync Undone", "reverted", "Nothing to undo."]
+        let keys = ["Undo Batch Sync", "Batch Sync Undone", "reverted", "failed to revert", "Nothing to undo."]
         for key in keys {
             let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")

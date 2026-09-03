@@ -304,6 +304,73 @@ final class BatchAdjustmentSyncServiceTests: XCTestCase {
         XCTAssertEqual(unchanged.exposure, 1, "a failed undo write must leave the target exactly as the original sync left it")
     }
 
+    /// Independent review of Task 3.4: `undo(_:)` merged `before[target]`
+    /// back onto the target's *current* adjustments without ever checking
+    /// whether the target's synced fields still held what the sync wrote --
+    /// a target edited (directly, or by a later batch sync) on the very
+    /// same field between the original sync and this undo would have that
+    /// later, deliberate edit silently discarded.
+    func testUndoDoesNotOverwriteAFieldTheTargetHasBeenEditedOnSinceTheSync() async throws {
+        let source = PhotoID()
+        let target = PhotoID()
+        let store = Store([target: .neutral])
+        let service = makeService(store)
+
+        let baseline = PhotoAdjustments.neutral
+        var after = baseline
+        after.exposure = 1.5
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: baseline)
+        let committed = await service.commitGesture(sourceAfter: after)
+        let transaction = try XCTUnwrap(committed)
+
+        // The user opens the target directly and edits the very same field
+        // the sync touched, after the sync but before the undo.
+        var manuallyEdited = PhotoAdjustments.neutral
+        manuallyEdited.exposure = 2.5
+        try await store.save(manuallyEdited, target)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 0, "the target must not be reverted once it's been edited on the synced field since the sync")
+        XCTAssertEqual(summary.skipped, 1)
+        let current = await store.current(target)
+        XCTAssertEqual(current.exposure, 2.5, "the user's later manual edit must survive the undo")
+    }
+
+    /// The same protection, but scoped to only the field that actually
+    /// conflicts -- a target edited on an *unrelated* field since the sync
+    /// must still have the synced field reverted normally.
+    func testUndoStillRevertsWhenTheTargetWasOnlyEditedOnAnUnrelatedFieldSinceTheSync() async throws {
+        let source = PhotoID()
+        let target = PhotoID()
+        let store = Store([target: .neutral])
+        let service = makeService(store)
+
+        let baseline = PhotoAdjustments.neutral
+        var after = baseline
+        after.exposure = 1.5
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: baseline)
+        let committed = await service.commitGesture(sourceAfter: after)
+        let transaction = try XCTUnwrap(committed)
+
+        // An unrelated field edited on the target since the sync -- must not
+        // block the revert of the field the sync actually touched.
+        var edited = PhotoAdjustments.neutral
+        edited.exposure = 1.5 // still exactly what the sync wrote
+        edited.contrast = 20 // the target's own, unrelated new edit
+        try await store.save(edited, target)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 1)
+        XCTAssertEqual(summary.skipped, 0)
+        let current = await store.current(target)
+        XCTAssertEqual(current.exposure, 0, "the synced field must still revert when untouched since the sync")
+        XCTAssertEqual(current.contrast, 20, "an unrelated later edit must survive the undo")
+    }
+
     func testUndoOfATransactionWithNoModifiedFieldsIsANoOp() async throws {
         let source = PhotoID()
         let target = PhotoID()

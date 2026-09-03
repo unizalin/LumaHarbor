@@ -160,6 +160,7 @@
 "Filter presets" = "篩選 Preset";
 "Focal Length" = "焦距";
 "failed" = "失敗";
+"failed to revert" = "張復原失敗";
 "Focus Mode" = "專注模式";
 "Format" = "格式";
 "found" = "張照片";

@@ -183,7 +183,10 @@ public actor BatchAdjustmentSyncService {
         /// `skipped` because there *is* something on disk to fix here.
         public var failed = 0
         /// A target the original sync never actually wrote to (it failed
-        /// back then) -- nothing to revert, so undo leaves it untouched.
+        /// back then), or one whose synced fields no longer hold what the
+        /// sync wrote (edited again since, directly or by a later batch
+        /// sync) -- nothing safe to revert, so undo leaves it untouched
+        /// either way.
         public var skipped = 0
 
         public init() {}
@@ -195,19 +198,36 @@ public actor BatchAdjustmentSyncService {
     /// a target received after the original sync (to a field the sync never
     /// touched) survives the undo exactly as it survived the sync itself. A
     /// target the original sync never wrote to is `skipped`, never touched.
+    ///
+    /// Independent review of Task 3.4: a target's *synced* field can also
+    /// have been deliberately changed again since the sync -- directly, or
+    /// by a later batch sync -- before this undo runs. Blindly merging
+    /// `before[target]` back in that case would silently discard that later
+    /// edit with no warning. Guarded by checking the target's current value
+    /// on exactly the fields this sync touched (`modifiedFieldIDs`) against
+    /// `after[target]` -- what the sync itself wrote -- first; a mismatch
+    /// means the target moved on since, so this undo leaves it alone
+    /// entirely (`skipped`) rather than guessing which part is still safe.
     /// One target's revert failing doesn't stop the rest, mirroring
     /// `commitGesture`'s own per-target fault tolerance.
     public func undo(_ transaction: BatchAdjustmentTransaction) async -> BatchUndoSummary {
         var summary = BatchUndoSummary()
         guard !transaction.modifiedFieldIDs.isEmpty else { return summary }
+        let modifiedFields = Set(transaction.modifiedFieldIDs)
 
         for targetID in transaction.targetPhotoIDs {
-            guard transaction.results[targetID] == .success, let priorPatch = transaction.before[targetID] else {
+            guard transaction.results[targetID] == .success,
+                  let priorPatch = transaction.before[targetID],
+                  let syncedPatch = transaction.after[targetID] else {
                 summary.skipped += 1
                 continue
             }
             do {
                 let current = try await loadAdjustments(targetID)
+                guard AdjustmentPatch.extracting(modifiedFields, from: current) == syncedPatch else {
+                    summary.skipped += 1
+                    continue
+                }
                 let reverted = applicator.apply(priorPatch, to: current, mode: .merge, context: .none).adjustments
                 try await saveAdjustments(reverted, targetID)
                 summary.affected += 1
