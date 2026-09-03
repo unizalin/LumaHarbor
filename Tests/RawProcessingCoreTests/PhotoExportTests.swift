@@ -546,6 +546,80 @@ final class PhotoExportTests: XCTestCase {
         XCTAssertEqual(outcome.pixelSize, CGSize(width: 4_000, height: 3_000))
     }
 
+    // MARK: - Geometry (Phase 2 Task 2)
+
+    func testExportAppliesCropToTheOutputDimensions() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 3_000)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.geometry.crop = NormalizedCropRect(x: 0, y: 0, width: 0.5, height: 0.5)
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 2_000, height: 1_500))
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 2_000, "the actual written file must match what pixelSize reports")
+        XCTAssertEqual(image.height, 1_500)
+    }
+
+    func testExportAppliesRotationSwappingTheOutputDimensions() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 3_000)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.geometry.rotationDegrees = 90
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 3_000, height: 4_000))
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 3_000)
+        XCTAssertEqual(image.height, 4_000)
+    }
+
+    func testExportCombinesCropAndRotationForTheOutputDimensions() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 2_000)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.geometry.crop = NormalizedCropRect(x: 0, y: 0, width: 0.5, height: 0.5)
+        adjustments.geometry.rotationDegrees = 90
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        // Crop first: 2000x1000. A 90deg rotate then swaps to 1000x2000.
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 1_000, height: 2_000))
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 1_000)
+        XCTAssertEqual(image.height, 2_000)
+    }
+
+    /// The bug this pins: before this task, `maximumWidth`/`maximumHeight`
+    /// fit against the *native* decode size, ignoring any crop. A native
+    /// 4000x2000 (2:1) source cropped to a 1000x1000 (1:1) square has a
+    /// different aspect ratio than its source, so fitting `maximumWidth`
+    /// against the wrong reference produces a visibly different (and
+    /// wrong) result: 500x250 (native-relative, the bug) vs. the correct
+    /// 500x500 (cropped-relative).
+    func testMaximumWidthFitsAgainstTheCroppedSizeNotTheNativeSize() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 2_000)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.geometry.crop = NormalizedCropRect(x: 0, y: 0, width: 0.25, height: 0.5)
+        let outcome = try await exporter.export(
+            makeRequest(adjustments: adjustments, format: .png, maximumWidth: 500)
+        )
+
+        // Cropped size is 1000x1000; capping at maximumWidth 500 halves it
+        // to 500x500 -- not 500x250, which is what fitting against the
+        // uncropped 4000x2000 native size would (wrongly) produce.
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 500, height: 500))
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 500)
+        XCTAssertEqual(image.height, 500)
+    }
+
+    func testNeutralGeometryExportMatchesTheUncroppedNativeSize() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 4_000, height: 3_000)))
+        let outcome = try await exporter.export(makeRequest(adjustments: .neutral, format: .png))
+        XCTAssertEqual(outcome.pixelSize, CGSize(width: 4_000, height: 3_000))
+    }
+
     // MARK: - DPI metadata
 
     func testDPIIsWrittenToTheExportedFile() async throws {
