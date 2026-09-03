@@ -40,6 +40,16 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
     public var adjustments: PhotoAdjustments
     public var createdAt: Date
     public var modifiedAt: Date
+    /// Phase 3 Task 3.5: `nil` for an original photo's sidecar; the
+    /// original's own `photoID` for a virtual copy's sidecar. Embedded here
+    /// too, redundant with `LibraryManifest`'s own `PhotoRecord.variantOf`,
+    /// the same way `sourceRelativePath`/`sourceFingerprint` already
+    /// duplicate manifest data -- this is what lets a sidecar found on disk
+    /// (e.g. rebuilding a lost index/manifest) still say whose copy it is,
+    /// not just whose photo. A plain `Optional` stored property, not a
+    /// custom decoder: missing on an older sidecar decodes to `nil`
+    /// automatically, same as every other addition here.
+    public var variantOf: PhotoID?
 
     public init(
         schemaVersion: Int = PhotoSidecar.currentSchemaVersion,
@@ -49,7 +59,8 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         decoder: DecoderDescriptor = .coreImageDefault,
         adjustments: PhotoAdjustments = .neutral,
         createdAt: Date = Date(),
-        modifiedAt: Date = Date()
+        modifiedAt: Date = Date(),
+        variantOf: PhotoID? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.photoID = photoID
@@ -59,6 +70,7 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         self.adjustments = adjustments
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
+        self.variantOf = variantOf
     }
 
     /// `true` when this file was written by a version that changed the format in

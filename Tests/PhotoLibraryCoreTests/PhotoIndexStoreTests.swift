@@ -163,6 +163,52 @@ final class PhotoIndexStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(remaining, ["Kept.ARW"])
     }
 
+    // MARK: - Phase 3 Task 3.5: virtual copies
+
+    func testVirtualCopyIdentityFieldsRoundTrip() throws {
+        let originalID = PhotoID()
+        var copy = PhotoAsset.stub(libraryID: library.id, relativePath: "Trip/DSC0001.ARW")
+        copy.variantOf = originalID
+        copy.variantName = "B&W"
+        try store.upsert(photo: copy)
+
+        let loaded = try XCTUnwrap(try store.photo(id: copy.id))
+        XCTAssertEqual(loaded.variantOf, originalID)
+        XCTAssertEqual(loaded.variantName, "B&W")
+        XCTAssertTrue(loaded.isVirtualCopy)
+    }
+
+    func testAnOriginalPhotoHasNilVariantFields() throws {
+        let original = PhotoAsset.stub(libraryID: library.id)
+        try store.upsert(photo: original)
+
+        let loaded = try XCTUnwrap(try store.photo(id: original.id))
+        XCTAssertNil(loaded.variantOf)
+        XCTAssertNil(loaded.variantName)
+        XCTAssertFalse(loaded.isVirtualCopy)
+    }
+
+    /// A virtual copy is never independently rediscovered by a scan (it
+    /// shares its original's `relativePath`), so nothing ever refreshes its
+    /// own `lastSeenAt` -- the sweep must never delete it purely for
+    /// looking stale, regardless of how long ago it was created.
+    func testSweepingNeverRemovesAVirtualCopyRegardlessOfItsOwnLastSeenAt() throws {
+        let original = PhotoAsset.stub(libraryID: library.id, relativePath: "Trip/DSC0001.ARW")
+        var copy = PhotoAsset.stub(
+            id: PhotoID(), libraryID: library.id, relativePath: "Trip/DSC0001.ARW"
+        )
+        copy.variantOf = original.id
+        copy.lastSeenAt = Date(timeIntervalSince1970: 1_000) // long before the sweep cutoff
+        try store.upsert(photos: [original, copy])
+
+        try store.removePhotos(
+            inLibrary: library.id,
+            notSeenSince: Date(timeIntervalSince1970: 5_000)
+        )
+
+        XCTAssertNotNil(try store.photo(id: copy.id), "a virtual copy must survive the sweep no matter its own lastSeenAt")
+    }
+
     func testEditFlagCanBeToggled() throws {
         let photo = PhotoAsset.stub(libraryID: library.id)
         try store.upsert(photo: photo)

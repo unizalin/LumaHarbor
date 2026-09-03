@@ -109,6 +109,53 @@ final class RelinkResolverTests: XCTestCase {
         XCTAssertEqual(decision, .new)
     }
 
+    // MARK: - Phase 3 Task 3.5: virtual copies are invisible to relinking
+
+    func testPathMatchIgnoresAVirtualCopyRecordAtTheSamePath() {
+        let originalID = PhotoID()
+        let copyID = PhotoID()
+        // The copy's record is deliberately listed first -- if resolution
+        // ever fell back to ".first(where:)" over the raw array, this would
+        // catch it picking the copy instead of the original.
+        let records = [
+            PhotoRecord.stub(photoID: copyID, relativePath: "Trip/A.ARW", fingerprint: alpha, variantOf: originalID),
+            PhotoRecord.stub(photoID: originalID, relativePath: "Trip/A.ARW", fingerprint: alpha)
+        ]
+        let decision = RelinkResolver.resolve(
+            relativePath: "Trip/A.ARW", fingerprint: alpha, against: records
+        )
+        XCTAssertEqual(decision, .unchanged(originalID), "a scanned file must always resolve to the original's identity, never a virtual copy sharing its path")
+    }
+
+    func testContentChangeAtASharedPathStillResolvesToTheOriginalNotTheCopy() {
+        let originalID = PhotoID()
+        let copyID = PhotoID()
+        let records = [
+            PhotoRecord.stub(photoID: originalID, relativePath: "Trip/A.ARW", fingerprint: alpha),
+            PhotoRecord.stub(photoID: copyID, relativePath: "Trip/A.ARW", fingerprint: alpha, variantOf: originalID)
+        ]
+        let decision = RelinkResolver.resolve(
+            relativePath: "Trip/A.ARW", fingerprint: beta, against: records
+        )
+        XCTAssertEqual(decision, .contentChanged(originalID))
+    }
+
+    func testFingerprintFallbackNeverTreatsAVirtualCopyAsAMoveCandidate() {
+        let originalID = PhotoID()
+        let copyID = PhotoID()
+        let records = [
+            PhotoRecord.stub(photoID: originalID, relativePath: "Old/A.ARW", fingerprint: alpha),
+            PhotoRecord.stub(photoID: copyID, relativePath: "Old/A.ARW", fingerprint: alpha, variantOf: originalID)
+        ]
+        let decision = RelinkResolver.resolve(
+            relativePath: "New/A.ARW", fingerprint: alpha, against: records
+        )
+        XCTAssertEqual(
+            decision, .moved(originalID, previousRelativePath: "Old/A.ARW"),
+            "a virtual copy sharing the original's fingerprint must never itself surface as a move candidate, and must never make this look ambiguous"
+        )
+    }
+
     func testSizeAloneDoesNotMakeAMatch() {
         let sameSizeDifferentDigest = FileFingerprint(fileSize: 1_024, edgeDigest: "different")
         let records = [PhotoRecord.stub(relativePath: "Trip/A.ARW", fingerprint: alpha)]

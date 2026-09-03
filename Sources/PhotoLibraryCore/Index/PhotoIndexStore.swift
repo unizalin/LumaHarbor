@@ -11,7 +11,7 @@ import RawProcessingCore
 /// synchronous SQLite call, and making callers `await` each row would push
 /// suspension points into the middle of scan batches for no benefit.
 public final class PhotoIndexStore: @unchecked Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 
     private let database: SQLiteDatabase
     /// Recursive because `transaction` re-enters through `upsertPhoto`.
@@ -116,37 +116,55 @@ public final class PhotoIndexStore: @unchecked Sendable {
         return rows.first ?? 1
     }
 
-    /// Spec §8: v1 -> v2 happens inside one transaction. `ALTER TABLE`,
-    /// `CREATE INDEX` and the backfill all run under the same `BEGIN
-    /// IMMEDIATE`/`COMMIT` pair as the version bump, so a thrown error at any
-    /// point — including from `migrationHook` — rolls every change back and
-    /// leaves the database exactly as it was opened.
+    /// Spec §8: every step from whatever version this database is currently
+    /// at, up to `Self.schemaVersion`, happens inside one transaction.
+    /// `ALTER TABLE`, `CREATE INDEX`, backfills and the version bump all run
+    /// under the same `BEGIN IMMEDIATE`/`COMMIT` pair, so a thrown error at
+    /// any point — including from `migrationHook` — rolls every change back
+    /// and leaves the database exactly as it was opened. Each step is
+    /// gated on the *starting* version, not `else`-chained, so a database
+    /// already at an intermediate version (e.g. an existing v2 database
+    /// picking up Phase 3 Task 3.5's v3 columns) runs only the steps it
+    /// actually still needs — re-running the v1 -> v2 `ALTER TABLE`s on an
+    /// already-v2 database would fail with "duplicate column name".
     private func migrateToLatestSchemaIfNeeded(migrationHook: () throws -> Void) throws {
         let version = try currentSchemaVersion()
         guard version < Self.schemaVersion else { return }
 
         try withLock {
             try database.transaction {
-                try database.execute("""
-                    ALTER TABLE library ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'externalFolder';
-                    ALTER TABLE library ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'ready';
-                    ALTER TABLE library ADD COLUMN scan_state TEXT NOT NULL DEFAULT 'idle';
-                    ALTER TABLE photo ADD COLUMN filename_normalized TEXT NOT NULL DEFAULT '';
-                    ALTER TABLE photo ADD COLUMN relative_directory TEXT NOT NULL DEFAULT '';
-                    ALTER TABLE photo ADD COLUMN last_edit_at REAL;
-                    """)
+                if version < 2 {
+                    try database.execute("""
+                        ALTER TABLE library ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'externalFolder';
+                        ALTER TABLE library ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'ready';
+                        ALTER TABLE library ADD COLUMN scan_state TEXT NOT NULL DEFAULT 'idle';
+                        ALTER TABLE photo ADD COLUMN filename_normalized TEXT NOT NULL DEFAULT '';
+                        ALTER TABLE photo ADD COLUMN relative_directory TEXT NOT NULL DEFAULT '';
+                        ALTER TABLE photo ADD COLUMN last_edit_at REAL;
+                        """)
 
-                try backfillFilenameNormalizedAndDirectory()
+                    try backfillFilenameNormalizedAndDirectory()
 
-                try database.execute("""
-                    CREATE INDEX photo_all_capture_desc ON photo (capture_date DESC, photo_id);
-                    CREATE INDEX photo_library_capture_desc ON photo (library_id, capture_date DESC, photo_id);
-                    CREATE INDEX photo_library_directory_capture_desc
-                        ON photo (library_id, relative_directory, capture_date DESC, photo_id);
-                    CREATE INDEX photo_filename_normalized ON photo (filename_normalized, photo_id);
-                    CREATE INDEX photo_last_edit_desc ON photo (last_edit_at DESC, photo_id)
-                        WHERE last_edit_at IS NOT NULL;
-                    """)
+                    try database.execute("""
+                        CREATE INDEX photo_all_capture_desc ON photo (capture_date DESC, photo_id);
+                        CREATE INDEX photo_library_capture_desc ON photo (library_id, capture_date DESC, photo_id);
+                        CREATE INDEX photo_library_directory_capture_desc
+                            ON photo (library_id, relative_directory, capture_date DESC, photo_id);
+                        CREATE INDEX photo_filename_normalized ON photo (filename_normalized, photo_id);
+                        CREATE INDEX photo_last_edit_desc ON photo (last_edit_at DESC, photo_id)
+                            WHERE last_edit_at IS NOT NULL;
+                        """)
+                }
+
+                if version < 3 {
+                    // Phase 3 Task 3.5: nullable, no backfill needed -- every
+                    // existing row is an original (`variant_of IS NULL`),
+                    // which is exactly the value absent columns default to.
+                    try database.execute("""
+                        ALTER TABLE photo ADD COLUMN variant_of TEXT;
+                        ALTER TABLE photo ADD COLUMN variant_name TEXT;
+                        """)
+                }
 
                 try migrationHook()
 
@@ -183,7 +201,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
         "photo_id", "library_id", "relative_path", "file_size", "edge_digest",
         "capture_date", "camera_make", "camera_model", "lens_model",
         "pixel_width", "pixel_height", "iso_speed", "shutter_speed", "aperture", "orientation",
-        "status", "failure_reason", "has_edits", "last_seen_at", "last_edit_at"
+        "status", "failure_reason", "has_edits", "last_seen_at", "last_edit_at",
+        "variant_of", "variant_name"
     ]
     private static let photoColumns = photoColumnList.joined(separator: ", ")
     private static let qualifiedPhotoColumns = photoColumnList.map { "p.\($0)" }.joined(separator: ", ")
@@ -383,7 +402,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
             INSERT INTO photo (
                 \(Self.photoColumns), filename_normalized, relative_directory
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(photo_id) DO UPDATE SET
                 library_id          = excluded.library_id,
                 relative_path       = excluded.relative_path,
@@ -404,6 +423,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 has_edits           = excluded.has_edits,
                 last_seen_at        = excluded.last_seen_at,
                 last_edit_at        = excluded.last_edit_at,
+                variant_of          = excluded.variant_of,
+                variant_name        = excluded.variant_name,
                 filename_normalized = excluded.filename_normalized,
                 relative_directory  = excluded.relative_directory;
             """, [
@@ -427,6 +448,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 .integer(photo.hasEdits ? 1 : 0),
                 .real(photo.lastSeenAt.timeIntervalSince1970),
                 photo.lastEditAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                photo.variantOf.map { .text($0.description) } ?? .null,
+                photo.variantName.map { .text($0) } ?? .null,
                 .text(Self.normalizeForSearch(Self.filenameComponent(of: photo.relativePath))),
                 .text(Self.directoryComponent(of: photo.relativePath))
             ])
@@ -490,10 +513,19 @@ public final class PhotoIndexStore: @unchecked Sendable {
     }
 
     /// Drops photos not seen by the latest scan, so deletions on the SSD show up.
+    ///
+    /// Phase 3 Task 3.5: a virtual copy (`variant_of IS NOT NULL`) is never
+    /// independently discovered by a folder scan -- it shares its
+    /// original's `relative_path`, so nothing about scanning ever refreshes
+    /// its own `last_seen_at`. Excluded here unconditionally, or every
+    /// virtual copy would look "not seen since" the very next scan and be
+    /// deleted regardless of how recently it was created. A copy's
+    /// lifecycle is managed entirely by `createVirtualCopy`/
+    /// `deleteVirtualCopy` instead.
     public func removePhotos(inLibrary libraryID: LibraryID, notSeenSince cutoff: Date) throws {
         try withLock {
             try database.run(
-                "DELETE FROM photo WHERE library_id = ? AND last_seen_at < ?;",
+                "DELETE FROM photo WHERE library_id = ? AND last_seen_at < ? AND variant_of IS NULL;",
                 [.text(libraryID.description), .real(cutoff.timeIntervalSince1970)]
             )
         }
@@ -655,7 +687,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
             parameters.append(.integer(Int64(limit + 1)))
 
             let rows = try database.query(sql, parameters) { row -> (asset: PhotoAsset, filenameNormalized: String) in
-                (Self.photoAsset(from: row), row.string(20))
+                (Self.photoAsset(from: row), row.string(Int32(Self.photoColumnList.count)))
             }
 
             let hasMore = rows.count > limit
@@ -842,7 +874,9 @@ public final class PhotoIndexStore: @unchecked Sendable {
             failureReason: row.optionalString(16),
             lastSeenAt: row.date(18) ?? Date(),
             hasEdits: row.bool(17),
-            lastEditAt: row.date(19)
+            lastEditAt: row.date(19),
+            variantOf: row.optionalString(20).flatMap(PhotoID.init(uuidString:)),
+            variantName: row.optionalString(21)
         )
     }
 }

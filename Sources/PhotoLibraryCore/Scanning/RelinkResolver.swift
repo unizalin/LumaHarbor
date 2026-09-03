@@ -23,16 +23,26 @@ public enum RelinkResolver {
         fingerprint: FileFingerprint,
         against records: [PhotoRecord]
     ) -> RelinkDecision {
+        // Phase 3 Task 3.5: a virtual copy's own record deliberately shares
+        // its original's relativePath/fingerprint (same underlying RAW file,
+        // never duplicated on disk) -- a scanned file must always resolve
+        // identity against the *original*, never a copy that happens to sit
+        // at the same path/fingerprint. Virtual copies are never created,
+        // relinked or pruned by scanning at all; their lifecycle is managed
+        // entirely by `PhotoLibraryService.createVirtualCopy`/
+        // `deleteVirtualCopy` instead.
+        let originals = records.filter { $0.variantOf == nil }
+
         // Path is the strongest signal: a file at the path we last saw it is the
         // same photo even if the user re-exported it with different bytes.
-        if let atPath = records.first(where: { $0.relativePath == relativePath }) {
+        if let atPath = originals.first(where: { $0.relativePath == relativePath }) {
             return atPath.fingerprint == fingerprint
                 ? .unchanged(atPath.photoID)
                 : .contentChanged(atPath.photoID)
         }
 
         // No path match: the file is new here, moved, or a copy of something else.
-        let matches = records.filter { $0.fingerprint == fingerprint }
+        let matches = originals.filter { $0.fingerprint == fingerprint }
         switch matches.count {
         case 0:
             return .new

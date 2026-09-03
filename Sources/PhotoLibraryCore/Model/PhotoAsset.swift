@@ -32,6 +32,17 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
     /// Rebuildable projection of the sidecar's `modifiedAt`. `nil` when the
     /// photo has no edits or its adjustments are neutral.
     public var lastEditAt: Date?
+    /// Phase 3 Task 3.5: `nil` for an original photo. Set to the original's
+    /// own `id` for a "virtual copy" -- a distinct `PhotoID` (and therefore
+    /// its own independent sidecar/adjustments) sharing the *original's*
+    /// `relativePath`/`fingerprint`, so the same RAW file is never
+    /// duplicated on disk. Never mutated after creation.
+    public var variantOf: PhotoID?
+    /// A virtual copy's user-facing name (e.g. "B&W"), shown instead of the
+    /// shared filename so several copies of one RAW don't all look
+    /// identical in the grid. `nil` for an original photo, or an
+    /// unnamed copy.
+    public var variantName: String?
 
     public init(
         id: PhotoID,
@@ -43,7 +54,9 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         failureReason: String? = nil,
         lastSeenAt: Date = Date(),
         hasEdits: Bool = false,
-        lastEditAt: Date? = nil
+        lastEditAt: Date? = nil,
+        variantOf: PhotoID? = nil,
+        variantName: String? = nil
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -55,7 +68,13 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         self.lastSeenAt = lastSeenAt
         self.hasEdits = hasEdits
         self.lastEditAt = lastEditAt
+        self.variantOf = variantOf
+        self.variantName = variantName
     }
+
+    /// `true` for a virtual copy (`variantOf != nil`), `false` for an
+    /// original photo.
+    public var isVirtualCopy: Bool { variantOf != nil }
 
     public var filename: String {
         relativePath.split(separator: "/").last.map(String.init) ?? relativePath
