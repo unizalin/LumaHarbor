@@ -57,4 +57,46 @@ final class CoreImagePreviewRendererTests: XCTestCase {
         let image = PreviewImage(cgImage: cgImage, pixelSize: CGSize(width: 4, height: 4))
         XCTAssertNil(image.whiteBalanceBaseline)
     }
+
+    // MARK: - Geometry (Phase 2 Task 2: "crop preview integration")
+
+    /// The preview a user drags a crop handle against must reflect the crop
+    /// live, not just the final export -- this is the round's own "crop
+    /// preview integration" requirement. `PreviewImage.pixelSize` is
+    /// derived straight from the rendered `CGImage`'s own dimensions, so a
+    /// correct crop application shows up here with no separate size
+    /// bookkeeping to keep in sync.
+    func testPreviewReflectsACropsDimensions() async throws {
+        let renderer = CoreImagePreviewRenderer(decoder: BaselineReportingDecoder(pixelSize: CGSize(width: 32, height: 24)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.geometry.crop = NormalizedCropRect(x: 0, y: 0, width: 0.5, height: 0.5)
+        let request = PreviewRequest(
+            subject: PreviewSubject(UUID()),
+            url: URL(fileURLWithPath: "/tmp/lumaharbor-test.ARW"),
+            adjustments: adjustments,
+            targetPixelDimension: 256,
+            quality: .interactive
+        )
+
+        let image = try await renderer.render(request)
+
+        XCTAssertEqual(image.pixelSize, CGSize(width: 16, height: 12))
+        XCTAssertEqual(image.cgImage.width, 16)
+        XCTAssertEqual(image.cgImage.height, 12)
+    }
+
+    func testPreviewWithNeutralGeometryMatchesTheUncroppedDecodeSize() async throws {
+        let renderer = CoreImagePreviewRenderer(decoder: BaselineReportingDecoder(pixelSize: CGSize(width: 32, height: 24)))
+        let request = PreviewRequest(
+            subject: PreviewSubject(UUID()),
+            url: URL(fileURLWithPath: "/tmp/lumaharbor-test.ARW"),
+            adjustments: .neutral,
+            targetPixelDimension: 256,
+            quality: .interactive
+        )
+
+        let image = try await renderer.render(request)
+
+        XCTAssertEqual(image.pixelSize, CGSize(width: 32, height: 24))
+    }
 }

@@ -183,8 +183,12 @@ public actor PhotoExporter {
             let attributes = try? fileManager.attributesOfItem(atPath: temporaryURL.path)
             let byteCount = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
             let nativePixelSize = try await fullResolutionPixelSize(of: request.sourceURL)
+            let geometryAdjustedSize = GeometryRenderer.appliedPixelSize(
+                of: nativePixelSize,
+                geometry: request.adjustments.geometry
+            )
             let pixelSize = ExportResizing.fittedSize(
-                nativeSize: nativePixelSize,
+                nativeSize: geometryAdjustedSize,
                 maximumWidth: request.maximumWidth,
                 maximumHeight: request.maximumHeight
             )
@@ -236,12 +240,20 @@ public actor PhotoExporter {
 
             try Task.checkCancellation()
             let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
+            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
             let resizeTransform = ExportResizing.fittingTransform(
-                nativeSize: decoded.nativePixelSize,
+                // The *geometry-adjusted* extent, not `decoded.nativePixelSize`:
+                // a crop/rotate changes what "native size" means for the
+                // max-width/max-height fit, and this is the real rendered
+                // extent, not a prediction (`GeometryRenderer
+                // .appliedPixelSize(of:geometry:)` is only for the
+                // metadata-only size report below, which has no decoded
+                // image to read an extent from).
+                nativeSize: withGeometry.extent.size,
                 maximumWidth: maximumWidth,
                 maximumHeight: maximumHeight
             )
-            let resized = resizeTransform == .identity ? adjusted : adjusted.transformed(by: resizeTransform)
+            let resized = resizeTransform == .identity ? withGeometry : withGeometry.transformed(by: resizeTransform)
 
             try Task.checkCancellation()
             let exifProperties = ExportMetadataBuilder.imageProperties(from: exifPolicy.apply(to: decoded.metadata))
