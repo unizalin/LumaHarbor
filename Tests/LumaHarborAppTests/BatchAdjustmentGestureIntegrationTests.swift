@@ -156,4 +156,82 @@ final class BatchAdjustmentGestureIntegrationTests: AppViewModelTestCase {
         XCTAssertEqual(savedForA.exposure, 0, "the reset must sync to target A, the same as a drag back to 0 would")
         XCTAssertEqual(savedForB.exposure, 0, "the reset must sync to target B, the same as a drag back to 0 would")
     }
+
+    // MARK: - Task 3.4: compound batch undo
+
+    /// End to end, through `LibraryViewModel`, not by calling
+    /// `BatchAdjustmentSyncService.undo(_:)` directly (already exhaustively
+    /// covered by `BatchAdjustmentSyncServiceTests`'s full-success/
+    /// partial-failure/revert-write-failure cases) -- this proves the
+    /// wiring: `lastBatchTransaction` is captured after a real sync,
+    /// `undoLastBatchTransaction()` reverts every target's own sidecar, and
+    /// the transaction is consumed so a second undo has nothing left to do.
+    func testUndoLastBatchTransactionRevertsEveryTargetAndClearsTheTransaction() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW", "DSC0003.ARW"])
+        let log = ServiceCallLog()
+        let store = AdjustmentStore()
+        let services = try makeServices(
+            loadAdjustments: { photo in await store.get(photo.id) },
+            saveAdjustments: { adjustments, photo in
+                await store.set(photo.id, adjustments)
+                await log.recordSave(photo.id, adjustments)
+            }
+        )
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let source = model.photos[0]
+        let targetA = model.photos[1]
+        let targetB = model.photos[2]
+
+        // targetA already has its own unrelated edit -- the undo must not
+        // clobber it, same as the original sync doesn't.
+        var targetAOwn = PhotoAdjustments.neutral
+        targetAOwn.contrast = 20
+        await store.set(targetA.id, targetAOwn)
+
+        model.requestSelectPhoto(source.id)
+        await waitUntilAppCondition("the source photo to open") {
+            await MainActor.run { model.editor.photo?.id == source.id }
+        }
+        model.toggleMultiSelect(targetA.id)
+        model.toggleMultiSelect(targetB.id)
+
+        model.editor.beginAdjustmentGesture()
+        model.editor.setAdjustment(.exposure, to: 1.5)
+        model.editor.endAdjustmentGesture()
+        await waitUntilAppCondition("both targets to receive the synced save") {
+            await log.saveCount >= 2
+        }
+        XCTAssertNotNil(model.lastBatchTransaction, "a sync that actually changed something must be undoable")
+
+        let summary = await model.undoLastBatchTransaction()
+
+        XCTAssertEqual(summary?.affected, 2)
+        XCTAssertEqual(summary?.failed, 0)
+        XCTAssertEqual(summary?.skipped, 0)
+        let revertedA = await store.get(targetA.id)
+        let revertedB = await store.get(targetB.id)
+        XCTAssertEqual(revertedA.exposure, 0, "target A's exposure must come back to what it was before the sync")
+        XCTAssertEqual(revertedA.contrast, 20, "target A's own unrelated edit must survive the undo")
+        XCTAssertEqual(revertedB.exposure, 0)
+        XCTAssertNil(model.lastBatchTransaction, "a compound batch undo is one-shot -- it must consume the transaction")
+
+        // A second undo has nothing left to revert.
+        let secondSummary = await model.undoLastBatchTransaction()
+        XCTAssertNil(secondSummary)
+    }
+
+    func testUndoLastBatchTransactionWithNothingToUndoReturnsNil() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+
+        let summary = await model.undoLastBatchTransaction()
+
+        XCTAssertNil(summary)
+    }
 }

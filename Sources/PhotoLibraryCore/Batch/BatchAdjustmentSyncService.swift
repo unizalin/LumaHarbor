@@ -170,6 +170,55 @@ public actor BatchAdjustmentSyncService {
         )
     }
 
+    /// The outcome of undoing one `BatchAdjustmentTransaction` (Phase 3 Task
+    /// 3.4) -- tallied rather than surfaced per target, the same reason
+    /// `PresetRestoreSummary` tallies a multi-document restore instead of
+    /// throwing at the first problem.
+    public struct BatchUndoSummary: Sendable, Equatable {
+        /// A target successfully reverted to its own pre-sync values.
+        public var affected = 0
+        /// A target the original sync had already written to, but whose
+        /// revert write (load or save) itself failed -- left exactly as the
+        /// original sync left it, never half-written, and distinct from
+        /// `skipped` because there *is* something on disk to fix here.
+        public var failed = 0
+        /// A target the original sync never actually wrote to (it failed
+        /// back then) -- nothing to revert, so undo leaves it untouched.
+        public var skipped = 0
+
+        public init() {}
+    }
+
+    /// Reverts `transaction`: every target it actually wrote to
+    /// (`results[target] == .success`) gets `before[target]` merged back
+    /// onto its *current* adjustments -- not a blind overwrite, so any edit
+    /// a target received after the original sync (to a field the sync never
+    /// touched) survives the undo exactly as it survived the sync itself. A
+    /// target the original sync never wrote to is `skipped`, never touched.
+    /// One target's revert failing doesn't stop the rest, mirroring
+    /// `commitGesture`'s own per-target fault tolerance.
+    public func undo(_ transaction: BatchAdjustmentTransaction) async -> BatchUndoSummary {
+        var summary = BatchUndoSummary()
+        guard !transaction.modifiedFieldIDs.isEmpty else { return summary }
+
+        for targetID in transaction.targetPhotoIDs {
+            guard transaction.results[targetID] == .success, let priorPatch = transaction.before[targetID] else {
+                summary.skipped += 1
+                continue
+            }
+            do {
+                let current = try await loadAdjustments(targetID)
+                let reverted = applicator.apply(priorPatch, to: current, mode: .merge, context: .none).adjustments
+                try await saveAdjustments(reverted, targetID)
+                summary.affected += 1
+            } catch {
+                summary.failed += 1
+            }
+        }
+
+        return summary
+    }
+
     private static func safeDescription(for error: Error) -> String {
         if let presetError = error as? PresetError, let description = presetError.errorDescription {
             return description

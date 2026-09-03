@@ -80,6 +80,11 @@ public final class LibraryViewModel: ObservableObject {
     /// without changing which photo is actually open in the editor;
     /// `toggleMultiSelect(_:)` is the only mutator.
     @Published private(set) var selectedPhotoIDs: Set<PhotoID> = []
+    /// Phase 3 Task 3.4: the most recent batch sync that actually changed
+    /// something, kept around for exactly one "Undo Batch Sync" -- `nil`
+    /// whenever there's nothing to undo (no batch sync has happened yet, a
+    /// gesture's diff was empty, or the last one was already undone).
+    @Published private(set) var lastBatchTransaction: BatchAdjustmentTransaction?
     @Published private(set) var scanProgress: ScanProgress?
     @Published private(set) var exportState: ExportState?
     @Published private(set) var startupFailure: String?
@@ -255,9 +260,44 @@ public final class LibraryViewModel: ObservableObject {
     /// "has edits" badge for every target that was actually written.
     private func endBatchGesture(after: PhotoAdjustments) async {
         guard let transaction = await batchSyncService.commitGesture(sourceAfter: after) else { return }
+        guard !transaction.modifiedFieldIDs.isEmpty else { return }
+        lastBatchTransaction = transaction
         for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
             updateEditBadge(photoID: targetID, hasEdits: true)
         }
+    }
+
+    /// Phase 3 Task 3.4: reverts `lastBatchTransaction` (`before[id]` merged
+    /// back onto each target's *current* adjustments -- not a blind
+    /// overwrite, so anything a target picked up since the sync survives),
+    /// then refreshes the grid's edit badge for every target the original
+    /// sync actually wrote to, from the ground truth left on disk rather
+    /// than assuming the revert made it neutral. Consumes the transaction
+    /// either way -- a compound batch undo is one-shot, not its own stack.
+    @discardableResult
+    func undoLastBatchTransaction() async -> BatchAdjustmentSyncService.BatchUndoSummary? {
+        guard let transaction = lastBatchTransaction else { return nil }
+        lastBatchTransaction = nil
+        let summary = await batchSyncService.undo(transaction)
+        for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
+            guard let (services, asset) = batchSyncTarget(for: targetID) else { continue }
+            if let reverted = try? await services.loadAdjustments(asset) {
+                updateEditBadge(photoID: targetID, hasEdits: !reverted.isNeutral)
+            }
+        }
+        return summary
+    }
+
+    /// Phase 3 Task 3.4: "affected N, failed M, skipped K" report copy,
+    /// following the same additive-parts convention (skip a count that's
+    /// zero, join the rest with ", ") `PresetBrowserView.restoreSummaryMessage`
+    /// already established for `PresetRestoreSummary`.
+    nonisolated static func batchUndoSummaryMessage(_ summary: BatchAdjustmentSyncService.BatchUndoSummary) -> String {
+        var parts: [String] = []
+        if summary.affected > 0 { parts.append("\(summary.affected) \(L10n.t("reverted"))") }
+        if summary.failed > 0 { parts.append("\(summary.failed) \(L10n.t("failed"))") }
+        if summary.skipped > 0 { parts.append("\(summary.skipped) \(L10n.t("skipped"))") }
+        return parts.isEmpty ? L10n.t("Nothing to undo.") : parts.joined(separator: ", ")
     }
 
     /// For `List(selection:)` and anything else that needs a two-way binding.

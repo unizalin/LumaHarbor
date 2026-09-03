@@ -65,6 +65,22 @@ struct LumaHarborCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model.editor.photo == nil || !model.editor.hasEdits)
 
+            // Phase 3 Task 3.4: compound batch undo -- reverts the most
+            // recent batch sync (a drag or reset on the ten basic sliders
+            // that landed on at least one other selected photo) as one
+            // step, distinct from the per-photo Undo above, which only ever
+            // touches the currently-open photo's own history.
+            Button(L10n.t("Undo Batch Sync")) {
+                Task {
+                    guard let summary = await model.undoLastBatchTransaction() else { return }
+                    model.alert = UserAlert(
+                        title: L10n.t("Batch Sync Undone"),
+                        message: LibraryViewModel.batchUndoSummaryMessage(summary)
+                    )
+                }
+            }
+            .disabled(model.lastBatchTransaction == nil)
+
             Divider()
 
             Button(L10n.t("Rescan Folder")) { model.startScan() }

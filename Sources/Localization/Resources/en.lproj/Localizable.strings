@@ -68,6 +68,7 @@
 "Backup or restore presets" = "Backup or restore presets";
 "Backup Presets" = "Backup Presets";
 "Backup This Library's Presets…" = "Backup This Library's Presets…";
+"Batch Sync Undone" = "Batch Sync Undone";
 "Blacks" = "Blacks";
 "Blue" = "Blue";
 "Built-In" = "Built-In";
@@ -235,6 +236,7 @@
 "No photos match this search" = "No photos match this search";
 "No presets yet" = "No presets yet";
 "Nothing to restore." = "Nothing to restore.";
+"Nothing to undo." = "Nothing to undo.";
 "No RAW files found in this folder" = "No RAW files found in this folder";
 "No sources yet" = "No sources yet";
 "No supported RAW files found" = "No supported RAW files found";
@@ -299,6 +301,7 @@
 "Restore complete" = "Restore complete";
 "Restore Presets" = "Restore Presets";
 "Restore Presets…" = "Restore Presets…";
+"reverted" = "reverted";
 "Refreshing the library index without changing your RAW files." = "Refreshing the library index without changing your RAW files.";
 "Rescan Folder" = "Rescan Folder";
 "Rescan" = "Rescan";
@@ -411,6 +414,7 @@
 "Try re-copying this file from the memory card." = "Try re-copying this file from the memory card.";
 "Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo." = "Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo.";
 "Undo" = "Undo";
+"Undo Batch Sync" = "Undo Batch Sync";
 "Unknown" = "Unknown";
 "Unlock the drive or copy the library somewhere writable, then retry." = "Unlock the drive or copy the library somewhere writable, then retry.";
 "Unlock the drive to save changes back to it." = "Unlock the drive to save changes back to it.";

@@ -217,4 +217,106 @@ final class BatchAdjustmentSyncServiceTests: XCTestCase {
         let updatedGood = await store.current(goodTarget)
         XCTAssertEqual(updatedGood.exposure, 1, "a failure on one target must not stop the others from syncing")
     }
+
+    // MARK: - Task 3.4: compound batch undo (revert = write `before[id]` back)
+
+    func testUndoRevertsEveryTargetToItsOwnPriorValueOnFullSuccess() async throws {
+        let source = PhotoID()
+        let targetA = PhotoID()
+        let targetB = PhotoID()
+        var targetAOwn = PhotoAdjustments.neutral
+        targetAOwn.exposure = -0.5
+        targetAOwn.contrast = 20 // unrelated field, must survive the undo too
+        let store = Store([targetA: targetAOwn, targetB: .neutral])
+        let service = makeService(store)
+
+        let baseline = PhotoAdjustments.neutral
+        var after = baseline
+        after.exposure = 1.5
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [targetA, targetB], sourceBaseline: baseline)
+        let committed = await service.commitGesture(sourceAfter: after)
+        let transaction = try XCTUnwrap(committed)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 2)
+        XCTAssertEqual(summary.failed, 0)
+        XCTAssertEqual(summary.skipped, 0)
+        let revertedA = await store.current(targetA)
+        XCTAssertEqual(revertedA.exposure, -0.5, "target A's own prior exposure must come back")
+        XCTAssertEqual(revertedA.contrast, 20, "an unrelated field must survive the undo, same as it survived the original sync")
+        let revertedB = await store.current(targetB)
+        XCTAssertEqual(revertedB.exposure, 0)
+    }
+
+    /// Partial failure: a target the original sync never actually wrote to
+    /// (its own load/save was already broken) has nothing to revert --
+    /// undo must not touch it, and must not count it as a failure of its
+    /// own.
+    func testUndoSkipsTargetsThatFailedTheOriginalSync() async throws {
+        let source = PhotoID()
+        let goodTarget = PhotoID()
+        let badTarget = PhotoID()
+        let store = Store([goodTarget: .neutral, badTarget: .neutral])
+        await store.markFailing(badTarget)
+        let service = makeService(store)
+
+        let baseline = PhotoAdjustments.neutral
+        var after = baseline
+        after.exposure = 1
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [goodTarget, badTarget], sourceBaseline: baseline)
+        let committed = await service.commitGesture(sourceAfter: after)
+        let transaction = try XCTUnwrap(committed)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 1, "only the target the original sync actually wrote to needs reverting")
+        XCTAssertEqual(summary.skipped, 1, "a target the original sync never touched must not be touched by undo either")
+        XCTAssertEqual(summary.failed, 0)
+    }
+
+    /// Undo after partial failure, the other direction: the revert write
+    /// itself can fail (e.g. the target became unwritable in between) --
+    /// tallied distinctly from `skipped`, and the target's sidecar must be
+    /// left exactly as the original sync left it, never half-written.
+    func testUndoTalliesFailedWhenTheTargetBecomesUnwritableBeforeTheRevertRuns() async throws {
+        let source = PhotoID()
+        let target = PhotoID()
+        let store = Store([target: .neutral])
+        let service = makeService(store)
+
+        let baseline = PhotoAdjustments.neutral
+        var after = baseline
+        after.exposure = 1
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: baseline)
+        let committed = await service.commitGesture(sourceAfter: after)
+        let transaction = try XCTUnwrap(committed)
+        await store.markFailing(target)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 0)
+        XCTAssertEqual(summary.failed, 1)
+        let unchanged = await store.current(target)
+        XCTAssertEqual(unchanged.exposure, 1, "a failed undo write must leave the target exactly as the original sync left it")
+    }
+
+    func testUndoOfATransactionWithNoModifiedFieldsIsANoOp() async throws {
+        let source = PhotoID()
+        let target = PhotoID()
+        let service = makeService(Store([target: .neutral]))
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: .neutral)
+        let committed = await service.commitGesture(sourceAfter: .neutral) // no actual change
+        let transaction = try XCTUnwrap(committed)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 0)
+        XCTAssertEqual(summary.failed, 0)
+        XCTAssertEqual(summary.skipped, 0)
+    }
 }

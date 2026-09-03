@@ -157,4 +157,15 @@ final class LocalizationSmokeTest: XCTestCase {
         let value = bundle.localizedString(forKey: "Included in the current batch selection", value: nil, table: "Localizable")
         XCTAssertNotEqual(value, "Included in the current batch selection", "has no Traditional Chinese translation")
     }
+
+    /// Phase 3 Task 3.4: every new user-facing string "Undo Batch Sync" and
+    /// its report copy introduce.
+    func testEveryBatchUndoStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = ["Undo Batch Sync", "Batch Sync Undone", "reverted", "Nothing to undo."]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }

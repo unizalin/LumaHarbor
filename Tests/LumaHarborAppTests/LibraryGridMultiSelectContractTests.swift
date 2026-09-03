@@ -41,4 +41,15 @@ final class LibraryGridMultiSelectContractTests: XCTestCase {
         let cellSource = try Self.loadSource("Sources/LumaHarborApp/Views/ThumbnailView.swift")
         XCTAssertTrue(cellSource.contains("isBatchSelected"), "the cell must accept a batch-selection flag distinct from isSelected")
     }
+
+    /// Phase 3 Task 3.4: "Undo Batch Sync" must be wired to the compound
+    /// undo, disabled whenever there is nothing to undo, and must surface
+    /// the "affected N, failed M, skipped K" report copy rather than
+    /// silently discarding it.
+    func testUndoBatchSyncMenuItemIsWiredToTheCompoundUndoAndDisabledWithNothingToUndo() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/LumaHarborCommands.swift")
+        XCTAssertTrue(source.contains("model.undoLastBatchTransaction()"), "must call the compound batch undo, not the per-photo Undo")
+        XCTAssertTrue(source.contains(".disabled(model.lastBatchTransaction == nil)"), "must be disabled whenever there is no batch transaction to undo")
+        XCTAssertTrue(source.contains("LibraryViewModel.batchUndoSummaryMessage(summary)"), "must surface the affected/failed/skipped report copy to the user")
+    }
 }
