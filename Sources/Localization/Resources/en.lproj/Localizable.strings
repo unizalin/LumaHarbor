@@ -133,7 +133,9 @@
 "Decoding RAW…" = "Decoding RAW…";
 "Delete the local index and rescan your folders to rebuild it." = "Delete the local index and rescan your folders to rebuild it.";
 "Delete" = "Delete";
+"Delete Virtual Copy" = "Delete Virtual Copy";
 "Dimensions" = "Dimensions";
+"Duplicate as Virtual Copy" = "Duplicate as Virtual Copy";
 "Double-click the row to reset" = "Double-click the row to reset";
 "Drag to move this panel." = "Drag to move this panel.";
 "Edit in Place" = "Edit in Place";
@@ -428,6 +430,7 @@
 "Update LumaHarbor, or edit this photo on the device that wrote it." = "Update LumaHarbor, or edit this photo on the device that wrote it.";
 "Vibrance" = "Vibrance";
 "Vignette" = "Vignette";
+"Virtual copy" = "Virtual copy";
 "Wait a moment, then try again." = "Wait a moment, then try again.";
 "Wait for the current scan to finish, then try again." = "Wait for the current scan to finish, then try again.";
 "White Balance" = "White Balance";

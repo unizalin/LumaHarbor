@@ -168,4 +168,19 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// Phase 3 Task 3.5: every new user-facing string virtual copies
+    /// introduce (badge, context menu actions, error alerts).
+    func testEveryVirtualCopyStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Virtual copy", "Duplicate as Virtual Copy", "Delete Virtual Copy",
+            "Couldn't create a virtual copy", "Couldn't delete this virtual copy",
+            "This photo isn't a virtual copy."
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }
