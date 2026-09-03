@@ -546,6 +546,48 @@ public final class LibraryViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Virtual copies
+
+    /// Phase 3 Task 3.5: creates an independently-editable "virtual copy" of
+    /// `photo`, sharing its own RAW file on disk (never duplicated) but
+    /// starting its own independent adjustments (an exact duplicate of
+    /// `photo`'s own current edit, from this moment on). Reloads the grid
+    /// so the new copy appears immediately, grouped next to its original.
+    func duplicateAsVirtualCopy(_ photo: PhotoAsset, named name: String? = nil) async {
+        guard let services else { return }
+        do {
+            try await services.libraryService.createVirtualCopy(of: photo, named: name)
+        } catch {
+            alert = UserAlert(title: L10n.t("Couldn't create a virtual copy"), error: error)
+            return
+        }
+        await reloadPhotos()
+    }
+
+    /// Deletes `copy` -- its own sidecar and index row only, never the
+    /// shared RAW file or any other photo (Phase 3 Task 3.5). The delete
+    /// itself is attempted before touching any editor/selection state, so a
+    /// failure (e.g. the drive went offline) never tears down an
+    /// in-progress edit for nothing. If `copy` was the photo open in the
+    /// editor, closes it once the delete has actually succeeded -- there's
+    /// nothing left to flush once its sidecar is gone.
+    func deleteVirtualCopy(_ copy: PhotoAsset) async {
+        guard let services else { return }
+        do {
+            try await services.libraryService.deleteVirtualCopy(copy)
+        } catch {
+            alert = UserAlert(title: L10n.t("Couldn't delete this virtual copy"), error: error)
+            return
+        }
+        selectedPhotoIDs.remove(copy.id)
+        if selectedPhotoID == copy.id {
+            invalidateOpenTask()
+            editor.close()
+            selectedPhotoID = nil
+        }
+        await reloadPhotos()
+    }
+
     /// Re-checks whether the drive is still mounted. Called on window focus and
     /// after a failed operation, which is how "SSD unplugged" surfaces.
     func refreshAvailability() async {
@@ -652,7 +694,7 @@ public final class LibraryViewModel: ObservableObject {
         for photo in batch {
             byID[photo.id] = photo
         }
-        photos = byID.values.sorted(by: Self.displayOrder)
+        photos = Self.orderedForDisplay(Array(byID.values))
     }
 
     private func reloadPhotos() async {
@@ -661,9 +703,9 @@ public final class LibraryViewModel: ObservableObject {
             return
         }
         do {
-            photos = try await services.libraryService
-                .photos(inLibrary: selectedLibraryID)
-                .sorted(by: Self.displayOrder)
+            photos = Self.orderedForDisplay(
+                try await services.libraryService.photos(inLibrary: selectedLibraryID)
+            )
         } catch {
             photos = []
             alert = UserAlert(title: L10n.t("Couldn't read the local index"), error: error)
@@ -679,6 +721,52 @@ public final class LibraryViewModel: ObservableObject {
         default:
             return lhs.relativePath.localizedStandardCompare(rhs.relativePath) == .orderedAscending
         }
+    }
+
+    /// Phase 3 Task 3.5: every virtual copy is pulled out of its own natural
+    /// `displayOrder` position and reinserted immediately after its
+    /// original, in whichever relative order `displayOrder`'s own stable
+    /// sort already gave same-original copies.
+    ///
+    /// A copy shares its original's `relativePath`/`captureDate` at the
+    /// moment it's created, so in the common case `displayOrder` alone
+    /// already ties them together and this function changes nothing
+    /// visible. It stops being a no-op the moment the *original* is later
+    /// relinked to a new path (the user renamed or moved the file) --
+    /// `RelinkResolver` never touches a virtual copy's own record (it's
+    /// invisible to scanning entirely, see that type's own doc comment), so
+    /// the copy's `relativePath` stays frozen at whatever it was when
+    /// duplicated. Without this grouping pass, that drift would silently
+    /// separate a copy from an original that has since moved; grouping by
+    /// `variantOf`'s `PhotoID` instead of by relativePath keeps them
+    /// together regardless. A copy whose original isn't present in this
+    /// same list (shouldn't happen in practice -- originals are never
+    /// deleted through this app -- but never silently dropped if it does)
+    /// falls back to its own natural sort position among the originals
+    /// instead of vanishing.
+    private static func orderedForDisplay(_ photos: [PhotoAsset]) -> [PhotoAsset] {
+        let sorted = photos.sorted(by: displayOrder)
+        var copiesByOriginal: [PhotoID: [PhotoAsset]] = [:]
+        var originalsAndOrphanedCopies: [PhotoAsset] = []
+        originalsAndOrphanedCopies.reserveCapacity(sorted.count)
+        let knownIDs = Set(sorted.map(\.id))
+        for photo in sorted {
+            if let originalID = photo.variantOf, knownIDs.contains(originalID) {
+                copiesByOriginal[originalID, default: []].append(photo)
+            } else {
+                originalsAndOrphanedCopies.append(photo)
+            }
+        }
+
+        var result: [PhotoAsset] = []
+        result.reserveCapacity(sorted.count)
+        for photo in originalsAndOrphanedCopies {
+            result.append(photo)
+            if let copies = copiesByOriginal.removeValue(forKey: photo.id) {
+                result.append(contentsOf: copies)
+            }
+        }
+        return result
     }
 
     // MARK: - Photo selection
