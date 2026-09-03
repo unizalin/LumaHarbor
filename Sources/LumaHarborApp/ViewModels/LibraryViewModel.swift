@@ -295,7 +295,12 @@ public final class LibraryViewModel: ObservableObject {
     nonisolated static func batchUndoSummaryMessage(_ summary: BatchAdjustmentSyncService.BatchUndoSummary) -> String {
         var parts: [String] = []
         if summary.affected > 0 { parts.append("\(summary.affected) \(L10n.t("reverted"))") }
-        if summary.failed > 0 { parts.append("\(summary.failed) \(L10n.t("failed"))") }
+        // A dedicated key, not the "failed" `PresetRestoreSummary` reuses --
+        // that one reads fine on its own ("3 failed") but its zh-Hant
+        // translation ("失敗") has no measure word, inconsistent with
+        // "reverted"/"skipped" here (both "張…") once joined into one
+        // photo-counting sentence.
+        if summary.failed > 0 { parts.append("\(summary.failed) \(L10n.t("failed to revert"))") }
         if summary.skipped > 0 { parts.append("\(summary.skipped) \(L10n.t("skipped"))") }
         return parts.isEmpty ? L10n.t("Nothing to undo.") : parts.joined(separator: ", ")
     }
