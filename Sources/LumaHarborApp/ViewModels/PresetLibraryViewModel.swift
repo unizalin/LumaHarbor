@@ -12,11 +12,16 @@ import RawProcessingCore
 enum PresetScopeKind: Hashable, CaseIterable {
     case mine
     case library
+    /// Shipped with the app, read-only (Phase 3 Task 3.1). Never a valid
+    /// `save`/`delete` destination -- `BuiltInPresetRepository` always
+    /// throws `PresetError.builtInPresetIsReadOnly` for both.
+    case builtIn
 
     var title: String {
         switch self {
         case .mine: return L10n.t("My Presets")
         case .library: return L10n.t("This Library")
+        case .builtIn: return L10n.t("Built-In")
         }
     }
 }
@@ -50,7 +55,7 @@ final class PresetLibraryViewModel: ObservableObject {
         case scope(PresetScopeKind)
         case favorites
 
-        static var allCases: [ScopeFilter] { [.all, .scope(.mine), .scope(.library), .favorites] }
+        static var allCases: [ScopeFilter] { [.all, .scope(.mine), .scope(.library), .scope(.builtIn), .favorites] }
 
         var title: String {
             switch self {
@@ -97,6 +102,10 @@ final class PresetLibraryViewModel: ObservableObject {
     /// library's own `.lumaharbor/presets/`, so switching libraries switches
     /// which "this library" scope means (spec §8.1).
     private var libraryRepository: (any PresetRepository)?
+    /// Never optional, unlike the two above: built-in presets don't depend
+    /// on Application Support or a library being available, so there is
+    /// nothing to `attach()` later (Phase 3 Task 3.1).
+    private let builtInRepository: any PresetRepository
     private let importer: XMPImporter
     private let exporter: XMPExporter
     private var operationID = 0
@@ -104,11 +113,13 @@ final class PresetLibraryViewModel: ObservableObject {
     init(
         myRepository: (any PresetRepository)? = nil,
         libraryRepository: (any PresetRepository)? = nil,
+        builtInRepository: any PresetRepository = BuiltInPresetRepository(),
         importer: XMPImporter = XMPImporter(),
         exporter: XMPExporter = XMPExporter()
     ) {
         self.myRepository = myRepository
         self.libraryRepository = libraryRepository
+        self.builtInRepository = builtInRepository
         self.importer = importer
         self.exporter = exporter
     }
@@ -153,6 +164,9 @@ final class PresetLibraryViewModel: ObservableObject {
         operationID += 1
         let current = operationID
         var loaded: [PresetListItem] = []
+        if let builtIn = try? await builtInRepository.list() {
+            loaded += builtIn.map { PresetListItem(document: $0, scope: .builtIn) }
+        }
         if let myRepository, let mine = try? await myRepository.list() {
             loaded += mine.map { PresetListItem(document: $0, scope: .mine) }
         }
@@ -167,6 +181,7 @@ final class PresetLibraryViewModel: ObservableObject {
         switch kind {
         case .mine: return myRepository
         case .library: return libraryRepository
+        case .builtIn: return builtInRepository
         }
     }
 
@@ -215,6 +230,51 @@ final class PresetLibraryViewModel: ObservableObject {
             return true
         } catch {
             alert = UserAlert(title: L10n.t("Couldn't create this preset"), error: error)
+            return false
+        }
+    }
+
+    /// Edits an already-saved preset in place: same identity, same scope,
+    /// same `createdAt` (spec-consistent with `rename`'s own "檔名不是身份"
+    /// rule, extended to the whole document). `keptFields` is a subset of
+    /// whatever fields the preset's own patch already has -- unlike
+    /// `createPreset`, this never *adds* a field that wasn't already
+    /// present, since there's no photo open to source a new field's value
+    /// from. Any currently-present field left out of `keptFields` is
+    /// dropped via `AdjustmentPatch.excluding(_:)`, the same sparse-removal
+    /// primitive the XMP import flow already uses for deselected
+    /// approximate fields (Phase 3 Task 3.1: "sparse patch edit/removal
+    /// when value returns to inherited/default" -- a field absent from the
+    /// patch is exactly that "returns to inherited/default" state).
+    @discardableResult
+    func updatePreset(
+        _ item: PresetListItem,
+        name: String,
+        groupPath: [String],
+        isFavorite: Bool,
+        keptFields: Set<AdjustmentFieldID>
+    ) async -> Bool {
+        guard let repository = repository(for: item.scope) else {
+            alert = UserAlert(
+                title: L10n.t("Couldn't update this preset"),
+                message: L10n.t("That destination isn't available right now.")
+            )
+            return false
+        }
+        var updated = item.document
+        updated.name = name
+        updated.groupPath = groupPath
+        updated.isFavorite = isFavorite
+        let presentFields = Set(AdjustmentFieldID.allCases.filter { item.document.patch.contains($0) })
+        updated.patch = updated.patch.excluding(presentFields.subtracting(keptFields))
+        updated.modifiedAt = Date()
+        do {
+            let validated = try updated.validated()
+            _ = try await repository.save(validated, conflict: .replace)
+            await load()
+            return true
+        } catch {
+            alert = UserAlert(title: L10n.t("Couldn't update this preset"), error: error)
             return false
         }
     }

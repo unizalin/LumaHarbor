@@ -109,4 +109,26 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// Phase 3 Task 3.1: every new user-facing string built-in presets and
+    /// editing an existing preset introduce must have landed in both
+    /// `.lproj` directories. Does NOT include `PresetError.builtInPresetIsReadOnly`'s
+    /// own `errorDescription`/`recoverySuggestion`, or the ad-hoc "That
+    /// destination isn't available right now." alert body -- those sit in a
+    /// pre-existing, systemic gap (the whole `PresetError` family, and some
+    /// `UserAlert` bodies distinct from their titles, have never had
+    /// `.strings` entries at all) that predates this task and is out of its
+    /// scope; see `docs/coordination/CURRENT.md`.
+    func testEveryPresetEditAndBuiltInStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Built-In", "Imported", "Edit…", "Edit Preset", "Fields in this preset",
+            "Uncheck a field to remove it from this preset. New fields can only be added by creating a preset from an open photo.",
+            "Couldn't update this preset"
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }

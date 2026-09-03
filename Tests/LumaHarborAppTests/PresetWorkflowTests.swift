@@ -409,7 +409,12 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
     func testLoadMergesMineAndLibraryScopes() async throws {
         let mine = RecordingPresetRepository(seed: [makeDocument(name: "Mine")])
         let library = RecordingPresetRepository(seed: [makeDocument(name: "Library")])
-        let sut = PresetLibraryViewModel(myRepository: mine, libraryRepository: library)
+        // Empty built-in scope: this test is specifically about mine/library
+        // merging, not the (unrelated) real built-in preset content.
+        let sut = PresetLibraryViewModel(
+            myRepository: mine, libraryRepository: library,
+            builtInRepository: BuiltInPresetRepository(documents: [])
+        )
 
         await sut.load()
 
@@ -436,7 +441,12 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
     func testScopeFilterNarrowsToOneScopeOrFavorites() async throws {
         let mine = RecordingPresetRepository(seed: [makeDocument(name: "Mine", isFavorite: true)])
         let library = RecordingPresetRepository(seed: [makeDocument(name: "Library")])
-        let sut = PresetLibraryViewModel(myRepository: mine, libraryRepository: library)
+        // Empty built-in scope: this test is specifically about mine/
+        // library/favorites filtering, not the real built-in preset content.
+        let sut = PresetLibraryViewModel(
+            myRepository: mine, libraryRepository: library,
+            builtInRepository: BuiltInPresetRepository(documents: [])
+        )
         await sut.load()
 
         sut.scopeFilter = .scope(.mine)
@@ -687,5 +697,165 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         guard case .failed = sut.importState else {
             return XCTFail("Expected .failed, got \(sut.importState) -- choosing an unavailable scope must not silently do nothing")
         }
+    }
+
+    // MARK: - Built-in scope (Phase 3 Task 3.1: built-in vs user precedence)
+
+    func testLoadIncludesBuiltInPresetsAlongsideMineAndLibrary() async throws {
+        let builtIn = BuiltInPresetRepository(documents: [makeDocument(name: "Built-In One")])
+        let mine = RecordingPresetRepository(seed: [makeDocument(name: "Mine")])
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: builtIn)
+
+        await sut.load()
+
+        XCTAssertEqual(Set(sut.items.map(\.document.name)), ["Built-In One", "Mine"])
+        XCTAssertEqual(sut.items.first { $0.document.name == "Built-In One" }?.scope, .builtIn)
+    }
+
+    /// "Precedence" here means *coexistence*: a name collision across scopes
+    /// must not merge, shadow, or drop either preset -- they're distinguished
+    /// by scope, not by name uniqueness.
+    func testBuiltInAndAUserPresetCanShareTheSameNameWithoutConflict() async throws {
+        let sharedName = "Same Name"
+        let builtIn = BuiltInPresetRepository(documents: [
+            PresetDocument(name: sharedName, patch: AdjustmentPatch(basic: BasicAdjustmentPatch(exposure: 1)))
+        ])
+        let mine = RecordingPresetRepository(seed: [makeDocument(name: sharedName)])
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: builtIn)
+
+        await sut.load()
+
+        XCTAssertEqual(
+            sut.items.filter { $0.document.name == sharedName }.count, 2,
+            "a name collision across scopes must not merge or drop either preset"
+        )
+    }
+
+    func testScopeFilterCanIsolateBuiltInPresets() async throws {
+        let builtIn = BuiltInPresetRepository(documents: [makeDocument(name: "Built-In")])
+        let mine = RecordingPresetRepository(seed: [makeDocument(name: "Mine")])
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: builtIn)
+        await sut.load()
+
+        sut.scopeFilter = .scope(.builtIn)
+
+        XCTAssertEqual(sut.filteredItems.map(\.document.name), ["Built-In"])
+    }
+
+    func testTogglingFavoriteOnABuiltInPresetFailsWithoutCorruptingWhatsDisplayed() async throws {
+        let builtIn = BuiltInPresetRepository()
+        let sut = PresetLibraryViewModel(builtInRepository: builtIn)
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first)
+
+        await sut.toggleFavorite(item)
+
+        XCTAssertNotNil(sut.alert)
+        let reloaded = try XCTUnwrap(sut.items.first { $0.id == item.id })
+        XCTAssertEqual(
+            reloaded.document.isFavorite, item.document.isFavorite,
+            "a rejected write must not silently mutate what's displayed"
+        )
+    }
+
+    func testDeletingABuiltInPresetFailsAndLeavesItInTheList() async throws {
+        let builtIn = BuiltInPresetRepository()
+        let sut = PresetLibraryViewModel(builtInRepository: builtIn)
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first)
+        let countBefore = sut.items.count
+
+        await sut.delete(item)
+
+        XCTAssertNotNil(sut.alert)
+        XCTAssertEqual(sut.items.count, countBefore, "a rejected delete must not remove the preset from what's displayed")
+    }
+
+    func testCopyingABuiltInPresetToMinePersistsItThere() async throws {
+        let builtIn = BuiltInPresetRepository()
+        let mine = RecordingPresetRepository()
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: builtIn)
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first)
+
+        await sut.copy(item, to: .mine)
+
+        let savedNames = await mine.savedDocuments.map(\.name)
+        XCTAssertTrue(savedNames.contains(item.document.name))
+    }
+
+    // MARK: - Edit an existing preset / sparse patch removal (Phase 3 Task 3.1)
+
+    func testUpdatePresetRemovesUncheckedFieldsFromThePatch() async throws {
+        let original = PresetDocument(
+            name: "Original",
+            patch: AdjustmentPatch(basic: BasicAdjustmentPatch(exposure: 1.0, contrast: 20))
+        )
+        let mine = RecordingPresetRepository(seed: [original])
+        // Empty built-in scope so `sut.items.first` is unambiguously the
+        // one preset this test actually seeded.
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: BuiltInPresetRepository(documents: []))
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first)
+
+        let saved = await sut.updatePreset(
+            item, name: original.name, groupPath: [], isFavorite: false,
+            keptFields: [.basicExposure]
+        )
+
+        XCTAssertTrue(saved)
+        let savedDocuments = await mine.savedDocuments
+        let updated = try XCTUnwrap(savedDocuments.last)
+        XCTAssertTrue(updated.patch.contains(.basicExposure))
+        XCTAssertFalse(
+            updated.patch.contains(.basicContrast),
+            "an unchecked field must actually disappear from the patch, not just read as its default value"
+        )
+    }
+
+    func testUpdatePresetKeepsTheSameIdentityAndCreationDate() async throws {
+        let original = PresetDocument(
+            name: "Original",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            patch: AdjustmentPatch(basic: BasicAdjustmentPatch(exposure: 1.0))
+        )
+        let mine = RecordingPresetRepository(seed: [original])
+        // Empty built-in scope so `sut.items.first` is unambiguously the
+        // one preset this test actually seeded.
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: BuiltInPresetRepository(documents: []))
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first)
+
+        _ = await sut.updatePreset(item, name: "Renamed", groupPath: [], isFavorite: true, keptFields: [.basicExposure])
+
+        let savedDocuments = await mine.savedDocuments
+        let updated = try XCTUnwrap(savedDocuments.last)
+        XCTAssertEqual(updated.id, original.id, "editing a preset must never mint a new identity")
+        XCTAssertEqual(updated.createdAt, original.createdAt)
+        XCTAssertEqual(updated.name, "Renamed")
+        XCTAssertTrue(updated.isFavorite)
+    }
+
+    func testUpdatePresetOnABuiltInPresetIsRejected() async throws {
+        let builtIn = BuiltInPresetRepository()
+        let sut = PresetLibraryViewModel(builtInRepository: builtIn)
+        await sut.load()
+        let item = try XCTUnwrap(sut.items.first)
+
+        let saved = await sut.updatePreset(item, name: item.document.name, groupPath: [], isFavorite: false, keptFields: [])
+
+        XCTAssertFalse(saved)
+        XCTAssertNotNil(sut.alert)
+    }
+
+    func testUpdatePresetWithNoRepositoryForScopeFails() async throws {
+        let original = makeDocument()
+        let sut = PresetLibraryViewModel() // no myRepository attached
+        let item = PresetListItem(document: original, scope: .mine)
+
+        let saved = await sut.updatePreset(item, name: original.name, groupPath: [], isFavorite: false, keptFields: [])
+
+        XCTAssertFalse(saved)
+        XCTAssertNotNil(sut.alert)
     }
 }

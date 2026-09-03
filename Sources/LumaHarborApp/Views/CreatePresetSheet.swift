@@ -7,7 +7,11 @@ import SwiftUI
 /// checklist). Grouped rather than one checkbox per leaf -- 48 individual
 /// checkboxes would swamp the sheet -- but every group still maps onto a
 /// spec-legible, exact set of fields, never a fuzzy "everything else" bucket.
-private enum PresetFieldGroup: CaseIterable, Identifiable {
+///
+/// Not `private`: `EditPresetSheet` (Phase 3 Task 3.1) reuses this same
+/// grouping for its own field-removal checklist rather than keeping a
+/// second, drift-prone copy of the same 23-group mapping.
+enum PresetFieldGroup: CaseIterable, Identifiable {
     case exposure, temperature, tint, contrast, highlights, shadows, whites, blacks, vibrance, saturation
     case toneCurve
     case hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta

@@ -23,6 +23,12 @@ public enum PresetError: Error, Equatable, Sendable {
     case noApplicableAdjustments
     case readOnlyDestination(String)
     case destinationUnavailable(String)
+    /// Distinct from `readOnlyDestination`: that case is about a *drive*
+    /// being read-only (spec §8.2, wording talks about unlocking a drive);
+    /// this one is a built-in preset being read-only *by design*, wherever
+    /// it's stored -- the recovery step is "duplicate it", not "unlock
+    /// anything" (Phase 3 Task 3.1).
+    case builtInPresetIsReadOnly
     case identityConflict(UUID)
     case partialBatchFailure(succeeded: Int, failed: Int)
     case reverseMappingUnavailable(String)
@@ -62,6 +68,8 @@ extension PresetError: LocalizedError {
             return L10n.t("This drive is read-only, so LumaHarbor can't save the preset there.")
         case .destinationUnavailable:
             return L10n.t("The destination for this preset isn't available right now.")
+        case .builtInPresetIsReadOnly:
+            return L10n.t("Built-in presets can't be changed.")
         case .identityConflict:
             return L10n.t("A preset with this identity already exists.")
         case .partialBatchFailure(let succeeded, let failed):
@@ -88,6 +96,8 @@ extension PresetError: LocalizedError {
             return L10n.t("Unlock the drive or choose a different scope, then retry.")
         case .destinationUnavailable:
             return L10n.t("Reconnect the drive or choose a different scope, then retry.")
+        case .builtInPresetIsReadOnly:
+            return L10n.t("Duplicate it to My Presets, then edit the copy.")
         case .identityConflict:
             return L10n.t("Choose to replace it, keep both, or cancel.")
         case .partialBatchFailure:

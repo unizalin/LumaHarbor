@@ -16,6 +16,10 @@ enum PresetCopyDestination {
         switch scope {
         case .mine: return hasLibraryScope ? .library : nil
         case .library: return .mine
+        // A built-in preset can only ever be duplicated into "My Presets"
+        // -- never "This Library", and nothing is ever copied *into*
+        // .builtIn (BuiltInPresetRepository.save always throws).
+        case .builtIn: return .mine
         }
     }
 }
@@ -98,6 +102,11 @@ struct PresetBrowserView: View {
     @State private var isShowingImportSheet = false
     @State private var renamingItem: PresetListItem?
     @State private var renameText = ""
+    /// Phase 3 Task 3.1: which preset (if any) the Edit… menu item opened.
+    /// A separate sheet from `CreatePresetSheet` -- editing an existing
+    /// document needs its identity, not a fresh one built from the open
+    /// photo.
+    @State private var editingItem: PresetListItem?
     @State private var exportError: UserAlert?
     /// Round 3: which of hover or keyboard focus currently owns the transient
     /// preview -- see `PresetPreviewOwner`.
@@ -124,6 +133,7 @@ struct PresetBrowserView: View {
         .task { await presetLibrary.load() }
         .sheet(isPresented: $isShowingCreateSheet) { CreatePresetSheet() }
         .sheet(isPresented: $isShowingImportSheet) { ImportPresetSheet() }
+        .sheet(item: $editingItem) { item in EditPresetSheet(item: item) }
         .alert(
             L10n.t("Rename Preset"),
             isPresented: Binding(get: { renamingItem != nil }, set: { if !$0 { renamingItem = nil } })
@@ -267,6 +277,7 @@ struct PresetBrowserView: View {
                         renameText = item.document.name
                         renamingItem = item
                     },
+                    onEdit: { editingItem = item },
                     onExport: { exportPreset(item) },
                     onCopy: { destination in Task { await presetLibrary.copy(item, to: destination) } },
                     onHoverChanged: { isHovering in handleHover(item, isHovering: isHovering) }
@@ -344,6 +355,7 @@ private struct PresetRow: View {
     /// for their "This Library" segment.
     let copyDestination: PresetScopeKind?
     let onRename: () -> Void
+    let onEdit: () -> Void
     let onExport: () -> Void
     let onCopy: (PresetScopeKind) -> Void
     let onHoverChanged: (Bool) -> Void
@@ -354,7 +366,25 @@ private struct PresetRow: View {
         switch destination {
         case .mine: return L10n.t("Copy to My Presets")
         case .library: return L10n.t("Copy to This Library")
+        // Unreachable in practice: `PresetCopyDestination.destination(for:)`
+        // never returns `.builtIn` (nothing can ever be copied *into* a
+        // read-only scope) -- handled for exhaustiveness, not because a
+        // menu item with this title can actually appear.
+        case .builtIn: return L10n.t("Copy to Built-In")
         }
+    }
+
+    /// Spec §9.1 gap (identified in Task 3.1 research): a row previously
+    /// showed nothing distinguishing a built-in preset (which can't be
+    /// renamed, edited, or deleted) or an Adobe/XMP-imported one (whose
+    /// approximate fields carry a wider tolerance than a native match) from
+    /// an ordinary native user preset. `nil` for the common case -- a native
+    /// preset in "My Presets" or "This Library" -- so this never clutters
+    /// the row with a label that says nothing new.
+    private var sourceBadge: String? {
+        if item.scope == .builtIn { return L10n.t("Built-In") }
+        if case .adobeXMP = item.document.source { return L10n.t("Imported") }
+        return nil
     }
 
     var body: some View {
@@ -363,8 +393,18 @@ private struct PresetRow: View {
                 model.editor.commitPreset(item.document, mode: applicationMode)
             } label: {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(item.document.name)
-                        .font(.callout)
+                    HStack(spacing: 6) {
+                        Text(item.document.name)
+                            .font(.callout)
+                        if let sourceBadge {
+                            Text(sourceBadge)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.15), in: Capsule())
+                        }
+                    }
                     if !item.document.groupPath.isEmpty {
                         Text(item.document.groupPath.joined(separator: " / "))
                             .font(.caption2)
@@ -389,7 +429,16 @@ private struct PresetRow: View {
             .accessibilityLabel(L10n.t("Toggle favorite"))
 
             Menu {
-                Button(L10n.t("Rename…"), action: onRename)
+                // Built-in presets can't be renamed, edited, or deleted --
+                // `BuiltInPresetRepository.save`/`delete` always throw
+                // `PresetError.builtInPresetIsReadOnly` -- so this menu
+                // never even offers those actions for one; the only path
+                // out is "Copy to My Presets" below, then edit the copy
+                // (Phase 3 Task 3.1).
+                if item.scope != .builtIn {
+                    Button(L10n.t("Rename…"), action: onRename)
+                    Button(L10n.t("Edit…"), action: onEdit)
+                }
                 Button(L10n.t("Export…"), action: onExport)
                 // Round 3 (Codex re-review, finding #3): `PresetLibraryViewModel.copy(_:to:)`
                 // existed and was tested end to end, but nothing in this view
@@ -403,9 +452,11 @@ private struct PresetRow: View {
                         .help(copyMenuTitle(for: destination))
                         .accessibilityLabel(copyMenuTitle(for: destination))
                 }
-                Divider()
-                Button(L10n.t("Delete"), role: .destructive) {
-                    Task { await presetLibrary.delete(item) }
+                if item.scope != .builtIn {
+                    Divider()
+                    Button(L10n.t("Delete"), role: .destructive) {
+                        Task { await presetLibrary.delete(item) }
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
