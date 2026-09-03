@@ -52,4 +52,24 @@ final class LibraryGridMultiSelectContractTests: XCTestCase {
         XCTAssertTrue(source.contains(".disabled(model.lastBatchTransaction == nil)"), "must be disabled whenever there is no batch transaction to undo")
         XCTAssertTrue(source.contains("LibraryViewModel.batchUndoSummaryMessage(summary)"), "must surface the affected/failed/skipped report copy to the user")
     }
+
+    /// Phase 3 Task 3.5: a virtual copy must show its own badge and name
+    /// (falling back to the shared filename when unnamed), distinct from
+    /// the batch-selection checkmark and the edit-state badge this same
+    /// cell already draws.
+    func testGridCellShowsAVirtualCopyBadgeAndItsOwnName() throws {
+        let cellSource = try Self.loadSource("Sources/LumaHarborApp/Views/ThumbnailView.swift")
+        XCTAssertTrue(cellSource.contains("photo.isVirtualCopy"), "the cell must distinguish a virtual copy from an original")
+        XCTAssertTrue(cellSource.contains("photo.variantName ?? photo.filename"), "a copy's own name must take priority over the shared filename")
+    }
+
+    /// Phase 3 Task 3.5: "Duplicate as Virtual Copy" must be offered for
+    /// any photo; "Delete Virtual Copy" only for a photo that actually is
+    /// one.
+    func testGridContextMenuOffersDuplicateAlwaysAndDeleteOnlyForACopy() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/Views/LibraryGridView.swift")
+        XCTAssertTrue(source.contains("model.duplicateAsVirtualCopy(photo)"), "duplicate must be wired for every photo")
+        XCTAssertTrue(source.contains("if photo.isVirtualCopy"), "delete must be gated on the photo actually being a copy")
+        XCTAssertTrue(source.contains("model.deleteVirtualCopy(photo)"), "delete must be wired to the compound delete action")
+    }
 }

@@ -111,6 +111,20 @@ struct PhotoGridCell: View {
                         .help(L10n.t("Included in the current batch selection"))
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                // Phase 3 Task 3.5: distinct from the two badges above --
+                // this is about the photo's own identity (a virtual copy of
+                // some original, sharing its RAW file), not a transient
+                // selection/edit state, hence its own corner.
+                if photo.isVirtualCopy {
+                    Image(systemName: "doc.on.doc.fill")
+                        .font(.caption2)
+                        .padding(4)
+                        .background(.thinMaterial, in: Circle())
+                        .padding(4)
+                        .help(L10n.t("Virtual copy"))
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 4)
                     .strokeBorder(
@@ -119,7 +133,11 @@ struct PhotoGridCell: View {
                     )
             }
 
-            Text(photo.filename)
+            // Phase 3 Task 3.5: an unnamed copy still falls back to the
+            // shared filename -- true, but disambiguated on screen by the
+            // badge above, not by a synthesized name this scope doesn't ask
+            // for.
+            Text(photo.variantName ?? photo.filename)
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)

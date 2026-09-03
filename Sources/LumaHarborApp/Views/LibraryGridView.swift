@@ -42,6 +42,24 @@ struct LibraryGridView: View {
                                 model.requestSelectPhoto(photo.id)
                             }
                         }
+                        .contextMenu {
+                            // Phase 3 Task 3.5: available on any photo,
+                            // original or copy -- a copy of a copy still
+                            // points its own `variantOf` directly at
+                            // whatever was duplicated, not at some "root".
+                            Button {
+                                Task { await model.duplicateAsVirtualCopy(photo) }
+                            } label: {
+                                Label(L10n.t("Duplicate as Virtual Copy"), systemImage: "doc.on.doc")
+                            }
+                            if photo.isVirtualCopy {
+                                Button(role: .destructive) {
+                                    Task { await model.deleteVirtualCopy(photo) }
+                                } label: {
+                                    Label(L10n.t("Delete Virtual Copy"), systemImage: "trash")
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(16)

@@ -133,7 +133,9 @@
 "Decoding RAW…" = "正在解碼 RAW…";
 "Delete the local index and rescan your folders to rebuild it." = "刪除本機索引，然後重新掃描你的資料夾即可重建。";
 "Delete" = "刪除";
+"Delete Virtual Copy" = "刪除虛擬副本";
 "Dimensions" = "尺寸";
+"Duplicate as Virtual Copy" = "複製為虛擬副本";
 "Double-click the row to reset" = "雙擊這一列可重設";
 "Drag to move this panel." = "拖曳可移動此面板。";
 "Edit in Place" = "原地編輯";
@@ -428,6 +430,7 @@
 "Update LumaHarbor, or edit this photo on the device that wrote it." = "更新 LumaHarbor，或在寫入這筆編輯的裝置上編輯這張照片。";
 "Vibrance" = "自然飽和度";
 "Vignette" = "暈影";
+"Virtual copy" = "虛擬副本";
 "Wait a moment, then try again." = "稍等一下，然後再試一次。";
 "Wait for the current scan to finish, then try again." = "等目前的掃描完成後再試一次。";
 "White Balance" = "白平衡";
