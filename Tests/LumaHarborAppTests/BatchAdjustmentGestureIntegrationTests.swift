@@ -102,4 +102,58 @@ final class BatchAdjustmentGestureIntegrationTests: AppViewModelTestCase {
         let saved = await log.savedAdjustments
         XCTAssertFalse(saved.contains { $0.0 == other.id }, "a photo that was never multi-selected must never receive a sync write")
     }
+
+    /// Independent review of Task 3.3: a reset (context menu, double-click,
+    /// or "Reset All") on one of the ten basic sliders is just as much an
+    /// edit to that field as a drag is -- it must sync to a batch's other
+    /// selected photos the same way, end to end through
+    /// `LibraryViewModel`/`EditorSession`, not just at the `EditorSession`
+    /// unit level.
+    func testResettingASliderOnTheOpenPhotoSyncsTheResetToOtherSelectedPhotos() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW", "DSC0003.ARW"])
+        let log = ServiceCallLog()
+        let store = AdjustmentStore()
+        let services = try makeServices(
+            loadAdjustments: { photo in await store.get(photo.id) },
+            saveAdjustments: { adjustments, photo in
+                await store.set(photo.id, adjustments)
+                await log.recordSave(photo.id, adjustments)
+            }
+        )
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let source = model.photos[0]
+        let targetA = model.photos[1]
+        let targetB = model.photos[2]
+
+        model.requestSelectPhoto(source.id)
+        await waitUntilAppCondition("the source photo to open") {
+            await MainActor.run { model.editor.photo?.id == source.id }
+        }
+        model.toggleMultiSelect(targetA.id)
+        model.toggleMultiSelect(targetB.id)
+
+        // A prior drag put exposure at 1.5 everywhere in the batch -- this
+        // is the same setup `testDraggingASliderOnTheOpenPhotoSyncsOnlyThe
+        // ChangedFieldToOtherSelectedPhotos` already proves works.
+        model.editor.beginAdjustmentGesture()
+        model.editor.setAdjustment(.exposure, to: 1.5)
+        model.editor.endAdjustmentGesture()
+        await waitUntilAppCondition("both targets to receive the initial synced save") {
+            await log.saveCount >= 2
+        }
+
+        model.editor.resetAdjustment(.exposure)
+
+        await waitUntilAppCondition("both targets to receive the reset sync") {
+            await log.saveCount >= 4
+        }
+
+        let savedForA = await store.get(targetA.id)
+        let savedForB = await store.get(targetB.id)
+        XCTAssertEqual(savedForA.exposure, 0, "the reset must sync to target A, the same as a drag back to 0 would")
+        XCTAssertEqual(savedForB.exposure, 0, "the reset must sync to target B, the same as a drag back to 0 would")
+    }
 }
