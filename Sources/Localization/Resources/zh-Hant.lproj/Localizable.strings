@@ -180,6 +180,7 @@
 "Imported" = "已匯入";
 "Imported %d of %d files." = "已匯入 %d／%d 個檔案。";
 "Include in this preset" = "納入這個 Preset";
+"Included in the current batch selection" = "包含在目前的批次選取中";
 "is read-only." = "是唯讀的。";
 "JPEG quality" = "JPEG 品質";
 "Keep the file in your library — support may arrive in a future macOS release." = "先把檔案留在相片庫中──未來的 macOS 版本可能會支援。";

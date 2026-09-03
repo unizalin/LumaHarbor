@@ -44,6 +44,18 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(source.contains("L10n.t(\"Reset\")"))
     }
 
+    /// Phase 3 Task 3.3: the shared row must report drag start/end (via
+    /// SwiftUI's own `Slider(value:in:onEditingChanged:)`), not just live
+    /// value changes -- this is what lets `BasicAdjustmentPanel` (and any
+    /// other panel built on this row) call `EditorSession.beginAdjustmentGesture()`
+    /// /`.endAdjustmentGesture()` at the right two moments for batch sync.
+    func testSharedSliderRowSupportsTheGestureLifecycle() throws {
+        let source = try Self.loadSource("AdjustmentSliderRow.swift")
+
+        XCTAssertTrue(source.contains("onEditingChanged: (Bool) -> Void"), "the row must accept a drag start/end callback")
+        XCTAssertTrue(source.contains("onEditingChanged: onEditingChanged"), "it must actually be wired into the underlying Slider, not just declared")
+    }
+
     func testColorPanelCoversAllEightHSLBandsWithHueSaturationAndLuminanceRows() throws {
         let source = try Self.loadSource("ColorAdjustmentPanel.swift")
 

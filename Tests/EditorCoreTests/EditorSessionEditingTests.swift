@@ -349,4 +349,109 @@ final class EditorSessionEditingTests: XCTestCase {
 
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
     }
+
+    // MARK: - Adjustment gesture hooks (Phase 3 Task 3.3: batch sync)
+    //
+    // `beginAdjustmentGesture()`/`endAdjustmentGesture()` are the seam a
+    // caller that supports thumbnail multi-select (`LibraryViewModel`, in
+    // practice) uses to snapshot the batch's target list and the source
+    // photo's own before/after state -- `EditorSession` itself has no
+    // concept of "the library" or "other selected photos", it only fires
+    // `EditorDependencies`' two optional hooks with `history.current` at
+    // the right two moments. Neither hook exists in a build that doesn't
+    // wire one (both default to `nil`), so this is zero-cost everywhere
+    // else in this codebase.
+
+    private struct NoOpPreviewRenderer: PreviewRendering {
+        func render(_ request: PreviewRequest) async throws -> PreviewImage {
+            try await Task.sleep(for: .seconds(60))
+            throw CancellationError()
+        }
+    }
+
+    private func makeOpenEditorWithGestureHooks(
+        onBeginAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil,
+        onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil
+    ) -> EditorSession {
+        let renderer = NoOpPreviewRenderer()
+        let editor = EditorSession()
+        editor.attach(dependencies: EditorDependencies(
+            previewScheduler: PreviewScheduler(renderer: renderer),
+            previewRenderer: renderer,
+            loadAdjustments: { _ in .neutral },
+            saveAdjustments: { _, _ in },
+            onBeginAdjustmentGesture: onBeginAdjustmentGesture,
+            onEndAdjustmentGesture: onEndAdjustmentGesture
+        ))
+        editor.open(
+            photo: PhotoAsset(
+                id: PhotoID(),
+                libraryID: LibraryID(),
+                relativePath: "fixture.ARW",
+                fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "fixture"),
+                status: .ready
+            ),
+            sourceURL: URL(fileURLWithPath: "/fixture.ARW"),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+        return editor
+    }
+
+    func testBeginAdjustmentGestureFiresTheHookWithTheCurrentAdjustments() {
+        var captured: PhotoAdjustments?
+        let editor = makeOpenEditorWithGestureHooks(onBeginAdjustmentGesture: { captured = $0 })
+        editor.updateAdjustments { $0.exposure = 0.5 }
+
+        editor.beginAdjustmentGesture()
+
+        XCTAssertEqual(captured?.exposure, 0.5)
+    }
+
+    func testBeginAdjustmentGestureDoesNothingWithoutAnOpenPhoto() {
+        var fired = false
+        let editor = EditorSession()
+        let renderer = NoOpPreviewRenderer()
+        editor.attach(dependencies: EditorDependencies(
+            previewScheduler: PreviewScheduler(renderer: renderer),
+            previewRenderer: renderer,
+            loadAdjustments: { _ in .neutral },
+            saveAdjustments: { _, _ in },
+            onBeginAdjustmentGesture: { _ in fired = true }
+        ))
+
+        editor.beginAdjustmentGesture()
+
+        XCTAssertFalse(fired, "no photo is open -- there is nothing to snapshot a gesture baseline from")
+    }
+
+    func testEndAdjustmentGestureFiresTheHookWithTheCurrentAdjustments() {
+        var captured: PhotoAdjustments?
+        let editor = makeOpenEditorWithGestureHooks(onEndAdjustmentGesture: { captured = $0 })
+        editor.updateAdjustments { $0.contrast = 30 }
+
+        editor.endAdjustmentGesture()
+
+        XCTAssertEqual(captured?.contrast, 30)
+    }
+
+    /// The end-to-end shape a real drag produces: begin captures the
+    /// baseline *before* any of this drag's own changes, end captures the
+    /// final value *after* -- proving the two hooks actually bracket an
+    /// edit rather than both firing with the same snapshot.
+    func testBeginAndEndAdjustmentGestureBracketAnEditWithDistinctBeforeAndAfterSnapshots() {
+        var began: PhotoAdjustments?
+        var ended: PhotoAdjustments?
+        let editor = makeOpenEditorWithGestureHooks(
+            onBeginAdjustmentGesture: { began = $0 },
+            onEndAdjustmentGesture: { ended = $0 }
+        )
+
+        editor.beginAdjustmentGesture()
+        editor.updateAdjustments { $0.exposure = 2.0 }
+        editor.endAdjustmentGesture()
+
+        XCTAssertEqual(began?.exposure, 0, "begin must capture the value before this drag's own change")
+        XCTAssertEqual(ended?.exposure, 2.0, "end must capture the value after this drag's own change")
+    }
 }

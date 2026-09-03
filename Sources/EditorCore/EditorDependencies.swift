@@ -16,6 +16,17 @@ public struct EditorDependencies: Sendable {
     /// histogram computation must stay cheap enough not to block slider
     /// interaction).
     public let computeHistogram: @Sendable (CGImage) async -> HistogramData?
+    /// Fires with `history.current` the instant `EditorSession.beginAdjustmentGesture()`
+    /// is called -- Phase 3 Task 3.3's own seam for a caller that supports
+    /// thumbnail multi-select (`LibraryViewModel`, in practice) to snapshot
+    /// a batch sync's target list and source baseline at exactly the right
+    /// moment. `EditorSession` itself has no concept of "the library" or
+    /// "other selected photos"; it only fires this hook, if one was given.
+    /// `nil` (the default) everywhere that doesn't support batch sync.
+    public let onBeginAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)?
+    /// Fires with `history.current` the instant `EditorSession.endAdjustmentGesture()`
+    /// is called -- the counterpart to `onBeginAdjustmentGesture` above.
+    public let onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)?
 
     public init(
         previewScheduler: PreviewScheduler,
@@ -24,12 +35,36 @@ public struct EditorDependencies: Sendable {
         saveAdjustments: @escaping @Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void,
         computeHistogram: @escaping @Sendable (CGImage) async -> HistogramData? = { image in
             (try? await runOffActor(priority: .utility) { HistogramComputer.histogram(for: image) }) ?? nil
-        }
+        },
+        onBeginAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil,
+        onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil
     ) {
         self.previewScheduler = previewScheduler
         self.previewRenderer = previewRenderer
         self.loadAdjustments = loadAdjustments
         self.saveAdjustments = saveAdjustments
         self.computeHistogram = computeHistogram
+        self.onBeginAdjustmentGesture = onBeginAdjustmentGesture
+        self.onEndAdjustmentGesture = onEndAdjustmentGesture
+    }
+
+    /// A copy with just the two batch-gesture hooks replaced -- the seam a
+    /// caller that supports thumbnail multi-select (`LibraryViewModel`, in
+    /// practice) uses to attach its own batch sync wiring onto services that
+    /// were otherwise built without any knowledge of "the library" or
+    /// "other selected photos" (`AppServices.editorDependencies`).
+    public func addingBatchGestureHooks(
+        onBegin: @escaping @Sendable (PhotoAdjustments) -> Void,
+        onEnd: @escaping @Sendable (PhotoAdjustments) -> Void
+    ) -> EditorDependencies {
+        EditorDependencies(
+            previewScheduler: previewScheduler,
+            previewRenderer: previewRenderer,
+            loadAdjustments: loadAdjustments,
+            saveAdjustments: saveAdjustments,
+            computeHistogram: computeHistogram,
+            onBeginAdjustmentGesture: onBegin,
+            onEndAdjustmentGesture: onEnd
+        )
     }
 }

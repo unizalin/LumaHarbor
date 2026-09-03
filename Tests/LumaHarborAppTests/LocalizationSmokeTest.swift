@@ -149,4 +149,12 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// Phase 3 Task 3.3: the one new user-facing string thumbnail
+    /// multi-select introduces.
+    func testTheBatchSelectionIndicatorStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let value = bundle.localizedString(forKey: "Included in the current batch selection", value: nil, table: "Localizable")
+        XCTAssertNotEqual(value, "Included in the current batch selection", "has no Traditional Chinese translation")
+    }
 }

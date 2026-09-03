@@ -76,6 +76,10 @@ struct PhotoGridCell: View {
     let sourceURL: URL?
     let isOnline: Bool
     let isSelected: Bool
+    /// Phase 3 Task 3.3: part of the current batch sync target set (a
+    /// Cmd-click), distinct from `isSelected` (the one actually open in the
+    /// editor) -- a photo can be both at once.
+    let isBatchSelected: Bool
     let provider: ThumbnailProvider?
 
     var body: some View {
@@ -95,6 +99,16 @@ struct PhotoGridCell: View {
                         .background(.thinMaterial, in: Circle())
                         .padding(4)
                         .help(L10n.t("This photo has saved adjustments"))
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if isBatchSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color.accentColor)
+                        .padding(4)
+                        .help(L10n.t("Included in the current batch selection"))
                 }
             }
             .overlay {
