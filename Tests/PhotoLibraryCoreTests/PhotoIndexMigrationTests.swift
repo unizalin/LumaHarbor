@@ -12,14 +12,17 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         case injected
     }
 
-    func testOpeningV1DatabaseMigratesAtomicallyToV2() throws {
+    func testOpeningV1DatabaseMigratesAtomicallyToTheLatestSchema() throws {
         let url = temporaryDirectory.appendingPathComponent("library.sqlite")
         try makeSchemaV1Database(at: url, photoCount: 2)
 
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(PhotoIndexStore.schemaVersion, 2)
+        XCTAssertEqual(PhotoIndexStore.schemaVersion, 3)
+        XCTAssertEqual(try readSchemaVersion(at: url), 3)
+        XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
+        XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
         XCTAssertEqual(try store.photoCount(inLibrary: fixtureLibraryID), 2)
         XCTAssertEqual(try store.page(
             matching: LibraryQuery(scope: .all, sort: .captureDateDescending),
@@ -28,7 +31,7 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         ).photos.count, 2)
     }
 
-    func testMigrationFailureRollsBackEveryV2Change() throws {
+    func testMigrationFailureRollsBackEveryChange() throws {
         let url = temporaryDirectory.appendingPathComponent("library.sqlite")
         try makeSchemaV1Database(at: url, photoCount: 1)
 
@@ -42,6 +45,48 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(try columnExists("photo", "relative_directory", at: url))
         XCTAssertFalse(try columnExists("photo", "last_edit_at", at: url))
         XCTAssertFalse(try columnExists("library", "source_kind", at: url))
+        XCTAssertFalse(try columnExists("photo", "variant_of", at: url))
+        XCTAssertFalse(try columnExists("photo", "variant_name", at: url))
+    }
+
+    /// Phase 3 Task 3.5: the realistic upgrade path for an existing
+    /// installation -- a database already fully migrated to v2 (the shape
+    /// every released version up to this one produces) must pick up only
+    /// the new v3 columns, never re-run the v1 -> v2 `ALTER TABLE`s (which
+    /// would fail with "duplicate column name" against a database that
+    /// already has them).
+    func testOpeningV2DatabaseMigratesToV3WithoutTouchingExistingData() throws {
+        let url = temporaryDirectory.appendingPathComponent("library.sqlite")
+        try makeSchemaV2Database(at: url, photoCount: 2)
+
+        let store = try PhotoIndexStore(databaseURL: url)
+        defer { store.close() }
+
+        XCTAssertEqual(try readSchemaVersion(at: url), 3)
+        XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
+        XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
+        // Untouched v2 data must survive exactly as it was.
+        XCTAssertEqual(try store.photoCount(inLibrary: fixtureLibraryID), 2)
+        let page = try store.page(
+            matching: LibraryQuery(scope: .all, sort: .captureDateDescending),
+            after: nil,
+            limit: 100
+        )
+        XCTAssertEqual(page.photos.count, 2)
+        XCTAssertTrue(page.photos.allSatisfy { $0.variantOf == nil })
+    }
+
+    func testReopeningAnAlreadyV3MigratedDatabaseDoesNotReapplyTheV3Migration() throws {
+        let url = temporaryDirectory.appendingPathComponent("library.sqlite")
+        try makeSchemaV2Database(at: url, photoCount: 1)
+        let store = try PhotoIndexStore(databaseURL: url)
+        store.close()
+
+        // Reopening a v3 database must not attempt to add the v3 columns a
+        // second time (which would throw "duplicate column name").
+        let reopened = try PhotoIndexStore(databaseURL: url)
+        defer { reopened.close() }
+        XCTAssertEqual(try reopened.photoCount(inLibrary: fixtureLibraryID), 1)
     }
 
     func testMigrationBackfillsNormalizedFilenameAndDirectory() throws {
@@ -97,14 +142,16 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try reopened.photoCount(inLibrary: fixtureLibraryID), 1)
     }
 
-    func testFreshlyCreatedDatabaseIsSchemaV2() throws {
+    func testFreshlyCreatedDatabaseIsTheLatestSchema() throws {
         let url = temporaryDirectory.appendingPathComponent("fresh.sqlite")
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(try readSchemaVersion(at: url), 2)
+        XCTAssertEqual(try readSchemaVersion(at: url), 3)
         XCTAssertTrue(try columnExists("photo", "filename_normalized", at: url))
         XCTAssertTrue(try columnExists("library", "source_kind", at: url))
+        XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
+        XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
     }
 
     // MARK: - Fixture helpers
@@ -174,6 +221,32 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
                 captureDate: 1_700_000_000 + Double(index)
             )
         }
+    }
+
+    /// Builds a database matching the pre-Task-3.5 schema exactly (v1 shape
+    /// plus every v1 -> v2 `ALTER TABLE`, stamped `schemaVersion = 2`) --
+    /// what every released version up to this one actually produces.
+    private func makeSchemaV2Database(at url: URL, photoCount: Int) throws {
+        try makeSchemaV1Database(at: url, photoCount: photoCount)
+        let db = try SQLiteDatabase(url: url)
+        defer { db.close() }
+        try db.execute("""
+            ALTER TABLE library ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'externalFolder';
+            ALTER TABLE library ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'ready';
+            ALTER TABLE library ADD COLUMN scan_state TEXT NOT NULL DEFAULT 'idle';
+            ALTER TABLE photo ADD COLUMN filename_normalized TEXT NOT NULL DEFAULT '';
+            ALTER TABLE photo ADD COLUMN relative_directory TEXT NOT NULL DEFAULT '';
+            ALTER TABLE photo ADD COLUMN last_edit_at REAL;
+
+            CREATE INDEX photo_all_capture_desc ON photo (capture_date DESC, photo_id);
+            CREATE INDEX photo_library_capture_desc ON photo (library_id, capture_date DESC, photo_id);
+            CREATE INDEX photo_library_directory_capture_desc
+                ON photo (library_id, relative_directory, capture_date DESC, photo_id);
+            CREATE INDEX photo_filename_normalized ON photo (filename_normalized, photo_id);
+            CREATE INDEX photo_last_edit_desc ON photo (last_edit_at DESC, photo_id)
+                WHERE last_edit_at IS NOT NULL;
+            """)
+        try db.run("UPDATE schema_info SET value = '2' WHERE key = 'schemaVersion';")
     }
 
     private func seedV1Photo(at url: URL, libraryID: LibraryID, relativePath: String) throws {

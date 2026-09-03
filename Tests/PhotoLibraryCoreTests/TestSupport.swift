@@ -86,13 +86,15 @@ extension PhotoRecord {
     static func stub(
         photoID: PhotoID = PhotoID(),
         relativePath: String,
-        fingerprint: FileFingerprint
+        fingerprint: FileFingerprint,
+        variantOf: PhotoID? = nil
     ) -> PhotoRecord {
         PhotoRecord(
             photoID: photoID,
             relativePath: relativePath,
             fingerprint: fingerprint,
-            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000),
+            variantOf: variantOf
         )
     }
 }

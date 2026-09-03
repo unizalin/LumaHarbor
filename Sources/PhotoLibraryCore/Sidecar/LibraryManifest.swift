@@ -10,19 +10,29 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
     /// Set when several records share this fingerprint, so the scanner refuses
     /// to guess which one a moved file belongs to (spec §8.1).
     public var needsConfirmation: Bool
+    /// Phase 3 Task 3.5: `nil` for an original photo's record; the
+    /// original's own `photoID` for a virtual copy's record. Mirrors
+    /// `PhotoAsset.variantOf` -- see that property's own doc comment.
+    public var variantOf: PhotoID?
+    /// Mirrors `PhotoAsset.variantName`.
+    public var variantName: String?
 
     public init(
         photoID: PhotoID,
         relativePath: String,
         fingerprint: FileFingerprint,
         lastSeenAt: Date = Date(),
-        needsConfirmation: Bool = false
+        needsConfirmation: Bool = false,
+        variantOf: PhotoID? = nil,
+        variantName: String? = nil
     ) {
         self.photoID = photoID
         self.relativePath = relativePath
         self.fingerprint = fingerprint
         self.lastSeenAt = lastSeenAt
         self.needsConfirmation = needsConfirmation
+        self.variantOf = variantOf
+        self.variantName = variantName
     }
 
     public init(from decoder: Decoder) throws {
@@ -34,6 +44,8 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
         self.needsConfirmation = try container.decodeIfPresent(
             Bool.self, forKey: .needsConfirmation
         ) ?? false
+        self.variantOf = try container.decodeIfPresent(PhotoID.self, forKey: .variantOf)
+        self.variantName = try container.decodeIfPresent(String.self, forKey: .variantName)
     }
 }
 
@@ -69,8 +81,11 @@ public struct LibraryManifest: Codable, Equatable, Sendable {
         photos.first { $0.photoID == photoID }
     }
 
+    /// The *original* photo's record at `path` -- never a virtual copy's,
+    /// even though a copy shares the original's `relativePath` (Phase 3
+    /// Task 3.5).
     public func record(atRelativePath path: String) -> PhotoRecord? {
-        photos.first { $0.relativePath == path }
+        photos.first { $0.relativePath == path && $0.variantOf == nil }
     }
 
     /// Inserts or replaces by `photoID`, keeping the array sorted by path so the
