@@ -27,6 +27,50 @@ final class AdjustmentPatchExtractionTests: XCTestCase {
         XCTAssertTrue(AdjustmentPatch.modifiedFields(in: adjustments).contains(.advancedToneCurve))
     }
 
+    // MARK: - modifiedFields(in:comparedTo:) -- Phase 3 Task 3.3 (batch sync
+    // needs to diff two arbitrary snapshots -- a drag's before/after -- not
+    // just "differs from neutral").
+
+    func testModifiedFieldsComparedToFindsOnlyLeavesThatDifferBetweenTheTwoSnapshots() {
+        var before = PhotoAdjustments.neutral
+        before.exposure = 1.0
+        before.contrast = 20
+
+        var after = before
+        after.exposure = 1.5 // changed
+        after.highlights = -10 // newly set
+
+        XCTAssertEqual(AdjustmentPatch.modifiedFields(in: after, comparedTo: before), [.basicExposure, .basicHighlights])
+    }
+
+    func testModifiedFieldsComparedToIsEmptyWhenTheTwoSnapshotsAreIdentical() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.saturation = 30
+        XCTAssertTrue(AdjustmentPatch.modifiedFields(in: adjustments, comparedTo: adjustments).isEmpty)
+    }
+
+    /// Unlike `modifiedFields(in:)` (always compared to `.neutral`), a field
+    /// that's non-neutral in *both* snapshots but equal to each other must
+    /// not show up -- this is what makes it usable for a drag's before/after
+    /// rather than only "create preset from photo"'s neutral baseline.
+    func testModifiedFieldsComparedToExcludesANonNeutralFieldThatDidntActuallyChange() {
+        var before = PhotoAdjustments.neutral
+        before.vibrance = 15
+        var after = before
+        after.blacks = -5 // only this one actually changed
+
+        let modified = AdjustmentPatch.modifiedFields(in: after, comparedTo: before)
+        XCTAssertEqual(modified, [.basicBlacks])
+        XCTAssertFalse(modified.contains(.basicVibrance))
+    }
+
+    func testModifiedFieldsComparedToDetectsAChangedToneCurve() {
+        let before = PhotoAdjustments.neutral
+        var after = before
+        after.advancedToneCurve = AdvancedToneCurve(points: [ToneCurvePoint(x: 0.5, y: 0.6)])
+        XCTAssertEqual(AdjustmentPatch.modifiedFields(in: after, comparedTo: before), [.advancedToneCurve])
+    }
+
     func testExtractingOnlyIncludesSelectedFields() {
         var adjustments = PhotoAdjustments.neutral
         adjustments.exposure = 1.0

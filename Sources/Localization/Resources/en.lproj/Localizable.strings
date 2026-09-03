@@ -180,6 +180,7 @@
 "Imported" = "Imported";
 "Imported %d of %d files." = "Imported %d of %d files.";
 "Include in this preset" = "Include in this preset";
+"Included in the current batch selection" = "Included in the current batch selection";
 "is read-only." = "is read-only.";
 "JPEG quality" = "JPEG quality";
 "Keep the file in your library — support may arrive in a future macOS release." = "Keep the file in your library — support may arrive in a future macOS release.";

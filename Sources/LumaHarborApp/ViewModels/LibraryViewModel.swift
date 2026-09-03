@@ -74,6 +74,12 @@ public final class LibraryViewModel: ObservableObject {
     /// below) instead, and the selection only changes once the write lands.
     @Published private(set) var selectedLibraryID: LibraryID?
     @Published private(set) var selectedPhotoID: PhotoID?
+    /// Which photos are included in the current batch sync target set
+    /// (Phase 3 Task 3.3), always a superset of `selectedPhotoID` while a
+    /// photo is open. Cmd-clicking a thumbnail toggles membership here
+    /// without changing which photo is actually open in the editor;
+    /// `toggleMultiSelect(_:)` is the only mutator.
+    @Published private(set) var selectedPhotoIDs: Set<PhotoID> = []
     @Published private(set) var scanProgress: ScanProgress?
     @Published private(set) var exportState: ExportState?
     @Published private(set) var startupFailure: String?
@@ -115,6 +121,47 @@ public final class LibraryViewModel: ObservableObject {
         case library(LibraryID?)
     }
 
+    /// Phase 3 Task 3.3: `BatchAdjustmentSyncService`'s load/save closures
+    /// are keyed by `PhotoID` alone (it has no concept of "the currently
+    /// open library"), so these map back to a `PhotoAsset` via `photos`
+    /// before delegating to `services.libraryService` -- the same
+    /// `PhotoAsset`-keyed API `loadAdjustments`/`saveAdjustments` already
+    /// use for the open photo.
+    private struct BatchSyncPhotoUnavailable: Error {}
+
+    private lazy var batchSyncService = BatchAdjustmentSyncService(
+        loadAdjustments: { [weak self] id in
+            guard let self, let (services, asset) = await self.batchSyncTarget(for: id) else {
+                throw BatchSyncPhotoUnavailable()
+            }
+            // Routes through `services.loadAdjustments`, not
+            // `services.libraryService.adjustments(for:)` directly -- the
+            // same seam the currently-open photo's own load/save already
+            // goes through, generic over *any* `PhotoAsset`, not just the
+            // open one. In production `AppServices.makeDefault()` wires
+            // both to the identical `libraryService` call either way; the
+            // difference only matters for tests, which override this seam
+            // (`AppTestSupport.makeServices(loadAdjustments:saveAdjustments:)`)
+            // to observe every write, target photos included.
+            return try await services.loadAdjustments(asset)
+        },
+        saveAdjustments: { [weak self] adjustments, id in
+            guard let self, let (services, asset) = await self.batchSyncTarget(for: id) else {
+                throw BatchSyncPhotoUnavailable()
+            }
+            try await services.saveAdjustments(adjustments, asset)
+        }
+    )
+
+    private func photo(for id: PhotoID) -> PhotoAsset? {
+        photos.first { $0.id == id }
+    }
+
+    private func batchSyncTarget(for id: PhotoID) -> (AppServices, PhotoAsset)? {
+        guard let services, let asset = photo(for: id) else { return nil }
+        return (services, asset)
+    }
+
     public init() {
         editorForwarding = editor.objectWillChange.sink { [weak self] in
             self?.objectWillChange.send()
@@ -126,7 +173,14 @@ public final class LibraryViewModel: ObservableObject {
 
     private func install(services: AppServices) {
         self.services = services
-        editor.attach(dependencies: services.editorDependencies)
+        editor.attach(dependencies: services.editorDependencies.addingBatchGestureHooks(
+            onBegin: { [weak self] baseline in
+                Task { @MainActor in await self?.beginBatchGesture(baseline: baseline) }
+            },
+            onEnd: { [weak self] after in
+                Task { @MainActor in await self?.endBatchGesture(after: after) }
+            }
+        ))
         editor.onSaved = { [weak self] photoID, hasEdits in
             self?.updateEditBadge(photoID: photoID, hasEdits: hasEdits)
         }
@@ -153,6 +207,7 @@ public final class LibraryViewModel: ObservableObject {
             selectedLibrary.map { FilePresetRepository(scope: .libraryPresets(libraryRootURL: $0.rootURL)) }
         )
         selectedPhotoID = nil
+        selectedPhotoIDs = []
         await reloadPhotos()
     }
 
@@ -168,6 +223,41 @@ public final class LibraryViewModel: ObservableObject {
     func requestSelectLibrary(_ libraryID: LibraryID?) {
         guard libraryID != selectedLibraryID else { return }
         enqueue(.library(libraryID))
+    }
+
+    /// Cmd-click in the grid (Phase 3 Task 3.3): adds/removes `photoID` from
+    /// the batch sync target set without changing which photo is open in
+    /// the editor. Purely local UI state -- unlike `requestSelectPhoto`,
+    /// there is no sidecar to flush, so this never needs to be async.
+    func toggleMultiSelect(_ photoID: PhotoID) {
+        if selectedPhotoIDs.contains(photoID) {
+            selectedPhotoIDs.remove(photoID)
+        } else {
+            selectedPhotoIDs.insert(photoID)
+        }
+    }
+
+    /// `EditorDependencies.onBeginAdjustmentGesture`'s target -- snapshots
+    /// the batch's target list and the open photo's own baseline into
+    /// `batchSyncService`. A no-op unless at least one *other* photo is
+    /// actually selected: opening a single photo with nothing else
+    /// multi-selected must never spuriously start a batch.
+    private func beginBatchGesture(baseline: PhotoAdjustments) async {
+        guard let source = selectedPhotoID, selectedPhotoIDs.count > 1 else { return }
+        let targets = selectedPhotoIDs.subtracting([source])
+        guard !targets.isEmpty else { return }
+        await batchSyncService.beginGesture(sourcePhotoID: source, targetPhotoIDs: targets, sourceBaseline: baseline)
+    }
+
+    /// `EditorDependencies.onEndAdjustmentGesture`'s target -- commits
+    /// whatever gesture `batchSyncService` has active (a no-op if
+    /// `beginBatchGesture` never started one) and refreshes the grid's own
+    /// "has edits" badge for every target that was actually written.
+    private func endBatchGesture(after: PhotoAdjustments) async {
+        guard let transaction = await batchSyncService.commitGesture(sourceAfter: after) else { return }
+        for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
+            updateEditBadge(photoID: targetID, hasEdits: true)
+        }
     }
 
     /// For `List(selection:)` and anything else that needs a two-way binding.
@@ -232,6 +322,17 @@ public final class LibraryViewModel: ObservableObject {
     private func commitPhotoSelection(_ photoID: PhotoID?) {
         guard photoID != selectedPhotoID else { return }
         selectedPhotoID = photoID
+        // A plain click always opens exactly what was clicked -- if it
+        // wasn't already part of an existing cmd-click batch, opening it
+        // starts a fresh one rather than leaving a stale multi-selection
+        // pointed at photos the user never asked to keep. Clicking a photo
+        // that *is* already in the batch (its own row) just changes which
+        // one is the sync source, leaving the rest of the batch intact.
+        if let photoID, !selectedPhotoIDs.contains(photoID) {
+            selectedPhotoIDs = [photoID]
+        } else if photoID == nil {
+            selectedPhotoIDs = []
+        }
         handlePhotoSelectionChange()
     }
 
@@ -239,6 +340,7 @@ public final class LibraryViewModel: ObservableObject {
         guard libraryID != selectedLibraryID else { return }
         selectedLibraryID = libraryID
         selectedPhotoID = nil
+        selectedPhotoIDs = []
         handleLibrarySelectionChange()
     }
 

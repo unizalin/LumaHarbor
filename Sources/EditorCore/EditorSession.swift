@@ -358,6 +358,35 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    /// Marks the start of a continuous slider drag (Phase 3 Task 3.3).
+    /// SwiftUI reports every tick of a drag as its own value change --
+    /// there is no built-in signal distinguishing "the user just started
+    /// dragging" from "one more tick of an already-running drag" -- so a
+    /// caller (an `AdjustmentSliderRow`'s `Slider(..., onEditingChanged:)`)
+    /// calls this exactly once, right before the drag's first change.
+    /// Fires `EditorDependencies.onBeginAdjustmentGesture` with the
+    /// adjustments as they stood at that instant, so a batch sync service
+    /// can snapshot every other selected photo's own target list and
+    /// baseline relative to this moment -- never a moment it has to guess
+    /// at by watching `history` for changes. A no-op without an open photo
+    /// or without a hook attached (every environment that doesn't support
+    /// batch sync).
+    public func beginAdjustmentGesture() {
+        guard photo != nil else { return }
+        services?.onBeginAdjustmentGesture?(history.current)
+    }
+
+    /// Marks the end of a drag started by `beginAdjustmentGesture()`. Fires
+    /// `EditorDependencies.onEndAdjustmentGesture` with the adjustments as
+    /// they stand now -- the batch sync service (if any) is responsible for
+    /// diffing this against the baseline it was given at
+    /// `beginAdjustmentGesture` and syncing only the fields that actually
+    /// changed (Task 3.3: "only modified field IDs are synchronized").
+    public func endAdjustmentGesture() {
+        guard photo != nil else { return }
+        services?.onEndAdjustmentGesture?(history.current)
+    }
+
     /// Switches the on-canvas interaction mode. Purely UI state -- it never
     /// touches `history`, `saveState` or the preview, unlike every other
     /// method in this section.

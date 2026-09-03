@@ -34,6 +34,19 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
         XCTAssertFalse(panelSource.contains("AdjustmentCatalog.definitions(in:"))
     }
 
+    /// Phase 3 Task 3.3: the ten basic sliders are where batch sync's
+    /// gesture snapshot must actually begin/end -- `editor.beginAdjustmentGesture()`
+    /// on drag start, `editor.endAdjustmentGesture()` on drag end -- so a
+    /// caller with thumbnail multi-select active can snapshot/sync the
+    /// batch around exactly this drag, not some other moment.
+    func testBasicSlidersWireTheAdjustmentGestureLifecycle() throws {
+        let panelSource = try panelSource()
+
+        XCTAssertTrue(panelSource.contains("onEditingChanged:"), "the basic sliders must report drag start/end, not just live value changes")
+        XCTAssertTrue(panelSource.contains("editor.beginAdjustmentGesture()"))
+        XCTAssertTrue(panelSource.contains("editor.endAdjustmentGesture()"))
+    }
+
     private func panelSource() throws -> String {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

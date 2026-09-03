@@ -1,3 +1,4 @@
+import AppKit
 import PhotoLibraryCore
 import Localization
 import SwiftUI
@@ -22,11 +23,24 @@ struct LibraryGridView: View {
                             sourceURL: sourceURL(for: photo),
                             isOnline: model.selectedLibrary?.isOnline ?? false,
                             isSelected: model.selectedPhotoID == photo.id,
+                            isBatchSelected: model.selectedPhotoIDs.contains(photo.id),
                             provider: model.thumbnailProvider
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            model.requestSelectPhoto(photo.id)
+                            // Cmd-click adds/removes this photo from the
+                            // batch sync target set (Phase 3 Task 3.3)
+                            // without opening it; a plain click opens it as
+                            // before. `.onTapGesture` reports no modifier
+                            // flags of its own, so this reads them directly
+                            // -- the standard AppKit way to distinguish a
+                            // Cmd-click from a plain one inside a SwiftUI
+                            // tap handler.
+                            if NSEvent.modifierFlags.contains(.command) {
+                                model.toggleMultiSelect(photo.id)
+                            } else {
+                                model.requestSelectPhoto(photo.id)
+                            }
                         }
                     }
                 }

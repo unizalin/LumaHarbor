@@ -96,6 +96,20 @@ public extension AdjustmentPatch {
         })
     }
 
+    /// Fields whose value in `adjustments` differs from `baseline` -- an
+    /// arbitrary snapshot, unlike `modifiedFields(in:)`'s fixed `.neutral`
+    /// comparison. Phase 3 Task 3.3: batch sync needs to know exactly which
+    /// fields a slider drag actually touched (before vs. after), which is
+    /// not the same question as "which fields differ from neutral" -- a
+    /// field that's already non-neutral in both snapshots, but equal to
+    /// itself, must not be reported as modified.
+    static func modifiedFields(in adjustments: PhotoAdjustments, comparedTo baseline: PhotoAdjustments) -> Set<AdjustmentFieldID> {
+        Set(AdjustmentFieldID.allCases.filter { field in
+            if field == .advancedToneCurve { return adjustments.advancedToneCurve != baseline.advancedToneCurve }
+            return adjustments.scalarValue(for: field) != baseline.scalarValue(for: field)
+        })
+    }
+
     /// A copy with `fields` set back to absent. Used when the user unchecks
     /// an approximate leaf in the XMP import summary before saving (spec
     /// §9.3: "使用者可取消 approximate leaf").

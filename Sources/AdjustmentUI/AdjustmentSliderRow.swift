@@ -14,6 +14,13 @@ struct AdjustmentSliderRow: View {
     let fractionDigits: Int
     let onChange: (Double) -> Void
     let onReset: () -> Void
+    /// Reports drag start (`true`) / drag end (`false`) -- distinct from
+    /// `onChange`, which fires on every value tick during a drag. Phase 3
+    /// Task 3.3: this is what a caller wires to
+    /// `EditorSession.beginAdjustmentGesture()`/`.endAdjustmentGesture()`
+    /// for batch sync. Defaults to a no-op so every existing caller keeps
+    /// compiling unchanged.
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     var body: some View {
         macOSResetGesture(
@@ -24,7 +31,7 @@ struct AdjustmentSliderRow: View {
                     Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits))
                         .monospacedDigit()
                 }
-                Slider(value: Binding(get: { value }, set: onChange), in: range)
+                Slider(value: Binding(get: { value }, set: onChange), in: range, onEditingChanged: onEditingChanged)
                     .accessibilityLabel(Text(label))
                     .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))
             }

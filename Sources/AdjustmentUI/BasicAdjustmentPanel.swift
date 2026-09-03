@@ -34,7 +34,19 @@ public struct BasicAdjustmentPanel: View {
                         get: { editor.adjustments[definition.kind] },
                         set: { editor.setAdjustment(definition.kind, to: $0) }
                     ),
-                    in: definition.range
+                    in: definition.range,
+                    // Phase 3 Task 3.3: distinct from the value binding's own
+                    // `set` above, which fires on every tick during a drag --
+                    // this reports only the drag's start/end, which is what
+                    // batch sync needs to snapshot the source photo's
+                    // before/after just once per drag, not once per tick.
+                    onEditingChanged: { isEditing in
+                        if isEditing {
+                            editor.beginAdjustmentGesture()
+                        } else {
+                            editor.endAdjustmentGesture()
+                        }
+                    }
                 )
                 .accessibilityLabel(Text(definition.kind.displayName))
                 .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(
