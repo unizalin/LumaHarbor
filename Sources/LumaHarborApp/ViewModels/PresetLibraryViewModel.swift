@@ -334,8 +334,29 @@ final class PresetLibraryViewModel: ObservableObject {
             )
             return
         }
+        var document = item.document
+        if item.scope == .builtIn {
+            // Independent-review finding: BuiltInPresetRepository's
+            // documents carry fixed UUIDs that are never file-backed
+            // anywhere. Forwarding one verbatim into a real, file-backed
+            // scope would give the still-present `.builtIn` row and the
+            // newly-copied `.mine`/`.library` row the same
+            // `PresetListItem.id` (unqualified by scope) -- permanently, on
+            // disk, since the destination has never seen that UUID and so
+            // never even consults `conflict`. A copy out of `.builtIn`
+            // always mints a fresh identity, the same way `.xmp`/`.lhpreset`
+            // import already does for the same underlying reason. This must
+            // NOT apply to a copy between `.mine` and `.library` -- both are
+            // real, file-backed scopes, and `presetDocumentsAreCanonicallyEqual`
+            // /`.keepBoth`'s own duplicate detection at the repository layer
+            // depends on identity staying stable across that copy (see
+            // `testCopyingABetweenMineAndLibraryPreservesIdentity`).
+            document.id = UUID()
+            document.createdAt = Date()
+            document.modifiedAt = Date()
+        }
         do {
-            _ = try await destination.save(item.document, conflict: .keepBoth)
+            _ = try await destination.save(document, conflict: .keepBoth)
             await load()
         } catch {
             alert = UserAlert(title: L10n.t("Couldn't copy this preset"), error: error)
@@ -465,10 +486,22 @@ final class PresetLibraryViewModel: ObservableObject {
     private static func previewLHPreset(data: Data, suggestedName: String) throws -> XMPImportPreview {
         let decoded = try SidecarCoding.decode(PresetDocument.self, from: data)
         let nativeFields = AdjustmentFieldID.allCases.filter { decoded.patch.contains($0) }
+        // Independent-review finding: a `.lhpreset` file that was itself
+        // originally imported from Adobe XMP still carries `source:
+        // .adobeXMP` and an `xmpEnvelope` preserving the full original
+        // packet (Task 3.2's own "preserve unknown XMP fields"). Dropping
+        // either here -- as an earlier version of this function did --
+        // would silently turn it into a plain native preset on re-import:
+        // losing the "Imported" source badge (Task 3.1), and permanently
+        // losing every unmapped property `xmpEnvelope` was preserving the
+        // next time it's re-exported to `.xmp` (`XMPExporter.baseDocument(for:)`
+        // falls back to a blank envelope when `xmpEnvelope == nil`).
         let proposedPreset = PresetDocument(
             name: decoded.name.isEmpty ? suggestedName : decoded.name,
             groupPath: decoded.groupPath,
-            patch: decoded.patch
+            source: decoded.source,
+            patch: decoded.patch,
+            xmpEnvelope: decoded.xmpEnvelope
         )
         return XMPImportPreview(
             proposedPreset: proposedPreset,
