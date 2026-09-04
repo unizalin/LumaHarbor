@@ -758,13 +758,26 @@ public final class LibraryViewModel: ObservableObject {
             }
         }
 
+        // `createVirtualCopy(of:)` explicitly allows a copy of a copy (its
+        // own doc comment: "works whether `photo` is itself an original or
+        // another virtual copy"), so a group's own members can themselves
+        // have further copies grouped under *their* id. Appending each
+        // group member's own group recursively -- rather than only the one
+        // level `copiesByOriginal[photo.id]` gives directly -- is what
+        // keeps every generation of a copy chain in `result` instead of
+        // silently dropping anything past the first generation.
+        func append(_ photo: PhotoAsset, into result: inout [PhotoAsset]) {
+            result.append(photo)
+            guard let copies = copiesByOriginal.removeValue(forKey: photo.id) else { return }
+            for copy in copies {
+                append(copy, into: &result)
+            }
+        }
+
         var result: [PhotoAsset] = []
         result.reserveCapacity(sorted.count)
         for photo in originalsAndOrphanedCopies {
-            result.append(photo)
-            if let copies = copiesByOriginal.removeValue(forKey: photo.id) {
-                result.append(contentsOf: copies)
-            }
+            append(photo, into: &result)
         }
         return result
     }

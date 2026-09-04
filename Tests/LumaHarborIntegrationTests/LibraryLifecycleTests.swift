@@ -270,6 +270,43 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(rebuiltEdit, edit)
     }
 
+    /// Phase 3 Task 3.5 (virtual copy): the class-level promise this whole
+    /// file exists to prove -- "identities come from library.json, so edits
+    /// survive an index rebuild" -- must also hold for a virtual copy, not
+    /// just an original. A copy is never independently rediscovered by the
+    /// scanner's own file walk (it shares its original's `relativePath`,
+    /// so nothing about scanning ever inspects a second file for it) --
+    /// its own row must instead be reconciled back into the index from
+    /// `library.json`'s own persisted `variantOf` record whenever the
+    /// original it belongs to is rescanned.
+    func testDeletingTheLocalIndexAndCacheStillRebuildsAVirtualCopyFromTheDrive() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let service = try makeService()
+        let library = try await addLibrary(service)
+        _ = await runScan(service, libraryID: library.id)
+
+        let seededPhotos = try await service.photos(inLibrary: library.id)
+        let original = try XCTUnwrap(seededPhotos.first)
+        let copy = try await service.createVirtualCopy(of: original, named: "B&W")
+        let copyEdit = PhotoAdjustments(exposure: -2, contrast: 30)
+        try await service.saveAdjustments(copyEdit, for: copy)
+
+        try await service.resetRebuildableLocalData()
+        _ = await runScan(service, libraryID: library.id)
+
+        let rebuiltPhotos = try await service.photos(inLibrary: library.id)
+        XCTAssertEqual(
+            Set(rebuiltPhotos.map(\.id)), [original.id, copy.id],
+            "the virtual copy must come back exactly like the original does, not vanish"
+        )
+        let rebuiltCopy = try XCTUnwrap(rebuiltPhotos.first { $0.id == copy.id })
+        XCTAssertEqual(rebuiltCopy.variantOf, original.id)
+        XCTAssertEqual(rebuiltCopy.variantName, "B&W")
+        XCTAssertTrue(rebuiltCopy.isVirtualCopy)
+        let rebuiltCopyEdit = try await service.adjustments(for: rebuiltCopy)
+        XCTAssertEqual(rebuiltCopyEdit, copyEdit, "the copy's own independent edit must survive the rebuild too")
+    }
+
     func testResettingIsRefusedWhileAScanIsActiveAndSucceedsOnceItEnds() async throws {
         try seedPhotos(["DSC0001.ARW", "DSC0002.ARW"])
         let gate = InspectionGate()

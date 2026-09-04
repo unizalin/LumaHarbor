@@ -127,6 +127,52 @@ final class VirtualCopyServiceTests: TemporaryDirectoryTestCase {
         XCTAssertNil(reloadedOriginal.variantOf)
     }
 
+    /// A copy's own sidecar is what makes it real (spec §8.1). If its
+    /// `library.json` record ever outlives its sidecar -- e.g.
+    /// `deleteVirtualCopy(_:)` already removed the sidecar (the
+    /// correctness gate) but its own best-effort manifest cleanup happened
+    /// not to land, the same tolerance `createVirtualCopy`'s own manifest
+    /// write already has -- a later rescan reconciling copy records back
+    /// into the index (so a copy survives an index rebuild, see
+    /// `LibraryLifecycleTests.testDeletingTheLocalIndexAndCacheStillRebuildsAVirtualCopyFromTheDrive`)
+    /// must never resurrect a copy whose sidecar is actually gone.
+    func testRescanNeverResurrectsACopyWhoseSidecarIsGoneButWhoseManifestRecordLingers() async throws {
+        let service = try makeService()
+        let root = try makeSubdirectory("Photos")
+        try writeFile(Data(repeating: 0x30, count: 64), at: root.appendingPathComponent("DSC0001.ARW"))
+        let library = try await addLibrary(service, at: root)
+        try await runScan(service, libraryID: library.id)
+        let seededPhotos = try await service.photos(inLibrary: library.id)
+        let original = try XCTUnwrap(seededPhotos.first)
+        let copy = try await service.createVirtualCopy(of: original, named: "Ghost")
+
+        // A normal delete removes the sidecar (the correctness gate), the
+        // index row, and -- here, nothing broke it -- the manifest record
+        // too. Reinserting a stale manifest record afterward simulates
+        // exactly the one gap `deleteVirtualCopy`'s own best-effort
+        // manifest write can leave in practice: sidecar and index row
+        // genuinely gone, but `library.json` still names the copy.
+        try await service.deleteVirtualCopy(copy)
+        let repository = FileSidecarRepository(libraryRootURL: root)
+        var manifest = try XCTUnwrap(try repository.loadManifest())
+        manifest.upsert(PhotoRecord(
+            photoID: copy.id,
+            relativePath: original.relativePath,
+            fingerprint: original.fingerprint,
+            variantOf: original.id,
+            variantName: "Ghost"
+        ))
+        try repository.write(manifest: manifest)
+
+        try await runScan(service, libraryID: library.id)
+
+        let afterRescan = try await service.photos(inLibrary: library.id)
+        XCTAssertNil(
+            afterRescan.first { $0.id == copy.id },
+            "a copy whose sidecar is gone must never be resurrected by a rescan just because a stale manifest record still names it"
+        )
+    }
+
     // MARK: - Deletion
 
     func testDeletingAVirtualCopyRemovesOnlyItsOwnSidecarAndIndexRow() async throws {

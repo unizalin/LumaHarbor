@@ -103,6 +103,33 @@ final class VirtualCopyLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertEqual(copyIndex, originalIndex + 1, "the copy must follow its original to its new position, not stay parked at the original's old path")
     }
 
+    /// `createVirtualCopy(of:)` explicitly allows a copy of a copy (its own
+    /// doc comment: "works whether `photo` is itself an original or another
+    /// virtual copy") and `LibraryGridView`'s own context menu offers
+    /// "Duplicate as Virtual Copy" on every photo unconditionally -- so a
+    /// user really can reach this through the app, not just through the
+    /// service layer directly. `orderedForDisplay` must still surface that
+    /// second-generation copy somewhere in `photos`, not silently drop it.
+    func testACopyOfAVirtualCopyStillAppearsInTheGrid() async throws {
+        try seedPhotos(["A.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photoA = try XCTUnwrap(model.photos.first { $0.relativePath == "A.ARW" })
+        await model.duplicateAsVirtualCopy(photoA, named: "First generation")
+        let firstCopy = try XCTUnwrap(model.photos.first { $0.variantOf == photoA.id })
+
+        await model.duplicateAsVirtualCopy(firstCopy, named: "Second generation")
+
+        XCTAssertEqual(model.photos.count, 3, "the original and both generations of copy must all be present")
+        let secondCopy = try XCTUnwrap(
+            model.photos.first { $0.variantName == "Second generation" },
+            "a copy of a copy must not silently vanish from the grid"
+        )
+        XCTAssertEqual(secondCopy.variantOf, firstCopy.id)
+    }
+
     func testDeletingAVirtualCopyThatIsNotOpenLeavesTheOpenPhotoUntouched() async throws {
         try seedPhotos(["A.ARW", "B.ARW"])
         let services = try makeServices()
