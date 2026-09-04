@@ -24,6 +24,10 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     public var vignette: Vignette
     public var grain: Grain
     public var geometry: GeometryAdjustments
+    /// Ordered — later entries composite on top of earlier ones once Task
+    /// 4.2/4.4 wire up rendering. Order is significant and must survive a
+    /// round trip, unlike every other field here which is a single value.
+    public var localAdjustments: [LocalAdjustment]
 
     public init(
         exposure: Double = 0,
@@ -43,7 +47,8 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         noiseReduction: NoiseReduction = .neutral,
         vignette: Vignette = .neutral,
         grain: Grain = .neutral,
-        geometry: GeometryAdjustments = .neutral
+        geometry: GeometryAdjustments = .neutral,
+        localAdjustments: [LocalAdjustment] = []
     ) {
         self.exposure = AdjustmentCatalog.definition(for: .exposure).clamp(exposure)
         self.temperature = AdjustmentCatalog.definition(for: .temperature).clamp(temperature)
@@ -63,6 +68,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.vignette = vignette
         self.grain = grain
         self.geometry = geometry
+        self.localAdjustments = localAdjustments
     }
 
     /// All sliders at their documented default — the "no edit applied" state.
@@ -122,7 +128,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
             vibrance: vibrance, saturation: saturation,
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
-            grain: grain, geometry: geometry
+            grain: grain, geometry: geometry, localAdjustments: localAdjustments
         )
     }
 
@@ -140,6 +146,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         case shadows, whites, blacks, vibrance, saturation
         case advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
         case geometry
+        case localAdjustments
     }
 
     /// Missing keys fall back to the catalogue default and out-of-range values
@@ -172,6 +179,10 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.vignette = try container.decodeIfPresent(Vignette.self, forKey: .vignette) ?? .neutral
         self.grain = try container.decodeIfPresent(Grain.self, forKey: .grain) ?? .neutral
         self.geometry = try container.decodeIfPresent(GeometryAdjustments.self, forKey: .geometry) ?? .neutral
+        // A sidecar written before Phase 4 has no "localAdjustments" key at
+        // all — the same absent-key-means-empty convention `geometry`
+        // itself used when it was the newly added field in Phase 2.
+        self.localAdjustments = try container.decodeIfPresent([LocalAdjustment].self, forKey: .localAdjustments) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -196,5 +207,6 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(vignette, forKey: .vignette)
         try container.encode(grain, forKey: .grain)
         try container.encode(geometry, forKey: .geometry)
+        try container.encode(localAdjustments, forKey: .localAdjustments)
     }
 }
