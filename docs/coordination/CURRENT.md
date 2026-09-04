@@ -2,7 +2,7 @@
 
 Updated: 2026-09-04
 
-Updated by: Codex（Phase 4 Task 4.3 手動驗測清單審查修正：A11 實體鍵盤 ⌘Z 不再誤標 PASS；Task 4.4 spot heal 尚未開始）
+Updated by: Codex（Phase 4 Task 4.3 手動驗測清單審查修正：A11 實體鍵盤 ⌘Z 不再誤標 PASS；Task 4.4 spot heal 可開始）
 
 ## Phase 4 Task 4.3 手動驗測審查修正：PHASE4_MANUAL_CHECKLIST.md A11 實體鍵盤 ⌘Z 尚未完成 (2026-09-04, Codex, docs-only review, in this worktree/branch)
 
@@ -15,7 +15,7 @@ Updated by: Codex（Phase 4 Task 4.3 手動驗測清單審查修正：A11 實體
   1. 合成的 `⌘Z` `CGEvent`/`System Events keystroke` 按鍵事件無法穩定觸發 App 的 Undo——`Sources/LumaHarborApp/LumaHarborMainApp.swift` 的 `UndoRedoKeyEquivalentFix` 用 local key-down monitor 接鍵盤事件，這次合成事件沒被接住；改用滑鼠點「編輯 › 復原」選單就正常。純自動化環境目前不能把這條路徑標為 PASS。
   2. App 重啟後 Inspector 面板預設捲到最上方（直方圖/詮釋資料/Preset），不記得使用者上次捲到「局部調整」的位置——是既有的面板行為，不是這輪新增的迴歸，但容易讓下一個測試的人誤以為漸層不見了，值得在 spot heal UI 也共用同一個面板時留意。
   3. 測試相片（`phase3-a-renamed.ARW`）基礎曝光偏高，套用較大的局部曝光值時大範圍會直接裁到 255,255,255，此時像素比對看不出差異；A13 改用較低曝光值＋刻意挑選漸層範圍內外的取樣點才量到有意義的差異。之後如果要建立自動化的「匯出像素回歸測試」用這張照片，要注意這個 clipping 陷阱。
-- **下一步**：補跑 A11 的實體鍵盤 `⌘Z` gate；若可通過，再把 checklist 改回 full PASS。之後才進 Task 4.4（spot heal / clone 的資料模型與 render 實作）、Task 4.5（spot heal 的 Mac UI）、Task 4.6（Phase 4 完整驗證輪）。
+- **下一步**：A11 的實體鍵盤 `⌘Z` 是 Phase 4 完整驗收／上線候選 gate；補跑可通過後，再把 checklist 改回 full PASS。它不阻塞 roadmap 的下一個開發步驟：Task 4.4（spot heal / clone 的資料模型與 render 實作）仍可開始，接著 Task 4.5（spot heal 的 Mac UI）、Task 4.6（Phase 4 完整驗證輪）。
 
 ## Phase 4 Task 4.3：Mac linear gradient UI (2026-09-04, Claude, TDD, in this worktree/branch)
 
