@@ -2,7 +2,20 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（Phase 4 Task 4.2：Linear gradient render composition，preview/export 都已接上，未做 Mac UI）
+Updated by: Claude（Phase 4 Task 4.3：Mac linear gradient UI，Inspector 面板 + 畫布拖曳把手都已實作，手動清單待真人跑）
+
+## Phase 4 Task 4.3：Mac linear gradient UI (2026-09-04, Claude, TDD, in this worktree/branch)
+
+- **狀態**：`DONE`（自動化部分）。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a`，這一輪之前的 HEAD 是 `21fcda1`（Task 4.2 render composition 完成）。Product commit：`8529dc2`。開始前確認過分支/HEAD/dirty files 一致。嚴格只做 Task 4.3 範圍——第一版 Mac UI，沒有做 spot heal UI（Task 4.5）、沒有做 perspective 的完整互動 UI（本來就不在 Task 2.3 範圍內，這輪也沒碰）。
+- **UI 結構**：照 `GeometryAdjustmentPanel`/`CropOverlayView` 當初建立的「Inspector 面板 + 畫布拖曳 overlay」兩層架構複製一份給線性漸層——新增 `Sources/AdjustmentUI/LocalAdjustmentsPanel.swift`（Add Gradient / 每列 enable 開關 / 刪除 / 選取中漸層的 Exposure 滑桿）跟 `Sources/LumaHarborApp/Views/LinearGradientOverlayView.swift`（每個漸層兩個獨立把手：中心點拖曳改位置、方向/範圍點拖曳同時改角度跟範圍）。`EditorToolMode` 新增 `.linearGradient`（這個 enum 自己的文件註解早就寫「未來的 local-adjustment 模式應該延伸這個 switch」，照做）；`EditorSession` 新增 `selectedLocalAdjustmentID`（純 UI 狀態，跟 `toolMode` 一樣在 `open()`/`close()` 時重置）。所有編輯都走 `editor.updateAdjustments(_:)`，跟其他每一個調整控制項共用同一條 undo/autosave 路徑。
+- **拖曳數學抽成純函式，可獨立單元測試**：新增 `Sources/LumaHarborApp/Views/LinearGradientDragMath.swift`，比照 `CropDragMath` 當初從 `CropOverlayView` 抽出來的理由——方向/範圍/位置的數學邏輯不需要真的驅動一個 `DragGesture` 就能單元測試。
+- **這輪抓到一個真的 bug（Task 4.1 schema 的既有缺陷）**：把拖曳數學接上 `LocalAdjustmentGeometry` 時，`testPositionDragClampsAtTheUnitSquareEdge...` 測試 RED 了——原來 Task 4.1 的 `x`/`y`/`range`/`radius`/`feather` 欄位只在 `init()` 裡 clamp，UI 直接修改既有值的欄位（`adjustments.localAdjustments[i].geometry.x = newX`，這正是這輪 UI 在做的事）完全沒有 clamp，跟 `GeometryAdjustments` 早就用 `didSet` 處理好的同一個問題。已經照 `GeometryAdjustments`/`Vignette` 的既有慣例，幫每個會被直接修改的欄位補上 `didSet` clamp 修好，RED 測試轉綠，同時重跑過 Task 4.1/4.2 的所有既有測試確認沒有回歸。
+- **座標系慣例文件化在 `LinearGradientOverlayView` 自己的 header 註解裡**：SwiftUI 本身就是 y-down，所以「順時針角度」在這一層直接用 `(cos, sin)` 對應、不用像 `LocalAdjustmentRenderer`（Task 4.2，Core Image 是 y-up）那樣把 y 分量反過來——這點如果搞混，會變成 UI 上拖曳往下卻讓 render 出來的效果往上跑，已經用 `LinearGradientDragMathTests` 的方向測試（右/下/上/左四個方向各自獨立斷言）釘住。
+- **在地化**：面板/overlay 新增的 11 個字串已經加進 en/zh-Hant 兩份 `.lproj`，並比照既有慣例新增 `LocalizationSmokeTest.testEveryLinearGradientStringHasAChineseTranslation`。
+- **驗證**：聚焦測試（`LinearGradient*|LocalAdjustment*` + `LocalizationSmokeTest`）0 失敗。完整 `swift test`：**1559 執行**（比上一輪基準 1533 多 26）、9 skip（既有 `RawFixtureTests` 基準不變）、0 失敗。`swift build` 乾淨。iOS generic build（`AdjustmentUI`/`RawProcessingCore` 是共用 module）——`** BUILD SUCCEEDED **`，`project.pbxproj` 建置前後確認未變動。`git diff --check` 乾淨。隱私掃描零命中。
+- **手動 screenshot checklist（roadmap 自己要求的 Task 4.3 交付項）**：新增 `docs/testing/beta/PHASE4_MANUAL_CHECKLIST.md`，13 項涵蓋新增漸層/拖曳位置把手/拖曳方向與範圍把手（含方向正確性人眼複查）/曝光滑桿/刪除/停用/多個漸層獨立性/離開編輯模式/undo/重新開啟持久化/匯出反映效果。**全部 13 項誠實列為 `NOT RUN`**——這個環境沒有真機/Simulator/人眼操作能力，這份清單就是留給真人接手用的。
+- **`NOT RUN`**：spot heal UI（Task 4.5）不在這個 task 範圍內，不是遺漏。真機/Simulator 手動視覺確認也還沒做，見上面 `PHASE4_MANUAL_CHECKLIST.md` 段落。
+- **Next action**：Task 4.4（Spot heal / clone model and render）——照 Task 4.1/4.2 已經打好的地基（`LocalAdjustmentKind.spotHeal`、`LocalAdjustmentGeometry` 的 `sourceX`/`sourceY`/`radius`/`healMode` 欄位都已經存在，`LocalAdjustmentRenderer` 目前明確跳過 `.spotHeal` 項目)，這輪要補上 target/source 移動測試、模式切換立即更新選取點的測試、full-resolution export 測試，實作保守的 Core Image based heal/clone，誠實記錄品質限制。或者先找時間讓真人跑一輪 `PHASE4_MANUAL_CHECKLIST.md` 的 13 項。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 4 Task 4.2：Linear gradient render composition (2026-09-04, Claude, TDD, in this worktree/branch)
 
