@@ -1,5 +1,11 @@
 # Phase 3 Manual Bug — A6 Preset Restore Summary
 
+## 狀態：已解決
+
+- 修復 commit：`2d697df`（`fix: present restore-complete summary through the view model's own alert (A6)`）。根因：`PresetBrowserView` 自己組裝並顯示還原摘要 alert（`exportError`），跟 `PresetLibraryViewModel.alert` 是兩條分開的路徑；在真實 Mac build 上這代表 restore 完成後摘要資料存在，但從未真的被呈現出來。修法把摘要組字與設定 alert 的邏輯搬進 `PresetLibraryViewModel.restoreBackupAndPresentSummary(_:into:conflict:)`，透過 view model 唯一的 `alert` 屬性發佈——跟其他每一個 view-model-driven alert走同一條路徑。
+- 驗證：重建 debug app bundle、重啟同一個隔離測試環境（同一份 `APFS-TMP-001` 圖庫、同一份 `.lhpresetbackup`）後，Claude 用 `osascript`/System Events UI scripting 重新執行「Restore Presets…」選同一份備份檔，確認視窗跳出「還原完成 / 1 已存在」alert，按「好」可正常關閉。詳見 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` A6 列。
+- 聚焦自動化測試：`PresetBrowserFoundationContractTests`／`PresetWorkflowTests`／`PresetLibraryViewModelTests` 71 執行、0 失敗；完整 `swift test` 1485 執行、9 skip、0 失敗；`git diff --check` 乾淨；隱私掃描零命中。
+
 ## 摘要
 
 - 標題：Restore Presets 完成後沒有顯示可讀的完成摘要

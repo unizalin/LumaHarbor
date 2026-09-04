@@ -2,7 +2,20 @@
 
 Updated: 2026-09-04
 
-Updated by: Codex（Phase 3 Mac manual verification started, A6 failed）
+Updated by: Claude（接手 Codex 中斷的 Phase 3 Mac 手動驗測：修好並驗證 A6，續跑 D1-D5/D7）
+
+## Phase 3 Mac manual verification：A6 修復並驗證，續跑虛擬副本 D 段 (2026-09-04, Claude, in this worktree/branch)
+
+- **背景**：Codex 用量到上限，在修 A6（`docs/testing/beta/PHASE3_BUG_A6_PRESET_RESTORE_SUMMARY.md`）的過程中中斷——工作目錄留有未提交的修法（`PresetLibraryViewModel.swift`/`PresetBrowserView.swift`/兩個測試檔），聚焦測試已跑綠但沒有 commit，也還沒重建 app bundle 重新驗證。使用者確認由 Claude 接手把整個循環做完。
+- **接手方式**：Claude 這個環境沒有等同 Codex CUA 的專用螢幕操作工具。確認過執行 Bash 的終端機（ghostty）已經被授予「輔助使用」權限後，改用 `osascript`/System Events 的 accessibility API（讀 UI 元件樹、點按鈕與選單項目）搭配 `screencapture` 逐步截圖確認，另外寫了兩個小工具（`CGEvent` 組出真正的雙擊／右鍵，因為 System Events 內建的 `click`/`double click` 語法在這個 macOS 版本對 SwiftUI 自訂手勢不夠可靠）拼出一個克難但可行的「畫面操作」流程。過程中多次因座標或 accessibility element 對應錯誤（例如某些 SwiftUI List row 的按鈕在 accessibility tree 回報同一個 position）重試，已在下方與 `PHASE3_MANUAL_CHECKLIST.md` 各自備註留下實際觀察，避免誤判。
+- **A6 修復驗證**：先驗證 Codex 未提交的修法（聚焦測試 71 執行 0 失敗、完整 `swift test` 1485 執行 9 skip 0 失敗、`git diff --check`/隱私掃描乾淨），照 repo 慣例 commit 為 `2d697df`。接著用 `Scripts/build-app-bundle.sh debug` 重建 app bundle、終止 Codex 留下的舊 process、以同一組 `HOME`/`CFFIXED_USER_HOME` 環境變數（指向同一個隔離測試 home `/private/tmp/LumaHarbor-Phase3-Manual-Home`）重新啟動同一個測試圖庫。用 UI scripting 重新執行一次「Restore Presets…」選同一份 `.lhpresetbackup`，截圖確認「還原完成 / 1 已存在」摘要 alert 正確跳出、按「好」可正常關閉。`docs/testing/beta/PHASE3_BUG_A6_PRESET_RESTORE_SUMMARY.md` 已標記解決，`PHASE3_MANUAL_CHECKLIST.md` A6 改為 `PASS`。
+- **續跑虛擬副本 D 段**：A6 解除阻擋後，繼續在同一個隔離測試環境跑 D1（建立副本）／D2（編輯副本隔離性）／D3（副本的副本）／D4（刪除副本）／D5（原照片無刪除選項）／D7（本機索引重建後存活）——全部 `PASS`，逐項的具體證據（截圖觀察 + 直接讀取隔離 Application Support 下的 `library.json`/sidecar/`library.sqlite` 交叉驗證）記在 `PHASE3_MANUAL_CHECKLIST.md` 對應列。D6（Finder 外部改名/搬移）評估操作風險後這輪跳過，維持 `NOT RUN`。
+- **D7 的一個操作陷阱，記錄避免下次誤判**：第一次嘗試 D7 時，Claude 在**app 還活著的 process 上**直接刪除 `library.sqlite*`／`cache`，結果 app 因為手上還握著已刪除檔案的控點而跳出「無法讀取本機索引」錯誤，重新掃描後虛擬副本沒有恢復——這不是產品 bug，是操作方式錯誤（正確做法是完全 quit app 後再刪本機索引，讓下次啟動用全新的 SQLite 連線）。改成「完全 quit → 刪索引/cache → 重新啟動」的乾淨流程後，D7 正確通過（sidebar 顯示「4 張照片」，虛擬副本與 badge 都正常出現，`library.sqlite` 的 `photo` table 也確認新增了帶正確 `variant_of` 的一列）。
+- **額外發現（不阻擋本輪判定，供之後留意）**：在測試過程中發現一筆沿用自更早期測試 session 的虛擬副本紀錄（sidecar/manifest 都還在磁碟上），其 `variantOf` 指向的原照片 ID 已經跟原照片目前實際的 photoID 不一致（很可能是更早某次 session 裡原照片身分變動所致，不是本輪任何操作造成——確認過 `RelinkResolver.resolve` 對同路徑檔案的身分解析邏輯本身沒有問題，這輪另外新建一份乾淨副本重跑整個 D7 流程即正確存活）。這筆孤兒副本目前在 UI 上永久不可見，但沒有被刪除、其他資料不受影響。值得之後找時間排查「副本的 `variantOf` 一旦跟原照片實際身分不同步時，沒有任何提示或復原路徑」這件事，但不是這輪的阻擋項。
+- **驗證**：聚焦測試 71 執行 0 失敗；完整 `swift test` 1485 執行、9 skip（既有 `RawFixtureTests` 基準）、0 失敗；`git diff --check` 乾淨；隱私掃描（`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM"`）對這輪 diff 零命中。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 全程未被讀取或變動（這輪完全沒碰 iOS 專案）。
+- **Commit**：`2d697df`（A6 修法，product + test）。這則段落與 `PHASE3_MANUAL_CHECKLIST.md`/`PHASE3_BUG_A6_PRESET_RESTORE_SUMMARY.md` 的更新會在寫完後另外 commit 為 docs-only。未 push、未 merge、未 rebase、未動 worktree。
+- **`NOT RUN`**：A1（Library scope 未完整覆蓋）、A7、B1-B4、C1-C4、D6 依 `PHASE3_MANUAL_CHECKLIST.md` 詳細列出的原因維持 `NOT RUN`。
+- **Next action**：整體判定為 `PARTIAL PASS`，還不能當作可上線候選——剩下的 `NOT RUN` 項目需要下一輪（Codex 額度恢復後，或使用者親自）補跑，特別是 B/C 段（多選批次同步、批次復原）完全還沒有人眼驗證過，以及那筆孤兒虛擬副本紀錄值得找時間排查根因。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 3 Mac manual verification started (2026-09-04, Codex-CUA, in this worktree/branch)
 
