@@ -1,8 +1,18 @@
 # Current Coordination State
 
-Updated: 2026-09-04
+Updated: 2026-09-05
 
-Updated by: Claude（Phase 4 Task 4.5 手動驗測 B1–B13 補跑完成，全數 PASS）
+Updated by: Claude（A11 ⌘Z 補測：換用硬體等級 CGEvent 注入重試，仍失敗，排除自動化工具本身的缺陷）
+
+## A11（實體鍵盤 ⌘Z）補測：CGEvent 硬體等級注入重試，仍失敗 (2026-09-05, Claude, docs-only, in this worktree/branch)
+
+- **狀態**：`DONE`（調查與文件記錄，`docs-only`，沒有改動任何 product/test code）。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a`，HEAD 在 `56427cc` 之上再加一個 docs commit。使用者這輪明確要求「你可以做吧」（接續上一輪詢問「要我先做別的，還是先等你補跑 A11」），於是嘗試自己補跑 A11——不是重複先前 session 已經試過的 AppleScript `keystroke`/CUA 合成按鍵，而是換一個更接近真實硬體的注入方式，看能不能有新結果。
+- **方法**：新寫一個 `CGEventCreateKeyboardEvent`-based 命令列小工具子指令（虛擬鍵碼 6＝Z，`CGEventFlags.maskCommand`，`post(tap: .cghidEventTap)`）——這條路徑比 AppleScript 的 `keystroke`（走 `CGEventKeyboardSetUnicodeString` 的 Unicode 文字注入）更接近真實鍵盤的 HID 事件。**先做管制組測試**：對全新的 TextEdit 文件用 `System Events keystroke` 打字，再用這個新工具送出 ⌘Z——文字確實被復原消失，證實這個注入方式本身是真的有效、會被系統當成硬體等級按鍵事件處理、且能觸發 AppKit 標準 `undo:` responder chain（TextEdit 沒有任何自訂 undo 邏輯）。接著在 LumaHarbor（沿用 B 段的隔離測試環境）重複三次「開啟局部修護的 Enabled 開關製造一筆新的可復原編輯（sidecar 立即變 `true`）→點擊照片畫布空白處把焦點留在主視窗內容→確認 `System Events` 回報 LumaHarbor 為 frontmost 且視窗 `AXMain`＝true→送出同一個 CGEvent ⌘Z→讀 sidecar」，三次結果一致：`isEnabled` 全程停留在 `true`，沒有被復原；改用滑鼠點選單「編輯 › 復原」則立即讓同一筆編輯回到 `false`，證實這筆編輯本身確實在 undo history 裡、確實可復原，只是 ⌘Z 這個按鍵路徑沒有觸發 `UndoRedoKeyEquivalentFix` 的 local key-down monitor。另外用 `grep -rn "addLocalMonitorForEvents"` 確認整個程式碼庫只有 `LumaHarborMainApp.swift` 這一處註冊 local monitor，排除「有其他 monitor 搶先攔截、吃掉這個按鍵事件」的可能。
+- **結論（不是新 bug，是既有已知限制的更強證據）**：這不只是 AppleScript `keystroke` 或 CUA 合成事件工具本身的缺陷——連比照真實硬體按鍵、且已經在完全不相關的系統應用程式（TextEdit）上驗證有效的 `CGEvent` 注入方式，一樣無法讓 `UndoRedoKeyEquivalentFix` 收到 ⌘Z。這讓「這其實會在真實實體鍵盤上重現，是一個真實的 SwiftUI/AppKit 事件路由限制，不只是自動化測試環境的產物」這個可能性明顯提高。但這輪測試終究還是黑箱操作（沒有 Xcode 中斷點/即時除錯能力），**不能**把 A11 從 `NOT RUN` 升級成確定的 `FAIL`，也**不能**升級成 `PASS`——維持 `NOT RUN`，等真人在實機用實體鍵盤做最終確認。
+- **產物**：這個新的 `CGEvent` 按鍵注入小工具留在本機 scratchpad（不在這個 repo 裡，未提交），跟先前 B 段測試用的 GUI 自動化工具是同一支小工具的擴充。`docs/testing/beta/PHASE4_MANUAL_CHECKLIST.md` 的 A11 列新增這輪的補測記錄，並新增一列「A11 補測」單獨記錄方法與結論；「已知限制」與「下一步」也一併更新，明確建議下一步是真人實機測試，若真人也重現失敗則直接開工程調查任務（Xcode 中斷點查 `NSEvent.addLocalMonitorForEvents` 的 handler 實際收到的事件內容），而不是繼續在這個環境換更多種合成注入方式重試。
+- **驗證**：這輪沒有改動 product/test code，`swift build`/`swift test`/iOS generic build 維持上一輪（HEAD `56427cc`）的基準不變。`git diff --check` 對這輪文件 diff 乾淨。隱私掃描（`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM"` 對 `git diff` 的新增行）零命中。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 這輪完全沒有被讀取或變動。
+- **NOT RUN**：A11 實體鍵盤 `⌘Z`（維持不變，理由見上）。
+- **Next action**：真人在實機用實體鍵盤補跑 A11；若真人也重現失敗，開一個獨立的工程調查任務用 Xcode 中斷點查 `UndoRedoKeyEquivalentFix.install` 的 handler 實際收到的事件內容，而不是回到手動 QA 清單裡繼續換合成注入方式重試。A11 完成（或有明確調查結論）後即可進入 Task 4.6（Phase 4 完整驗證輪）。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 4 Task 4.5 手動驗測：B1–B13 補跑，全數 PASS (2026-09-04, Claude, in this worktree/branch)
 
