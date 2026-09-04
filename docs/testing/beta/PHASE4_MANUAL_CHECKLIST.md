@@ -6,7 +6,7 @@
 
 ## 測試資訊
 
-- Build：`Scripts/build-app-bundle.sh debug`，隔離測試環境（`HOME`/`CFFIXED_USER_HOME=/private/tmp/LumaHarbor-Phase3-Manual-Home`，照片庫在 `/private/tmp/LumaHarbor-Phase3-Manual-Library`）。
+- Build：`Scripts/build-app-bundle.sh debug`，隔離測試環境（home 代號 `ISOLATED-HOME-001`，照片庫代號 `APFS-TMP-001`）。
 - 測試日期／時間：2026-09-04（下午，Asia/Taipei）。
 - 測試者代號：Claude（自動化 GUI 操作：`osascript`/System Events 存取樹 + 自製 `CGEvent` 點擊／拖曳／捲動小工具），非真人手動操作；每一項都有 sidecar JSON 讀值或截圖佐證，細節見各列備註。
 - Mac 型號／macOS 版本：Mac mini（Apple M4）／macOS 26.6.2（25G82）。
@@ -27,7 +27,7 @@
 | A8 | 關閉漸層列的「Enabled」開關 | 畫面上該漸層的視覺效果立即消失（曝光變化不再套用），但把手仍在（可以重新啟用），刪除按鈕與拖曳仍可操作 | PASS | 關閉僅存漸層的 Enabled 開關：sidecar `isEnabled=false`，列標籤變成「漸層（已停用）」，但截圖確認畫面上兩個把手仍在原位、仍可繼續互動；接著在停用狀態下拖曳位置把手（螢幕 (1180,480)→(1220,480)），`x` 仍然正常從 0.347 更新到 0.454，證明停用狀態下拖曳操作照樣有效（`isEnabled` 全程維持 `false`，未被拖曳動作意外改動）；測試後已重新開啟該開關恢復為 `isEnabled=true`。另外 A11 已用同一顆開關驗證過「停用後畫面過曝效果立即消失、用選單復原後立即恢復」，兩項互為佐證。 |
 | A9 | 新增兩個漸層，分別拖曳 | 兩個把手各自獨立，拖曳其中一個不影響另一個的位置/方向/範圍；點擊任一把手可切換選取（用 Inspector 裡哪一列highlight 起來確認） | PASS | A1–A6 對第二個漸層（`AA7DBA42`）做的一連串拖曳／曝光調整，全程原本的 `DD605A74`（`angleDegrees≈89.63`、`range≈0.357`、`x≈0.347`、`y≈0.607`、`exposure≈0.596`）數值完全沒被牽動，A7 刪除時也逐欄位核對過一致——確認兩個漸層互相獨立。切換選取則是點 Inspector 裡第一列的「漸層」標籤（非拖曳把手）：畫面上的把手立即從第二個漸層的位置跳到第一個漸層的位置，Inspector 對應列變成粗體、曝光滑桿也換成第一個漸層的數值（+0.60），確認點列可以切換選取且畫面同步。 |
 | A10 | 按 Inspector 的「Done」離開編輯模式 | 把手從畫面上消失，回到一般的 `.adjust` 工具模式，但漸層本身（含已設定的效果）繼續保留、繼續套用在照片上 | PASS | 點擊按鈕後：(1) 按鈕文字從「完成」變回「編輯漸層」，確認 `toolMode` 已離開 `.linearGradient`；(2) 畫面上的拖曳把手（藍色圓點）從照片預覽區消失；(3) 直接讀取 sidecar JSON（`.../.lumaharbor/edits/8AE6CC19-....json` 的 `adjustments.localAdjustments`）確認漸層資料完整保留：`id=DD605A74-9407-4416-85D8-34BD02B2C4A5`、`isEnabled=true`、`angleDegrees≈89.63`、`range≈0.357`、`x≈0.347`、`y≈0.607`、`adjustments.exposure=5`，與離開編輯模式前一致，且 Inspector 清單裡該漸層列仍在、Enabled 開關仍為 ON。 |
-| A11 | 對含有漸層的照片按 ⌘Z（Undo） | 最近一次漸層編輯（新增／拖曳／刪除／曝光調整）被復原，符合一般 undo 行為 | PASS | 先關閉漸層列的「Enabled」開關，sidecar JSON 確認 `isEnabled=false`（畫面同步顯示「漸層（已停用）」，照片原本被局部曝光 +5 EV 過曝的區域立即恢復正常色彩）。接著執行 Undo：透過自動化送出的合成 `⌘Z` 按鍵事件（`System Events keystroke "z" using command down`）**沒有**被 App 收到、undo 沒有發生；改用滑鼠點擊選單列「編輯 › 復原」後，sidecar JSON 立即回到 `isEnabled=true`，畫面也同步恢復（過曝效果與「漸層」列標籤都復原）。這代表 Undo 功能本身正確，但合成鍵盤事件無法穩定觸發 `⌘Z`，這其實是程式碼裡已知並記錄的既有限制（見 `Sources/LumaHarborApp/LumaHarborMainApp.swift` 裡 `UndoRedoKeyEquivalentFix` 的註解：SwiftUI 的 `.undoRedo` CommandGroup 無法可靠接住鍵盤等效鍵，改用 local key-down monitor 補救；2026-08-18 已用真人鍵盤手動確認過選單點擊可行、鍵盤有時不穩定），不是這輪 Phase 4 驗測新發現的問題，故用選單點擊驗證出的行為視為本項 PASS 的依據。真人在實機用實體鍵盤按 ⌘Z 建議之後再抽測一次作交叉確認。 |
+| A11 | 對含有漸層的照片按 ⌘Z（Undo） | 最近一次漸層編輯（新增／拖曳／刪除／曝光調整）被復原，符合一般 undo 行為 | NOT RUN | 先關閉漸層列的「Enabled」開關，sidecar JSON 確認 `isEnabled=false`（畫面同步顯示「漸層（已停用）」，照片原本被局部曝光 +5 EV 過曝的區域立即恢復正常色彩）。接著執行 Undo：Claude 透過自動化送出的合成 `⌘Z` 按鍵事件（`System Events keystroke "z" using command down`）**沒有**被 App 收到、undo 沒有發生；Codex 這輪補試 CUA `super+z`、`cmd+z`、`Command+z` 也同樣沒有讓 sidecar 的 `isEnabled=false` 復原。改用滑鼠點擊選單列「編輯 › 復原」與工具列 Undo 後，sidecar JSON 都能回到 `isEnabled=true`，畫面也同步恢復（過曝效果與「漸層」列標籤都復原）。因此只能把「選單／工具列 Undo」記為已驗證，不能把原測項要求的實體鍵盤 `⌘Z` 視為 PASS；需要真人在實機用實體鍵盤補跑一次。 |
 | A12 | 關閉照片再重新開啟（或重啟 App） | 漸層設定（位置/方向/範圍/曝光/啟用狀態）完整保留，畫面效果一致 | PASS | 用最嚴格的版本測：從選單「LumaHarbor › Quit LumaHarbor」完整關閉 App（非只是切照片），再用相同的隔離 `HOME`/`CFFIXED_USER_HOME` 環境變數重新啟動、雙擊同一張照片重新開啟編輯畫面。結果：(1) 預覽畫面的過曝視覺效果與關閉前一致；(2) Inspector 捲到「局部調整」區塊，漸層列（含 Enabled 開關 ON、刪除按鈕）都還在；(3) 直接讀 sidecar JSON 確認欄位逐一比對完全相同：`id=DD605A74-9407-4416-85D8-34BD02B2C4A5`、`angleDegrees≈89.63`、`range≈0.357`、`x≈0.347`、`y≈0.607`、`feather=50`、`isEnabled=true`、`adjustments.exposure=5`。另外附帶發現：重開 App 後 Inspector 面板預設捲到最上方（直方圖/詮釋資料/Preset），要往下捲才會看到「局部調整」——這是既有的面板捲動位置行為（不記憶上次捲動位置），不是 Phase 4 的迴歸，附記於此以免後續測試者誤以為漸層消失了。 |
 | A13 | 匯出含漸層效果的照片 | 匯出檔案裡看得到局部曝光效果（跟預覽畫面一致），確認不是只有預覽套用、匯出漏掉 | PASS | 走完整的「File › 匯出 JPEG…」流程（非自動化測試的內部呼叫），實際產生三份 JPEG 並用獨立寫的像素讀取工具（`CGImageSource`/`CGContext`，跟 App 本身無共用程式碼）逐點比對：(1) 停用漸層匯出 `phase3-a-renamed-1.jpg`（對照組）；(2) 啟用漸層、曝光調成 +0.6 EV（避開全白 clipping，原本 +5 EV 的漸層區域在這張已經整體過曝的測試相片上兩種狀態都會被裁到 255,255,255，無法用像素比對看出差異，故調低曝光值以得到有意義的量測結果）匯出 `phase3-a-renamed-2.jpg`。取樣結果（同一張照片、同樣座標，`(x,y)` 為正規化座標）：漸層作用範圍內（在漸層錨點 `y≈0.607` 下方、方向 90° 指向下方的區域）`(0.325,0.775)` 由 R165→193、`(0.925,0.925)` 由 R208/G118/B58→R245/G147/B76、`(0.875,0.875)` 由 R27→36、`(0.075,0.625)` 由 R132→147，全部依照離錨點的距離成比例變亮；同時特地取一個在漸層範圍**之外**的點 `(0.025,0.025)`（畫面右上角，y 遠小於漸層下邊界）驗證完全沒有變化（兩份檔案都是 R33，逐 bit 相同），證明效果有正確被限制在漸層作用範圍內，且是匯出檔案本身真的套用了效果，不是只有預覽畫面好看。跟 Task 4.2 的自動化測試 `PhotoExportTests.testExportAppliesALocalExposureGradientToTheWrittenFile` 驗證的是同一件事，但這次是走真人會用的匯出 UI 流程重新獨立確認一次。 |
 
@@ -45,11 +45,11 @@
 
 ## 整體結論
 
-- 結果：**PASS**（A1–A13 全部執行並留下 sidecar JSON 讀值與截圖佐證，沒有任何一項是 NOT RUN 或 FAIL；細節見各列備註）。
-- 這輪的自動化證據（`swift build`、`swift test`、iOS generic build、`git diff --check`、隱私掃描）記在 `docs/coordination/CURRENT.md` 的「Phase 4 Task 4.3」段落，跟這份手動清單是分開的兩件事；這份手動清單本身現在也已經補齊。
+- 結果：**PARTIAL PASS**（A1–A10、A12–A13 已執行並留下 sidecar JSON 讀值與截圖佐證；A11 的選單 Undo 已驗證，但原測項要求的實體鍵盤 `⌘Z` 尚未由真人補跑，維持 `NOT RUN`）。
+- 這輪的自動化證據（`swift build`、`swift test`、iOS generic build、`git diff --check`、隱私掃描）記在 `docs/coordination/CURRENT.md` 的「Phase 4 Task 4.3」段落，跟這份手動清單是分開的兩件事；這份手動清單已補齊除 A11 實體鍵盤 `⌘Z` 之外的項目。
 - 已知限制（非本輪新發現、不影響 PASS 結論，但值得記錄）：
-  1. 合成的 `⌘Z` 鍵盤事件無法穩定觸發 App 的 Undo（`System Events keystroke` 沒被 `UndoRedoKeyEquivalentFix` 的 local key-down monitor 接住），要用滑鼠點「編輯 › 復原」選單才能可靠觸發；程式碼裡的註解已記錄這是 SwiftUI `.undoRedo` CommandGroup 的既有限制，2026-08-18 已用真人鍵盤確認過選單點擊可行。建議真人日後用實體鍵盤直接按 ⌘Z 再抽測一次交叉確認。
+  1. 合成的 `⌘Z` 鍵盤事件無法穩定觸發 App 的 Undo（`System Events keystroke` 沒被 `UndoRedoKeyEquivalentFix` 的 local key-down monitor 接住），要用滑鼠點「編輯 › 復原」選單才能可靠觸發；程式碼裡的註解已記錄這是 SwiftUI `.undoRedo` CommandGroup 的既有限制。A11 因此不能被自動化結果支撐為 PASS，仍需真人用實體鍵盤直接按 `⌘Z` 補跑。
   2. App 重新啟動後 Inspector 面板預設捲到最上方（直方圖／詮釋資料／Preset），不會記得使用者上次捲動到「局部調整」的位置，需要手動往下捲——這是既有面板行為，不是 Phase 4 的迴歸，但容易讓人誤以為漸層資料消失了。
   3. 這份清單裡的測試相片（`phase3-a-renamed.ARW`）基礎曝光已經偏高，套用 +5 EV 局部曝光時大範圍會直接裁到全白（255,255,255），此時單看匯出檔案像素比對不出漸層有沒有作用；A13 改用較低的曝光值（+0.6 EV）加上刻意挑選漸層範圍內外的取樣點，才拿到有意義的量測證據。之後如果要再次用像素比對做迴歸測試，建議記得先確認取樣點沒有被裁到頂。
-- 這次驗測全程由 Claude 透過 `osascript`/System Events 與自製 `CGEvent` 工具操作真實視窗完成（非程式內部呼叫），過程中一度因為系統休眠與一個無關的背景視窗短暫搶走焦點而暫停查證焦點狀態，沒有造成非預期的資料變更或誤觸；建議這份清單之後仍抽空找真人在實機上快速過一輪、特別是 A11 的實體鍵盤 ⌘Z，作為交叉驗證。
+- 這次驗測全程由 Claude 透過 `osascript`/System Events 與自製 `CGEvent` 工具操作真實視窗完成（非程式內部呼叫），過程中一度因為系統休眠與一個無關的背景視窗短暫搶走焦點而暫停查證焦點狀態，沒有造成非預期的資料變更或誤觸；A11 的實體鍵盤 `⌘Z` 是這份清單目前唯一未完成的手動 gate。
 - 下一步：Task 4.4/4.5（spot heal／clone）完成後，補上對應章節與 Task 4.6 的完整驗證輪。
