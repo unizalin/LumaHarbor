@@ -73,6 +73,44 @@ public enum LocalAdjustmentKind: String, Codable, Equatable, Hashable, Sendable 
     case spotHeal
 }
 
+/// Copy/delete/select as list surgery on the plain array `PhotoAdjustments
+/// .localAdjustments` already is (Phase 4 Task 4.2's own "model tests for
+/// copy/delete/select" requirement) -- there is no service or view model
+/// yet (Task 4.3 is the first Mac UI), so this is exactly what a future
+/// "Duplicate"/"Delete"/tap-to-select action needs the schema layer to
+/// support, matching how `LibraryViewModel.duplicateAsVirtualCopy`/
+/// `deleteVirtualCopy` sit directly on top of equally plain model
+/// operations for Phase 3's virtual copies.
+extension Array where Element == LocalAdjustment {
+    /// Inserts a fresh-identity copy of the entry matching `id` immediately
+    /// after it, leaving everything else (including elements after the
+    /// original) in the same relative order. A no-op, not a crash, if `id`
+    /// isn't found -- matches `removing(_:)`'s own tolerance for a stale
+    /// reference (e.g. the entry was already deleted by a concurrent edit).
+    public func duplicating(_ id: UUID) -> [LocalAdjustment] {
+        guard let index = firstIndex(where: { $0.id == id }) else { return self }
+        var copy = self[index]
+        copy.id = UUID()
+        var result = self
+        result.insert(copy, at: index + 1)
+        return result
+    }
+
+    /// Removes the entry matching `id`. A no-op if `id` isn't found.
+    public func removing(_ id: UUID) -> [LocalAdjustment] {
+        var result = self
+        result.removeAll { $0.id == id }
+        return result
+    }
+
+    /// Looks up the entry matching `id` -- the model-layer half of "the
+    /// user tapped/selected this one"; which `id` counts as selected is a
+    /// future UI's own state, not this array's.
+    public func selecting(_ id: UUID) -> LocalAdjustment? {
+        first { $0.id == id }
+    }
+}
+
 /// Spot heal's two sampling modes (design spec §6.7).
 public enum SpotHealMode: String, Codable, Equatable, Hashable, Sendable {
     /// Auto-sampled surrounding texture — no source point needed.

@@ -193,3 +193,61 @@ final class LocalAdjustmentPatchTests: XCTestCase {
         )
     }
 }
+
+/// Model-level copy/delete/select operations on a `[LocalAdjustment]` list
+/// (Phase 4 Task 4.2's own "model tests for copy/delete/select" requirement),
+/// exercised as plain `Array` extensions -- there is no view model or
+/// service yet (that is Task 4.3's job), so this is exactly what the schema
+/// itself needs to support to make a future UI's duplicate/delete/select
+/// actions a thin wrapper rather than reimplementing list surgery.
+final class LocalAdjustmentListOperationsTests: XCTestCase {
+    func testDuplicatingInsertsAFreshCopyImmediatelyAfterTheOriginal() {
+        let original = LocalAdjustment(kind: .linearGradient, adjustments: LocalAdjustmentPatch(exposure: 1))
+        let other = LocalAdjustment(kind: .spotHeal)
+        let list = [original, other]
+
+        let duplicated = list.duplicating(original.id)
+
+        XCTAssertEqual(duplicated.count, 3)
+        XCTAssertEqual(duplicated[0].id, original.id)
+        XCTAssertNotEqual(duplicated[1].id, original.id, "the copy gets a fresh identity, not the original's")
+        XCTAssertEqual(duplicated[1].kind, original.kind)
+        XCTAssertEqual(duplicated[1].adjustments, original.adjustments)
+        XCTAssertEqual(duplicated[1].geometry, original.geometry)
+        XCTAssertEqual(duplicated[2].id, other.id, "everything after the original shifts down by one, order otherwise preserved")
+    }
+
+    func testDuplicatingAnIDNotInTheListIsANoOp() {
+        let list = [LocalAdjustment(kind: .linearGradient)]
+        XCTAssertEqual(list.duplicating(UUID()), list)
+    }
+
+    func testRemovingDeletesOnlyTheMatchingEntry() {
+        let first = LocalAdjustment(kind: .linearGradient)
+        let second = LocalAdjustment(kind: .spotHeal)
+        let third = LocalAdjustment(kind: .linearGradient)
+        let list = [first, second, third]
+
+        let removed = list.removing(second.id)
+
+        XCTAssertEqual(removed.map(\.id), [first.id, third.id])
+    }
+
+    func testRemovingAnIDNotInTheListIsANoOp() {
+        let list = [LocalAdjustment(kind: .linearGradient)]
+        XCTAssertEqual(list.removing(UUID()), list)
+    }
+
+    func testSelectingFindsTheMatchingEntryByID() {
+        let first = LocalAdjustment(kind: .linearGradient)
+        let second = LocalAdjustment(kind: .spotHeal)
+        let list = [first, second]
+
+        XCTAssertEqual(list.selecting(second.id)?.id, second.id)
+    }
+
+    func testSelectingAnIDNotInTheListReturnsNil() {
+        let list = [LocalAdjustment(kind: .linearGradient)]
+        XCTAssertNil(list.selecting(UUID()))
+    }
+}
