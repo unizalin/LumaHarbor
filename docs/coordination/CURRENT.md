@@ -2,7 +2,16 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（獨立審查 Phase 3 Task 3.5，修了兩個真的 bug）
+Updated by: Claude（Phase 3 Task 3.6：全 Phase 收尾驗證與 handoff report）
+
+## Phase 3 Task 3.6 (2026-09-04, Claude, verification-only, in this worktree/branch)
+
+- **狀態**：`DONE`（自動化驗證）。分支 `claude/awayphotoraweditor-parity-phase2-geometry`。這一輪沒有改動任何 product code——只做 Phase 3 全範圍的收尾驗證，加上這份 `CURRENT.md` 段落、`docs/testing/reports/2026-09-04-awayphotoraweditor-parity-phase3.md`、`docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` 三個文件，都在 Task 3.5 獨立審查的文件 commit `025a14a` 之上。Base 分支 `main` 在 `fb7109a4fd76035bb9ca3f492b1fa45f511a60ec`，未變動。開始前確認過分支／HEAD／dirty files 與這份檔案自己描述的狀態一致（HEAD `025a14a`，base `fb7109a`），沒有不符需要先處理。
+- **完整報告**：`docs/testing/reports/2026-09-04-awayphotoraweditor-parity-phase3.md`——涵蓋 Phase 3 五個 task（3.1 Preset library、3.2 Preset backup/restore、3.3 多選批次同步、3.4 批次復原、3.5 虛擬副本，共 26 個 commit）的逐 task 摘要、每個 task 各自獨立審查抓到並修好的 bug、各 task 重點測試與全範圍 gate 的完整結果表；這裡只摘要重點，細節請讀那份報告。
+- **結果**：各 task 重點測試分別重新單獨跑過（不是沿用各自回合當時的舊數字）——3.1 組（`BuiltInPresetRepositoryTests`/`PresetBrowserFoundationContractTests`/`PresetWorkflowTests`/`PresetLibraryViewModelTests`）77 執行 0 失敗；3.2 組（`PresetBackupArchiveTests`/`PresetRestoreTests`）13 執行 0 失敗；3.3 組（`AdjustmentPatchExtractionTests`/`BatchAdjustmentSyncServiceTests`/`EditorSessionEditingTests`/`AdjustmentGroupPanelsContractTests`/`BasicAdjustmentPanelModelTests`/`LibraryGridMultiSelectContractTests`/`BatchAdjustmentGestureIntegrationTests`）90 執行 0 失敗；3.4 組（`BatchUndoSummaryMessageTests`/`BatchAdjustmentSyncServiceTests`/`BatchAdjustmentGestureIntegrationTests`）29 執行 0 失敗；3.5 組（`RelinkResolverTests`/`PhotoIndexMigrationTests`/`PhotoIndexStoreTests`/`VirtualCopyServiceTests`/`VirtualCopyLibraryViewModelTests`/`LibraryLifecycleTests`）73 執行 0 失敗；共用的 `LocalizationSmokeTest` 12 執行 0 失敗。完整 `swift test` —— 1483 執行，9 skip（既有 `RawFixtureTests` fixture 相依基準，不變），0 失敗——跟上一輪（Task 3.5 獨立審查修復完成時）的基準完全一致。`git diff --check` 對工作目錄、`fb7109a..HEAD`（整個分支範圍）、`382d799..HEAD`（Phase 3 自己的範圍）都乾淨。隱私掃描（`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM"` 對 `fb7109a..HEAD`）：20 處命中，逐一確認全部落在 `CURRENT.md` 自己文字裡提到的、這個 worktree 已公開的路徑，另外把這個範圍內每一個被改到的 product/test 檔案單獨重跑同一組 pattern，零命中；沒有任何簽章／裝置專屬樣式的真實命中。`swift build` 乾淨。`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` —— `** BUILD SUCCEEDED **`。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 確認在 iOS build 前後都沒有變動。
+- **`NOT RUN`**：整個 Phase 3 的真機／Mac 桌機人眼手動驗證——這個環境沒有辦法啟動並操作 Mac app 的視窗。新建了 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`（比照既有 `docs/testing/beta/REAL_DEVICE_CHECKLIST.md` 的表格／NOT RUN 慣例，另開新檔而不是併入那份——那份是 iPad 多來源圖庫的清單，跟 Phase 3 這些只存在於 Mac app 的功能是不同的驗測對象），列出 preset（built-in 優先序、編輯、backup/restore）、多選批次同步、批次復原（含部分失敗與重試）、虛擬副本（建立/刪除/分組/badge/改名/索引重建後是否還在）四大類、共 21 個具體驗測項目，每項寫清楚要驗證什麼、預期行為是什麼；目前每一項都還是 `NOT RUN`。
+- **獨立審查**：Phase 3 五個 task（含 3.4 的 follow-up 回合）每一個都已個別經過獨立審查並修好找到的問題，細節見 `CURRENT.md` 各自的「Independent review of Phase 3 Task 3.x」段落與新報告的「獨立審查」小節；這輪 Task 3.6 本身是收尾驗證，沒有再發現新問題。
+- **Next action**：Phase 3 的自動化驗證與逐 task 獨立審查已全部完成。接下來由使用者決定：(a) 依 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` 在真實 Mac 上跑一輪人眼手動驗證，(b) 是否要把這個分支合併進 `main`（合併／push 都需要使用者明確授權，目前沒有），或 (c) 依 roadmap 開始下一個 Phase。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Independent review of Phase 3 Task 3.5 (2026-09-04, Claude, TDD, in this worktree/branch)
 
