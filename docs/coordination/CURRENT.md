@@ -2,7 +2,19 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（Phase 4 Task 4.1：local adjustment schema，只做 schema，未做 render/UI）
+Updated by: Claude（Phase 4 Task 4.2：Linear gradient render composition，preview/export 都已接上，未做 Mac UI）
+
+## Phase 4 Task 4.2：Linear gradient render composition (2026-09-04, Claude, TDD, in this worktree/branch)
+
+- **狀態**：`DONE`。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a`，這一輪之前的 HEAD 是 `a457e34`（Task 4.1 schema 完成）。Product commit：`996583b`。開始前確認過分支/HEAD/dirty files 一致。嚴格只做 Task 4.2 範圍——render composition，沒有動 Mac UI（Task 4.3）、沒有做 spot heal render（Task 4.4）、沒有碰 eyedropper/batch/preset/virtual copy（都已在更早的 Phase 完成）。
+- **接進 render pipeline**：新增 `Sources/RawProcessingCore/Pipeline/LocalAdjustmentRenderer.swift`，在 `CoreImagePreviewRenderer` 跟 `PhotoExporter` 兩條路徑裡都接在 `GeometryRenderer.apply(...)` **之後**、resize/export **之前**——跟 crop 當初被獨立審查移到最後的理由一樣：使用者是在已經旋轉/裁切過的顯示畫面上拖曳漸層錨點，錨點座標必須用那個已經套用過 geometry 的座標系解讀，不能用套用 geometry 之前的來源座標系。完整的 transform order 現在統一寫在 `GeometryRenderer` 檔案自己的 header 註解裡（decode → 基本調整 → geometry → local adjustments → resize/export），作為整條 pipeline 順序的唯一權威來源。
+- **Mask 與 patch 渲染邏輯**：`LocalAdjustmentRenderer.apply(_:to:)` 對每個 `isEnabled && kind == .linearGradient` 的項目,用 `CILinearGradient` 從 geometry 的 position/angle/range/feather 建出黑到白遮罩(angle 的順時針慣例跟 `GeometryRenderer.clockwiseRadians` 一致,兩個 renderer 保持一致)。`.spotHeal` 項目完全不處理,原封不動——那是 Task 4.4 的範圍。`LocalAdjustmentPatchRenderer` 重用 `AdjustmentPipeline` 處理 patch 的 7 個欄位(曝光/對比/高光/陰影/白色/黑色/飽和度,其餘欄位保持 identity 直接被跳過),`temperature`/`tint` 這兩個 `AdjustmentPipeline` 完全不處理的欄位(全域白平衡是烘進 RAW decode 本身的)則直接用 `CITemperatureAndTint` 處理——這不違反 `CoreImageRawDecoder` 自己文件裡「post-decode 溫度調整會打架」的顧慮,因為那個顧慮是針對「兩個全畫面決策打架」,局部區域調整本來就沒有對應的 RAW-level 機制,只能在 decode 之後做。
+- **模型層 copy/delete/select**：`LocalAdjustment.swift` 新增 `Array<LocalAdjustment>` extension 的 `duplicating(_:)`/`removing(_:)`/`selecting(_:)`——roadmap 自己要求的「model tests for copy/delete/select」，這輪只做到模型層（純陣列操作），沒有 view model 或 UI（Task 4.3 的範圍）。
+- **TDD**：先寫 `LocalAdjustmentRendererTests.swift`（synthetic 平面灰色圖，跟 `GeometryRendererTests` 的四象限標記圖不同，因為要測「這裡變亮那裡不變」需要均勻起始色，象限邊界會混淆取樣點）跟 `LocalAdjustmentTests.swift` 新增的 `LocalAdjustmentListOperationsTests`，跑 `swift test --filter` 確認真的編譯失敗才動手實作。實作完後有 2 個測試因為設計假設錯誤而 RED（`testMultipleEnabledEntriesBothApply` 誤以為兩個同方向漸層中間會沒被動到——實際上 `CILinearGradient` 過了 point1 之後會一直維持 color1，不會退回 0，這其實正是真實漸層濾鏡工具的行為，不是 bug；`testWideningFeatherSoftensTheTransition...` 用的 exposure 太強在兩種 feather 下都直接 clip 到全白，量不出差異）——都是測試設計本身的問題，修正測試後綠燈，沒有改動任何 render 邏輯本身。
+- **Export 驗證用真的讀檔案 pixel，不是只看尺寸**：`PhotoExportTests.swift` 新增兩個測試——一個確認匯出檔案裡靠近漸層作用側的 pixel 真的變亮（而不是只有記憶體內的 preview 變了，export 卻悄悄跳過），一個確認 `isEnabled: false` 的項目在匯出檔案裡完全沒有作用。因為 local adjustment 不像 crop/rotate 那樣會改變輸出尺寸，尺寸相同不能證明真的套用了，必須直接讀出檔案內容比對。
+- **驗證**：聚焦測試（`LocalAdjustment*|PhotoExportTests`）71 執行、0 失敗。完整 `swift test`：**1533 執行**（比上一輪基準 1513 多 20）、9 skip（既有 `RawFixtureTests` 基準不變）、0 失敗。`swift build` 乾淨。iOS generic build（`xcodebuild ... -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build`，因為 `RawProcessingCore` 是共用 module）——`** BUILD SUCCEEDED **`，`project.pbxproj` 建置前後確認未變動。`git diff --check` 乾淨。隱私掃描零命中。
+- **`NOT RUN`**：Mac UI（Task 4.3）、spot heal render（Task 4.4）都不在這個 task 範圍內，不是遺漏。真機/Simulator 手動視覺確認也還沒做——這輪完全是 model/render 層的自動化測試，沒有走到 UI，等 Task 4.3 做完後才有畫面可以人眼確認漸層拖曳的實際效果。
+- **Next action**：Task 4.3（Mac linear gradient UI）——crop overlay 那組的 source-contract 測試模式（`CropOverlayContractTests.swift`）已經有先例可以照抄，需要新增漸層拖曳把手的 overlay、工具模式切換、RAW non-destructive 文案，保留既有的 undo/autosave 行為。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 4 Task 4.1：Local adjustment schema (2026-09-04, Claude, TDD, in this worktree/branch)
 
