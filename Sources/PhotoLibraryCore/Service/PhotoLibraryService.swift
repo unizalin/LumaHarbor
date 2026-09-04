@@ -1436,6 +1436,16 @@ public actor PhotoLibraryService {
             manifest = LibraryManifest(libraryID: libraryID)
         }
 
+        // Phase 3 Task 3.5: a snapshot, taken once, of every virtual copy
+        // record this manifest already knows about, keyed by whatever it
+        // was duplicated from -- see `virtualCopyAssets(for:...)`'s own doc
+        // comment for why the scan loop below needs this to reconcile a
+        // copy's index row back in whenever its original is rescanned.
+        let variantRecordsByOriginal: [PhotoID: [PhotoRecord]] = Dictionary(
+            grouping: manifest.photos.filter { $0.variantOf != nil },
+            by: { $0.variantOf! }
+        )
+
         var indexed = 0
         var failed = 0
         var ambiguous = 0
@@ -1498,6 +1508,18 @@ public actor PhotoLibraryService {
                         manifest.upsert(record)
                         batch.append(asset)
                         indexed += 1
+                        // Phase 3 Task 3.5: bring any virtual copy of this
+                        // photo back into the index too -- it was never
+                        // discovered by the walk above (see
+                        // `virtualCopyAssets(for:...)`'s own doc comment).
+                        batch.append(contentsOf: Self.virtualCopyAssets(
+                            for: asset.id,
+                            metadata: asset.metadata,
+                            status: asset.status,
+                            libraryID: libraryID,
+                            recordsByOriginal: variantRecordsByOriginal,
+                            repository: repository
+                        ))
                     }
 
                     if cancelled { break }
@@ -1961,6 +1983,82 @@ public actor PhotoLibraryService {
         guard let sidecar = try? repository.loadSidecar(for: photoID) else { return (false, nil) }
         let hasEdits = !sidecar.adjustments.isNeutral
         return (hasEdits, hasEdits ? sidecar.modifiedAt : nil)
+    }
+
+    /// Phase 3 Task 3.5: a virtual copy is never independently discovered
+    /// by the scanner's own file walk (it shares its original's
+    /// `relativePath`, so no second file ever triggers `inspectWithTimeout`
+    /// for it) -- its own index row must instead be reconciled back in
+    /// from `library.json`'s own persisted `variantOf` record whenever the
+    /// photo it was duplicated from is itself successfully scanned. This is
+    /// what makes `resetRebuildableLocalData()` + rescan (spec §13.9,
+    /// "identities come from library.json, so edits survive the rebuild")
+    /// actually true for a copy too, not just an original -- without this,
+    /// deleting the local SQLite index permanently drops every virtual copy
+    /// from the app (though its sidecar and manifest record stay behind,
+    /// orphaned, on disk).
+    ///
+    /// `originalID` is walked recursively, not just one level, since
+    /// `createVirtualCopy(of:)` allows a copy of a copy (`variantOf`
+    /// pointing directly at whatever was duplicated, never chased to some
+    /// "root" original) -- a rebuild must bring every generation back, not
+    /// only the ones directly off the true original.
+    ///
+    /// `relativePath`/`fingerprint` come from the copy's own frozen
+    /// `PhotoRecord`, never from the just-rescanned original's current
+    /// values: a copy's own record is never touched by scanning (matching
+    /// `LibraryViewModel.orderedForDisplay`'s own documented reasoning), so
+    /// reconciling it must preserve that same frozen state, not
+    /// "unfreeze" it into the original's possibly-since-moved path.
+    /// `metadata`/`status` have no equivalent in `library.json` at all
+    /// (only `PhotoIndexStore` ever carried them), so the freshly
+    /// rescanned original's own values are reused -- correct because both
+    /// describe the same underlying RAW file's bytes.
+    private static func virtualCopyAssets(
+        for originalID: PhotoID,
+        metadata: RawMetadata,
+        status: PhotoStatus,
+        libraryID: LibraryID,
+        recordsByOriginal: [PhotoID: [PhotoRecord]],
+        repository: FileSidecarRepository
+    ) -> [PhotoAsset] {
+        guard let records = recordsByOriginal[originalID] else { return [] }
+        var result: [PhotoAsset] = []
+        for record in records {
+            // A copy's own sidecar (never its manifest record) is what
+            // makes it real (spec §8.1). `deleteVirtualCopy(_:)` removes
+            // the sidecar as its correctness gate but only best-effort
+            // cleans up the matching manifest record afterward -- the same
+            // tolerance `createVirtualCopy`'s own manifest write already
+            // has. Skipping a record with no loadable sidecar here is what
+            // stops a copy that failed exactly that manifest cleanup from
+            // being silently resurrected into the index by a later rescan.
+            guard let sidecar = try? repository.loadSidecar(for: record.photoID) else { continue }
+            let hasEdits = !sidecar.adjustments.isNeutral
+            let copyAsset = PhotoAsset(
+                id: record.photoID,
+                libraryID: libraryID,
+                relativePath: record.relativePath,
+                fingerprint: record.fingerprint,
+                metadata: metadata,
+                status: status,
+                lastSeenAt: Date(),
+                hasEdits: hasEdits,
+                lastEditAt: hasEdits ? sidecar.modifiedAt : nil,
+                variantOf: record.variantOf,
+                variantName: record.variantName
+            )
+            result.append(copyAsset)
+            result.append(contentsOf: Self.virtualCopyAssets(
+                for: record.photoID,
+                metadata: metadata,
+                status: status,
+                libraryID: libraryID,
+                recordsByOriginal: recordsByOriginal,
+                repository: repository
+            ))
+        }
+        return result
     }
 
     // MARK: - Edits
