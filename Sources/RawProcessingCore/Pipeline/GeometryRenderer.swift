@@ -6,17 +6,27 @@ import Foundation
 /// Applies `GeometryAdjustments` to an already-decoded image (design spec
 /// §6.5, roadmap Phase 2 "Task 2.2: Geometry render pipeline").
 ///
-/// Transform order:
+/// Whole-pipeline transform order (both `CoreImagePreviewRenderer` and
+/// `PhotoExporter`, in that same order):
 ///   1. orientation normalize -- already done before this runs: the decoder
 ///      (`CoreImageRawDecoder`) rotates `CIRAWFilter.outputImage` to display
 ///      orientation itself (see `ExportMetadataBuilder`'s P1-fix doc comment
 ///      for the corroborating finding), so this type never reads EXIF
 ///      orientation.
-///   2. rotate 90°/flip, then the fine-angle straighten
-///   3. perspective
-///   4. crop, in that already-rotated/flipped/straightened frame's own
-///      normalized coordinates
-///   5. resize/export -- the caller's job (`ExportResizing`, `PhotoExporter`)
+///   2. `AdjustmentPipeline` -- basic/tone/colour adjustments, in linear
+///      light, before this type ever runs.
+///   3. rotate 90°/flip, then the fine-angle straighten (this type)
+///   4. perspective (this type)
+///   5. crop, in that already-rotated/flipped/straightened frame's own
+///      normalized coordinates (this type)
+///   6. `LocalAdjustmentRenderer` -- linear gradient / spot heal (Phase 4
+///      Task 4.2/4.4), *after* this type, not before: a local adjustment's
+///      anchor point is placed by the user dragging on the displayed
+///      preview, which is always the fully rotated/cropped/straightened
+///      image, never the pre-geometry source -- the same reasoning that
+///      already put crop last within this type (see the independent-review
+///      P1 fix note below).
+///   7. resize/export -- the caller's job (`ExportResizing`, `PhotoExporter`)
 ///
 /// Independent-review P1 fix, corrected from the roadmap's own originally
 /// *suggested* order (crop before rotate, in the un-rotated source's

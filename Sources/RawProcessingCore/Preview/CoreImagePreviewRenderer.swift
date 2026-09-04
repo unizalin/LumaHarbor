@@ -46,9 +46,10 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
             try Task.checkCancellation()
             let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
             let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
+            let withLocalAdjustments = LocalAdjustmentRenderer.apply(request.adjustments.localAdjustments, to: withGeometry)
 
             try Task.checkCancellation()
-            let cgImage = try renderService.makeCGImage(withGeometry)
+            let cgImage = try renderService.makeCGImage(withLocalAdjustments)
 
             return PreviewImage(
                 cgImage: cgImage,

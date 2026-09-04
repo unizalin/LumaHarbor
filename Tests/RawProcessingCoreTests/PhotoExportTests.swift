@@ -626,6 +626,84 @@ final class PhotoExportTests: XCTestCase {
         XCTAssertEqual(outcome.pixelSize, CGSize(width: 4_000, height: 3_000))
     }
 
+    // MARK: - Local adjustments (Phase 4 Task 4.2)
+
+    /// The bug this pins: it would be easy for a local adjustment to
+    /// visibly apply in the interactive preview (which recomputes from a
+    /// downsampled decode on every slider move) while a full-resolution
+    /// export silently skips it -- exactly the class of bug the plan calls
+    /// out ("full-resolution export must apply the same geometry, not just
+    /// the preview cache"), now extended to local adjustments. Reads the
+    /// actual written file's own pixels, not just its dimensions (geometry's
+    /// own export tests only need dimensions since crop/rotate change
+    /// those; a local adjustment never does, so content is the only signal
+    /// that it ran at all).
+    func testExportAppliesALocalExposureGradientToTheWrittenFile() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 200, height: 100)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [
+            LocalAdjustment(
+                kind: .linearGradient,
+                geometry: LocalAdjustmentGeometry(x: 0.5, y: 0.5, angleDegrees: 0, range: 0.3, feather: 5),
+                adjustments: LocalAdjustmentPatch(exposure: 3)
+            )
+        ]
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+
+        func brightness(atFractionOfWidth fraction: CGFloat) throws -> Int {
+            var bytes = [UInt8](repeating: 0, count: 4)
+            let context = try XCTUnwrap(CGContext(
+                data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            let x = CGFloat(image.width) * fraction
+            let y = CGFloat(image.height) / 2
+            context.draw(image, in: CGRect(
+                x: -x, y: -(CGFloat(image.height) - 1 - y),
+                width: CGFloat(image.width), height: CGFloat(image.height)
+            ))
+            return Int(bytes[0]) + Int(bytes[1]) + Int(bytes[2])
+        }
+
+        let effectSide = try brightness(atFractionOfWidth: 0.95)
+        let farSide = try brightness(atFractionOfWidth: 0.02)
+        XCTAssertGreaterThan(
+            effectSide, farSide + 30,
+            "the exported file's own pixels must show the local exposure boost near the gradient's effect side, not just the in-memory preview"
+        )
+    }
+
+    func testDisabledLocalAdjustmentIsNotAppliedToTheExportedFile() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 200, height: 100)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [
+            LocalAdjustment(
+                kind: .linearGradient,
+                isEnabled: false,
+                geometry: LocalAdjustmentGeometry(x: 0.5, y: 0.5, angleDegrees: 0, range: 1, feather: 0),
+                adjustments: LocalAdjustmentPatch(exposure: 3)
+            )
+        ]
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+        // The synthetic decoder's own flat source colour (0.4, 0.5, 0.6) --
+        // a disabled entry must render as if it were never added.
+        XCTAssertLessThanOrEqual(abs(Int(bytes[0]) - Int(0.4 * 255)), 3)
+    }
+
     // MARK: - DPI metadata
 
     func testDPIIsWrittenToTheExportedFile() async throws {

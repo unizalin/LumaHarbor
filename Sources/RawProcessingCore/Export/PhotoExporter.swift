@@ -241,6 +241,15 @@ public actor PhotoExporter {
             try Task.checkCancellation()
             let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
             let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
+            // Local adjustments (Phase 4 Task 4.2) run after geometry, same
+            // as the preview path (`CoreImagePreviewRenderer`) and for the
+            // same reason: a gradient's anchor point is placed on the
+            // already-rotated/cropped displayed preview, so it must be
+            // interpreted in that same coordinate space here too -- this is
+            // what makes "export renders from full-resolution source and
+            // applies local edits" true rather than the export silently
+            // reverting to a geometry-only render.
+            let withLocalAdjustments = LocalAdjustmentRenderer.apply(request.adjustments.localAdjustments, to: withGeometry)
             let resizeTransform = ExportResizing.fittingTransform(
                 // The *geometry-adjusted* extent, not `decoded.nativePixelSize`:
                 // a crop/rotate changes what "native size" means for the
@@ -248,12 +257,14 @@ public actor PhotoExporter {
                 // extent, not a prediction (`GeometryRenderer
                 // .appliedPixelSize(of:geometry:)` is only for the
                 // metadata-only size report below, which has no decoded
-                // image to read an extent from).
-                nativeSize: withGeometry.extent.size,
+                // image to read an extent from). Local adjustments never
+                // change the extent, so reusing it here is exact, not a
+                // second prediction.
+                nativeSize: withLocalAdjustments.extent.size,
                 maximumWidth: maximumWidth,
                 maximumHeight: maximumHeight
             )
-            let resized = resizeTransform == .identity ? withGeometry : withGeometry.transformed(by: resizeTransform)
+            let resized = resizeTransform == .identity ? withLocalAdjustments : withLocalAdjustments.transformed(by: resizeTransform)
 
             try Task.checkCancellation()
             let exifProperties = ExportMetadataBuilder.imageProperties(from: exifPolicy.apply(to: decoded.metadata))
