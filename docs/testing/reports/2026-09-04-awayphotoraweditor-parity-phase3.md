@@ -4,13 +4,13 @@
 分支：`claude/awayphotoraweditor-parity-phase2-geometry`
 Worktree：`/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`
 Base：本機 `main@fb7109a4fd76035bb9ca3f492b1fa45f511a60ec`（Phase 1、Phase 2 皆已在這個分支上完成並經獨立審查；`main` 本身尚未 push）
-本報告最初撰寫時的 HEAD：`025a14abca4786b49180723a71dec56a649c1409`；Task 3.5 follow-up 審查修正驗證至 `8e5caf1`
+本報告最初撰寫時的 HEAD：`025a14abca4786b49180723a71dec56a649c1409`；Task 3.5 follow-up 審查修正驗證至 `8e5caf1`；Mac 手動驗測已於 `9593582d9acbfa1115df039c7b82b399cfca5644` 開始，但 A6 失敗中止。
 Roadmap：`docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-roadmap.md`（"Phase 3" 段落）
 Design spec：`docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`
 
 ## 摘要
 
-狀態：**自動化驗證完成**，涵蓋 Phase 3 全部五個 task（3.1 Preset library、3.2 Preset backup/restore、3.3 多選批次同步、3.4 批次復原、3.5 虛擬副本）。這五個 task 每一個做完後都經過獨立審查，其中 3.1+3.2（合併審查）、3.3、3.4（含一次 follow-up 回合的再審查）、3.5 各自都至少抓到並修好一個真的 bug。Task 3.6（本報告）本身沒有改 product code；但報告完成後的 Codex follow-up 獨立審查又發現 Task 3.5 的第三個問題：編輯虛擬副本會把它自己 sidecar 的 `variantOf` 靜默重寫成 `nil`。該問題已以 TDD 修正於 `8e5caf1`，並重跑全範圍驗證。真機／Mac 桌機的人眼手動驗證仍是 `NOT RUN`，見下方「未執行項目」與 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`。
+狀態：**自動化驗證完成；Mac 手動驗測已開始但未通過**。本報告涵蓋 Phase 3 全部五個 task（3.1 Preset library、3.2 Preset backup/restore、3.3 多選批次同步、3.4 批次復原、3.5 虛擬副本）。這五個 task 每一個做完後都經過獨立審查，其中 3.1+3.2（合併審查）、3.3、3.4（含一次 follow-up 回合的再審查）、3.5 各自都至少抓到並修好一個真的 bug。Task 3.6（本報告）本身沒有改 product code；但報告完成後的 Codex follow-up 獨立審查又發現 Task 3.5 的第三個問題：編輯虛擬副本會把它自己 sidecar 的 `variantOf` 靜默重寫成 `nil`。該問題已以 TDD 修正於 `8e5caf1`，並重跑全範圍驗證。之後 Codex 以隔離 Mac app 視窗開始跑 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`；A2-A5 通過，A1 只完成 partial 觀察，A6 因 Restore Presets 完成後沒有顯示可讀摘要而 `FAIL`，手動 gate 仍未通過。
 
 ## Commits（`382d799..8e5caf1`，28 個 commit，與 `main` 沒有分岔）
 
@@ -86,7 +86,7 @@ Design spec：`docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-desig
 
 ## 未執行項目
 
-- **整個 Phase 3 的真機／Mac 桌機人眼手動驗證：`NOT RUN`。** 這個環境沒有辦法啟動並操作 Mac app 的實際視窗，所以以下這些都只能靠單元／整合／source-contract 測試驗證，沒有人在跑起來的視窗前確認過：Preset browser 的 built-in／My Presets／Library 三個 scope 分區與徽章實際外觀、Preset 編輯表單的欄位勾選互動、Backup/Restore 的 `NSSavePanel`/`NSOpenPanel` 流程、多選 ⌘-click 的打勾徽章與拖曳同步的即時手感、"Undo Batch Sync" 選單與 alert 的實際樣式、虛擬副本徽章與右鍵選單的真實觸感、以及「刪除本機索引重建」在真實視窗上是否如預期把虛擬副本找回來。已建立 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`，列出這些項目各自要驗證什麼、預期行為是什麼，供之後有人拿到真實 Mac 時照著走；目前清單裡每一項都還是 `NOT RUN`。
+- **Phase 3 的 Mac 桌面人眼手動驗證：`FAIL`（已開始，未完成）。** Codex 以 `Scripts/build-app-bundle.sh debug` 建出 Mac debug `.app`，以前景方式啟動並用隔離 Application Support 與 `APFS-TMP-001` 測試圖庫跑 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`。A2-A5 為 `PASS`；A1 只完成 built-in/My Presets 的 partial 觀察，Library scope 尚未完整驗證，維持 `NOT RUN`；A6 為 `FAIL`：Backup My Presets 成功輸出 `.lhpresetbackup` 且檔案可讀，但 Restore Presets 選取同一份 backup 後沒有顯示「還原完成」或新增/略過/失敗摘要 alert，無法通過「摘要文字清楚可讀」。A7、B1-B4、C1-C4、D1-D7 依清單停止條件維持 `NOT RUN`。Bug 記錄：`docs/testing/beta/PHASE3_BUG_A6_PRESET_RESTORE_SUMMARY.md`。
 - **`LumaHarborIntegrationTests.RawFixtureTests`**（9 個測試，上表已列）——`SKIPPED`，不是 `NOT RUN`：需要 `LUMAHARBOR_RAW_FIXTURE_DIR` 指向真實相機 RAW 檔案，這個環境沒有，從 Phase 1 起就是既有、不變的基準。
 - **刻意排除、不是這輪漏掉的範圍**（Task 3.5 一開始就經使用者明確決定排除，記錄在 `CURRENT.md` Task 3.5 段落）：批次同步（3.3/3.4）、preset 套用／匯出、搜尋／篩選目前都還不認識虛擬副本——虛擬副本在這些流程裡就是一張普通、獨立的 `PhotoAsset`，除了圖庫網格自己的分組與兩個新的右鍵選單動作之外，沒有特別處理。這是下一輪如果要擴大虛擬副本相容性時的待辦，不是這次 Task 3.6 收尾漏掉的東西。
 - **Preset 相關既有的本地化缺口**（Task 3.1 自己記錄，非本輪引入）：`PresetError` 整個 `LocalizedError` family 與部分 alert 內文從一開始就沒有 `.strings` entry，兩種語言都沒有；這是獨立於 Task 3.1 新增內容之外的既有系統性缺口，留待日後整批處理。
@@ -99,4 +99,4 @@ Phase 3 五個 task（3.1 起到 3.5 止，含 3.4 與 3.5 的 follow-up 回合�
 
 尚未 land、merge、rebase 或 push。`claude/awayphotoraweditor-parity-phase2-geometry` 仍是獨立分支／worktree，位於 `/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`，未 push，沒有任何簽章／本機專案設定被提交。本機 `main` 仍在 `fb7109a`，領先 `origin/main` 27 個 commit，未 push，不受這個分支影響。
 
-建議下一步：先依 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` 在真實 Mac 上跑完 21 項人眼手動驗證；全數 PASS 後，再由使用者明確授權是否將這個分支合併進 `main`。下一個 Phase 的規劃可以在獨立 worktree 進行，但不應建立在尚未完成手動 gate 的 Phase 3 分支上。
+建議下一步：先修 A6 Restore Presets 完成摘要沒有出現的 Mac UI 問題；修好並驗證後，再重跑 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`。全數 PASS 後，再由使用者明確授權是否將這個分支合併進 `main`。下一個 Phase 的規劃可以在獨立 worktree 進行，但不應建立在尚未完成手動 gate 的 Phase 3 分支上。

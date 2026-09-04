@@ -4,12 +4,12 @@
 
 ## 測試資訊
 
-- Build：
-- Commit（完整 SHA）：
-- 測試日期／時間：
-- 測試者代號：
-- Mac 型號／macOS 版本：
-- 測試用圖庫（APFS/exFAT/檔案提供者，代號即可，不填真實路徑）：
+- Build：Debug `.app` bundle built with `Scripts/build-app-bundle.sh debug`
+- Commit（完整 SHA）：9593582d9acbfa1115df039c7b82b399cfca5644
+- 測試日期／時間：2026-09-04 11:00 CST
+- 測試者代號：Codex-CUA
+- Mac 型號／macOS 版本：Mac mini (Mac16,10), Apple M4, 32 GB, macOS 26.6.2 (25G82)
+- 測試用圖庫（APFS/exFAT/檔案提供者，代號即可，不填真實路徑）：APFS-TMP-001（3 張 Sony ARW 測試副本 + 1 份 XMP fixture）
 
 每一項只能填 `PASS`、`FAIL` 或 `NOT RUN`，並附必要備註。`NOT RUN` 不得視為通過。
 
@@ -17,12 +17,12 @@
 
 | ID | 驗測項目 | 預期行為 | 結果 | 備註／證據 |
 |---|---|---|---|---|
-| A1 | Preset Browser 同時顯示 Built-In／My Presets／Library 三個 scope | 三個 scope 的項目都可見，Built-In 的兩個內建 preset（"High Contrast"／"Flat (Low Contrast)"）帶有「Built-In」徽章 | NOT RUN | |
-| A2 | Built-In preset 無法直接改名／編輯／刪除 | 右鍵選單只剩「Copy to My Presets」可用，其餘操作不可選或不存在 | NOT RUN | |
-| A3 | 把 Built-In preset 複製到 My Presets 後可自由編輯 | 複製出來的項目取得全新身分（不是同一個內建 preset 的 UUID），可正常改名／編輯／刪除，原本的 Built-In 項目不受影響 | NOT RUN | |
-| A4 | 對已存的 preset 執行「Edit…」，取消某個欄位的勾選 | 該欄位從 preset 的 patch 中移除（之後套用這個 preset 不會再覆蓋該欄位），其餘欄位不受影響 | NOT RUN | |
-| A5 | 套用一個 preset 到目前打開的照片 | 對應欄位立即改變，且可用一般的 Undo（⌘Z）復原 | NOT RUN | |
-| A6 | 從「Backup My Presets…」匯出一份 `.lhpresetbackup`，之後用「Restore Presets…」還原到 My Presets | 還原後項目與備份時一致，成功／失敗／略過的摘要文字（含中文翻譯）清楚可讀 | NOT RUN | |
+| A1 | Preset Browser 同時顯示 Built-In／My Presets／Library 三個 scope | 三個 scope 的項目都可見，Built-In 的兩個內建 preset（"High Contrast"／"Flat (Low Contrast)"）帶有「Built-In」徽章 | NOT RUN | Partial：UI 顯示 `Flat (Low Contrast)`／`High Contrast` 與「內建」徽章；複製到 My Presets 後同名 user preset 也出現在同一區塊。尚未建立 Library scope preset，因此未完整驗證三個 scope。 |
+| A2 | Built-In preset 無法直接改名／編輯／刪除 | 右鍵選單只剩「Copy to My Presets」可用，其餘操作不可選或不存在 | PASS | Built-in row 的更多選單只顯示 `匯出…` 與 `Copy to My Presets`，未顯示 rename/edit/delete。 |
+| A3 | 把 Built-In preset 複製到 My Presets 後可自由編輯 | 複製出來的項目取得全新身分（不是同一個內建 preset 的 UUID），可正常改名／編輯／刪除，原本的 Built-In 項目不受影響 | PASS | 複製後 My Presets 出現第二筆 `Flat (Low Contrast)`；該 row 更多選單顯示重新命名、編輯、匯出、Copy to This Library、刪除。 |
+| A4 | 對已存的 preset 執行「Edit…」，取消某個欄位的勾選 | 該欄位從 preset 的 patch 中移除（之後套用這個 preset 不會再覆蓋該欄位），其餘欄位不受影響 | PASS | 編輯 sheet 顯示單一「對比」欄位；取消勾選並儲存後，隔離 My Presets 檔案的 `patch` 為空物件。 |
+| A5 | 套用一個 preset 到目前打開的照片 | 對應欄位立即改變，且可用一般的 Undo（⌘Z）復原 | PASS | 套用 `High Contrast` 後 `對比` 變 `+30`、`飽和度` 變 `+10`；按 toolbar 復原後兩者回到 `0`。 |
+| A6 | 從「Backup My Presets…」匯出一份 `.lhpresetbackup`，之後用「Restore Presets…」還原到 My Presets | 還原後項目與備份時一致，成功／失敗／略過的摘要文字（含中文翻譯）清楚可讀 | FAIL | Backup 檔已成功寫出且可讀；Restore panel 可選該檔並關閉，但回到主視窗後沒有顯示「還原完成」或新增/略過摘要 alert。見 `docs/testing/beta/PHASE3_BUG_A6_PRESET_RESTORE_SUMMARY.md`。 |
 | A7 | 匯入一個帶未知欄位的 `.xmp`，再匯出成 `.lhpreset`，再重新匯入 | 未知欄位不遺失（Imported 徽章與原始 XMP 內容都還在） | NOT RUN | |
 
 ## B. 多選批次同步
@@ -68,7 +68,7 @@
 
 ## 整體結論
 
-- 結果：NOT RUN
-- 阻擋問題：
-- 未執行項目與原因：（此清單建立時尚未有真機／Mac 桌機環境可操作，全部項目為 NOT RUN）
-- 證據位置（僅填去識別化名稱）：
+- 結果：FAIL
+- 阻擋問題：A6 restore completion summary 未在 Mac app 視窗中呈現，無法確認成功／失敗／略過摘要文字清楚可讀。
+- 未執行項目與原因：A1（Library scope 未完整覆蓋）、A7、B1-B4、C1-C4、D1-D7 依本清單停止條件維持 `NOT RUN`；A6 已 FAIL，停止把此 build 視為可上線候選。
+- 證據位置（僅填去識別化名稱）：CUA-Phase3-A1-A6-20260904；APFS-TMP-001；Bug-A6-Preset-Restore-Summary

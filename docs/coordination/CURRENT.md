@@ -2,7 +2,16 @@
 
 Updated: 2026-09-04
 
-Updated by: Codex（Phase 3 Task 3.5 follow-up independent review fix）
+Updated by: Codex（Phase 3 Mac manual verification started, A6 failed）
+
+## Phase 3 Mac manual verification started (2026-09-04, Codex-CUA, in this worktree/branch)
+
+- **狀態**：`FAIL`（手動驗測中止）。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，驗測 commit `9593582d9acbfa1115df039c7b82b399cfca5644`，base 仍是 `main@fb7109a4fd76035bb9ca3f492b1fa45f511a60ec`。未 push、未 merge、未 rebase。
+- **環境**：用 `Scripts/build-app-bundle.sh debug` 建出 Mac debug `.app`，以前景方式啟動，並把 Application Support 指到隔離測試 home。測試圖庫代號 `APFS-TMP-001`，內容為 3 張 Sony ARW 測試副本與 1 份 XMP fixture；不在文件保存完整本機路徑、真實照片內容或私人 fixture 路徑。
+- **已跑項目**：`docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` 的 A2-A5 為 `PASS`；A1 只完成 partial 觀察，維持 `NOT RUN`。已確認：加入測試圖庫後主視窗顯示 3 張照片；Preset Browser 顯示 built-in presets 與「內建」徽章；built-in row 不提供 rename/edit/delete；Copy to My Presets 後使用者 preset row 提供 rename/edit/export/copy/delete；Edit sheet 取消欄位勾選後 My Presets 檔案 `patch` 變空；套用 `High Contrast` 讓 `對比` 變 `+30`、`飽和度` 變 `+10`，toolbar 復原後回到 0。
+- **阻擋問題**：A6 `FAIL`。`Backup My Presets...` 成功輸出 `.lhpresetbackup`，檔案可讀；但 `Restore Presets...` 選取同一份 backup 並按 `Open` 後，只回到主視窗，沒有呈現「還原完成」或新增/略過/失敗摘要 alert，因此「成功／失敗／略過的摘要文字（含中文翻譯）清楚可讀」未通過。Bug 記錄：`docs/testing/beta/PHASE3_BUG_A6_PRESET_RESTORE_SUMMARY.md`。
+- **`NOT RUN`**：依清單停止條件，A1（Library scope 未完整覆蓋）、A7、B1-B4、C1-C4、D1-D7 尚未執行；不能把 Phase 3 Mac manual gate 報成 PASS。
+- **Next action**：先修 A6 restore completion summary 的 Mac UI 呈現問題，完成 TDD 與自動化驗證後，再重跑 Phase 3 Mac manual checklist。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Follow-up independent review of Phase 3 Task 3.5 (2026-09-04, Codex, TDD, in this worktree/branch)
 
