@@ -2,7 +2,19 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（Phase 4 Task 4.3：Mac linear gradient UI，Inspector 面板 + 畫布拖曳把手都已實作，手動清單待真人跑）
+Updated by: Claude（Phase 4 Task 4.3 手動驗測清單 A1–A13 全部跑完，全部 PASS；Task 4.4 spot heal 尚未開始）
+
+## Phase 4 Task 4.3 手動驗測：PHASE4_MANUAL_CHECKLIST.md A1–A13 全部 PASS (2026-09-04, Claude, verification-only, in this worktree/branch)
+
+- **狀態**：`DONE`（手動驗測部分）。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，worktree `.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a`。這輪沒有改任何 product code——純粹是把 Task 4.3 建立時留下的 `docs/testing/beta/PHASE4_MANUAL_CHECKLIST.md`（當時 13 項全部 `NOT RUN`）在真實 Mac 視窗上跑過一輪。開始前確認過分支/HEAD/dirty files 跟本檔一致；product HEAD 沿用 Task 4.3 的 `8529dc2`（本輪只新增這份文件的一個 docs commit）。
+- **驗測方式**：沒有真人手動操作，而是由 Claude 透過 `osascript`/System Events 存取樹查詢＋點擊，加上現場編譯的 `CGEvent`-based 命令列小工具（`click`/`drag`/`scroll`）對真實執行中的 `build/LumaHarbor.app`（`Scripts/build-app-bundle.sh debug`，隔離 `HOME=/private/tmp/LumaHarbor-Phase3-Manual-Home`）送出真實滑鼠/鍵盤事件；每一項的判定依據都是 sidecar JSON（`/private/tmp/LumaHarbor-Phase3-Manual-Library/.lumaharbor/edits/*.json`）逐欄位讀值，加上截圖比對，不是只看畫面「感覺對不對」。詳細每一項的操作與讀值記在 `PHASE4_MANUAL_CHECKLIST.md` 本身，這裡只記重點與跟未來工作有關的發現。
+- **A1–A9（拖曳把手）**：全部 PASS。新增漸層／拖曳位置／拖曳方向到 0°/90°／拖近拖遠改變 range／曝光滑桿局部生效／刪除只影響單一漸層／停用後效果消失但把手與拖曳仍可用／兩個漸層互相獨立且點列可切換選取，逐項都有 sidecar 數值變化佐證。方向慣例（往下拖＝角度變正、非负）跟 `LinearGradientDragMathTests` 的既有單元測試結論一致，這次是拿真實視窗座標再驗證一次，沒有發現落差。
+- **A10–A13（離開編輯模式／Undo／持久性／匯出）**：全部 PASS。A12 特地測了最嚴格版本——從選單完整 Quit App、用同樣隔離環境重開、重新雙擊照片，確認漸層的位置/方向/範圍/曝光/啟用狀態逐欄位跟關閉前相同。A13 特地走真人會用的「File › 匯出 JPEG…」UI 流程（不是呼叫測試內部 API），匯出後用獨立寫的 `CGImageSource` 像素讀取工具比對「有漸層」跟「沒漸層」兩份匯出檔案，證實局部曝光效果確實寫進了匯出檔案，且只影響漸層範圍內的像素、範圍外像素逐 bit 相同。
+- **這輪發現、但不算 Phase 4 迴歸的既有限制（已寫進 checklist 的整體結論，供下次驗測或 spot heal UI 開發時參考）**：
+  1. 合成的 `⌘Z` `CGEvent`/`System Events keystroke` 按鍵事件無法穩定觸發 App 的 Undo——`Sources/LumaHarborApp/LumaHarborMainApp.swift` 的 `UndoRedoKeyEquivalentFix` 用 local key-down monitor 接鍵盤事件，這次合成事件沒被接住；改用滑鼠點「編輯 › 復原」選單就正常。程式碼裡的註解本來就記錄了這是 SwiftUI `.undoRedo` CommandGroup 的已知限制、2026-08-18 已用真人鍵盤驗證過選單可行。建議之後找真人用實體鍵盤直接按一次 ⌘Z 交叉確認，純自動化環境目前測不出這條路徑。
+  2. App 重啟後 Inspector 面板預設捲到最上方（直方圖/詮釋資料/Preset），不記得使用者上次捲到「局部調整」的位置——是既有的面板行為，不是這輪新增的迴歸，但容易讓下一個測試的人誤以為漸層不見了，值得在 spot heal UI 也共用同一個面板時留意。
+  3. 測試相片（`phase3-a-renamed.ARW`）基礎曝光偏高，套用較大的局部曝光值時大範圍會直接裁到 255,255,255，此時像素比對看不出差異；A13 改用較低曝光值＋刻意挑選漸層範圍內外的取樣點才量到有意義的差異。之後如果要建立自動化的「匯出像素回歸測試」用這張照片，要注意這個 clipping 陷阱。
+- **下一步**：Task 4.4（spot heal / clone 的資料模型與 render 實作——`LocalAdjustmentKind.spotHeal`、`LocalAdjustmentGeometry` 的 `sourceX`/`sourceY`/`radius`/`healMode` 欄位在 Task 4.1 就已經打好地基，`LocalAdjustmentRenderer` 目前明確跳過 `.spotHeal` 項目，這輪要補上 render 實作），接著 Task 4.5（spot heal 的 Mac UI，比照這輪 linear gradient UI 的 Inspector + overlay 兩層架構）、Task 4.6（Phase 4 完整驗證輪）。
 
 ## Phase 4 Task 4.3：Mac linear gradient UI (2026-09-04, Claude, TDD, in this worktree/branch)
 
