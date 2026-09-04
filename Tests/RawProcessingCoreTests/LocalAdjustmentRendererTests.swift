@@ -26,6 +26,24 @@ final class LocalAdjustmentRendererTests: XCTestCase {
             .cropped(to: CGRect(origin: .zero, size: size))
     }
 
+    /// Left half pure blue (red channel 0), right half pure red (red channel
+    /// 255) -- unlike `makeFlatImage`, spot heal/clone need actual pixel
+    /// content difference between a source and a target region to prove
+    /// content was actually copied; a flat fixture would make clone/heal
+    /// invisible to a pixel assertion. A horizontal split needs no
+    /// visual/Core-Image y-flip (unlike `GeometryRendererTests`'
+    /// `makeQuadrantImage`, which does), since x means the same thing in
+    /// both coordinate systems.
+    private func makeHalvesImage(size: CGSize? = nil) -> CIImage {
+        let size = size ?? self.size
+        let halfWidth = size.width / 2
+        let left = CIImage(color: CIColor(red: 0, green: 0, blue: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: halfWidth, height: size.height))
+        let right = CIImage(color: CIColor(red: 1, green: 0, blue: 0))
+            .cropped(to: CGRect(x: halfWidth, y: 0, width: size.width - halfWidth, height: size.height))
+        return left.composited(over: right).cropped(to: CGRect(origin: .zero, size: size))
+    }
+
     /// Visual/on-screen coordinates, (0,0) at the top-left, matching
     /// `GeometryRendererTests.sample(_:of:)`'s own convention.
     private func samplePoint(
@@ -78,19 +96,132 @@ final class LocalAdjustmentRendererTests: XCTestCase {
         XCTAssertEqual(sample.red, 128, accuracy: 2, "a disabled local adjustment must render exactly as if it were absent")
     }
 
-    func testSpotHealEntriesAreIgnoredByThisRenderer() throws {
-        // Task 4.2's own scope boundary (roadmap): spot heal render is Task
-        // 4.4's job. A spotHeal entry must not crash or silently apply
-        // gradient math against heal-shaped geometry.
-        let source = makeFlatImage()
+    func testDisabledSpotHealIsSkipped() throws {
+        let source = makeHalvesImage()
         let heal = LocalAdjustment(
             kind: .spotHeal,
-            geometry: LocalAdjustmentGeometry(x: 0.5, y: 0.5, radius: 0.3, healMode: .heal),
-            adjustments: LocalAdjustmentPatch(exposure: 3)
+            isEnabled: false,
+            geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.5, sourceX: 0.8, sourceY: 0.5, radius: 0.15, feather: 0, healMode: .clone)
         )
         let output = LocalAdjustmentRenderer.apply([heal], to: source)
-        let sample = try samplePoint(CGPoint(x: 32, y: 32), of: output)
-        XCTAssertEqual(sample.red, 128, accuracy: 2)
+        let target = try samplePoint(CGPoint(x: 12, y: 32), of: output)
+        XCTAssertEqual(target.red, 0, accuracy: 2, "a disabled spot heal entry must render as if it were never added -- the left (blue) half must stay untouched")
+    }
+
+    // MARK: - Spot heal / clone (Task 4.4)
+
+    func testCloneCopiesContentFromSourceToTarget() throws {
+        let source = makeHalvesImage()
+        let heal = LocalAdjustment(
+            kind: .spotHeal,
+            geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.5, sourceX: 0.8, sourceY: 0.5, radius: 0.15, feather: 0, healMode: .clone)
+        )
+        let output = LocalAdjustmentRenderer.apply([heal], to: source)
+
+        let target = try samplePoint(CGPoint(x: 12, y: 32), of: output)
+        XCTAssertGreaterThan(target.red, 200, "clone must copy the source region's red content onto the target -- got \(target)")
+
+        let farFromTarget = try samplePoint(CGPoint(x: 2, y: 2), of: output)
+        XCTAssertEqual(farFromTarget.red, 0, accuracy: 2, "clone must stay confined to the brush radius around the target")
+    }
+
+    func testMovingTheSourcePointChangesWhatIsCloned() throws {
+        let source = makeHalvesImage()
+        func heal(sourceX: Double) -> LocalAdjustment {
+            LocalAdjustment(
+                kind: .spotHeal,
+                geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.5, sourceX: sourceX, sourceY: 0.5, radius: 0.1, feather: 0, healMode: .clone)
+            )
+        }
+        let redSourcedOutput = LocalAdjustmentRenderer.apply([heal(sourceX: 0.8)], to: source)
+        let blueSourcedOutput = LocalAdjustmentRenderer.apply([heal(sourceX: 0.25)], to: source)
+
+        let targetPoint = CGPoint(x: 12, y: 32)
+        let redSourced = try samplePoint(targetPoint, of: redSourcedOutput)
+        let blueSourced = try samplePoint(targetPoint, of: blueSourcedOutput)
+        XCTAssertGreaterThan(
+            redSourced.red, blueSourced.red + 100,
+            "moving the source point must change what content clone copies onto an unchanged target -- red-sourced=\(redSourced) blue-sourced=\(blueSourced)"
+        )
+    }
+
+    func testMovingTheTargetPointMovesWhereTheEffectAppears() throws {
+        let source = makeHalvesImage()
+        func heal(targetX: Double) -> LocalAdjustment {
+            LocalAdjustment(
+                kind: .spotHeal,
+                geometry: LocalAdjustmentGeometry(x: targetX, y: 0.5, sourceX: 0.8, sourceY: 0.5, radius: 0.08, feather: 0, healMode: .clone)
+            )
+        }
+        let targetNearLeftEdge = LocalAdjustmentRenderer.apply([heal(targetX: 0.15)], to: source)
+        let targetFurtherRight = LocalAdjustmentRenderer.apply([heal(targetX: 0.35)], to: source)
+
+        let pointA = CGPoint(x: 9, y: 32) // 0.15 * 64, still left (blue) half of the untouched source
+        let pointB = CGPoint(x: 22, y: 32) // 0.35 * 64, likewise left half, far from pointA's brush radius
+
+        let atA_whenTargetIsA = try samplePoint(pointA, of: targetNearLeftEdge)
+        let atB_whenTargetIsA = try samplePoint(pointB, of: targetNearLeftEdge)
+        XCTAssertGreaterThan(atA_whenTargetIsA.red, 200, "the effect must land at the target point")
+        XCTAssertEqual(atB_whenTargetIsA.red, 0, accuracy: 2, "a point well outside the target's brush radius must stay untouched")
+
+        let atB_whenTargetIsB = try samplePoint(pointB, of: targetFurtherRight)
+        XCTAssertGreaterThan(
+            atB_whenTargetIsB.red, 200,
+            "moving the target point must move where the effect appears, not just widen the original spot"
+        )
+    }
+
+    func testSwitchingHealModeOnTheSameAdjustmentImmediatelyChangesBehaviorWithoutClearingTheSourcePoint() throws {
+        // Design spec 6.7: "模式切換時，當前選取點必須立即更新，不只影響下一個
+        // 新點" -- switching mode must immediately change how the currently
+        // selected point renders, not merely apply to the next point the user
+        // creates. Modeled here at the render layer: the same `LocalAdjustment`
+        // (same id, same geometry, same lingering `sourceX`/`sourceY`) renders
+        // differently the instant only `healMode` flips -- proving the switch
+        // takes effect immediately and isn't gated on clearing/resetting the
+        // source point first.
+        let source = makeHalvesImage()
+        let geometry = LocalAdjustmentGeometry(x: 0.1, y: 0.5, sourceX: 0.8, sourceY: 0.5, radius: 0.05, feather: 0, healMode: .heal)
+        var adjustment = LocalAdjustment(kind: .spotHeal, geometry: geometry)
+        let targetPoint = CGPoint(x: 6, y: 32)
+
+        let healOutput = LocalAdjustmentRenderer.apply([adjustment], to: source)
+        let healed = try samplePoint(targetPoint, of: healOutput)
+        XCTAssertEqual(
+            healed.red, 0, accuracy: 10,
+            "heal mode must ignore the stale explicit source point (which points at the red half) and auto-sample nearby still-blue texture instead -- got \(healed)"
+        )
+
+        adjustment.geometry.healMode = .clone
+        let cloneOutput = LocalAdjustmentRenderer.apply([adjustment], to: source)
+        let cloned = try samplePoint(targetPoint, of: cloneOutput)
+        XCTAssertGreaterThan(
+            cloned.red, 200,
+            "flipping healMode to .clone on the very same adjustment must immediately start using the explicit source point that was already there, with no other field changed -- got \(cloned)"
+        )
+    }
+
+    func testHealModeWithNoExplicitSourcePointAutoSamplesRatherThanCrashing() throws {
+        let source = makeHalvesImage()
+        let heal = LocalAdjustment(
+            kind: .spotHeal,
+            geometry: LocalAdjustmentGeometry(x: 0.1, y: 0.5, radius: 0.05, feather: 0, healMode: .heal)
+        )
+        let output = LocalAdjustmentRenderer.apply([heal], to: source)
+        XCTAssertEqual(output.extent, source.extent)
+        let target = try samplePoint(CGPoint(x: 6, y: 32), of: output)
+        XCTAssertEqual(target.red, 0, accuracy: 10, "with no source placed, heal must still auto-sample nearby texture rather than crash or leave a hole")
+    }
+
+    func testTargetAndSourceAtTheSamePointIsAHarmlessNoOp() throws {
+        let source = makeHalvesImage()
+        let heal = LocalAdjustment(
+            kind: .spotHeal,
+            geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.5, sourceX: 0.2, sourceY: 0.5, radius: 0.1, feather: 0, healMode: .clone)
+        )
+        let output = LocalAdjustmentRenderer.apply([heal], to: source)
+        let target = try samplePoint(CGPoint(x: 12, y: 32), of: output)
+        XCTAssertEqual(target.red, 0, accuracy: 2, "cloning a point onto itself must not corrupt or crash -- it's a no-op")
     }
 
     // MARK: - Gradient mask direction

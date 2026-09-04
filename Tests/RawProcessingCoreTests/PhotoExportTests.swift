@@ -80,6 +80,11 @@ struct SyntheticRawDecoder: RawDecoding {
     /// old size-only default so every pre-existing test is unaffected.
     var metadataOverride: RawMetadata?
     var recorder: DecodeRequestRecorder?
+    /// Overrides the flat single-colour fixture with arbitrary content --
+    /// used by spot heal/clone export tests, which need actual pixel
+    /// variation between a source and target region to prove content was
+    /// really copied (the flat fixture makes clone/heal invisible).
+    var contentImage: CIImage?
 
     /// Built directly rather than via `readMetadata`, so gating the metadata
     /// stage doesn't also stall the decode stage.
@@ -106,8 +111,8 @@ struct SyntheticRawDecoder: RawDecoding {
         try Task.checkCancellation()
         if let failure { throw failure }
 
-        let image = CIImage(color: CIColor(red: 0.4, green: 0.5, blue: 0.6))
-            .cropped(to: CGRect(origin: .zero, size: pixelSize))
+        let image = contentImage?.cropped(to: CGRect(origin: .zero, size: pixelSize))
+            ?? CIImage(color: CIColor(red: 0.4, green: 0.5, blue: 0.6)).cropped(to: CGRect(origin: .zero, size: pixelSize))
         return DecodedRawImage(
             image: image,
             nativePixelSize: pixelSize,
@@ -702,6 +707,81 @@ final class PhotoExportTests: XCTestCase {
         // The synthetic decoder's own flat source colour (0.4, 0.5, 0.6) --
         // a disabled entry must render as if it were never added.
         XCTAssertLessThanOrEqual(abs(Int(bytes[0]) - Int(0.4 * 255)), 3)
+    }
+
+    // MARK: - Spot heal / clone (Task 4.4)
+
+    /// Left half pure blue, right half pure red -- gives clone/heal an
+    /// actual source/target content difference to prove was copied. Reused
+    /// by both spot heal export tests below.
+    private func makeHalvesContentImage(size: CGSize) -> CIImage {
+        let halfWidth = size.width / 2
+        let left = CIImage(color: CIColor(red: 0, green: 0, blue: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: halfWidth, height: size.height))
+        let right = CIImage(color: CIColor(red: 1, green: 0, blue: 0))
+            .cropped(to: CGRect(x: halfWidth, y: 0, width: size.width - halfWidth, height: size.height))
+        return left.composited(over: right).cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    private func redChannel(of image: CGImage, atFractionOfWidth fraction: CGFloat) throws -> Int {
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let x = CGFloat(image.width) * fraction
+        let y = CGFloat(image.height) / 2
+        context.draw(image, in: CGRect(
+            x: -x, y: -(CGFloat(image.height) - 1 - y),
+            width: CGFloat(image.width), height: CGFloat(image.height)
+        ))
+        return Int(bytes[0])
+    }
+
+    func testExportAppliesSpotHealCloneToTheWrittenFile() async throws {
+        let pixelSize = CGSize(width: 200, height: 100)
+        let content = makeHalvesContentImage(size: pixelSize)
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: pixelSize, contentImage: content))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [
+            LocalAdjustment(
+                kind: .spotHeal,
+                geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.5, sourceX: 0.8, sourceY: 0.5, radius: 0.1, feather: 0, healMode: .clone)
+            )
+        ]
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+
+        let atTarget = try redChannel(of: image, atFractionOfWidth: 0.2)
+        let farFromTarget = try redChannel(of: image, atFractionOfWidth: 0.02)
+        XCTAssertGreaterThan(
+            atTarget, 200,
+            "the exported file's own pixels must show the cloned red content at the target point, not just the in-memory preview -- got \(atTarget)"
+        )
+        XCTAssertLessThanOrEqual(farFromTarget, 5, "outside the brush radius, the exported file must be untouched")
+    }
+
+    func testDisabledSpotHealIsNotAppliedToTheExportedFile() async throws {
+        let pixelSize = CGSize(width: 200, height: 100)
+        let content = makeHalvesContentImage(size: pixelSize)
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: pixelSize, contentImage: content))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [
+            LocalAdjustment(
+                kind: .spotHeal,
+                isEnabled: false,
+                geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.5, sourceX: 0.8, sourceY: 0.5, radius: 0.1, feather: 0, healMode: .clone)
+            )
+        ]
+        let outcome = try await exporter.export(makeRequest(adjustments: adjustments, format: .png))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let atTarget = try redChannel(of: image, atFractionOfWidth: 0.2)
+        XCTAssertLessThanOrEqual(atTarget, 5, "a disabled spot heal entry must render as if it were never added")
     }
 
     // MARK: - DPI metadata

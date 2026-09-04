@@ -251,3 +251,103 @@ final class LocalAdjustmentListOperationsTests: XCTestCase {
         XCTAssertNil(list.selecting(UUID()))
     }
 }
+
+/// Model-level target/source movement and mode-switch semantics for spot
+/// heal (Phase 4 Task 4.4's own "tests for target/source movement" and
+/// "tests for mode switch immediately updating selected point"
+/// requirements), exercised as in-place mutation of an existing array
+/// entry -- the same idiom Task 4.3's Mac UI already uses for linear
+/// gradient (`adjustments.localAdjustments[i].geometry.x = newX`), so a
+/// future spot heal UI (Task 4.5) can reuse it unchanged. `Local
+/// AdjustmentRendererTests` covers the corresponding rendered-pixel
+/// behavior; these tests stay at the pure-model layer, with no Core Image
+/// involved.
+final class LocalAdjustmentSpotHealModelTests: XCTestCase {
+    func testMovingTheTargetPointOnAnExistingEntryOnlyChangesXAndY() {
+        var list = [LocalAdjustment(
+            kind: .spotHeal,
+            geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.3, sourceX: 0.7, sourceY: 0.6, radius: 0.08, feather: 40, healMode: .clone)
+        )]
+        let id = list[0].id
+
+        list[0].geometry.x = 0.9
+        list[0].geometry.y = 0.1
+
+        XCTAssertEqual(list[0].id, id, "moving the target must never change identity")
+        XCTAssertEqual(list[0].geometry.x, 0.9)
+        XCTAssertEqual(list[0].geometry.y, 0.1)
+        XCTAssertEqual(list[0].geometry.sourceX, 0.7, "moving the target must not disturb the source point")
+        XCTAssertEqual(list[0].geometry.sourceY, 0.6)
+        XCTAssertEqual(list[0].geometry.radius, 0.08)
+        XCTAssertEqual(list[0].geometry.feather, 40)
+        XCTAssertEqual(list[0].geometry.healMode, .clone)
+    }
+
+    func testMovingTheSourcePointOnAnExistingEntryOnlyChangesSourceXAndSourceY() {
+        var list = [LocalAdjustment(
+            kind: .spotHeal,
+            geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.3, sourceX: 0.7, sourceY: 0.6, radius: 0.08, feather: 40, healMode: .clone)
+        )]
+
+        list[0].geometry.sourceX = 0.15
+        list[0].geometry.sourceY = 0.85
+
+        XCTAssertEqual(list[0].geometry.sourceX, 0.15)
+        XCTAssertEqual(list[0].geometry.sourceY, 0.85)
+        XCTAssertEqual(list[0].geometry.x, 0.2, "moving the source must not disturb the target point")
+        XCTAssertEqual(list[0].geometry.y, 0.3)
+    }
+
+    func testTargetAndSourceMovementIndependentlyClampToTheUnitSquare() {
+        var list = [LocalAdjustment(kind: .spotHeal, geometry: LocalAdjustmentGeometry(x: 0.5, y: 0.5, sourceX: 0.5, sourceY: 0.5))]
+
+        list[0].geometry.x = 3
+        list[0].geometry.sourceY = -2
+
+        XCTAssertEqual(list[0].geometry.x, 1, "a target dragged past the edge clamps to the unit square, the same as Task 4.1's linear gradient fields")
+        XCTAssertEqual(list[0].geometry.sourceY, 0)
+    }
+
+    /// Design spec §6.7: "模式切換時，當前選取點必須立即更新，不只影響下一個
+    /// 新點" (switching mode must immediately update the currently selected
+    /// point, not only affect the next new point). At the model layer this
+    /// means `healMode` is a plain field on the *existing* entry's geometry
+    /// -- flipping it is one direct mutation on the already-selected array
+    /// element by its own `id`, with every other field (including a
+    /// previously-placed source point) left exactly as it was. There is no
+    /// separate "next new point's default mode" the schema would need to
+    /// keep in sync with it.
+    func testSwitchingModeOnAnExistingEntryLeavesEveryOtherFieldUntouched() {
+        var list = [LocalAdjustment(
+            kind: .spotHeal,
+            geometry: LocalAdjustmentGeometry(x: 0.4, y: 0.4, sourceX: 0.9, sourceY: 0.1, radius: 0.12, feather: 25, healMode: .heal)
+        )]
+        let id = list[0].id
+
+        guard let index = list.firstIndex(where: { $0.id == id }) else {
+            return XCTFail("the selected entry must still be found by id after the switch")
+        }
+        list[index].geometry.healMode = .clone
+
+        XCTAssertEqual(list[0].geometry.healMode, .clone, "the switch must apply to the already-selected entry immediately")
+        XCTAssertEqual(list[0].geometry.x, 0.4)
+        XCTAssertEqual(list[0].geometry.y, 0.4)
+        XCTAssertEqual(list[0].geometry.sourceX, 0.9, "a mode switch must not clear or reset an already-placed source point")
+        XCTAssertEqual(list[0].geometry.sourceY, 0.1)
+        XCTAssertEqual(list[0].geometry.radius, 0.12)
+        XCTAssertEqual(list[0].geometry.feather, 25)
+    }
+
+    func testSwitchingModeOnOneEntryDoesNotAffectAnyOtherEntrysMode() {
+        var list = [
+            LocalAdjustment(kind: .spotHeal, geometry: LocalAdjustmentGeometry(healMode: .heal)),
+            LocalAdjustment(kind: .spotHeal, geometry: LocalAdjustmentGeometry(healMode: .heal))
+        ]
+        let secondID = list[1].id
+
+        list[0].geometry.healMode = .clone
+
+        XCTAssertEqual(list[0].geometry.healMode, .clone)
+        XCTAssertEqual(list.selecting(secondID)?.geometry.healMode, .heal, "switching one selected point's mode must never leak onto a different point")
+    }
+}
