@@ -944,6 +944,20 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
         XCTAssertEqual(sut.items.count, 2, "restoreBackup must reload items so the browser reflects what was restored")
     }
 
+    func testRestoringABackupPresentsTheCompletionSummaryThroughTheViewModelAlert() async throws {
+        let mine = RecordingPresetRepository()
+        let sut = PresetLibraryViewModel(myRepository: mine, builtInRepository: BuiltInPresetRepository(documents: []))
+        let archive = PresetBackupArchive(documents: [makeDocument(name: "Restored A")])
+        let data = try PresetBackupCoding.encode(archive)
+
+        let summary = await sut.restoreBackupAndPresentSummary(data, into: .mine, conflict: .keepBoth)
+
+        XCTAssertEqual(summary?.created, 1)
+        let alert = try XCTUnwrap(sut.alert, "A completed restore must present a visible summary, not only reload the list")
+        XCTAssertEqual(alert.title, L10n.t("Restore complete"))
+        XCTAssertTrue(alert.message.contains("1 \(L10n.t("added"))"))
+    }
+
     func testRestoreBackupWithMalformedDataSetsAlertAndReturnsNil() async throws {
         let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
         XCTAssertNil(sut.alert)

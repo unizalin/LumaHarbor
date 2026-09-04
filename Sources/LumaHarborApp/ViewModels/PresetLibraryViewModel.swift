@@ -559,4 +559,26 @@ final class PresetLibraryViewModel: ObservableObject {
         await load()
         return summary
     }
+
+    @discardableResult
+    func restoreBackupAndPresentSummary(
+        _ data: Data,
+        into scope: PresetScopeKind,
+        conflict: PresetConflictResolution
+    ) async -> PresetRestoreSummary? {
+        guard let summary = await restoreBackup(data, into: scope, conflict: conflict) else {
+            return nil
+        }
+        alert = UserAlert(title: L10n.t("Restore complete"), message: Self.restoreSummaryMessage(summary))
+        return summary
+    }
+
+    private static func restoreSummaryMessage(_ summary: PresetRestoreSummary) -> String {
+        var parts: [String] = []
+        if summary.created > 0 { parts.append("\(summary.created) \(L10n.t("added"))") }
+        if summary.keptBoth > 0 { parts.append("\(summary.keptBoth) \(L10n.t("kept as a copy"))") }
+        if summary.duplicateSkipped > 0 { parts.append("\(summary.duplicateSkipped) \(L10n.t("already present"))") }
+        if summary.failed > 0 { parts.append("\(summary.failed) \(L10n.t("failed"))") }
+        return parts.isEmpty ? L10n.t("Nothing to restore.") : parts.joined(separator: ", ")
+    }
 }
