@@ -126,6 +126,26 @@ final class LocalizationSmokeTest: XCTestCase {
         }
     }
 
+    /// AwayPhotoRawEditor parity Phase 4 Task 4.5: every new user-facing
+    /// string the spot heal panel/overlay introduces must have landed in
+    /// both `.lproj` directories. "Radius"/"Feather"/"Enabled"/"Done" are
+    /// reused from Task 4.3's own gradient controls, not duplicated here.
+    func testEverySpotHealStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Add Spot Heal", "Edit Spot Heals", "No spot heals yet.",
+            "Spot Heal", "Spot Heal (Off)", "Delete Spot Heal",
+            "Mode", "Heal", "Clone",
+            "Spot Heal Target", "Spot Heal Source", "Spot Heal Size",
+            "Heal samples nearby texture automatically.",
+            "For reliable results on busy backgrounds, use Clone instead."
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
+
     /// Phase 3 Task 3.1: every new user-facing string built-in presets and
     /// editing an existing preset introduce must have landed in both
     /// `.lproj` directories. Does NOT include `PresetError.builtInPresetIsReadOnly`'s

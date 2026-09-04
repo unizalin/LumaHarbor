@@ -469,3 +469,17 @@
 "Local adjustments are non-destructive." = "局部調整為非破壞式。";
 "Gradient Position" = "漸層位置";
 "Gradient Direction and Range" = "漸層方向與範圍";
+"Add Spot Heal" = "新增局部修護";
+"Edit Spot Heals" = "編輯局部修護";
+"No spot heals yet." = "尚未加入任何局部修護。";
+"Spot Heal" = "局部修護";
+"Spot Heal (Off)" = "局部修護（已停用）";
+"Delete Spot Heal" = "刪除局部修護";
+"Mode" = "模式";
+"Heal" = "修復";
+"Clone" = "仿製";
+"Spot Heal Target" = "修護目標點";
+"Spot Heal Source" = "修護來源點";
+"Spot Heal Size" = "修護範圍大小";
+"Heal samples nearby texture automatically." = "「修復」模式會自動取樣周邊材質。";
+"For reliable results on busy backgrounds, use Clone instead." = "在複雜背景上，改用「仿製」並自行指定來源點會更可靠。";

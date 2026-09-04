@@ -469,3 +469,17 @@
 "Local adjustments are non-destructive." = "Local adjustments are non-destructive.";
 "Gradient Position" = "Gradient Position";
 "Gradient Direction and Range" = "Gradient Direction and Range";
+"Add Spot Heal" = "Add Spot Heal";
+"Edit Spot Heals" = "Edit Spot Heals";
+"No spot heals yet." = "No spot heals yet.";
+"Spot Heal" = "Spot Heal";
+"Spot Heal (Off)" = "Spot Heal (Off)";
+"Delete Spot Heal" = "Delete Spot Heal";
+"Mode" = "Mode";
+"Heal" = "Heal";
+"Clone" = "Clone";
+"Spot Heal Target" = "Spot Heal Target";
+"Spot Heal Source" = "Spot Heal Source";
+"Spot Heal Size" = "Spot Heal Size";
+"Heal samples nearby texture automatically." = "Heal samples nearby texture automatically.";
+"For reliable results on busy backgrounds, use Clone instead." = "For reliable results on busy backgrounds, use Clone instead.";
