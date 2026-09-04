@@ -2,7 +2,18 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（Phase 3 Mac 手動驗測全數完成：21 項中 20 項 PASS，1 項 NOT RUN 有明確理由）
+Updated by: Claude（Phase 4 Task 4.1：local adjustment schema，只做 schema，未做 render/UI）
+
+## Phase 4 Task 4.1：Local adjustment schema (2026-09-04, Claude, TDD, in this worktree/branch)
+
+- **狀態**：`DONE`。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a`，這一輪之前的 HEAD 是 `1b9476e`（Phase 3 完整驗測完成）。Product commit：`74de022`。開始前確認過分支/HEAD/dirty files 與這份檔案自己描述的狀態一致，沒有不符需要先處理。這輪嚴格只做 roadmap 的 Task 4.1 範圍——schema only，沒有動 render pipeline、Mac UI，也沒有把新欄位接進 `AdjustmentMapping`/`RenderPipeline` 任何地方。
+- **資料模型**：新增 `Sources/RawProcessingCore/Model/LocalAdjustment.swift`，完全比照 roadmap 文件自己給的 sketch：`LocalAdjustment`（id/kind/isEnabled/geometry/adjustments）、`LocalAdjustmentKind`（linearGradient/spotHeal）。`LocalAdjustmentGeometry` 是單一扁平 struct（跟 `GeometryAdjustments` 既有慣例一致，不是 per-kind enum），放位置/角度/範圍/羽化/(clone 專用)來源點/半徑/heal-clone 模式——不用點陣圖遮罩（design spec §6.6 明確要求）。`LocalAdjustmentPatch` 是設計 spec §6.6 列的 9 個 mini-adjustments（曝光/對比/高光/陰影/白色/黑色/飽和度/色溫/色調，刻意沒有 vibrance），稀疏 optional 欄位，跟 `PresetCore.BasicAdjustmentPatch` 同款但獨立宣告（`RawProcessingCore` 不能依賴 `PresetCore`，依賴方向是反過來的）。`PhotoAdjustments` 新增 `localAdjustments: [LocalAdjustment]`，預設空陣列，decode 時 key 不存在就是 `[]`（沿用 Phase 2 `geometry` 欄位自己當年新增時建立的向後相容慣例）。
+- **TDD**：先寫 `Tests/RawProcessingCoreTests/LocalAdjustmentTests.swift`（含 `LocalAdjustmentGeometryTests`/`LocalAdjustmentPatchTests`）跟 `PhotoAdjustmentsTests.swift` 的新測試，跑 `swift test --filter` 確認是真的編譯失敗（`cannot find 'LocalAdjustment' in scope` 等），不是只看 IDE 提示，才動手實作。實作完成、聚焦測試全綠後才 commit。
+- **測試涵蓋**：backward-compatible sidecar 測試（舊 sidecar 完全沒有 `localAdjustments` key，decode 成 `[]`）、多筆 local adjustment 順序測試（JSON round trip 後順序不變）、enable/disable/delete 測試（陣列層級操作，這輪沒有 render/UI/service，schema 夠用）、geometry 的 clamp/非有限值防呆、patch 的稀疏編碼（只有真的設定過的欄位才出現在 JSON 裡）、`id`/`kind` 缺失時該拋錯而不是瞎猜的設計決定（這兩個欄位跟這個 repo 其他所有「缺欄位就退回預設值」的慣例不同，理由寫在程式碼註解裡）。
+- **驗證**：聚焦測試（`LocalAdjustment*|PhotoAdjustmentsTests`）42 執行、0 失敗。完整 `swift test`：**1513 執行**（比上一輪基準 1485 多 28，全部是這輪新增的測試）、9 skip（既有 `RawFixtureTests` 基準不變）、0 失敗。`swift build` 乾淨。`git diff --check` 乾淨。隱私掃描零命中。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 全程未被讀取或變動。
+- **一個值得記錄的岔路（不是產品 bug）**：這輪中途真的重現過一次看起來像記憶體安全問題的 crash（`EXC_BAD_ACCESS` 在 Array buffer 存取，透過 lldb 抓到堆疊）,一度以為是新欄位設計本身有問題。深入排查後根因是：這輪中間多次 `git stash`/`stash pop` 切換去比對「有沒有我的改動」時，把 SwiftPM 的 incremental build cache 弄成不一致狀態（部分 `.o` 是舊記憶體佈局編譯的、部分是新的），造成真的 ABI 不一致當掉——`swift package clean` 後問題永久消失，跟 `LocalAdjustment` 本身的設計或程式碼完全無關。記錄在這裡是給以後的 session 一個參考：如果又在這個 worktree 遇到類似「改一個看起來很單純的欄位卻讓不相關的測試當掉」，先試 `swift package clean` 再開始深入除錯，不要浪費時間懷疑自己的程式邏輯。
+- **`NOT RUN`**：render/Mac UI/eyedropper 以外的東西都不在這個 task 範圍內，不是遺漏。
+- **Next action**：Task 4.2（Linear gradient render）——照 roadmap 要求先寫 synthetic image 的 failing tests（rotate/flip/crop 等的 tolerance-based assertion 慣例，這個專案 `GeometryRendererTests.swift` 已經有先例可以照抄），確認 full-resolution export 真的套用同一套 geometry 而不是只改 preview cache，文件化 transform order。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 3 Mac manual verification：全部完成，20/21 PASS (2026-09-04, Claude, in this worktree/branch)
 
