@@ -108,6 +108,9 @@ final class PresetBrowserFoundationContractTests: XCTestCase {
     func testPresetBrowserOffersBackupAndRestoreEntryPoints() throws {
         let source = try Self.loadSource("Sources/LumaHarborApp/Views/PresetBrowserView.swift")
         XCTAssertTrue(source.contains("presetLibrary.exportBackup("), "there must be a reachable UI path to back up presets")
-        XCTAssertTrue(source.contains("presetLibrary.restoreBackup("), "there must be a reachable UI path to restore presets")
+        XCTAssertTrue(
+            source.contains("presetLibrary.restoreBackupAndPresentSummary("),
+            "there must be a reachable UI path that restores presets and presents its completion summary"
+        )
     }
 }
