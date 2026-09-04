@@ -2,7 +2,17 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（Phase 3 Task 3.6：全 Phase 收尾驗證與 handoff report）
+Updated by: Codex（Phase 3 Task 3.5 follow-up independent review fix）
+
+## Follow-up independent review of Phase 3 Task 3.5 (2026-09-04, Codex, TDD, in this worktree/branch)
+
+- **狀態**：`DONE`。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a4fd76035bb9ca3f492b1fa45f511a60ec`。在 Task 3.6 文件 commit `df00864` 之後，Codex 又對 `fb7109a..HEAD` 做了一次獨立審查，發現並修好一個 Task 3.5 的 sidecar 身分資料問題；product + test commit 是 `8e5caf1` (`fix: preserve virtual copy identity when editing`)。
+- **Finding（真的、會破壞 portable sidecar 的虛擬副本身分，已修）**：`PhotoLibraryService.saveAdjustments(_:for:)` 每次儲存都會重建 `PhotoSidecar`，但原實作沒有帶入 `variantOf`，因此虛擬副本只要被編輯過，它自己的 sidecar 就會被靜默重寫成 `variantOf == nil`。現有的索引重建整合測試仍會通過，是因為它從 `library.json` 的 `PhotoRecord.variantOf` 恢復關係，沒有直接驗證編輯後的 sidecar；這跟 `PhotoSidecar.variantOf` 要在索引／manifest 遺失時仍能自我描述副本身分的資料契約不符。
+  - **修法**：`saveAdjustments` 建立新 sidecar 時寫入 `variantOf: photo.variantOf ?? existing?.variantOf`，以當前 `PhotoAsset` 的副本身分為主，並在現有 sidecar 有身分但傳入 projection 缺少時保留已儲存值。
+- **TDD**：先新增 `VirtualCopyServiceTests.testEditingAVirtualCopyPreservesItsIdentityInTheSidecar`，透過真實暫存目錄與 `FileSidecarRepository` 直接讀回編輯後的副本 sidecar。RED 確認斷言收到 `nil` 而非 original `PhotoID`；再實作上述最小修正後 GREEN。
+- **驗證**：Task 3.5 聚焦組（`RelinkResolverTests|PhotoIndexMigrationTests|PhotoIndexStoreTests|VirtualCopyServiceTests|VirtualCopyLibraryViewModelTests|LibraryLifecycleTests`）74 執行、0 失敗；完整 `swift test` 1484 執行、9 skip（既有 `RawFixtureTests` fixture 相依基準）、0 失敗；`swift build` PASS；iOS generic `xcodebuild` `** BUILD SUCCEEDED **`；`git diff --check` PASS；這次的 product/test 檔案隱私樣式零命中；`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 未變動。
+- **`NOT RUN`**：`docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` 的 21 項 Mac app 人眼驗測仍全數 `NOT RUN`，其中 D2（編輯副本不影響原版）與 D7（重建索引後副本與編輯仍在）已涵蓋這條使用者流程，但尚未在實際 Mac 視窗中執行。
+- **Next action**：先在真實 Mac 上跑完 Phase 3 的 21 項人眼測試；全數 PASS 後再由使用者決定是否 merge 到 `main`。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 3 Task 3.6 (2026-09-04, Claude, verification-only, in this worktree/branch)
 
