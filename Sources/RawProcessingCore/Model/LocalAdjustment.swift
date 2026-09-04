@@ -129,29 +129,39 @@ public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
     /// Normalized `[0, 1]` source-image coordinates, origin top-left (same
     /// convention as `NormalizedCropRect`). Linear gradient: the gradient's
     /// pivot point. Spot heal: the target point being retouched.
-    public var x: Double
-    public var y: Double
+    ///
+    /// Every field below carries its own `didSet` clamp -- not just
+    /// validation inside `init` -- because Task 4.3's UI mutates an
+    /// existing value's fields directly (`adjustments.localAdjustments[i]
+    /// .geometry.x = newX`, the same idiom `GeometryAdjustments
+    /// .rotationDegrees` already established its own `didSet` for), and
+    /// `didSet` does not fire during a type's own initializer, so `init`
+    /// clamps explicitly too, matching `Vignette`'s and `GeometryAdjustments`'s
+    /// own existing convention exactly.
+    public var x: Double { didSet { x = Self.clampToUnit(x) } }
+    public var y: Double { didSet { y = Self.clampToUnit(y) } }
     /// Linear gradient only: direction of the transition, degrees (0 =
     /// left-to-right, 90 = top-to-bottom, increasing clockwise). Not an
     /// angle Task 4.1 validates against a range — any finite value is a
     /// legal direction, it just normalizes to something a compass makes
-    /// sense of at render time (Task 4.2).
-    public var angleDegrees: Double
+    /// sense of at render time (Task 4.2). Still guarded against non-finite
+    /// input the same way every other field here is.
+    public var angleDegrees: Double { didSet { angleDegrees = angleDegrees.isFinite ? angleDegrees : 0 } }
     /// Linear gradient only: how far the transition band extends from the
     /// pivot before reaching full effect, normalized to `[0, 1]`.
     /// Meaningless for `.spotHeal`.
-    public var range: Double
+    public var range: Double { didSet { range = Self.clampToUnit(range) } }
     /// Spot heal, clone mode only: the point sampled from. `nil` in heal
     /// mode (the algorithm chooses its own source) or before the user has
     /// placed one. Meaningless for `.linearGradient`.
-    public var sourceX: Double?
-    public var sourceY: Double?
+    public var sourceX: Double? { didSet { sourceX = sourceX.map(Self.clampToUnit) } }
+    public var sourceY: Double? { didSet { sourceY = sourceY.map(Self.clampToUnit) } }
     /// Spot heal only: brush radius, normalized to `[0, 1]`. Meaningless
     /// for `.linearGradient`.
-    public var radius: Double
+    public var radius: Double { didSet { radius = Self.clampToUnit(radius) } }
     /// Shared: edge softness. `0` = hard edge, `100` = maximally soft.
     /// Applies to the gradient's own transition and the heal brush's edge.
-    public var feather: Double
+    public var feather: Double { didSet { feather = Self.clamp(feather, to: Self.featherRange) } }
     /// Spot heal only: which of the two sampling modes this point uses.
     /// Meaningless for `.linearGradient`.
     public var healMode: SpotHealMode

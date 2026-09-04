@@ -110,6 +110,22 @@ final class LocalizationSmokeTest: XCTestCase {
         }
     }
 
+    /// AwayPhotoRawEditor parity Phase 4 Task 4.3: every new user-facing
+    /// string the linear gradient panel/overlay introduces must have landed
+    /// in both `.lproj` directories.
+    func testEveryLinearGradientStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Local Adjustments", "Add Gradient", "Edit Gradients", "No gradients yet.",
+            "Gradient", "Gradient (Off)", "Enabled", "Delete Gradient",
+            "Local adjustments are non-destructive.", "Gradient Position", "Gradient Direction and Range"
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
+
     /// Phase 3 Task 3.1: every new user-facing string built-in presets and
     /// editing an existing preset introduce must have landed in both
     /// `.lproj` directories. Does NOT include `PresetError.builtInPresetIsReadOnly`'s

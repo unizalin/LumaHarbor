@@ -458,3 +458,14 @@
 "White Balance Eyedropper" = "白平衡滴管";
 "Cancel Eyedropper" = "取消滴管";
 "Click a point that should be neutral gray" = "點選畫面上應該是中性灰的位置";
+"Local Adjustments" = "局部調整";
+"Add Gradient" = "新增漸層";
+"Edit Gradients" = "編輯漸層";
+"No gradients yet." = "尚未加入任何漸層。";
+"Gradient" = "漸層";
+"Gradient (Off)" = "漸層（已停用）";
+"Enabled" = "啟用";
+"Delete Gradient" = "刪除漸層";
+"Local adjustments are non-destructive." = "局部調整為非破壞式。";
+"Gradient Position" = "漸層位置";
+"Gradient Direction and Range" = "漸層方向與範圍";

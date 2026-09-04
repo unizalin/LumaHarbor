@@ -65,6 +65,17 @@ struct EditorView: View {
                             image: image
                         )
                     }
+
+                    if model.editor.toolMode == .linearGradient {
+                        LinearGradientOverlayView(
+                            editor: model.editor,
+                            imageFrame: AspectFitRect.fitting(
+                                imageSize: CGSize(width: image.width, height: image.height),
+                                in: geometry.size,
+                                padding: 16
+                            )
+                        )
+                    }
                 } else if model.editor.decodeFailed {
                     // Distinct from the spinner below: nothing is actually
                     // running (isRendering is false too), so showing
