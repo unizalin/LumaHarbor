@@ -12,8 +12,9 @@ import SwiftUI
 /// delete) write straight through `EditorSession.updateAdjustments(_:)`,
 /// the same undo/autosave path every other adjustment uses.
 ///
-/// Spot heal (Task 4.4/4.5) is deliberately out of scope here -- this panel
-/// only ever lists/creates `.linearGradient` entries.
+/// Spot heal (Task 4.5) is the second section below, mirroring this same
+/// panel's own "add / list / select / delete, plus the selected entry's own
+/// controls" structure.
 public struct LocalAdjustmentsPanel: View {
     @ObservedObject private var editor: EditorSession
 
@@ -23,6 +24,10 @@ public struct LocalAdjustmentsPanel: View {
 
     private var gradients: [LocalAdjustment] {
         editor.adjustments.localAdjustments.filter { $0.kind == .linearGradient }
+    }
+
+    private var spotHeals: [LocalAdjustment] {
+        editor.adjustments.localAdjustments.filter { $0.kind == .spotHeal }
     }
 
     public var body: some View {
@@ -58,6 +63,39 @@ public struct LocalAdjustmentsPanel: View {
             } else {
                 ForEach(gradients) { gradient in
                     row(for: gradient)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Button {
+                    let newHeal = LocalAdjustment(kind: .spotHeal)
+                    editor.updateAdjustments { $0.localAdjustments.append(newHeal) }
+                    editor.selectedLocalAdjustmentID = newHeal.id
+                    editor.setToolMode(.spotHeal)
+                } label: {
+                    Label(L10n.t("Add Spot Heal"), systemImage: "bandage")
+                }
+                .disabled(editor.photo == nil)
+
+                Spacer()
+
+                Button {
+                    editor.setToolMode(editor.toolMode == .spotHeal ? .adjust : .spotHeal)
+                } label: {
+                    Text(editor.toolMode == .spotHeal ? L10n.t("Done") : L10n.t("Edit Spot Heals"))
+                }
+                .disabled(editor.photo == nil || spotHeals.isEmpty)
+            }
+
+            if spotHeals.isEmpty {
+                Text(L10n.t("No spot heals yet."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(spotHeals) { heal in
+                    spotHealRow(for: heal)
                 }
             }
 
@@ -130,6 +168,124 @@ public struct LocalAdjustmentsPanel: View {
                         editor.updateAdjustments { adjustments in
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == gradient.id }) else { return }
                             adjustments.localAdjustments[index].adjustments.exposure = nil
+                        }
+                    }
+                )
+            }
+        }
+        .padding(6)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func spotHealRow(for heal: LocalAdjustment) -> some View {
+        let isSelected = editor.selectedLocalAdjustmentID == heal.id
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button {
+                    editor.selectedLocalAdjustmentID = heal.id
+                    editor.setToolMode(.spotHeal)
+                } label: {
+                    Label(
+                        heal.isEnabled ? L10n.t("Spot Heal") : L10n.t("Spot Heal (Off)"),
+                        systemImage: "bandage"
+                    )
+                    .fontWeight(isSelected ? .semibold : .regular)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Toggle(L10n.t("Enabled"), isOn: Binding(
+                    get: { heal.isEnabled },
+                    set: { newValue in
+                        editor.updateAdjustments { adjustments in
+                            if let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) {
+                                adjustments.localAdjustments[index].isEnabled = newValue
+                            }
+                        }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+                Button(role: .destructive) {
+                    editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(heal.id) }
+                    if editor.selectedLocalAdjustmentID == heal.id {
+                        editor.selectedLocalAdjustmentID = nil
+                    }
+                } label: {
+                    Label(L10n.t("Delete Spot Heal"), systemImage: "trash")
+                }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
+            }
+
+            if isSelected {
+                Picker(L10n.t("Mode"), selection: Binding(
+                    get: { heal.geometry.healMode },
+                    set: { newValue in
+                        editor.updateAdjustments { adjustments in
+                            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
+                            adjustments.localAdjustments[index].geometry.healMode = newValue
+                        }
+                    }
+                )) {
+                    Text(L10n.t("Heal")).tag(SpotHealMode.heal)
+                    Text(L10n.t("Clone")).tag(SpotHealMode.clone)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                // Roadmap Task 4.5: "record quality limitations honestly" --
+                // heal mode is a fixed, deterministic auto-sample (see
+                // `LocalAdjustmentRenderer.autoSourcePoint`'s own doc
+                // comment), not content-aware fill. Shown only for heal
+                // mode -- clone with an explicit source point is the
+                // reliable path this caption points the user toward.
+                if heal.geometry.healMode == .heal {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.t("Heal samples nearby texture automatically."))
+                        Text(L10n.t("For reliable results on busy backgrounds, use Clone instead."))
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+
+                AdjustmentSliderRow(
+                    label: L10n.t("Radius"),
+                    value: heal.geometry.radius,
+                    range: 0.01...0.3,
+                    fractionDigits: 2,
+                    onChange: { newValue in
+                        editor.updateAdjustments { adjustments in
+                            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
+                            adjustments.localAdjustments[index].geometry.radius = newValue
+                        }
+                    },
+                    onReset: {
+                        editor.updateAdjustments { adjustments in
+                            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
+                            adjustments.localAdjustments[index].geometry.radius = LocalAdjustmentGeometry.neutral.radius
+                        }
+                    }
+                )
+
+                AdjustmentSliderRow(
+                    label: L10n.t("Feather"),
+                    value: heal.geometry.feather,
+                    range: LocalAdjustmentGeometry.featherRange,
+                    fractionDigits: 0,
+                    onChange: { newValue in
+                        editor.updateAdjustments { adjustments in
+                            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
+                            adjustments.localAdjustments[index].geometry.feather = newValue
+                        }
+                    },
+                    onReset: {
+                        editor.updateAdjustments { adjustments in
+                            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
+                            adjustments.localAdjustments[index].geometry.feather = LocalAdjustmentGeometry.neutral.feather
                         }
                     }
                 )
