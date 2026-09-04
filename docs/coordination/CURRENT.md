@@ -2,7 +2,21 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（接手 Codex 中斷的 Phase 3 Mac 手動驗測：修好並驗證 A6，續跑 D1-D5/D7）
+Updated by: Claude（Phase 3 Mac 手動驗測全數完成：21 項中 20 項 PASS，1 項 NOT RUN 有明確理由）
+
+## Phase 3 Mac manual verification：全部完成，20/21 PASS (2026-09-04, Claude, in this worktree/branch)
+
+- **狀態**：`DONE`（手動驗測完整跑完）。接續上一則「A6 修復並驗證，續跑虛擬副本 D 段」段落之後，Claude 又補完了 A1（Library scope）、A7（XMP 未知欄位往返）、B1-B4（多選批次同步）、C1-C4（批次復原）、D6（Finder 外部改名/搬移），加上先前已完成的 A2-A6、D1-D5/D7，`docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md` 的 21 個必要項目現在是 **20 個 `PASS`、1 個 `NOT RUN`（B3，有明確、可驗證的理由，非阻礙）**。這一輪沒有再改動任何 product code，只有這則文件記錄本身是新 commit。分支/HEAD/base 跟上一則段落描述的狀態一致，未變動。
+- **測試方法（沒有專用工具，靠 accessibility API 拼出來的）**：這個環境沒有等同 Codex CUA 的螢幕操作能力，全程用 `osascript`/System Events 的 accessibility tree（讀取按鈕/選單/滑桿位置與屬性、觸發點擊/選單動作）搭配手寫的三個 `CGEvent` 小工具（`doubleclick`——正確設置 `mouseEventClickState` 的真雙擊；`cmdclick`——**真的按住+放開 Command 鍵**而不只是在事件上標記旗標，因為 SwiftUI 的 `NSEvent.modifierFlags` 檢查讀的是即時鍵盤狀態，只標記事件旗標曾被誤判成一般點擊；`rightclick`/`drag`——真右鍵與真正的 mouseDown→多段 mouseDragged→mouseUp）拼出一個克難但確實可行的操作能力。每一項關鍵斷言都額外直接讀隔離測試環境裡的 `library.json`／sidecar JSON／`library.sqlite` 內容做交叉驗證，不只憑截圖判斷——這是在沒有專用工具時，讓證據可信度盡量貼近真人手動測試的作法。
+- **A1（Library scope）現在是 `PASS`**：用「Copy to This Library」把 My Presets 的一個 preset 複製到 Library scope 後，直接讀檔確認**同一個 preset ID** 同時存在於 `~/Library/Application Support/LumaHarbor/Presets/`（My Presets）跟圖庫自己的 `.lumaharbor/presets/`（Library scope）兩個獨立位置——這比單純看 UI 篩選選單更硬的證據，證實三個 scope 真的是各自獨立儲存，不是同一份資料用不同標籤呈現。
+- **A7（XMP 未知欄位往返）`PASS`**：用一份合成的 `phase3-unknown.xmp`（內含 Adobe 認得的 `crs:Exposure2012` 跟一個模擬「未來版本才有」的未知 namespace `future:MaskTree`/`future:Tags`）做完整往返：匯入（出現「已匯入」徽章）→ 匯出成 `.lhpreset` → 刪除 → 重新匯入同一份 `.lhpreset`（再次出現「已匯入」徽章）。直接讀 app 實際存放的 preset 檔案，確認 `MaskTree`／`layerName`／`portrait`／`studio` 這些未知欄位標記在完整往返後一字不差，只有認得的 `crs:Exposure2012` 被額外解析進 `patch.basic.exposure`。
+- **B1/B2/B4（多選批次同步）`PASS`**：B1 確認真正的 Cmd+click（不是只標記事件旗標）能正確多選縮圖而不開啟編輯器；B2 用真正的滑鼠拖曳（不是直接寫 AXValue，因為那不會觸發批次同步倚賴的手勢開始/結束回呼）拖動來源的 Highlights 滑桿，讀 sidecar 確認目標欄位正確同步、其餘欄位不受影響；B4 確認 HSL 這類非 Basic 欄位的變更完全不會外溢到批次目標。**B3 維持 `NOT RUN`**：這個情境要求「滑鼠鍵按著拖曳滑桿」同時「Cmd+click 另一張縮圖」，任何單一滑鼠指標（真人的手或這個環境的合成指標）都做不到同時進行兩個互斥的按鍵狀態；程式碼本身用值型別快照保證這件事是結構性正確（`beginBatchGesture` 複製一份不隨後續選取變動的目標清單），且已有 `BatchAdjustmentGestureIntegrationTests` 涵蓋，不視為本輪的阻礙或缺口。
+- **C1-C4（批次復原）全部 `PASS`**：C1 正常復原+摘要文字正確；C2 目標照片有手動編輯時被歸類「跳過」、不被覆蓋；C3 用 `chmod 444` 模擬一個目標的 sidecar 寫入失敗，摘要文字正確顯示「已還原/復原失敗」，改回可寫後選單項目仍是 enabled、重試後真的成功；C4 由 C1 的復原範圍間接證實——更早一輪的批次同步欄位全程沒被動過，證實 undo 是一次性、不會往回堆疊到更早的交易。
+- **D6（Finder 外部改名）`PASS`**：直接在隔離圖庫資料夾把原照片改名（等同 Finder 操作的檔案系統效果，這個環境沒有安全的方式驅動真正的 Finder GUI），重新掃描後編輯器視窗標題自動更新成新檔名（同一個 photoID，不是被當成新照片），讀 `library.json` 確認虛擬副本的 `variantOf` 仍正確指向同一個原照片 ID——這正是 Task 3.5 獨立審查那則測試特別設計要涵蓋的情境（副本建立當下路徑跟原照片一致只是巧合，唯有原照片之後改名/搬移，才會真的用到「按 ID 分組」而非路徑相鄰）。
+- **一次真的有風險的插曲，如實記錄**：測試過程中桌面上一個股票看盤網頁（Chrome）兩次不明原因搶到前景焦點，其中一次在 Claude 已確認 LumaHarbor 前景、截圖看起來正常之後的極短間隔內又被搶走，導致一次滑鼠點擊誤落在該網頁的圖表區域（不是任何操作性按鈕，看起來只是看盤介面而非下單介面）。Claude 立即停止操作、明確告知使用者發生了什麼，使用者確認沒有問題後才繼續；之後每次操作前都先明確 `set frontmost` 並截圖確認 LumaHarbor 真的在最前面才動作。這件事沒有對 LumaHarbor 專案本身造成任何影響，記錄在這裡是為了交接透明，不是為了甩鍋。
+- **驗證**：這輪沒有改動 product code，`swift test`/`swift build`/`git diff --check` 維持上一則段落記錄的基準不變（1485 執行、9 skip、0 失敗）。隱私掃描（`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM"`）對這次文件 diff 零命中。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 全程未被讀取或變動。
+- **Commit**：這則段落與 `PHASE3_MANUAL_CHECKLIST.md` 的更新會在寫完後 commit 為 docs-only。未 push、未 merge、未 rebase、未動 worktree。
+- **Next action**：Phase 3 的自動化驗證、逐 task 獨立審查、Mac 手動驗測全部完成（20/21 PASS，1 項有明確理由 NOT RUN）。接下來由使用者決定：(a) 是否要把這個分支合併進 `main`（需要明確授權，目前沒有），(b) 是否要排查那筆沿用自更早期 session 的孤兒虛擬副本（低風險、非阻礙的邊界情況），或 (c) 依 roadmap 開始下一個 Phase。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 3 Mac manual verification：A6 修復並驗證，續跑虛擬副本 D 段 (2026-09-04, Claude, in this worktree/branch)
 
