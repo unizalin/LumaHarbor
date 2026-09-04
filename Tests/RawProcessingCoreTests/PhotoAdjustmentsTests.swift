@@ -57,7 +57,7 @@ final class PhotoAdjustmentsTests: XCTestCase {
                 "exposure", "temperature", "tint", "contrast", "highlights",
                 "shadows", "whites", "blacks", "vibrance", "saturation",
                 "advancedToneCurve", "hsl", "splitToning", "sharpening",
-                "noiseReduction", "vignette", "grain", "geometry"
+                "noiseReduction", "vignette", "grain", "geometry", "localAdjustments"
             ]
         )
     }
@@ -152,5 +152,72 @@ final class PhotoAdjustmentsTests: XCTestCase {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
         XCTAssertEqual(decoded, original)
+    }
+
+    // MARK: - Local adjustments (Phase 4 Task 4.1)
+
+    func testNeutralHasNoLocalAdjustments() {
+        XCTAssertTrue(PhotoAdjustments.neutral.localAdjustments.isEmpty)
+    }
+
+    /// Every sidecar on disk before this task has no "localAdjustments" key
+    /// at all -- including one that already has every other Phase 1-3 key,
+    /// matching `testPhase1SidecarWithoutGeometryKeyDecodesToNeutralGeometry`'s
+    /// own realism bar.
+    func testSidecarWithoutLocalAdjustmentsKeyDecodesToAnEmptyArray() throws {
+        let json = Data(#"""
+        {"exposure": 1.0, "temperature": 0, "tint": 0, "contrast": 0, "highlights": 0,
+         "shadows": 0, "whites": 0, "blacks": 0, "vibrance": 0, "saturation": 0,
+         "advancedToneCurve": {}, "hsl": {}, "splitToning": {},
+         "sharpening": {}, "noiseReduction": {}, "vignette": {}, "grain": {}, "geometry": {}}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.exposure, 1.0)
+        XCTAssertTrue(decoded.localAdjustments.isEmpty)
+    }
+
+    func testMultipleLocalAdjustmentsRoundTripInOrder() throws {
+        var original = PhotoAdjustments.neutral
+        let gradient = LocalAdjustment(kind: .linearGradient, geometry: LocalAdjustmentGeometry(angleDegrees: 30))
+        let heal = LocalAdjustment(kind: .spotHeal, geometry: LocalAdjustmentGeometry(x: 0.2, y: 0.2))
+        let secondGradient = LocalAdjustment(kind: .linearGradient, isEnabled: false)
+        original.localAdjustments = [gradient, heal, secondGradient]
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
+
+        XCTAssertEqual(decoded.localAdjustments.map(\.id), [gradient.id, heal.id, secondGradient.id])
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testDisablingOneLocalAdjustmentDoesNotAffectTheOthers() {
+        let first = LocalAdjustment(kind: .linearGradient)
+        var second = LocalAdjustment(kind: .spotHeal)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [first, second]
+
+        second.isEnabled = false
+        adjustments.localAdjustments[1] = second
+
+        XCTAssertTrue(adjustments.localAdjustments[0].isEnabled)
+        XCTAssertFalse(adjustments.localAdjustments[1].isEnabled)
+    }
+
+    func testDeletingOneLocalAdjustmentLeavesTheRestInOrder() {
+        let first = LocalAdjustment(kind: .linearGradient)
+        let second = LocalAdjustment(kind: .spotHeal)
+        let third = LocalAdjustment(kind: .linearGradient)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [first, second, third]
+
+        adjustments.localAdjustments.removeAll { $0.id == second.id }
+
+        XCTAssertEqual(adjustments.localAdjustments.map(\.id), [first.id, third.id])
+    }
+
+    func testNonEmptyLocalAdjustmentsMakeThePhotoNonNeutral() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [LocalAdjustment(kind: .linearGradient)]
+        XCTAssertFalse(adjustments.isNeutral)
     }
 }
