@@ -458,3 +458,14 @@
 "White Balance Eyedropper" = "White Balance Eyedropper";
 "Cancel Eyedropper" = "Cancel Eyedropper";
 "Click a point that should be neutral gray" = "Click a point that should be neutral gray";
+"Local Adjustments" = "Local Adjustments";
+"Add Gradient" = "Add Gradient";
+"Edit Gradients" = "Edit Gradients";
+"No gradients yet." = "No gradients yet.";
+"Gradient" = "Gradient";
+"Gradient (Off)" = "Gradient (Off)";
+"Enabled" = "Enabled";
+"Delete Gradient" = "Delete Gradient";
+"Local adjustments are non-destructive." = "Local adjustments are non-destructive.";
+"Gradient Position" = "Gradient Position";
+"Gradient Direction and Range" = "Gradient Direction and Range";

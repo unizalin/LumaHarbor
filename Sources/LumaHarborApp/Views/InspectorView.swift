@@ -44,6 +44,9 @@ struct InspectorView: View {
                         Divider()
                         Text(L10n.t("Geometry")).font(.headline)
                         GeometryAdjustmentPanel(editor: model.editor)
+                        Divider()
+                        Text(L10n.t("Local Adjustments")).font(.headline)
+                        LocalAdjustmentsPanel(editor: model.editor)
                     }
                     .padding(14)
                 }

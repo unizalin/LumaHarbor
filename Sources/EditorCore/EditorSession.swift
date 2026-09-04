@@ -79,6 +79,15 @@ public final class EditorSession: ObservableObject {
     /// crop.
     @Published public private(set) var toolMode: EditorToolMode = .adjust
 
+    /// Which entry in `adjustments.localAdjustments` the linear gradient
+    /// overlay/panel is currently showing full drag handles and mini-
+    /// adjustment controls for (Task 4.3). Purely UI state -- like
+    /// `toolMode`, it never touches `history`. Reset alongside `toolMode` on
+    /// every `open()`/`close()` for the same reason: switching photos must
+    /// never leave a selection pointed at an entry that belongs to the
+    /// photo just left behind.
+    @Published public var selectedLocalAdjustmentID: UUID?
+
     /// Longest edge the preview should cover, in backing-store pixels.
     @Published public var previewPixelDimension = 1_600
 
@@ -283,6 +292,7 @@ public final class EditorSession: ObservableObject {
         self.previewRequestGeneration = nil
         self.previewImageReflectsAPreview = false
         self.toolMode = .adjust
+        self.selectedLocalAdjustmentID = nil
         refreshUndoState()
 
         submitInteractivePreview()
@@ -313,6 +323,7 @@ public final class EditorSession: ObservableObject {
         previewRequestGeneration = nil
         previewImageReflectsAPreview = false
         toolMode = .adjust
+        selectedLocalAdjustmentID = nil
         refreshUndoState()
         if let scheduler = services?.previewScheduler {
             Task { await scheduler.cancelAll() }
