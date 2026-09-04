@@ -2,14 +2,25 @@
 
 涵蓋 Phase 4（Local Retouching：線性漸層、Spot Heal）在真實 Mac 視窗上的行為。這份清單只列自動化測試無法涵蓋的「畫面實際看起來／操作起來」項目——資料模型與 render 正確性已由 `swift test` 涵蓋（`LocalAdjustmentTests`/`LocalAdjustmentRendererTests`/`LinearGradientDragMathTests`/`LinearGradientOverlayContractTests`/`SpotHealDragMathTests`/`SpotHealOverlayContractTests`），詳見 `docs/coordination/CURRENT.md` 對應段落。跟 `PHASE3_MANUAL_CHECKLIST.md` 是不同的清單，因為驗測對象不同（Phase 4 是局部調整工具，只存在於 Mac app）。
 
-這份清單涵蓋 **Task 4.3（Mac linear gradient UI）** 與 **Task 4.5（Mac spot heal UI）** 的拖曳把手部分——roadmap 自己要求的「manual screenshot checklist for drag handles」與「UI source-contracts for add, select, move source, move target, size, feather, delete, mode switch」。B 段（Task 4.5）目前全數 `NOT RUN`：這個環境這輪沒有重跑一次 Task 4.3 當時做過的完整自動化 GUI 操作流程（`osascript`/System Events + 自製 `CGEvent` 小工具），留給下一輪或真人補跑。Phase 4 的完整驗證輪（含 focused tests/`swift test`/`git diff --check`/隱私掃描彙整）是 Task 4.6 的範圍，不在這份文件裡。
+這份清單涵蓋 **Task 4.3（Mac linear gradient UI）** 與 **Task 4.5（Mac spot heal UI）** 的拖曳把手部分——roadmap 自己要求的「manual screenshot checklist for drag handles」與「UI source-contracts for add, select, move source, move target, size, feather, delete, mode switch」。A 段、B 段都已跑完自動化 GUI 操作流程並留下佐證。Phase 4 的完整驗證輪（含 focused tests/`swift test`/`git diff --check`/隱私掃描彙整）是 Task 4.6 的範圍，不在這份文件裡。
 
 ## 測試資訊
+
+**A 段（Task 4.3 線性漸層）**
 
 - Build：`Scripts/build-app-bundle.sh debug`，隔離測試環境（home 代號 `ISOLATED-HOME-001`，照片庫代號 `APFS-TMP-001`）。
 - 測試日期／時間：2026-09-04（下午，Asia/Taipei）。
 - 測試者代號：Claude（自動化 GUI 操作：`osascript`/System Events 存取樹 + 自製 `CGEvent` 點擊／拖曳／捲動小工具），非真人手動操作；每一項都有 sidecar JSON 讀值或截圖佐證，細節見各列備註。
 - Mac 型號／macOS 版本：Mac mini（Apple M4）／macOS 26.6.2（25G82）。
+
+**B 段（Task 4.5 局部修護）**
+
+- Build：`Scripts/build-app-bundle.sh debug`（同一個 worktree，product commit `1f3ee74`），獨立的隔離測試環境（home 代號 `ISOLATED-HOME-002`，照片庫代號 `APFS-TMP-002`，跟 A 段的隔離環境互不共用，避免殘留 sidecar 干擾判定）。
+- 測試日期／時間：2026-09-04（深夜，Asia/Taipei）。
+- 測試者代號：Claude（自動化 GUI 操作：`osascript`/System Events 存取樹 + 自製 `CGEvent` 點擊／拖曳／捲動小工具，另外新增 `scroll` 子指令與一個獨立的 `CGImageSource`/`CGContext` 像素讀取小工具），非真人手動操作；每一項都有 sidecar JSON 讀值、截圖或匯出檔案像素比對佐證，細節見各列備註。
+- Mac 型號／macOS 版本：Mac mini（Apple M4）／macOS 26.6.2（25G82）。
+- 測試相片：合成的 Sony ARW 測試檔（代號 `spotheal-test.ARW`，6000×4000，複製自既有測試 fixture，跟 A 段用的測試相片是不同檔案），全程只有這一張照片、乾淨的隔離圖庫，沒有殘留其他 session 的 sidecar 資料。
+- 過程中一次環境插曲：桌面上另一個常駐 app（非 LumaHarbor、非本測試相關）的浮動小工具視窗剛好疊在 Inspector 面板的 Radius/Feather 滑桿正上方，一度讓兩次滑桿拖曳操作的合成滑鼠事件被那個浮動視窗吃掉而不是送到 LumaHarbor（sidecar 數值在那兩次操作前後完全沒變，藉此察覺問題）。發現後暫時把該視窗隱藏（`System Events` 的 `visible` 屬性，未關閉、未刪除任何資料），重新操作後正常，測試結束後已把該視窗恢復顯示。記錄在這裡是為了交接透明，不是 LumaHarbor 本身的問題。
 
 每一項只能填 `PASS`、`FAIL` 或 `NOT RUN`，並附必要備註。`NOT RUN` 不得視為通過。
 
@@ -33,23 +44,23 @@
 
 ## B. 局部修護拖曳把手（Task 4.5）
 
-這個環境這輪沒有重跑 Task 4.3 當時用過的完整自動化 GUI 操作流程（build app bundle、隔離測試環境、`osascript`/`CGEvent` 逐項操作 + sidecar JSON 讀值佐證），所以下列全部誠實列為 `NOT RUN`，不是遺漏——render／drag 數學／source-contract 已由 `LocalAdjustmentRendererTests`/`SpotHealDragMathTests`/`SpotHealOverlayContractTests`（`swift test`）涵蓋，見 `docs/coordination/CURRENT.md` 對應段落。
+B1–B13 全部已用 `osascript`/System Events 存取樹＋自製 `CGEvent` 小工具對真實執行中的 `build/LumaHarbor.app`（隔離環境 `ISOLATED-HOME-002`/`APFS-TMP-002`）操作完成，每一項都直接讀取 sidecar JSON（`.../.lumaharbor/edits/<photoID>.json`）逐欄位核對，關鍵幾項另外搭配截圖或匯出檔案像素比對。測試相片 `spotheal-test.ARW`（6000×4000）匯入後 photoID 為 `02516008-89E8-444E-B5D9-BB56CAB5DA38`；第一個修護點 id 為 `7EA7AD81-3429-4EC1-B68D-7747C5315D7D`。
 
 | ID | 驗測項目 | 預期行為 | 結果 | 備註／證據 |
 |---|---|---|---|---|
-| B1 | 在 Inspector「局部調整」區塊按「新增局部修護」 | 立即新增一個置中、`.heal` 模式的修護點，自動選取，並自動切換進 `.spotHeal` 工具模式（畫面上出現目標把手與尺寸把手，無來源把手） | NOT RUN | |
-| B2 | 拖曳修護點的**目標把手** | 把手跟著滑鼠移動；`.clone` 模式下來源把手與連接虛線一起跟著保持相對位置不變（只有目標點移動） | NOT RUN | |
-| B3 | 拖曳修護點的**尺寸把手** | 修護範圍的圓形外框跟著放大/縮小；拖近變小、拖遠變大，且視覺上的圓形大小跟實際套用效果的範圍一致 | NOT RUN | |
-| B4 | 把模式從「修復」切成「仿製」 | 立即出現黃色來源把手（在目標附近的預設位置，尚未手動放置過的情況下），連接虛線同時出現；切回「修復」後來源把手立即消失 | NOT RUN | |
-| B5 | 在「仿製」模式下拖曳**來源把手** | 來源把手跟著滑鼠移動，連接虛線同步更新；目標把手與尺寸不受影響 | NOT RUN | |
-| B6 | 調整選取中修護點的「Radius」／「Feather」滑桿 | 畫面上的尺寸把手與圓形外框即時反映 Radius 變化；Feather 影響邊緣柔和度（無獨立把手，僅滑桿可調） | NOT RUN | |
-| B7 | 「修復」模式下檢查說明文字 | Inspector 顯示「「修復」模式會自動取樣周邊材質。」與「在複雜背景上，改用「仿製」並自行指定來源點會更可靠。」兩行說明；切到「仿製」後這兩行消失 | NOT RUN | |
-| B8 | 按 Inspector 裡修護列的刪除（垃圾桶）按鈕 | 該修護點立即從畫面與清單中消失，其他修護點／漸層不受影響 | NOT RUN | |
-| B9 | 關閉修護列的「Enabled」開關 | 畫面上該修護點的視覺效果立即消失，但把手仍在（可重新啟用），刪除與拖曳仍可操作 | NOT RUN | |
-| B10 | 新增兩個修護點，分別拖曳 | 兩組把手各自獨立，拖曳其中一個不影響另一個；點擊任一把手可切換選取 | NOT RUN | |
-| B11 | 按 Inspector 的「Done」離開編輯模式 | 把手從畫面上消失，回到 `.adjust` 工具模式，修護點本身（含已設定的效果）繼續保留、繼續套用在照片上 | NOT RUN | |
-| B12 | 關閉照片再重新開啟（或重啟 App） | 修護點設定（目標/來源/半徑/羽化/模式/啟用狀態）完整保留，畫面效果一致 | NOT RUN | |
-| B13 | 匯出含修護效果的照片 | 匯出檔案裡看得到修護效果（跟預覽畫面一致，且是完整解析度重算，不是把預覽 bitmap 直接貼上），確認不是只有預覽套用、匯出漏掉 | NOT RUN | |
+| B1 | 在 Inspector「局部調整」區塊按「新增局部修護」 | 立即新增一個置中、`.heal` 模式的修護點，自動選取，並自動切換進 `.spotHeal` 工具模式（畫面上出現目標把手與尺寸把手，無來源把手） | PASS | 按下後 sidecar 立即多一筆 `localAdjustments` 記錄：`kind=spotHeal`、`x=0.5,y=0.5`（置中）、`radius=0.05`、`feather=50`、`healMode=heal`、`isEnabled=true`，`adjustments={}`（spot heal 不使用 mini adjustments，符合 Task 4.4 的既有範圍界線）。畫面上同時出現一個以照片中心為圓心的圓形外框，中心一個藍色目標把手、右側一個藍色尺寸把手，沒有黃色來源把手（`.heal` 模式的預期行為）；Inspector 面板該列標籤變成「局部修護」並反白選取，按鈕文字從「編輯局部修護」變成「完成」，確認 `toolMode` 已切到 `.spotHeal`。目標把手螢幕座標 (943,511)、尺寸把手 (973,511)，用照片顯示區域換算（左上 (648,69)、寬 590、高 884）反推剛好對應 `x=0.5,y=0.5` 與 `radius×min(590,884)=29.5px`，證實把手位置的座標轉換公式（含 size 把手的正規化除數）跟 render 層完全一致。 |
+| B2 | 拖曳修護點的**目標把手** | 把手跟著滑鼠移動；`.clone` 模式下來源把手與連接虛線一起跟著保持相對位置不變（只有目標點移動） | PASS | 把目標把手從 (943,511) 拖到 (900,450)（screen points）：sidecar `x` 從 0.5→0.4273、`y` 從 0.5→0.4312，跟「位移量 ÷ 圖片顯示區域寬高」算出的預測值（0.4271、0.4310）幾乎一致；同一筆記錄的 `radius`/`feather`/`healMode`/`angleDegrees`/`range` 完全沒被牽動。截圖確認圓形外框與兩個把手一起平移到新位置。 |
+| B3 | 拖曳修護點的**尺寸把手** | 修護範圍的圓形外框跟著放大/縮小；拖近變小、拖遠變大，且視覺上的圓形大小跟實際套用效果的範圍一致 | PASS | 把尺寸把手從 (930,450) 拖到 (980,450)（遠離目標 50pt）：sidecar `radius` 從 0.05→0.1346（預測 0.1356，接近），`x`/`y`/`feather`/`healMode` 未變。截圖確認圓形外框明顯變大，把手位置與圓周邊緣始終貼合。 |
+| B4 | 把模式從「修復」切成「仿製」 | 立即出現黃色來源把手（在目標附近的預設位置，尚未手動放置過的情況下），連接虛線同時出現；切回「修復」後來源把手立即消失 | PASS | 點擊「仿製」分段按鈕：sidecar `healMode` 立即變成 `clone`，`sourceX`/`sourceY` 這輪仍未寫入（設計上尚未手動放置前不落地，見 `SpotHealDragMath.resolvedSource`/`LocalAdjustmentRenderer.autoSourcePoint` 共用的預設公式）。畫面上立即出現一個黃色來源把手，位置精確落在「目標正上方、偏移量 = min(radius×2.5, 0.45) 正規化距離」算出的位置（依當時 `radius=0.1346,y=0.4312` 算出偏移 0.3364、來源 `y=0.0949`，反推螢幕座標約 (900,150)，跟截圖量到的黃點位置一致），且用白色虛線連到目標——證實 render 層與 overlay 層對「clone 模式尚未放置來源點時的預設位置」用的是同一套公式，不會出現「畫面上看到的來源位置」跟「實際渲染取樣位置」對不起來的情況。 |
+| B5 | 在「仿製」模式下拖曳**來源把手** | 來源把手跟著滑鼠移動，連接虛線同步更新；目標把手與尺寸不受影響 | PASS | 把來源把手從 (900,150) 拖到 (1050,150)（純水平移動 150pt）：sidecar 這時才第一次寫入 `sourceX=0.6809`（預測 0.6815）、`sourceY=0.0948`（拖曳前的 resolved 值 0.0949，水平拖曳不應改變 y，果然幾乎不變），目標的 `x`/`y`、`radius`、`feather` 完全沒被牽動。截圖確認黃色把手與虛線一起移動到新位置，藍色目標/尺寸把手原地不動。 |
+| B6 | 調整選取中修護點的「Radius」／「Feather」滑桿 | 畫面上的尺寸把手與圓形外框即時反映 Radius 變化；Feather 影響邊緣柔和度（無獨立把手，僅滑桿可調） | PASS | 拖曳 Radius 滑桿：sidecar `radius` 0.1346→0.2538（畫面上的圓形外框同步明顯變大，尺寸把手位置跟著外移，且能看到照片本身在圓內已經出現局部平移/混合的即時預覽效果）。拖曳 Feather 滑桿：sidecar `feather` 50→84.04（圓形外框邊緣的柔化過渡帶肉眼可見變寬）；兩次操作前 `x`/`y`/`sourceX`/`sourceY`/`healMode` 都未受影響。（第一次嘗試這兩個滑桿時，桌面上一個無關 app 的浮動小工具視窗剛好蓋住滑桿座標，兩次合成拖曳事件被那個視窗吃掉、sidecar 完全沒變——察覺後把該視窗暫時隱藏，重新操作後才成功，過程記在上面「測試資訊」段落。） |
+| B7 | 「修復」模式下檢查說明文字 | Inspector 顯示「「修復」模式會自動取樣周邊材質。」與「在複雜背景上，改用「仿製」並自行指定來源點會更可靠。」兩行說明；切到「仿製」後這兩行消失 | PASS | 從「仿製」切回「修復」：sidecar `healMode` 立即變回 `heal`，同一時間 Inspector 立即顯示這兩行說明文字（截圖確認字樣逐字相符），黃色來源把手立即從畫面上消失。同時觀察到照片預覽的局部效果內容也立即改變（因為 render 層 `resolvedSourcePoint` 對 `.heal` 一律改用 `autoSourcePoint`，不再理會剛才 clone 模式放置的來源點）——這正是 design spec §6.7「模式切換時，當前選取點必須立即更新，不只影響下一個新點」在畫面上的具體展現，不只是資料層面正確，肉眼也能立即看到效果跟著換了。 |
+| B8 | 按 Inspector 裡修護列的刪除（垃圾桶）按鈕 | 該修護點立即從畫面與清單中消失，其他修護點／漸層不受影響 | PASS | 先按「新增局部修護」再新增一個第二筆修護點（`id=78338701-...`，預設值），拖曳其目標把手到新位置確認兩筆互相獨立（第一筆的 `radius=0.2538`/`feather=84.04`/`sourceX`/`sourceY`/`healMode=heal` 全程未被牽動）之後，點第二筆列的垃圾桶按鈕：sidecar 的 `localAdjustments` 立即從 2 筆變回 1 筆，只剩第一筆且逐欄位比對跟刪除前完全一致，畫面上也只剩一個圓形把手組。 |
+| B9 | 關閉修護列的「Enabled」開關 | 畫面上該修護點的視覺效果立即消失，但把手仍在（可重新啟用），刪除與拖曳仍可操作 | PASS | 關閉 Enabled 開關：sidecar `isEnabled=false`，列標籤變成「局部修護（已停用）」，截圖確認照片預覽裡原本可見的局部平移/混合效果立即消失（畫面變回接近原圖），但兩個把手與圓形外框仍在原位、仍可繼續互動。重新開啟開關後 sidecar 立即回到 `isEnabled=true`，效果同步恢復。 |
+| B10 | 新增兩個修護點，分別拖曳 | 兩組把手各自獨立，拖曳其中一個不影響另一個；點擊任一把手可切換選取 | PASS | 見 B8 說明——新增並拖曳第二筆時，第一筆的所有欄位（含這輪特地放大過的 `radius`/`feather` 與放置過的 `sourceX`/`sourceY`）全程逐一核對未變。另外點擊 Inspector 第一筆列的標籤（非拖曳把手）：畫面上的選取把手立即從第二筆的位置跳回第一筆的位置，該列變成反白選取、面板下方的模式/Radius/Feather 也同步換成第一筆的數值，確認點列可以切換選取且畫面同步。 |
+| B11 | 按 Inspector 的「Done」離開編輯模式 | 把手從畫面上消失，回到 `.adjust` 工具模式，修護點本身（含已設定的效果）繼續保留、繼續套用在照片上 | PASS | 點擊「完成」後：按鈕文字變回「編輯局部修護」，畫面上所有把手（目標/尺寸/來源）與圓形外框立即消失，但照片預覽裡的修護效果仍然可見（非破壞、非「只在編輯模式才套用」的暫時效果），Inspector 清單裡該修護列與其 Enabled 開關、Radius/Feather 數值都還在。 |
+| B12 | 關閉照片再重新開啟（或重啟 App） | 修護點設定（目標/來源/半徑/羽化/模式/啟用狀態）完整保留，畫面效果一致 | PASS | 用最嚴格的版本測：從選單「LumaHarbor › 結束 LumaHarbor」完整關閉 App，用同一組隔離 `HOME`/`CFFIXED_USER_HOME` 環境變數重新啟動、雙擊同一張照片重新開啟編輯畫面。結果：(1) 縮圖與預覽畫面的局部修護視覺效果跟關閉前一致（縮圖本身就看得出來，證實縮圖生成也套用了同一條 render pipeline）；(2) 直接讀 sidecar JSON 確認欄位逐一比對完全相同：`id=7EA7AD81-...`、`x=0.4273`、`y=0.4312`、`radius=0.2538`、`feather=84.04`、`healMode=heal`、`sourceX=0.6809`、`sourceY=0.0948`、`isEnabled=true`；(3) Inspector 面板往下捲到「局部調整」區塊後，該修護列、Enabled 開關（ON）、Radius/Feather 數值都還在。跟 A12 一樣，重開 App 後 Inspector 面板預設捲到最上方，需要手動往下捲——沿用既有面板行為，不是這輪的迴歸。 |
+| B13 | 匯出含修護效果的照片 | 匯出檔案裡看得到修護效果（跟預覽畫面一致，且是完整解析度重算，不是把預覽 bitmap 直接貼上），確認不是只有預覽套用、匯出漏掉 | PASS | 走完整的「File › 匯出 JPEG…」UI 流程（非測試內部呼叫），分別在「Enabled 開／關」兩種狀態各匯出一份 4000×6000 JPEG，用獨立寫的 `CGImageSource`/`CGContext` 像素讀取工具（跟 App 本身無共用程式碼）取樣比對：目標點 `(0.4273,0.4312)`（修護範圍內）啟用版 RGB=(158,128,82) vs. 停用版 RGB=(223,200,185)，差異明顯；範圍邊緣附近的 `(0.4273,0.30)` 也有差異但較小（feather 過渡帶的預期行為）；範圍外的 `(0.6,0.2)` 兩版完全相同 RGB=(248,235,219)，畫面角落 `(0.05,0.05)`／`(0.95,0.95)` 也逐 bit 相同——證實修護效果確實以完整解析度寫進匯出檔案本身、且正確限制在修護圓形範圍內（含 feather 過渡帶），範圍外像素不受影響，不是只有預覽好看。跟 Task 4.4 的自動化測試 `PhotoExportTests` 兩個 full-resolution export 案例驗證的是同一件事，這次額外用真人會用的匯出 UI 流程與獨立像素工具重新確認一次。 |
 
 ## C. 停止條件
 
@@ -66,11 +77,12 @@
 
 ## 整體結論
 
-- 結果：**PARTIAL PASS**。A 段（Task 4.3 線性漸層）：A1–A10、A12–A13 已執行並留下 sidecar JSON 讀值與截圖佐證；A11 的選單 Undo 已驗證，但原測項要求的實體鍵盤 `⌘Z` 尚未由真人補跑，維持 `NOT RUN`。B 段（Task 4.5 局部修護）：這輪只完成程式碼實作與自動化測試，尚未重跑一次完整的自動化 GUI 操作流程，B1–B13 全部 `NOT RUN`。
+- 結果：**PARTIAL PASS**。A 段（Task 4.3 線性漸層）：A1–A10、A12–A13 已執行並留下 sidecar JSON 讀值與截圖佐證；A11 的選單 Undo 已驗證，但原測項要求的實體鍵盤 `⌘Z` 尚未由真人補跑，維持 `NOT RUN`。B 段（Task 4.5 局部修護）：**B1–B13 全部已執行並 `PASS`**，每一項都有 sidecar JSON 讀值佐證，關鍵幾項（B4 預設來源點位置、B7 模式切換立即生效、B13 匯出）另外有截圖或匯出檔案像素比對佐證，過程中未發現任何 FAIL 或需要開 bug 的行為。整體清單唯一剩下的 `NOT RUN` 是 A11 實體鍵盤 `⌘Z`（Phase 4 完整驗收／上線候選 gate）。
 - 這輪的自動化證據（`swift build`、`swift test`、iOS generic build、`git diff --check`、隱私掃描）記在 `docs/coordination/CURRENT.md` 的「Phase 4 Task 4.3」／「Phase 4 Task 4.5」段落，跟這份手動清單是分開的兩件事。
 - 已知限制（非本輪新發現、不影響結論，但值得記錄）：
   1. 合成的 `⌘Z` 鍵盤事件無法穩定觸發 App 的 Undo（`System Events keystroke` 沒被 `UndoRedoKeyEquivalentFix` 的 local key-down monitor 接住），要用滑鼠點「編輯 › 復原」選單才能可靠觸發；程式碼裡的註解已記錄這是 SwiftUI `.undoRedo` CommandGroup 的既有限制。A11 因此不能被自動化結果支撐為 PASS，仍需真人用實體鍵盤直接按 `⌘Z` 補跑。
-  2. App 重新啟動後 Inspector 面板預設捲到最上方（直方圖／詮釋資料／Preset），不會記得使用者上次捲動到「局部調整」的位置，需要手動往下捲——這是既有面板行為，不是 Phase 4 的迴歸，但容易讓人誤以為漸層／修護資料消失了。
-  3. 這份清單裡的測試相片（`phase3-a-renamed.ARW`）基礎曝光已經偏高，套用大幅局部曝光時大範圍會直接裁到全白（255,255,255），此時單看匯出檔案像素比對不出效果有沒有作用；A13 改用較低的曝光值加上刻意挑選作用範圍內外的取樣點，才拿到有意義的量測證據。B13 補跑時也要留意這個 clipping 陷阱。
-  4. `.heal` 模式的自動取樣是固定、決定性的偏移量（`LocalAdjustmentRenderer.autoSourcePoint`：正上方 radius×2.5，太靠邊界時鏡射到下方），不是內容感知填色；在複雜材質或高對比邊界上可能明顯重複貼上不相關內容，B7 應確認 Inspector 有把這個限制誠實告知使用者。
-- 下一步：真人或下一輪代理補跑 B1–B13（可比照 A 段當時的方式，用 `osascript`/`CGEvent` 或真人操作 + sidecar JSON 讀值佐證），以及 A11 的實體鍵盤 `⌘Z`；之後才進入 Task 4.6（Phase 4 完整驗證輪）。
+  2. App 重新啟動後 Inspector 面板預設捲到最上方（直方圖／詮釋資料／Preset），不會記得使用者上次捲動到「局部調整」的位置，需要手動往下捲——這是既有面板行為，不是 Phase 4 的迴歸，但容易讓人誤以為漸層／修護資料消失了。B12 這輪再次遇到並確認同一個既有行為，非新迴歸。
+  3. 這份清單裡 A 段用的測試相片（`phase3-a-renamed.ARW`）基礎曝光已經偏高，套用大幅局部曝光時大範圍會直接裁到全白（255,255,255），此時單看匯出檔案像素比對不出效果有沒有作用；A13 改用較低的曝光值加上刻意挑選作用範圍內外的取樣點，才拿到有意義的量測證據。B 段改用另一張未過曝的測試相片（`spotheal-test.ARW`），B13 的目標點與範圍外取樣點都量到清楚差異，沒有踩到同樣的 clipping 陷阱。
+  4. `.heal` 模式的自動取樣是固定、決定性的偏移量（`LocalAdjustmentRenderer.autoSourcePoint`：正上方 radius×2.5，太靠邊界時鏡射到下方），不是內容感知填色；在複雜材質或高對比邊界上可能明顯重複貼上不相關內容。B7 已確認 Inspector 在 `.heal` 模式下會即時顯示這個限制的說明文字，B4 也確認 overlay 顯示的預設來源位置跟 render 實際取樣位置公式一致——UI 層與 render 層對這個品質限制的呈現是一致的，沒有落差。
+  5. 測試過程中一次無關 app 的浮動視窗疊在滑桿上方吃掉了兩次合成拖曳事件（B6 第一次嘗試），靠「sidecar 數值操作前後完全沒變」這個訊號才察覺，不是憑截圖「看起來對不對」判斷——這也是這份清單全程要求逐項讀 sidecar 佐證、不能只憑畫面判斷通過與否的原因。
+- 下一步：真人在實機用實體鍵盤補跑 A11 的 `⌘Z`；完成後即可進入 Task 4.6（Phase 4 完整驗證輪：focused tests/`swift test`/`git diff --check`/隱私掃描彙整 + 這份清單的最終確認）。

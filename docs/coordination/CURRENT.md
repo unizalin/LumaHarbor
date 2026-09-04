@@ -2,7 +2,26 @@
 
 Updated: 2026-09-04
 
-Updated by: Claude（Phase 4 Task 4.5 完成：spot heal 的 Mac UI）
+Updated by: Claude（Phase 4 Task 4.5 手動驗測 B1–B13 補跑完成，全數 PASS）
+
+## Phase 4 Task 4.5 手動驗測：B1–B13 補跑，全數 PASS (2026-09-04, Claude, in this worktree/branch)
+
+- **狀態**：`DONE`（手動驗測，docs-only，沒有改動任何 product code）。分支 `claude/awayphotoraweditor-parity-phase2-geometry`，base 仍是 `main@fb7109a`，HEAD 在文件 commit `313ef0a` 之上再加一個 docs commit。開始前確認過分支/HEAD/dirty files 與 `CURRENT.md` 描述一致。使用者這輪明確要求「補跑 B1–B13 你來驗測」，於是接續上一輪 Task 4.5 UI 實作，把 `docs/testing/beta/PHASE4_MANUAL_CHECKLIST.md` B 段（局部修護）當時誠實列為 `NOT RUN` 的 13 項全部跑完。
+- **環境**：這個環境沒有等同 Codex CUA 的專用螢幕操作能力，沿用 Phase 3/Phase 4 A 段已經驗證可行的作法——`Scripts/build-app-bundle.sh debug` 建出 Mac debug `.app`，以前景方式啟動，`HOME`/`CFFIXED_USER_HOME` 指向一個全新的隔離測試環境（跟 A 段的隔離環境是不同的目錄，避免殘留 sidecar 干擾判定），測試圖庫只有一張複製自既有 fixture 的合成 Sony ARW（`spotheal-test.ARW`，6000×4000）。操作工具：`osascript`/System Events 存取樹（讀取按鈕/選單/滑桿/radio button 的位置與屬性、用 `AXPress` 觸發按鈕、讀取視窗與選單結構）搭配這輪新寫的一個 `CGEvent`-based 命令列小工具（`click`/`doubleclick`/`rightclick`/`drag`/`scroll`，drag 用多段 `leftMouseDragged` 模擬真實拖曳路徑，scroll 用 `scrollWheelEvent2Source`），以及另一個獨立的 `CGImageSource`/`CGContext` 像素讀取小工具（`pixelread`，用正規化座標讀取任意匯出圖檔的 RGB 值，跟 App 本身無共用程式碼）。每一項判定都直接讀取隔離測試環境裡的 sidecar JSON（`.../.lumaharbor/edits/<photoID>.json`）逐欄位比對，不是只憑截圖「看起來對不對」。
+- **B1–B13 結果**：**全部 `PASS`**，詳細操作步驟、螢幕座標、sidecar 數值變化與截圖佐證都寫在 `PHASE4_MANUAL_CHECKLIST.md` 對應列，這裡只摘要重點：
+  - B1（新增）：sidecar 立即多一筆 `kind=spotHeal` 記錄，預設值與 `LocalAdjustmentGeometry.neutral`/`init` 一致；畫面上出現的把手座標反推回去，證實 UI 層的 `imagePoint`/`sizeHandlePoint` 座標轉換公式跟 render 層完全一致。
+  - B2/B3（移動 target／size）：拖曳距離換算成正規化座標的預測值跟 sidecar 實際寫入值幾乎一致（誤差在小數點後三四位），且互不牽動彼此或 `healMode`/`feather`。
+  - B4（切到 clone）：`healMode` 立即變 `clone`，overlay 立即畫出黃色來源把手在「未放置前的預設位置」——這個位置的畫面座標换算回正規化座標後，跟 `SpotHealDragMath.resolvedSource`（也就是 `LocalAdjustmentRenderer.autoSourcePoint` 的鏡像公式）算出的值一致，證實 B4 的一大重點——UI 預覽的預設來源位置跟實際 render 取樣位置沒有落差。
+  - B5（拖曳 source）：sidecar 這時才第一次真的寫入 `sourceX`/`sourceY`，純水平拖曳只動 `sourceX`，`sourceY` 幾乎不變，target/radius/feather 不受影響。
+  - B6（Radius／Feather 滑桿）：兩個滑桿都能正確改對應欄位；過程中遇到一次無關 app 的浮動視窗剛好蓋住滑桿座標、吃掉兩次合成拖曳事件的插曲（sidecar 數值操作前後完全沒變，藉此察覺問題，暫時隱藏該視窗後重試成功，結束後已恢復顯示，未刪除任何資料）——記錄在清單的「測試資訊」與「整體結論」段落。
+  - B7（品質限制文字＋模式切換立即生效）：切回 heal 模式時，Inspector 立即顯示兩行誠實的品質限制說明文字，同時照片預覽的效果內容也立即改變（因為 render 對 heal 模式一律改用 `autoSourcePoint`，不理會剛才 clone 模式放置的來源點）——design spec §6.7 的「模式切換立即生效」要求在畫面上得到具體驗證，不只是資料層面。
+  - B8/B9/B10（刪除／停用／多點獨立）：新增第二個修護點、各自拖曳、停用、刪除，全程用逐欄位比對確認彼此互不影響，點列可以正確切換選取。
+  - B11/B12（Done／持久化）：離開編輯模式後把手消失但效果與資料保留；完整 `Quit App` 後用同一組隔離環境重新啟動、重新開啟同一張照片，sidecar 逐欄位比對與關閉前完全相同，縮圖本身也看得出效果（證實縮圖生成走同一條 render pipeline）。
+  - B13（匯出）：走真人會用的「File › 匯出 JPEG…」UI 流程，「Enabled 開／關」各匯出一份 4000×6000 JPEG，用獨立像素工具在目標點／邊緣過渡帶／範圍外三種位置取樣比對——範圍內有清楚差異、範圍外逐 bit 相同，證實修護效果是以完整解析度寫進匯出檔案，且正確限制在修護圓形（含 feather 過渡帶）範圍內。
+- **這輪沒有發現任何 FAIL 或需要開 bug 的行為**——B 段全數 PASS，`PHASE4_MANUAL_CHECKLIST.md` 的整體結論已更新為「B1–B13 全數 PASS，清單唯一剩下的 NOT RUN 是 A11 實體鍵盤 ⌘Z」。
+- **驗證**：這輪是手動 GUI 操作 + 文件記錄，沒有改動 product/test code，`swift build`/`swift test`/iOS generic build 維持 Task 4.5 上一輪（HEAD `1f3ee74`）的基準不變（1603 執行、9 skip、0 失敗）。`git diff --check` 對這輪文件 diff 乾淨。隱私掃描（`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM"`）對 `PHASE4_MANUAL_CHECKLIST.md` 這輪 diff 零命中——文件裡的隔離環境路徑一律用代號（`ISOLATED-HOME-002`/`APFS-TMP-002`）表示，沒有寫入任何本機絕對路徑。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 這輪完全沒有被讀取或變動。
+- **NOT RUN**：A11 實體鍵盤 `⌘Z`（Phase 4 完整驗收／上線候選 gate，這輪沒有嘗試補跑，也不是這輪的範圍）。
+- **Next action**：真人在實機用實體鍵盤補跑 A11 的 `⌘Z`；完成後即可進入 Task 4.6（Phase 4 完整驗證輪：focused tests/`swift test`/`git diff --check`/隱私掃描彙整 + `PHASE4_MANUAL_CHECKLIST.md` 的最終確認）。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 4 Task 4.5：Spot heal 的 Mac UI (2026-09-04, Claude, TDD, in this worktree/branch)
 
