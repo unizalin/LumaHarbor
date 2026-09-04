@@ -127,6 +127,23 @@ final class VirtualCopyServiceTests: TemporaryDirectoryTestCase {
         XCTAssertNil(reloadedOriginal.variantOf)
     }
 
+    func testEditingAVirtualCopyPreservesItsIdentityInTheSidecar() async throws {
+        let service = try makeService()
+        let root = try makeSubdirectory("Photos")
+        try writeFile(Data(repeating: 0x30, count: 64), at: root.appendingPathComponent("DSC0001.ARW"))
+        let library = try await addLibrary(service, at: root)
+        try await runScan(service, libraryID: library.id)
+        let photos = try await service.photos(inLibrary: library.id)
+        let original = try XCTUnwrap(photos.first)
+        let copy = try await service.createVirtualCopy(of: original)
+
+        try await service.saveAdjustments(PhotoAdjustments(exposure: -1.25), for: copy)
+
+        let repository = FileSidecarRepository(libraryRootURL: root)
+        let editedSidecar = try XCTUnwrap(try repository.loadSidecar(for: copy.id))
+        XCTAssertEqual(editedSidecar.variantOf, original.id)
+    }
+
     /// A copy's own sidecar is what makes it real (spec §8.1). If its
     /// `library.json` record ever outlives its sidecar -- e.g.
     /// `deleteVirtualCopy(_:)` already removed the sidecar (the

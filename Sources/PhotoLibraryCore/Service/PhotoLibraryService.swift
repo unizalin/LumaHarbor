@@ -2111,7 +2111,8 @@ public actor PhotoLibraryService {
                 decoder: DecoderDescriptor(decoder.identifier),
                 adjustments: adjustments,
                 createdAt: existing?.createdAt ?? now,
-                modifiedAt: now
+                modifiedAt: now,
+                variantOf: photo.variantOf ?? existing?.variantOf
             )
             try repository.write(sidecar: sidecar)
             // Best-effort by design (spec §8.1): the sidecar write above is
