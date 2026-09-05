@@ -7,6 +7,7 @@ import SwiftUI
 /// already called `LumaHarborApp`; a type of the same name would shadow it.
 public struct LumaHarborMainApp: App {
     @StateObject private var libraryModel = LibraryViewModel()
+    @NSApplicationDelegateAdaptor(LumaHarborAppDelegate.self) private var appDelegate
 
     public init() {}
 
@@ -15,7 +16,7 @@ public struct LumaHarborMainApp: App {
             RootView()
                 .environmentObject(libraryModel)
                 .frame(minWidth: 1_100, minHeight: 700)
-                .onAppear { UndoRedoKeyEquivalentFix.install(model: libraryModel) }
+                .onAppear { appDelegate.model = libraryModel }
         }
         .commands {
             LumaHarborCommands(model: libraryModel)
@@ -23,59 +24,46 @@ public struct LumaHarborMainApp: App {
     }
 }
 
-/// `CommandGroup(replacing: .undoRedo)` in `LumaHarborCommands` gives Undo/Redo
-/// working, correctly-enabled menu items — clicking them works — but ⌘Z/⌘⇧Z
-/// themselves never reach the menu's key-equivalent matching (confirmed by
-/// hand 2026-08-18: menu click undoes fine, the keyboard shortcut does
-/// nothing, even after clicking away from every slider to rule out a focused
-/// control eating the key). This is a known SwiftUI-on-macOS gap: `.undoRedo`
-/// key equivalents aren't reliably routed without a real `NSResponder`
-/// implementing `undo:`/`redo:`. A local key-down monitor -- which AppKit
-/// consults ahead of ordinary key-equivalent dispatch -- is the standard
-/// workaround.
+/// Two earlier fixes for ⌘Z/⌘⇧Z doing nothing both failed real-hardware
+/// testing (2026-08-18, then again 2026-09-05 with a hardware-level `CGEvent`
+/// control-tested against TextEdit): a `CommandGroup(replacing: .undoRedo)`
+/// with `.keyboardShortcut` set directly, and later the same CommandGroup
+/// backed by an `NSEvent.addLocalMonitorForEvents` local key-down monitor.
+/// Neither puts a real `NSResponder` implementing `undo:`/`redo:` anywhere
+/// AppKit's standard key-equivalent dispatch can find it, which is what every
+/// other Mac app (including TextEdit, confirmed by the same control test)
+/// relies on for ⌘Z to work at all.
+///
+/// This fix instead leaves `.undoRedo` *unreplaced* -- so SwiftUI keeps
+/// generating the system's own Undo/Redo menu items, with their OS-standard
+/// ⌘Z/⌘⇧Z key equivalents and target `nil` (first-responder-chain dispatch)
+/// -- and gives the app delegate real `undo(_:)`/`redo(_:)` methods so that
+/// chain has somewhere to land regardless of which view currently has focus.
+/// `NSApplication`'s delegate is the last stop in `NSApp.target(for:)`'s
+/// search order, after the key window and its responder chain, so a focused
+/// text field's own undo (e.g. mid-rename) still wins over this app-level
+/// fallback, matching standard multi-level Mac undo behavior.
 @MainActor
-enum UndoRedoKeyEquivalentFix {
-    /// Which action a key-down event maps to, if any. Kept separate from
-    /// `install`'s `NSEvent` handling so the matching rules themselves are
-    /// unit-testable without a real window or key event delivery -- neither
-    /// of which XCTest can drive in this environment.
-    enum Action: Equatable {
-        case undo
-        case redo
+final class LumaHarborAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+    weak var model: LibraryViewModel?
+
+    @objc func undo(_ sender: Any?) {
+        model?.editor.undo()
     }
 
-    private static var monitor: Any?
-
-    /// `modifierFlags` is masked to `.deviceIndependentFlagsMask` before
-    /// comparison so a stray device-dependent bit in the raw event (the low
-    /// 16 bits, unrelated to any named modifier) can't spuriously break the
-    /// match, while still requiring an *exact* semantic modifier set -- ⌥⌘Z
-    /// or ⌃⌘Z must not trigger undo, only plain ⌘Z (redo additionally
-    /// requires ⇧).
-    static func match(charactersIgnoringModifiers: String?, modifierFlags: NSEvent.ModifierFlags) -> Action? {
-        guard charactersIgnoringModifiers?.lowercased() == "z" else { return nil }
-        switch modifierFlags.intersection(.deviceIndependentFlagsMask) {
-        case [.command]: return .undo
-        case [.command, .shift]: return .redo
-        default: return nil
-        }
+    @objc func redo(_ sender: Any?) {
+        model?.editor.redo()
     }
 
-    static func install(model: LibraryViewModel) {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { @MainActor event in
-            switch match(charactersIgnoringModifiers: event.charactersIgnoringModifiers, modifierFlags: event.modifierFlags) {
-            case .undo:
-                guard model.editor.canUndo else { return event }
-                model.editor.undo()
-                return nil
-            case .redo:
-                guard model.editor.canRedo else { return event }
-                model.editor.redo()
-                return nil
-            case nil:
-                return event
-            }
+    /// AppKit calls this on whichever responder it found for the menu item's
+    /// action -- here, only ever `undo(_:)`/`redo(_:)`, since those are the
+    /// only actions this delegate implements. Anything else is left enabled,
+    /// matching `NSMenuItemValidation`'s "no opinion" default.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(undo(_:)): return model?.editor.canUndo ?? false
+        case #selector(redo(_:)): return model?.editor.canRedo ?? false
+        default: return true
         }
     }
 }
