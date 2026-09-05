@@ -87,9 +87,21 @@ public final class LibraryViewModel: ObservableObject {
     @Published private(set) var lastBatchTransaction: BatchAdjustmentTransaction?
     @Published private(set) var scanProgress: ScanProgress?
     @Published private(set) var exportState: ExportState?
+    /// Phase 5 Task 5.1: live per-file status for the batch export currently
+    /// running (or the most recently finished one, left visible until a new
+    /// batch starts or `isShowingBatchExportSheet` closes) -- one entry per
+    /// photo in `selectedPhotoIDs` at the moment the batch started. Declared
+    /// now alongside `BatchExportQueue` (see `batchExportQueue` below) so the
+    /// core queue's own state shape is exercised end-to-end by the type
+    /// checker; no action wires them together yet -- that Mac export queue
+    /// UI is the roadmap's own next Task 5.1 follow-up, not this round's
+    /// scope.
+    @Published private(set) var batchExportItems: [BatchExportItem] = []
+    @Published private(set) var isBatchExporting = false
     @Published private(set) var startupFailure: String?
     @Published var alert: UserAlert?
     @Published var isShowingExportSheet = false
+    @Published var isShowingBatchExportSheet = false
 
     let editor = EditorSession()
     let presetLibrary = PresetLibraryViewModel()
@@ -108,6 +120,11 @@ public final class LibraryViewModel: ObservableObject {
     private var services: AppServices?
     private var scanTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
+    /// Phase 5 Task 5.1 follow-up: no method starts or cancels a batch export
+    /// through `batchExportQueue` yet -- see the note on `batchExportItems`
+    /// above.
+    private var batchExportTask: Task<Void, Never>?
+    private let batchExportQueue = BatchExportQueue()
     private var hasBootstrapped = false
 
     /// Only ever holds the most recent request: clicking three thumbnails
