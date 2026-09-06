@@ -50,4 +50,38 @@ public enum L10n {
     public static func t(_ key: String) -> String {
         bundle.localizedString(forKey: key, value: nil, table: "Localizable")
     }
+
+    /// Every language this module ships a `.lproj` for -- `Bundle.module`'s
+    /// own `.localizations`, independent of `Locale.preferredLanguages`
+    /// -based resolution (which `resolveBundle` above uses and which always
+    /// returns exactly one best-matching language, silently falling back to
+    /// English for one that isn't shipped). Public so headless diagnostics
+    /// (roadmap Phase 5 Task 5.5) can report which languages actually ship
+    /// without needing `@testable import` from outside this module.
+    public static var availableLanguageCodes: [String] {
+        Bundle.module.localizations
+    }
+
+    /// Number of keys in `languageCode`'s own `Localizable.strings`, or
+    /// `nil` if this module has no `.lproj` for it, or its table couldn't be
+    /// parsed. Case-insensitive: SwiftPM lowercases `.lproj` directory names
+    /// when it copies them into the built resource bundle, so an exact-case
+    /// lookup for e.g. "zh-Hant" would miss the "zh-hant" it actually
+    /// shipped as -- this matches against `availableLanguageCodes` first to
+    /// find the real on-disk name before resolving a path from it.
+    public static func keyCount(for languageCode: String) -> Int? {
+        guard let actualName = Bundle.module.localizations.first(where: { $0.caseInsensitiveCompare(languageCode) == .orderedSame }),
+              let path = Bundle.module.path(forResource: actualName, ofType: "lproj"),
+              let languageBundle = Bundle(path: path),
+              let stringsURL = languageBundle.url(forResource: "Localizable", withExtension: "strings"),
+              let data = try? Data(contentsOf: stringsURL) else {
+            return nil
+        }
+        var format = PropertyListSerialization.PropertyListFormat.openStep
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: &format),
+              let table = plist as? [String: String] else {
+            return nil
+        }
+        return table.count
+    }
 }

@@ -90,6 +90,14 @@ let package = Package(
         // any shipping target -- see `Sources/PendingLeaseHelper/main.swift`.
         .executableTarget(name: "PendingLeaseHelper", dependencies: ["PhotoLibraryCore"]),
 
+        // Headless diagnostics CLI (roadmap Phase 5 Task 5.5): prints a
+        // `LumaHarborDiagnosticsRunner` report as text or JSON. Never opens
+        // a window or needs a person at the keyboard -- `swift run
+        // LumaHarborDiagnosticsCLI [--json]`. Not a shipping product (same
+        // as `PendingLeaseHelper` above), just a dev/CI entry point into the
+        // same runner `LumaHarborDiagnosticsRunnerTests` already exercises.
+        .executableTarget(name: "LumaHarborDiagnosticsCLI", dependencies: ["LumaHarborApp"]),
+
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
         .testTarget(
             name: "PresetCoreTests",
