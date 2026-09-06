@@ -1,5 +1,6 @@
 "1 GB" = "1 GB";
 "1 photo" = "1 張照片";
+"1 photo selected" = "已選取 1 張照片";
 "10 GB" = "10 GB";
 "2 GB" = "2 GB";
 "5 GB" = "5 GB";
@@ -40,7 +41,10 @@
 "DPI" = "DPI";
 "EXIF" = "EXIF";
 "Export a full-resolution photo" = "匯出完整解析度照片";
+"Export every selected photo" = "匯出每一張選取的照片";
 "Export Photo" = "匯出照片";
+"Export Photos" = "匯出照片";
+"Batch Export…" = "批次匯出…";
 "HEIC" = "HEIC";
 "JPEG" = "JPEG";
 "Max Height" = "最大高度";
@@ -75,6 +79,7 @@
 "Camera" = "相機";
 "Can't open this photo" = "無法開啟這張照片";
 "Cancel" = "取消";
+"Cancelled" = "已取消";
 "Can't verify this photo" = "無法驗證這張照片";
 "Capture Date" = "拍攝時間";
 "Choose a different output location." = "選擇其他輸出位置。";
@@ -90,6 +95,7 @@
 "Choose the original folder again so LumaHarbor can verify it is the same source." = "請重新選擇原本的資料夾，讓 LumaHarbor 確認這是同一個來源。";
 "Choose the photo folder again to restore access." = "重新選擇這個照片資料夾以恢復存取權限。";
 "Choose where to save the exported photo." = "選擇要儲存匯出照片的位置。";
+"Choose where to save the exported photos." = "選擇要儲存匯出照片的位置。";
 "Checking file access before opening the editor." = "正在確認檔案存取權，接著會開啟編輯器。";
 "Close" = "關閉";
 "Color" = "色彩";
@@ -148,6 +154,7 @@
 "Export JPEG" = "匯出 JPEG";
 "Export JPEG…" = "匯出 JPEG…";
 "Export Preset" = "匯出 Preset";
+"Export Selected Photos…" = "匯出選取的照片…";
 "Export" = "匯出";
 "Exported" = "已匯出";
 "Exporting" = "正在匯出";
@@ -164,6 +171,7 @@
 "Filter presets" = "篩選 Preset";
 "Focal Length" = "焦距";
 "failed" = "失敗";
+"failed to export" = "張匯出失敗";
 "failed to revert" = "張復原失敗";
 "Focus Mode" = "專注模式";
 "Format" = "格式";
@@ -263,6 +271,7 @@
 "Photo Folders" = "照片資料夾";
 "Photo" = "相片";
 "photos" = "張照片";
+"photos selected" = "張照片已選取";
 "Pick the folder on your drive that holds your RAW files." = "選擇磁碟上存放 RAW 檔案的資料夾。";
 "Preparing photo…" = "正在準備照片…";
 "Preserved: kept but not applied" = "保留：僅保存，不套用";
@@ -341,6 +350,8 @@
 "Shutter Speed" = "快門速度";
 "Size" = "尺寸";
 "skipped" = "張跳過";
+"succeeded" = "張成功";
+"cancelled" = "張已取消";
 "Small" = "小";
 "Something went wrong." = "發生了一些問題。";
 "Sort" = "排序";
@@ -432,6 +443,7 @@
 "Vignette" = "暈影";
 "Virtual copy" = "虛擬副本";
 "Wait a moment, then try again." = "稍等一下，然後再試一次。";
+"Waiting" = "等待中";
 "Wait for the current scan to finish, then try again." = "等目前的掃描完成後再試一次。";
 "White Balance" = "白平衡";
 "Whites" = "白色";

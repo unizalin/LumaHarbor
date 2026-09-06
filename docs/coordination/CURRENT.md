@@ -2,7 +2,29 @@
 
 Updated: 2026-09-06
 
-Updated by: Codex（Phase 5 Task 5.1 batch export queue core model 的 per-file failure report 隱私 follow-up；A11 真人實體鍵盤最終驗證仍 NOT RUN）
+Updated by: Claude（Phase 5 Task 5.1 Mac batch export queue UI / ViewModel action wiring；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+
+## Phase 5 Task 5.1：Mac batch export queue UI / ViewModel action wiring (2026-09-06, Claude, code + tests, in this worktree/branch)
+
+- **狀態**：`DONE`（UI / ViewModel action wiring）。接續 `5702c9a` 的 Phase 5 Task 5.1 batch export queue core model + per-file failure report 隱私 follow-up。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `5702c9a`。範圍嚴格限定在把已有的 `BatchExportQueue`／`batchExportItems`／`isBatchExporting`／`isShowingBatchExportSheet` 接上 Mac UI 與 ViewModel action；沒有做 Phase 5.2 rename template/DPI/EXIF policy/watermark、沒有做 theme、沒有做八語 localization gate、沒有做 headless diagnostics，也沒有處理 Phase 4.6 最終驗收。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**，這輪依使用者指示刻意跳過，未嘗試任何自動化或真人驗證，也沒有把它改成 `PASS`。沒有碰 iPad app 檔案。
+- **TDD**：先在 `Tests/LumaHarborAppTests/BatchExportQueueWiringTests.swift`（新檔，ViewModel 行為）與 `Tests/LumaHarborAppTests/BatchExportSheetContractTests.swift`（新檔，UI source-contract，沿用 `ExportSheetContractTests` 的原始碼字串比對手法）寫會失敗的測試，先確認 RED：`LibraryViewModel` 還沒有 `startBatchExport`/`cancelBatchExport`/`closeBatchExportSheet`/`presentBatchExportPanel`，導致 `swift test --filter 'BatchExportQueueWiringTests|BatchExportSheetContractTests'` 編譯失敗（`value of type 'LibraryViewModel' has no member 'startBatchExport'` 等）；`BatchExportSheet.swift` 檔案也還不存在。之後才實作到 GREEN。
+- **實作**：
+  - `Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift` 新增 `presentBatchExportPanel(options:)`（開 `NSOpenPanel` 選目的地，仿照既有 `presentExportPanel`）、`startBatchExport(to:options:)`（把 `selectedPhotoIDs` 對應的 `photos` 建成 `ExportRequest` 陣列，交給 `batchExportQueue.run`，per-item 用該相片自己的已存 adjustments——若該相片正是目前開啟中的 `selectedPhotoID` 則用 `editor.adjustments` 這份即時狀態，其餘一律走 `services.loadAdjustments` 讀已存 sidecar）、`cancelBatchExport()`（取消 `batchExportTask`，沿用既有 cooperative cancellation 慣例）、`closeBatchExportSheet()`（關閉 sheet；若批次已結束才清空 `batchExportItems`，仍在跑的話保留現況，重開 sheet 還看得到進度）。
+  - **修掉一個既有 bug**：`batchExportQueue`（`efb87ec` 引入）原本用屬性預設值 `BatchExportQueue()` 初始化，從未接上 `services.exporter`，導致它永遠用內建預設的真實 `CoreImageRawDecoder`，而不是測試/正式流程注入的 decoder——這輪新增的 gate-based wiring test 一跑就在真實環境下對 256-byte 假 RAW fixture 產生 `RawDecodingError.corruptedFile`，才揭露這個之前完全沒被行為測試踩到的接線缺口。修法：`install(services:)` 新增 `batchExportQueue = BatchExportQueue(exporter: services.exporter)`，讓它跟單張 export 共用同一份 decoder/pipeline/render-service 圖。
+  - 新增 `Sources/LumaHarborApp/Views/BatchExportSheet.swift`：選項期沿用跟 `ExportSheet` 相同的 format/quality/bit-depth/resize/DPI/EXIF 選單元件；一旦 `model.batchExportItems` 非空就切到進度畫面——`ForEach(model.batchExportItems)` 逐檔顯示 pending/running/succeeded/failed/cancelled 圖示與文字（failed 顯示該檔自己的 path-free 訊息，不是通用成功字樣），下方顯示 succeeded/failed to export/cancelled 三個獨立計數（永遠列出 succeeded，failed/cancelled 只在 >0 時才列，不會把有失敗的批次偽裝成全 PASS），跑批時提供「取消」按鈕呼叫 `cancelBatchExport()`，「關閉」呼叫 `closeBatchExportSheet()`。
+  - 入口：`Sources/LumaHarborApp/Views/RootView.swift` 加 `.sheet(isPresented: $model.isShowingBatchExportSheet) { BatchExportSheet() }`；`Sources/LumaHarborApp/Views/LibraryGridView.swift` 工具列新增「Batch Export…」按鈕（依 `selectedPhotoIDs.isEmpty` 決定是否停用）；`Sources/LumaHarborApp/LumaHarborCommands.swift` 選單新增「Export Selected Photos…」（⌘⇧E，同樣依選取是否為空停用），不影響既有單張 Export JPEG…（⌘E）。
+  - 新增的字串已補齊 `en`／`zh-Hant`（`Export Photos`、`Batch Export…`、`Export Selected Photos…`、`Export every selected photo`、`Choose where to save the exported photos.`、`1 photo selected`／`photos selected`、`Waiting`、`Cancelled`、`succeeded`、`failed to export`、`cancelled`）；`failed to export` 是獨立新 key，沒有重用既有的 `failed`（`失敗`，沒有量詞），理由跟既有 `BatchUndoSummaryMessage` 旁的註解一致——`succeeded`/`cancelled`/`failed to export` 三者的 zh-Hant 翻譯都內嵌「張」量詞，跟 `reverted`/`skipped` 的既有慣例一致。`Tests/LumaHarborAppTests/LocalizationSmokeTest.swift` 新增 `testEveryBatchExportStringHasAChineseTranslation` 涵蓋全部新 key。
+  - `Tests/LumaHarborAppTests/AppTestSupport.swift` 新增 `decoder` 覆寫參數給 `makeServices(...)`、`AppDecodeGate`（synchronous gate，仿 `RawProcessingCoreTests/PhotoExportTests.swift` 的 `DecodeGate`，因為那個型別在別的 test target 拿不到）與 `SucceedingRawDecoder`（永遠成功的假 decoder，因為既有 `StubRawDecoder` 永遠 decode 失敗，測不出 `.succeeded`/live running 狀態）。
+- **驗證**：
+  - `swift build` PASS。
+  - `swift test --filter 'BatchExportQueueWiringTests|BatchExportSheetContractTests|LocalizationSmokeTest|ExportSheetContractTests'` PASS（6 + 11 + 15 + 9 = 41 tests, 0 failures）——先跑過一次確認 RED（編譯錯誤／`gate.started` 逾時＋錯誤解成 `corruptedFile`，見上面 bug 說明），修完 wiring 與 `batchExportQueue` 接線後轉 GREEN。
+  - `swift test --filter BatchExportQueueTests` PASS（9 tests, 0 failures，`RawProcessingCoreTests` 既有 core-model 測試不受影響）。
+  - `swift test --filter LumaHarborAppTests` PASS（272 tests, 0 failures）。
+  - `swift test`（完整）PASS（1628 tests, 9 skipped, 0 failures）。
+  - `git diff --check` PASS。
+  - 隱私掃描：對本輪所有新增/修改檔案（見上方檔案清單）以 `/Users/|/Volumes/|/private/|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|TEAM_ID|UDID` 掃描，零命中；測試用的暫存路徑一律走既有 `AppViewModelTestCase`/`NSTemporaryDirectory()` 慣例（`temporaryDirectory`/UUID 子目錄），沒有引入新的私人路徑字面值。
+- **未做/已知缺口**：Phase 5.2（rename template、collision policy、DPI metadata、EXIF preserve/remove/partial、watermark）、theme system、八語 localization gate、headless diagnostics、Phase 5.6 RC verification、Phase 4.6 最終驗收，皆未動；A11 仍是 `NOT RUN`，不得標成 `PASS`。批次匯出目前沒有 UI 層的「跳過已存在檔案」進階 collision policy（沿用 `PhotoExporter`/`UniqueFilenameResolver` 既有的自動流水號行為，跟單張 export 一致）；沒有為批次匯出新增獨立的 iPad 對應 UI（design spec §8.2 允許匯出/批次晚於 macOS）。
+- **Next action**：可選 Phase 5.2（rename/DPI/EXIF policy/watermark）或繼續 A11 真人實機驗證（需要使用者或有實體鍵盤存取權限的一方執行，見上方兩則 A11 記錄的「Next action」）。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5 Task 5.1 follow-up：Batch export per-file failure report 不洩漏絕對路徑 (2026-09-06, Codex, code + tests, in this worktree/branch)
 

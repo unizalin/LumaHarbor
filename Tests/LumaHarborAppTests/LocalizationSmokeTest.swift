@@ -219,4 +219,21 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// Phase 5 Task 5.1 UI/action wiring follow-up: every new user-facing
+    /// string the Mac batch export queue sheet and its grid/menu entry
+    /// points introduce.
+    func testEveryBatchExportStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Export Photos", "Batch Export…", "Export Selected Photos…",
+            "Export every selected photo", "Choose where to save the exported photos.",
+            "1 photo selected", "photos selected",
+            "Waiting", "Cancelled", "succeeded", "failed to export", "cancelled"
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }
