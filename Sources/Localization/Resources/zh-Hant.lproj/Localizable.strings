@@ -75,6 +75,10 @@
 "TIFF" = "TIFF";
 "App Copies" = "App 複本";
 "Aperture" = "光圈";
+"Appearance" = "外觀";
+"System" = "跟隨系統";
+"Light" = "淺色";
+"Dark" = "深色";
 "Applies this preset using the current merge or replace mode" = "依目前的合併或取代模式套用此 Preset";
 "Apply mode" = "套用模式";
 "Apply preset" = "套用 Preset";
