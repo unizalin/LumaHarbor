@@ -1,5 +1,6 @@
 "1 GB" = "1 GB";
 "1 photo" = "1 photo";
+"1 photo selected" = "1 photo selected";
 "10 GB" = "10 GB";
 "2 GB" = "2 GB";
 "5 GB" = "5 GB";
@@ -40,7 +41,10 @@
 "DPI" = "DPI";
 "EXIF" = "EXIF";
 "Export a full-resolution photo" = "Export a full-resolution photo";
+"Export every selected photo" = "Export every selected photo";
 "Export Photo" = "Export Photo";
+"Export Photos" = "Export Photos";
+"Batch Export…" = "Batch Export…";
 "HEIC" = "HEIC";
 "JPEG" = "JPEG";
 "Max Height" = "Max Height";
@@ -75,6 +79,7 @@
 "Camera" = "Camera";
 "Can't open this photo" = "Can't open this photo";
 "Cancel" = "Cancel";
+"Cancelled" = "Cancelled";
 "Can't verify this photo" = "Can't verify this photo";
 "Capture Date" = "Capture Date";
 "Choose a different output location." = "Choose a different output location.";
@@ -89,6 +94,7 @@
 "Choose the original folder again so LumaHarbor can verify it is the same source." = "Choose the original folder again so LumaHarbor can verify it is the same source.";
 "Choose the photo folder again to restore access." = "Choose the photo folder again to restore access.";
 "Choose where to save the exported photo." = "Choose where to save the exported photo.";
+"Choose where to save the exported photos." = "Choose where to save the exported photos.";
 "Close" = "Close";
 "Checking file access before opening the editor." = "Checking file access before opening the editor.";
 "Color" = "Color";
@@ -148,6 +154,7 @@
 "Export JPEG" = "Export JPEG";
 "Export JPEG…" = "Export JPEG…";
 "Export Preset" = "Export Preset";
+"Export Selected Photos…" = "Export Selected Photos…";
 "Export" = "Export";
 "Exported" = "Exported";
 "Exporting" = "Exporting";
@@ -164,6 +171,7 @@
 "Filter presets" = "Filter presets";
 "Focal Length" = "Focal Length";
 "failed" = "failed";
+"failed to export" = "failed to export";
 "failed to revert" = "failed to revert";
 "Focus Mode" = "Focus Mode";
 "Format" = "Format";
@@ -263,6 +271,7 @@
 "Photo Folders" = "Photo Folders";
 "Photo" = "Photo";
 "photos" = "photos";
+"photos selected" = "photos selected";
 "Pick the folder on your drive that holds your RAW files." = "Pick the folder on your drive that holds your RAW files.";
 "Preparing photo…" = "Preparing photo…";
 "Preserved: kept but not applied" = "Preserved: kept but not applied";
@@ -341,6 +350,8 @@
 "Shutter Speed" = "Shutter Speed";
 "Size" = "Size";
 "skipped" = "skipped";
+"succeeded" = "succeeded";
+"cancelled" = "cancelled";
 "Small" = "Small";
 "Something went wrong." = "Something went wrong.";
 "Sort" = "Sort";
@@ -432,6 +443,7 @@
 "Vignette" = "Vignette";
 "Virtual copy" = "Virtual copy";
 "Wait a moment, then try again." = "Wait a moment, then try again.";
+"Waiting" = "Waiting";
 "Wait for the current scan to finish, then try again." = "Wait for the current scan to finish, then try again.";
 "White Balance" = "White Balance";
 "Whites" = "Whites";

@@ -70,6 +70,15 @@ struct LibraryGridView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
+                    model.isShowingBatchExportSheet = true
+                } label: {
+                    Label(L10n.t("Batch Export…"), systemImage: "square.and.arrow.up.on.square")
+                }
+                .disabled(model.selectedPhotoIDs.isEmpty)
+                .help(L10n.t("Export every selected photo"))
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
                     model.startScan()
                 } label: {
                     Label(L10n.t("Rescan"), systemImage: "arrow.clockwise")

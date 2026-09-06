@@ -36,6 +36,12 @@ struct LumaHarborCommands: Commands {
             }
             .keyboardShortcut("e", modifiers: .command)
             .disabled(model.selectedPhotoID == nil)
+
+            Button(L10n.t("Export Selected Photos…")) {
+                model.isShowingBatchExportSheet = true
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(model.selectedPhotoIDs.isEmpty)
         }
 
         CommandMenu(L10n.t("Photo")) {

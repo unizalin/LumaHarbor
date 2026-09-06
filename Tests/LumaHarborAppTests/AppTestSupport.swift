@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import XCTest
 @testable import EditorCore
@@ -158,6 +159,77 @@ struct StubRawDecoder: RawDecoding {
     }
 }
 
+/// Lets a test hold `SucceedingRawDecoder.decode` open until released, and
+/// count how many decodes actually started -- for proving a batch export's
+/// live per-file status (Phase 5 Task 5.1 UI wiring) and its cancellation
+/// behaviour, the same way `RawProcessingCoreTests/PhotoExportTests.swift`'s
+/// `DecodeGate` does for `BatchExportQueueTests` -- duplicated in miniature
+/// here rather than shared, since that type lives in a different test
+/// target this one can't import.
+final class AppDecodeGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isReleased = false
+    private var startedCount = 0
+
+    var started: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return startedCount
+    }
+
+    func release() {
+        lock.lock()
+        isReleased = true
+        lock.unlock()
+    }
+
+    private var released: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isReleased
+    }
+
+    /// Blocks the calling (detached) thread until released or cancelled.
+    func enterAndWait(timeout: TimeInterval = 5) {
+        lock.lock()
+        startedCount += 1
+        lock.unlock()
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while !released, !Task.isCancelled, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+    }
+}
+
+/// A decoder that always succeeds with a tiny flat-colour fixture, optionally
+/// gated so a test can control exactly when each decode completes -- used by
+/// batch export wiring tests that need at least one item to actually reach
+/// `.succeeded` (`StubRawDecoder` above never does).
+struct SucceedingRawDecoder: RawDecoding {
+    let identifier = DecoderIdentifier(kind: "app-test-succeeding", version: "test")
+    var gate: AppDecodeGate?
+
+    func supportsFile(at url: URL) -> Bool { true }
+    func readMetadata(at url: URL) throws -> RawMetadata {
+        RawMetadata(pixelWidth: 4, pixelHeight: 4)
+    }
+    func decode(_ request: RawDecodeRequest) throws -> DecodedRawImage {
+        gate?.enterAndWait()
+        try Task.checkCancellation()
+        let size = CGSize(width: 4, height: 4)
+        let image = CIImage(color: CIColor(red: 0.4, green: 0.5, blue: 0.6)).cropped(to: CGRect(origin: .zero, size: size))
+        return DecodedRawImage(
+            image: image,
+            nativePixelSize: size,
+            decodedPixelSize: size,
+            baselineTemperature: 5_500,
+            baselineTint: 0,
+            metadata: RawMetadata(pixelWidth: 4, pixelHeight: 4)
+        )
+    }
+}
+
 @MainActor
 class AppViewModelTestCase: XCTestCase {
     // `setUpWithError` is inherited as nonisolated, and these are only written
@@ -213,10 +285,11 @@ class AppViewModelTestCase: XCTestCase {
     func makeServices(
         loadAdjustments: (@Sendable (PhotoAsset) async throws -> PhotoAdjustments)? = nil,
         saveAdjustments: (@Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void)? = nil,
-        previewRenderer: (any PreviewRendering)? = nil
+        previewRenderer: (any PreviewRendering)? = nil,
+        decoder: (any RawDecoding)? = nil
     ) throws -> AppServices {
         try locations.createDirectories()
-        let decoder = StubRawDecoder()
+        let decoder = decoder ?? StubRawDecoder()
         let renderService = ImageRenderService()
         let libraryService = try PhotoLibraryService(
             locations: locations,

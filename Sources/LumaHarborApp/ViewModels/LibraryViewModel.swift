@@ -89,13 +89,9 @@ public final class LibraryViewModel: ObservableObject {
     @Published private(set) var exportState: ExportState?
     /// Phase 5 Task 5.1: live per-file status for the batch export currently
     /// running (or the most recently finished one, left visible until a new
-    /// batch starts or `isShowingBatchExportSheet` closes) -- one entry per
-    /// photo in `selectedPhotoIDs` at the moment the batch started. Declared
-    /// now alongside `BatchExportQueue` (see `batchExportQueue` below) so the
-    /// core queue's own state shape is exercised end-to-end by the type
-    /// checker; no action wires them together yet -- that Mac export queue
-    /// UI is the roadmap's own next Task 5.1 follow-up, not this round's
-    /// scope.
+    /// batch starts or the sheet is closed via `closeBatchExportSheet()`) --
+    /// one entry per photo in `selectedPhotoIDs` at the moment the batch
+    /// started. Populated and driven by `startBatchExport(to:options:)`.
     @Published private(set) var batchExportItems: [BatchExportItem] = []
     @Published private(set) var isBatchExporting = false
     @Published private(set) var startupFailure: String?
@@ -120,11 +116,13 @@ public final class LibraryViewModel: ObservableObject {
     private var services: AppServices?
     private var scanTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
-    /// Phase 5 Task 5.1 follow-up: no method starts or cancels a batch export
-    /// through `batchExportQueue` yet -- see the note on `batchExportItems`
-    /// above.
     private var batchExportTask: Task<Void, Never>?
-    private let batchExportQueue = BatchExportQueue()
+    /// Rebuilt in `install(services:)` against `services.exporter` -- the
+    /// same decoder/pipeline/render-service graph a single-photo export
+    /// uses (and the one tests inject). The `BatchExportQueue()` default
+    /// here only matters before `install(services:)` has run, which no
+    /// action that reads it is reachable before.
+    private var batchExportQueue = BatchExportQueue()
     private var hasBootstrapped = false
 
     /// Only ever holds the most recent request: clicking three thumbnails
@@ -195,6 +193,7 @@ public final class LibraryViewModel: ObservableObject {
 
     private func install(services: AppServices) {
         self.services = services
+        batchExportQueue = BatchExportQueue(exporter: services.exporter)
         editor.attach(dependencies: services.editorDependencies.addingBatchGestureHooks(
             onBegin: { [weak self] baseline in
                 Task { @MainActor in await self?.beginBatchGesture(baseline: baseline) }
@@ -967,5 +966,117 @@ public final class LibraryViewModel: ObservableObject {
     func revealExportInFinder() {
         guard let path = exportState?.resultPath else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    // MARK: - Batch export (Phase 5 Task 5.1)
+
+    func presentBatchExportPanel(options: MacExportOptions) {
+        guard !selectedPhotoIDs.isEmpty, selectedLibrary != nil else { return }
+        let panel = NSOpenPanel()
+        panel.title = L10n.t("Export Photos")
+        panel.message = L10n.t("Choose where to save the exported photos.")
+        panel.prompt = L10n.t("Export Here")
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        startBatchExport(to: directory, options: options)
+    }
+
+    /// Exports every photo in `selectedPhotoIDs` through `batchExportQueue`,
+    /// reusing the same `PhotoExporter` guarantees (full-resolution re-decode,
+    /// no silent overwrite, no partial output on cancel) a single-photo
+    /// export already relies on.
+    ///
+    /// Each target uses its own adjustments: the currently open photo's live
+    /// in-editor state if it's part of the selection (matching what a
+    /// single-photo export of that same photo would use), its saved sidecar
+    /// otherwise -- every other selected photo is, by definition, not open
+    /// in the editor.
+    func startBatchExport(to directory: URL, options: MacExportOptions) {
+        guard let services, let library = selectedLibrary else { return }
+        let targets = photos.filter { selectedPhotoIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+
+        batchExportTask?.cancel()
+        isBatchExporting = true
+        // Seeded with `.neutral` placeholders so the sheet has something to
+        // show (filenames, pending status) the instant the batch starts,
+        // before any per-photo adjustments have actually loaded.
+        batchExportItems = targets.map {
+            BatchExportItem(request: batchExportRequest($0, library: library, directory: directory, options: options, adjustments: .neutral))
+        }
+
+        let openPhotoID = selectedPhotoID
+        let liveAdjustments = editor.adjustments
+        let loadAdjustments = services.loadAdjustments
+
+        batchExportTask = Task { [weak self] in
+            guard let self else { return }
+            var requests: [ExportRequest] = []
+            for target in targets {
+                let adjustments: PhotoAdjustments
+                if target.id == openPhotoID {
+                    adjustments = liveAdjustments
+                } else {
+                    adjustments = (try? await loadAdjustments(target)) ?? .neutral
+                }
+                requests.append(self.batchExportRequest(target, library: library, directory: directory, options: options, adjustments: adjustments))
+            }
+
+            guard !Task.isCancelled else {
+                self.batchExportItems = requests.map { BatchExportItem(request: $0, status: .cancelled) }
+                self.isBatchExporting = false
+                return
+            }
+
+            _ = await self.batchExportQueue.run(requests) { [weak self] items in
+                guard let self else { return }
+                await MainActor.run { self.batchExportItems = items }
+            }
+            self.isBatchExporting = false
+        }
+    }
+
+    /// Cancellation is cooperative, the same pattern `cancelExport()` above
+    /// uses: cancel the `Task`, and let `BatchExportQueue.run` (and
+    /// `PhotoExporter` underneath it) notice and unwind on their own.
+    func cancelBatchExport() {
+        batchExportTask?.cancel()
+    }
+
+    /// Closes the batch export sheet. A finished (or cancelled) report is
+    /// cleared so reopening the sheet starts clean; a still-running batch's
+    /// live progress is preserved so reopening the sheet shows where it
+    /// actually is, rather than discarding an in-flight export's status.
+    func closeBatchExportSheet() {
+        isShowingBatchExportSheet = false
+        if !isBatchExporting {
+            batchExportItems = []
+        }
+    }
+
+    private func batchExportRequest(
+        _ photo: PhotoAsset,
+        library: LibraryFolder,
+        directory: URL,
+        options: MacExportOptions,
+        adjustments: PhotoAdjustments
+    ) -> ExportRequest {
+        ExportRequest(
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: adjustments,
+            destinationDirectory: directory,
+            baseFilename: photo.baseFilename,
+            format: options.format,
+            quality: options.quality,
+            bitDepth: options.bitDepth,
+            maximumWidth: options.maximumWidth,
+            maximumHeight: options.maximumHeight,
+            dpi: options.dpi,
+            exifRetentionPolicy: options.exifRetentionPolicy
+        )
     }
 }

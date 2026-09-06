@@ -38,6 +38,10 @@ struct RootView: View {
             ExportSheet()
                 .environmentObject(model)
         }
+        .sheet(isPresented: $model.isShowingBatchExportSheet) {
+            BatchExportSheet()
+                .environmentObject(model)
+        }
         .onReceive(
             NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification
