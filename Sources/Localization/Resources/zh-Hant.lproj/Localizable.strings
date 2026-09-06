@@ -40,6 +40,10 @@
 "Default" = "預設";
 "DPI" = "DPI";
 "EXIF" = "EXIF";
+"Increment (DSC0001-1)" = "遞增流水號（DSC0001-1）";
+"Skip" = "跳過";
+"Ask Each Time" = "每次詢問";
+"If a File Exists" = "同名檔已存在時";
 "Export a full-resolution photo" = "匯出完整解析度照片";
 "Export every selected photo" = "匯出每一張選取的照片";
 "Export Photo" = "匯出照片";
@@ -80,9 +84,11 @@
 "Can't open this photo" = "無法開啟這張照片";
 "Cancel" = "取消";
 "Cancelled" = "已取消";
+"Skipped" = "已跳過";
 "Can't verify this photo" = "無法驗證這張照片";
 "Capture Date" = "拍攝時間";
 "Choose a different output location." = "選擇其他輸出位置。";
+"Choose Increment or Skip instead." = "請改選遞增流水號或跳過。";
 "Choose a photo from Files or an external drive." = "從「檔案」App 或外接磁碟選擇一張照片。";
 "Choose a folder on your drive. LumaHarbor reads your RAW files where they are and never moves or changes them." = "選擇磁碟上的一個資料夾。LumaHarbor 會直接讀取原位置的 RAW 檔案，永遠不會搬移或修改它們。";
 "Choose a photo folder" = "選擇一個照片資料夾";
@@ -361,6 +367,8 @@
 "Stop" = "停止";
 "Temperature" = "色溫";
 "That export location is read-only." = "這個匯出位置是唯讀的。";
+"A file with this name already exists, so this export was skipped." = "已經有相同名稱的檔案，因此這次匯出被跳過。";
+"Asking before each export isn't supported yet." = "目前還不支援每次匯出前先詢問。";
 "That file couldn't be read." = "無法讀取這個檔案。";
 "That location can't be written to." = "無法寫入這個位置。";
 "That photo folder is no longer in your library list." = "這個照片資料夾已經不在你的相片庫清單中。";
