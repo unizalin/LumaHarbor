@@ -161,7 +161,8 @@ final class PhotoExportTests: XCTestCase {
         maximumWidth: Int? = nil,
         maximumHeight: Int? = nil,
         dpi: Double? = nil,
-        exifRetentionPolicy: ExifRetentionPolicy = .preserveAll
+        exifRetentionPolicy: ExifRetentionPolicy = .preserveAll,
+        collisionPolicy: ExportCollisionPolicy = .increment
     ) -> ExportRequest {
         ExportRequest(
             sourceURL: sourceURL,
@@ -174,7 +175,8 @@ final class PhotoExportTests: XCTestCase {
             maximumWidth: maximumWidth,
             maximumHeight: maximumHeight,
             dpi: dpi,
-            exifRetentionPolicy: exifRetentionPolicy
+            exifRetentionPolicy: exifRetentionPolicy,
+            collisionPolicy: collisionPolicy
         )
     }
 
@@ -266,6 +268,75 @@ final class PhotoExportTests: XCTestCase {
         _ = try await exporter.export(makeRequest())
         let third = try await exporter.export(makeRequest())
         XCTAssertEqual(third.url.lastPathComponent, "DSC0001-2.jpg")
+    }
+
+    // MARK: - Collision policy (Phase 5 Task 5.2)
+
+    func testSkipPolicyLeavesTheExistingFileUntouchedAndThrowsADistinctError() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let first = try await exporter.export(makeRequest())
+        let firstBytes = try Data(contentsOf: first.url)
+
+        do {
+            _ = try await exporter.export(makeRequest(collisionPolicy: .skip))
+            XCTFail("expected the second export to be skipped, not silently increment or overwrite")
+        } catch let error as ExportError {
+            guard case .skippedExistingFile = error else {
+                return XCTFail("expected .skippedExistingFile, got \(error)")
+            }
+        }
+
+        let stillThere = try Data(contentsOf: first.url)
+        XCTAssertEqual(stillThere, firstBytes, "skip must never overwrite the existing file")
+        let onlyOneFile = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".jpg") }
+        XCTAssertEqual(onlyOneFile, ["DSC0001.jpg"], "skip must never create a second, incremented file either")
+    }
+
+    func testSkipPolicyNeverDecodesWhenTheDestinationAlreadyExists() async throws {
+        let recorder = DecodeRequestRecorder()
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        _ = try await exporter.export(makeRequest())
+
+        let recordingExporter = PhotoExporter(decoder: SyntheticRawDecoder(recorder: recorder))
+        do {
+            _ = try await recordingExporter.export(makeRequest(collisionPolicy: .skip))
+        } catch is ExportError {
+            // Expected -- see testSkipPolicyLeavesTheExistingFileUntouched...
+        }
+
+        XCTAssertTrue(recorder.requests.isEmpty, "skip must short-circuit before the expensive full-resolution decode, not decode and then discard the result")
+    }
+
+    func testSkipPolicyStillExportsNormallyWhenNothingCollides() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(makeRequest(collisionPolicy: .skip))
+        XCTAssertEqual(outcome.url.lastPathComponent, "DSC0001.jpg")
+    }
+
+    func testAskPolicyIsRejectedBeforeWritingOrDecodingAnything() async throws {
+        let recorder = DecodeRequestRecorder()
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(recorder: recorder))
+
+        do {
+            _ = try await exporter.export(makeRequest(collisionPolicy: .ask))
+            XCTFail("expected .ask to be rejected -- there is no interactive prompt implemented")
+        } catch let error as ExportError {
+            guard case .collisionPolicyNotSupported = error else {
+                return XCTFail("expected .collisionPolicyNotSupported, got \(error)")
+            }
+        }
+
+        XCTAssertTrue(recorder.requests.isEmpty, "an unsupported policy must fail before ever touching the decoder")
+        XCTAssertEqual(try leftoverTemporaryFiles(), [], "an unsupported policy must leave no temp file behind")
+        let noOutput = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".jpg") }
+        XCTAssertEqual(noOutput, [], "an unsupported policy must never write an output file")
+    }
+
+    func testEveryCollisionPolicyErrorOffersANextStep() {
+        for error in [ExportError.skippedExistingFile, .collisionPolicyNotSupported] {
+            XCTAssertNotNil(error.errorDescription, "\(error) has no user-facing description")
+        }
+        XCTAssertNotNil(ExportError.collisionPolicyNotSupported.recoverySuggestion)
     }
 
     // MARK: - Cancellation

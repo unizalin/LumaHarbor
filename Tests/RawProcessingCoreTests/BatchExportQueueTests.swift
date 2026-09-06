@@ -136,6 +136,50 @@ final class BatchExportQueueTests: XCTestCase {
         XCTAssertEqual(report.succeededCount, 0)
     }
 
+    // MARK: - Collision policy (Phase 5 Task 5.2)
+
+    /// A `.skip`-policy collision on one file must show up as its own
+    /// distinct terminal state, never disguised as `.succeeded` (design
+    /// spec §8.3: "failed / skipped / not run 不得偽裝成成功") and never
+    /// counted as `.failed` either -- it isn't an error, it's the user's
+    /// own chosen policy doing exactly what it says.
+    func testASkippedCollisionIsItsOwnStatusDistinctFromSucceededAndFailed() async {
+        let queue = BatchExportQueue(exporter: PhotoExporter(decoder: SyntheticRawDecoder()))
+        var request = makeRequest(sourceURLs[0], baseFilename: "a")
+        request.collisionPolicy = .skip
+
+        // Export "a" once so the second run collides.
+        _ = await queue.run([request])
+        let report = await queue.run([request])
+
+        guard case .skipped = report.files[0].status else {
+            return XCTFail("expected .skipped, got \(report.files[0].status)")
+        }
+        XCTAssertEqual(report.skippedCount, 1)
+        XCTAssertEqual(report.succeededCount, 0)
+        XCTAssertEqual(report.failedCount, 0)
+    }
+
+    func testASkippedItemDoesNotStopTheRestOfTheBatch() async {
+        let queue = BatchExportQueue(exporter: PhotoExporter(decoder: SyntheticRawDecoder()))
+        var requests = zip(sourceURLs, ["a", "b", "c"]).map { makeRequest($0, baseFilename: $1) }
+        requests[0].collisionPolicy = .skip
+        // Pre-create "a"'s destination so item 0 collides and is skipped.
+        _ = await queue.run([requests[0]])
+
+        let report = await queue.run(requests)
+
+        guard case .skipped = report.files[0].status else {
+            return XCTFail("expected item 0 to be .skipped, got \(report.files[0].status)")
+        }
+        guard case .succeeded = report.files[1].status else {
+            return XCTFail("expected item 1 to still succeed despite item 0 being skipped")
+        }
+        guard case .succeeded = report.files[2].status else {
+            return XCTFail("expected item 2 to still succeed despite item 0 being skipped")
+        }
+    }
+
     // MARK: - Per-file report
 
     func testReportListsEveryFileWithItsOwnSourceAndFilename() async {
@@ -216,7 +260,7 @@ final class BatchExportQueueTests: XCTestCase {
             switch file.status {
             case .pending, .running:
                 XCTFail("no item should still be pending/running after the queue's Task was cancelled and awaited")
-            case .succeeded, .failed, .cancelled:
+            case .succeeded, .failed, .cancelled, .skipped:
                 continue
             }
         }

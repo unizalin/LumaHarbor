@@ -13,11 +13,18 @@ public enum BatchExportItemStatus: Equatable, Sendable {
     case succeeded(ExportOutcome)
     case failed(String)
     case cancelled
+    /// `.skip` collision policy and a file already sits at this item's
+    /// destination name (roadmap Phase 5 Task 5.2). Its own distinct
+    /// terminal state -- not `.succeeded` (nothing was written) and not
+    /// `.failed` (nothing went wrong; this is the user's own chosen
+    /// policy), matching design spec §8.3's "failed / skipped / not run
+    /// 不得偽裝成成功".
+    case skipped
 
     public var isFinished: Bool {
         switch self {
         case .pending, .running: return false
-        case .succeeded, .failed, .cancelled: return true
+        case .succeeded, .failed, .cancelled, .skipped: return true
         }
     }
 }
@@ -63,6 +70,10 @@ public struct BatchExportReport: Sendable, Equatable {
 
     public var cancelledCount: Int {
         files.filter { $0.status == .cancelled }.count
+    }
+
+    public var skippedCount: Int {
+        files.filter { $0.status == .skipped }.count
     }
 }
 
@@ -117,6 +128,10 @@ public actor BatchExportQueue {
             do {
                 let outcome = try await exporter.export(items[index].request)
                 items[index].status = .succeeded(outcome)
+            } catch ExportError.skippedExistingFile {
+                // The user's own `.skip` collision policy doing exactly
+                // what it says -- never counted as `.failed`.
+                items[index].status = .skipped
             } catch {
                 items[index].status = Task.isCancelled ? .cancelled : .failed(Self.safeDescription(for: error))
             }
@@ -155,7 +170,8 @@ public actor BatchExportQueue {
         case .decoding(let decodingError):
             return safeDescription(for: decodingError)
         case .destinationNotWritable, .destinationUnavailable, .couldNotFindUniqueName,
-             .insufficientDiskSpace, .cancelled, .rendering, .formatNotSupported:
+             .insufficientDiskSpace, .cancelled, .rendering, .formatNotSupported,
+             .skippedExistingFile, .collisionPolicyNotSupported:
             // Every other case's own `errorDescription` has been read end to
             // end and never embeds a path -- verified again here rather than
             // assumed, the same discipline `SafeErrorPresentation` uses.

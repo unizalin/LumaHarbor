@@ -22,6 +22,11 @@ public struct ExportRequest: Sendable {
     /// `nil` leaves the encoder's own default.
     public var dpi: Double?
     public var exifRetentionPolicy: ExifRetentionPolicy
+    /// What to do when `baseFilename.<extension>` already exists at
+    /// `destinationDirectory` (design spec §6.11; roadmap Phase 5 Task 5.2).
+    /// Defaults to `.increment`, the behaviour every export had before this
+    /// field existed, so no existing call site's behaviour changes.
+    public var collisionPolicy: ExportCollisionPolicy
 
     public init(
         sourceURL: URL,
@@ -34,7 +39,8 @@ public struct ExportRequest: Sendable {
         maximumWidth: Int? = nil,
         maximumHeight: Int? = nil,
         dpi: Double? = nil,
-        exifRetentionPolicy: ExifRetentionPolicy = .preserveAll
+        exifRetentionPolicy: ExifRetentionPolicy = .preserveAll,
+        collisionPolicy: ExportCollisionPolicy = .increment
     ) {
         self.sourceURL = sourceURL
         self.adjustments = adjustments
@@ -47,6 +53,7 @@ public struct ExportRequest: Sendable {
         self.maximumHeight = maximumHeight
         self.dpi = dpi
         self.exifRetentionPolicy = exifRetentionPolicy
+        self.collisionPolicy = collisionPolicy
     }
 }
 
@@ -74,6 +81,17 @@ public enum ExportError: Error, Equatable, Sendable {
     /// "if a platform cannot encode one format, show disabled/unsupported UI
     /// instead of pretending success"). Caught before anything is written.
     case formatNotSupported(ExportFormat)
+    /// `.skip` collision policy and a file already sits at the exact
+    /// destination name -- not an error the user needs to fix, but still not
+    /// a success, so it must not be silently absorbed into either. Caught
+    /// before the decoder ever runs (design spec §8.3: never disguise a
+    /// skip as success, and never do the expensive work just to throw it
+    /// away).
+    case skippedExistingFile
+    /// `.ask` collision policy was selected. There is no interactive prompt
+    /// implemented for a sequential batch export to pause on, so this fails
+    /// loudly rather than silently behaving like `.increment` or `.skip`.
+    case collisionPolicyNotSupported
 }
 
 extension ExportError: LocalizedError {
@@ -95,6 +113,10 @@ extension ExportError: LocalizedError {
             return error.errorDescription
         case .formatNotSupported(let format):
             return "\(L10n.t("This Mac can't export")) \(format.displayName)."
+        case .skippedExistingFile:
+            return L10n.t("A file with this name already exists, so this export was skipped.")
+        case .collisionPolicyNotSupported:
+            return L10n.t("Asking before each export isn't supported yet.")
         }
     }
 
@@ -104,8 +126,10 @@ extension ExportError: LocalizedError {
             return L10n.t("Choose a different output location.")
         case .insufficientDiskSpace:
             return L10n.t("Free up space or choose a different destination, then export again.")
-        case .cancelled:
+        case .cancelled, .skippedExistingFile:
             return nil
+        case .collisionPolicyNotSupported:
+            return L10n.t("Choose Increment or Skip instead.")
         case .decoding(let error):
             return error.recoverySuggestion
         case .rendering(let error):
@@ -160,13 +184,25 @@ public actor PhotoExporter {
             throw ExportError.destinationNotWritable(path: directory.path)
         }
 
-        guard let finalURL = UniqueFilenameResolver.resolve(
+        let finalURL: URL
+        switch UniqueFilenameResolver.resolve(
             baseName: request.baseFilename,
             fileExtension: request.format.fileExtension,
             in: directory,
+            policy: request.collisionPolicy,
             fileManager: fileManager
-        ) else {
+        ) {
+        case .proceed(let url):
+            finalURL = url
+        case .skip:
+            // Caught before the temp file is even created, let alone the
+            // decoder invoked -- a skip must never pay for a decode/render
+            // it then throws away.
+            throw ExportError.skippedExistingFile
+        case .incrementExhausted:
             throw ExportError.couldNotFindUniqueName(baseName: request.baseFilename)
+        case .unsupportedAsk:
+            throw ExportError.collisionPolicyNotSupported
         }
 
         // Write to a hidden sibling first: same volume, so the final move is a

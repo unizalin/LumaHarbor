@@ -214,6 +214,9 @@ struct BatchExportSheet: View {
         case .cancelled:
             Image(systemName: "slash.circle")
                 .foregroundStyle(.secondary)
+        case .skipped:
+            Image(systemName: "arrow.uturn.forward.circle")
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -229,6 +232,8 @@ struct BatchExportSheet: View {
             return message
         case .cancelled:
             return L10n.t("Cancelled")
+        case .skipped:
+            return L10n.t("Skipped")
         }
     }
 
@@ -236,10 +241,14 @@ struct BatchExportSheet: View {
         let succeeded = model.batchExportItems.filter { if case .succeeded = $0.status { return true }; return false }.count
         let failed = model.batchExportItems.filter { if case .failed = $0.status { return true }; return false }.count
         let cancelled = model.batchExportItems.filter { $0.status == .cancelled }.count
+        let skipped = model.batchExportItems.filter { $0.status == .skipped }.count
 
         var parts: [String] = ["\(succeeded) \(L10n.t("succeeded"))"]
         if failed > 0 {
             parts.append("\(failed) \(L10n.t("failed to export"))")
+        }
+        if skipped > 0 {
+            parts.append("\(skipped) \(L10n.t("skipped"))")
         }
         if cancelled > 0 {
             parts.append("\(cancelled) \(L10n.t("cancelled"))")

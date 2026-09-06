@@ -72,7 +72,7 @@ final class BatchExportSheetContractTests: XCTestCase {
 
     func testBatchExportSheetDistinguishesEveryQueueStatus() throws {
         let source = try Self.batchExportSheetSource()
-        for status in ["case .pending", "case .running", "case .succeeded", "case .failed", "case .cancelled"] {
+        for status in ["case .pending", "case .running", "case .succeeded", "case .failed", "case .cancelled", "case .skipped"] {
             XCTAssertTrue(
                 source.contains(status),
                 "the sheet must render each queue status distinctly, including \(status)"
@@ -92,9 +92,9 @@ final class BatchExportSheetContractTests: XCTestCase {
 
     // MARK: - Totals (must not fake all-PASS)
 
-    func testBatchExportSheetShowsSucceededFailedAndCancelledTotals() throws {
+    func testBatchExportSheetShowsSucceededFailedSkippedAndCancelledTotals() throws {
         let source = try Self.batchExportSheetSource()
-        for key in ["succeeded", "failed to export", "cancelled"] {
+        for key in ["succeeded", "failed to export", "skipped", "cancelled"] {
             XCTAssertTrue(
                 source.contains("L10n.t(\"\(key)\")"),
                 "the batch summary must report a \(key) count through localization, not just a blanket success message"
