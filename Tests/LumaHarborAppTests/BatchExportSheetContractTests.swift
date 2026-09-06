@@ -45,9 +45,44 @@ final class BatchExportSheetContractTests: XCTestCase {
         let optionsBlock = try XCTUnwrap(
             source.range(of: "private var options: MacExportOptions").map { source[$0.lowerBound...] }
         )
-        for field in ["format", "quality", "bitDepth", "maximumWidth", "maximumHeight", "dpi", "exifRetentionPolicy"] {
+        for field in ["format", "quality", "bitDepth", "maximumWidth", "maximumHeight", "dpi", "exifRetentionPolicy", "namingTemplate", "collisionPolicy"] {
             XCTAssertTrue(optionsBlock.contains("\(field): \(field)"), "MacExportOptions must be built from the sheet's own \(field)")
         }
+        XCTAssertTrue(optionsBlock.contains("watermark: watermark"), "MacExportOptions must be built from the sheet's own computed watermark")
+    }
+
+    // MARK: - Naming template / collision policy (Phase 5 Task 5.2)
+
+    func testBatchExportSheetOffersANamingTemplatePickerCoveringEveryCase() throws {
+        let source = try Self.batchExportSheetSource()
+        XCTAssertTrue(source.contains("L10n.t(\"Rename\")"))
+        XCTAssertTrue(source.contains("ForEach(ExportNamingTemplate.allCases"))
+    }
+
+    func testBatchExportSheetOffersACollisionPolicyPickerCoveringEveryCase() throws {
+        let source = try Self.batchExportSheetSource()
+        XCTAssertTrue(source.contains("L10n.t(\"If a File Exists\")"))
+        XCTAssertTrue(source.contains("ForEach(ExportCollisionPolicy.allCases"))
+    }
+
+    func testAskCollisionPolicyIsVisiblyMarkedAndDisablesStartingTheBatch() throws {
+        let source = try Self.batchExportSheetSource()
+        XCTAssertTrue(
+            source.contains("collisionPolicy == .ask"),
+            "the sheet must check specifically for .ask to mark it and disable starting the batch"
+        )
+        XCTAssertTrue(source.contains("L10n.t(\"Not Supported\")"))
+    }
+
+    // MARK: - Watermark (Phase 5 Task 5.2)
+
+    func testBatchExportSheetOffersAWatermarkToggleWithTextPositionOpacityAndSize() throws {
+        let source = try Self.batchExportSheetSource()
+        XCTAssertTrue(source.contains("Toggle(L10n.t(\"Add Watermark\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Watermark Text\")"))
+        XCTAssertTrue(source.contains("ForEach(Watermark.Position.allCases"))
+        XCTAssertTrue(source.contains("L10n.t(\"Opacity\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Watermark Size\")"))
     }
 
     // MARK: - Entry point

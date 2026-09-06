@@ -44,6 +44,16 @@
 "Skip" = "跳過";
 "Ask Each Time" = "每次詢問";
 "If a File Exists" = "同名檔已存在時";
+"Rename" = "重新命名";
+"Original Filename" = "原始檔名";
+"Original Filename + Sequence" = "原始檔名 + 序號";
+"Date + Original Filename" = "日期 + 原始檔名";
+"Preset Name + Original Filename" = "Preset 名稱 + 原始檔名";
+"Original Filename + Copy Name" = "原始檔名 + 虛擬副本名稱";
+"Add Watermark" = "加入浮水印";
+"Watermark Text" = "浮水印文字";
+"Opacity" = "不透明度";
+"Watermark Size" = "浮水印大小";
 "Export a full-resolution photo" = "匯出完整解析度照片";
 "Export every selected photo" = "匯出每一張選取的照片";
 "Export Photo" = "匯出照片";
