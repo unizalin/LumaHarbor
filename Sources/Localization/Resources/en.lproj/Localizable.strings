@@ -44,6 +44,16 @@
 "Skip" = "Skip";
 "Ask Each Time" = "Ask Each Time";
 "If a File Exists" = "If a File Exists";
+"Rename" = "Rename";
+"Original Filename" = "Original Filename";
+"Original Filename + Sequence" = "Original Filename + Sequence";
+"Date + Original Filename" = "Date + Original Filename";
+"Preset Name + Original Filename" = "Preset Name + Original Filename";
+"Original Filename + Copy Name" = "Original Filename + Copy Name";
+"Add Watermark" = "Add Watermark";
+"Watermark Text" = "Watermark Text";
+"Opacity" = "Opacity";
+"Watermark Size" = "Watermark Size";
 "Export a full-resolution photo" = "Export a full-resolution photo";
 "Export every selected photo" = "Export every selected photo";
 "Export Photo" = "Export Photo";

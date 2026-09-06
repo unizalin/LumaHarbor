@@ -136,8 +136,71 @@ final class ExportSheetContractTests: XCTestCase {
         let optionsBlock = try XCTUnwrap(
             source.range(of: "private var options: MacExportOptions").map { source[$0.lowerBound...] }
         )
-        for field in ["format", "quality", "bitDepth", "maximumWidth", "maximumHeight", "dpi", "exifRetentionPolicy"] {
+        for field in ["format", "quality", "bitDepth", "maximumWidth", "maximumHeight", "dpi", "exifRetentionPolicy", "namingTemplate", "collisionPolicy"] {
             XCTAssertTrue(optionsBlock.contains("\(field): \(field)"), "MacExportOptions must be built from the sheet's own \(field)")
         }
+        XCTAssertTrue(optionsBlock.contains("watermark: watermark"), "MacExportOptions must be built from the sheet's own computed watermark")
+    }
+
+    // MARK: - Naming template / collision policy (Phase 5 Task 5.2)
+
+    func testExportSheetOffersANamingTemplatePickerCoveringEveryCase() throws {
+        let source = try Self.exportSheetSource()
+        XCTAssertTrue(source.contains("L10n.t(\"Rename\")"))
+        XCTAssertTrue(source.contains("ForEach(ExportNamingTemplate.allCases"))
+    }
+
+    func testExportSheetOffersACollisionPolicyPickerCoveringEveryCase() throws {
+        let source = try Self.exportSheetSource()
+        XCTAssertTrue(source.contains("L10n.t(\"If a File Exists\")"))
+        XCTAssertTrue(source.contains("ForEach(ExportCollisionPolicy.allCases"))
+    }
+
+    /// Mirrors `testUnsupportedFormatsAreVisiblyMarkedAndTheExportActionIsDisabled`:
+    /// `.ask` has no interactive prompt implemented (see `ExportCollisionPolicy`'s
+    /// own doc comment) and must be visibly marked and disable the export
+    /// action, the same way an unencodable format already does -- never
+    /// silently offered as if it worked.
+    func testAskCollisionPolicyIsVisiblyMarkedAndDisablesTheExportAction() throws {
+        let source = try Self.exportSheetSource()
+        XCTAssertTrue(
+            source.contains("collisionPolicy == .ask"),
+            "the sheet must check specifically for .ask to mark it and disable the export action"
+        )
+        XCTAssertTrue(source.contains("L10n.t(\"Not Supported\")"))
+    }
+
+    // MARK: - Watermark (Phase 5 Task 5.2)
+
+    func testExportSheetOffersAWatermarkToggleWithTextPositionOpacityAndSize() throws {
+        let source = try Self.exportSheetSource()
+        XCTAssertTrue(source.contains("Toggle(L10n.t(\"Add Watermark\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Watermark Text\")"))
+        XCTAssertTrue(source.contains("ForEach(Watermark.Position.allCases"))
+        XCTAssertTrue(source.contains("L10n.t(\"Opacity\")"))
+        XCTAssertTrue(source.contains("L10n.t(\"Watermark Size\")"))
+    }
+
+    /// A disabled watermark must never reach `ExportRequest` as a non-nil
+    /// value with empty text -- `WatermarkRenderer` already treats that as
+    /// a no-op, but the sheet shouldn't rely on that safety net alone.
+    func testWatermarkIsOnlyBuiltWhenToggleIsOnAndTextIsNotBlank() throws {
+        let source = try Self.exportSheetSource()
+        let watermarkBlock = try XCTUnwrap(
+            source.range(of: "private var watermark: Watermark?").map { source[$0.lowerBound...] }
+        )
+        XCTAssertTrue(watermarkBlock.contains("watermarkEnabled"))
+        XCTAssertTrue(watermarkBlock.contains("isEmpty"))
+    }
+
+    // MARK: - Skip must not read as success
+
+    func testASkippedExportShowsItsOwnCopyNotTheExportedSuccessCopy() throws {
+        let source = try Self.exportSheetSource()
+        XCTAssertTrue(
+            source.contains("state.wasSkipped"),
+            "the sheet must branch on wasSkipped, not show the same success row for a skip"
+        )
+        XCTAssertTrue(source.contains("L10n.t(\"Skipped\")"))
     }
 }

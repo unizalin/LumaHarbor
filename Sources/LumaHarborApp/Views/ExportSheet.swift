@@ -13,6 +13,13 @@ struct ExportSheet: View {
     @AppStorage("export.quality") private var quality = 0.9
     @AppStorage("export.bitDepth") private var bitDepth: ExportBitDepth = .eightBit
     @AppStorage("export.exifRetentionPolicy") private var exifRetentionPolicy: ExifRetentionPolicy = .preserveAll
+    @AppStorage("export.namingTemplate") private var namingTemplate: ExportNamingTemplate = .default
+    @AppStorage("export.collisionPolicy") private var collisionPolicy: ExportCollisionPolicy = .default
+    @AppStorage("export.watermarkEnabled") private var watermarkEnabled = false
+    @AppStorage("export.watermarkText") private var watermarkText = ""
+    @AppStorage("export.watermarkPosition") private var watermarkPosition: Watermark.Position = .bottomRight
+    @AppStorage("export.watermarkOpacity") private var watermarkOpacity = 0.6
+    @AppStorage("export.watermarkSizeFraction") private var watermarkSizeFraction = 0.04
     @State private var maximumWidthText = ""
     @State private var maximumHeightText = ""
     @State private var dpiText = ""
@@ -20,6 +27,17 @@ struct ExportSheet: View {
     private var maximumWidth: Int? { Int(maximumWidthText) }
     private var maximumHeight: Int? { Int(maximumHeightText) }
     private var dpi: Double? { Double(dpiText) }
+
+    /// `nil` unless the toggle is on and there is actual text -- an empty
+    /// or disabled watermark must never reach `ExportRequest` as a non-nil
+    /// value (see `WatermarkRenderer.apply(_:to:)`'s own no-op guard, which
+    /// this mirrors rather than relies on alone).
+    private var watermark: Watermark? {
+        guard watermarkEnabled, !watermarkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return Watermark(text: watermarkText, position: watermarkPosition, opacity: watermarkOpacity, sizeFraction: watermarkSizeFraction)
+    }
 
     private var options: MacExportOptions {
         MacExportOptions(
@@ -29,7 +47,10 @@ struct ExportSheet: View {
             maximumWidth: maximumWidth,
             maximumHeight: maximumHeight,
             dpi: dpi,
-            exifRetentionPolicy: exifRetentionPolicy
+            exifRetentionPolicy: exifRetentionPolicy,
+            namingTemplate: namingTemplate,
+            collisionPolicy: collisionPolicy,
+            watermark: watermark
         )
     }
 
@@ -57,6 +78,9 @@ struct ExportSheet: View {
             resizeFields
             dpiField
             exifPolicyPicker
+            namingPicker
+            collisionPolicyPicker
+            watermarkSection
 
             Text(L10n.t(
                 "LumaHarbor re-decodes the original RAW at full resolution and tags the result sRGB. If a file with the same name already exists, a number is added — nothing is overwritten."
@@ -68,13 +92,22 @@ struct ExportSheet: View {
             if let state = model.exportState {
                 Divider()
                 if state.isFinished {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("\(L10n.t("Exported")) \(state.filename)")
-                        Spacer()
-                        Button(L10n.t("Show in Finder")) { model.revealExportInFinder() }
-                            .controlSize(.small)
+                    if state.wasSkipped {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.uturn.forward.circle")
+                                .foregroundStyle(.secondary)
+                            Text("\(L10n.t("Skipped")) \(state.filename)")
+                            Spacer()
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("\(L10n.t("Exported")) \(state.filename)")
+                            Spacer()
+                            Button(L10n.t("Show in Finder")) { model.revealExportInFinder() }
+                                .controlSize(.small)
+                        }
                     }
                 } else {
                     HStack(spacing: 8) {
@@ -101,7 +134,7 @@ struct ExportSheet: View {
                     model.presentExportPanel(options: options)
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(model.selectedPhoto == nil || model.isExporting || !format.isSupported())
+                .disabled(model.selectedPhoto == nil || model.isExporting || !format.isSupported() || collisionPolicy == .ask)
             }
         }
         .padding(20)
@@ -185,6 +218,57 @@ struct ExportSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var namingPicker: some View {
+        Picker(L10n.t("Rename"), selection: $namingTemplate) {
+            ForEach(ExportNamingTemplate.allCases, id: \.self) { candidate in
+                Text(candidate.displayName).tag(candidate)
+            }
+        }
+    }
+
+    private var collisionPolicyPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(L10n.t("If a File Exists"), selection: $collisionPolicy) {
+                ForEach(ExportCollisionPolicy.allCases, id: \.self) { candidate in
+                    Text(collisionPolicyLabel(candidate)).tag(candidate)
+                }
+            }
+            if collisionPolicy == .ask {
+                Text(L10n.t("Asking before each export isn't supported yet."))
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func collisionPolicyLabel(_ candidate: ExportCollisionPolicy) -> String {
+        candidate == .ask ? "\(candidate.displayName) (\(L10n.t("Not Supported")))" : candidate.displayName
+    }
+
+    private var watermarkSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(L10n.t("Add Watermark"), isOn: $watermarkEnabled)
+            if watermarkEnabled {
+                TextField(L10n.t("Watermark Text"), text: $watermarkText)
+                Picker(L10n.t("Position"), selection: $watermarkPosition) {
+                    ForEach(Watermark.Position.allCases, id: \.self) { candidate in
+                        Text(candidate.displayName).tag(candidate)
+                    }
+                }
+                .pickerStyle(.segmented)
+                HStack {
+                    Text(L10n.t("Opacity"))
+                    Slider(value: $watermarkOpacity, in: 0.1...1.0)
+                }
+                HStack {
+                    Text(L10n.t("Watermark Size"))
+                    Slider(value: $watermarkSizeFraction, in: 0.01...0.2)
+                }
+            }
+        }
+        .font(.caption)
     }
 
     private func sizeDescription(_ width: Int, _ height: Int) -> String {

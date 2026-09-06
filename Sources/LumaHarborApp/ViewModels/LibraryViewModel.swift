@@ -31,6 +31,11 @@ struct ExportState: Equatable {
     var filename: String
     var isFinished: Bool
     var resultPath: String?
+    /// Phase 5 Task 5.2: `true` when this export finished by being skipped
+    /// under `.skip` collision policy -- nothing was written, and the sheet
+    /// must say so plainly rather than reusing the "Exported" success copy
+    /// (design spec §8.3: never disguise a skip as success).
+    var wasSkipped: Bool = false
 }
 
 /// Every user-facing choice `ExportSheet` collects, bundled so
@@ -46,6 +51,9 @@ struct MacExportOptions: Equatable {
     var maximumHeight: Int?
     var dpi: Double?
     var exifRetentionPolicy: ExifRetentionPolicy
+    var namingTemplate: ExportNamingTemplate
+    var collisionPolicy: ExportCollisionPolicy
+    var watermark: Watermark?
 
     static let `default` = MacExportOptions(
         format: .jpeg,
@@ -54,7 +62,10 @@ struct MacExportOptions: Equatable {
         maximumWidth: nil,
         maximumHeight: nil,
         dpi: nil,
-        exifRetentionPolicy: .preserveAll
+        exifRetentionPolicy: .preserveAll,
+        namingTemplate: .default,
+        collisionPolicy: .default,
+        watermark: nil
     )
 }
 
@@ -915,9 +926,20 @@ public final class LibraryViewModel: ObservableObject {
         guard let services, let library = selectedLibrary else { return }
 
         exportTask?.cancel()
+        let baseFilename = options.namingTemplate.render(ExportNamingTemplate.Context(
+            originalFilename: photo.baseFilename,
+            sequence: 1,
+            date: photo.metadata.captureDate,
+            // No per-photo "currently applied preset" is tracked yet, so
+            // `.presetNameAndOriginalFilename` falls back to the plain
+            // original filename here -- see `ExportNamingTemplate`'s own
+            // doc comment on that fallback.
+            presetName: nil,
+            virtualCopyName: photo.variantName
+        ))
         exportState = ExportState(
             photoID: photo.id,
-            filename: photo.baseFilename,
+            filename: baseFilename,
             isFinished: false,
             resultPath: nil
         )
@@ -926,14 +948,16 @@ public final class LibraryViewModel: ObservableObject {
             sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
             adjustments: editor.adjustments,
             destinationDirectory: directory,
-            baseFilename: photo.baseFilename,
+            baseFilename: baseFilename,
             format: options.format,
             quality: options.quality,
             bitDepth: options.bitDepth,
             maximumWidth: options.maximumWidth,
             maximumHeight: options.maximumHeight,
             dpi: options.dpi,
-            exifRetentionPolicy: options.exifRetentionPolicy
+            exifRetentionPolicy: options.exifRetentionPolicy,
+            collisionPolicy: options.collisionPolicy,
+            watermark: options.watermark
         )
 
         exportTask = Task { [weak self] in
@@ -948,6 +972,15 @@ public final class LibraryViewModel: ObservableObject {
                 )
             } catch is CancellationError {
                 self?.exportState = nil
+            } catch ExportError.skippedExistingFile {
+                guard !Task.isCancelled else { return }
+                self?.exportState = ExportState(
+                    photoID: photo.id,
+                    filename: baseFilename,
+                    isFinished: true,
+                    resultPath: nil,
+                    wasSkipped: true
+                )
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.exportState = nil
@@ -1005,8 +1038,10 @@ public final class LibraryViewModel: ObservableObject {
         // Seeded with `.neutral` placeholders so the sheet has something to
         // show (filenames, pending status) the instant the batch starts,
         // before any per-photo adjustments have actually loaded.
-        batchExportItems = targets.map {
-            BatchExportItem(request: batchExportRequest($0, library: library, directory: directory, options: options, adjustments: .neutral))
+        batchExportItems = targets.enumerated().map { index, target in
+            BatchExportItem(request: batchExportRequest(
+                target, sequence: index + 1, library: library, directory: directory, options: options, adjustments: .neutral
+            ))
         }
 
         let openPhotoID = selectedPhotoID
@@ -1016,14 +1051,16 @@ public final class LibraryViewModel: ObservableObject {
         batchExportTask = Task { [weak self] in
             guard let self else { return }
             var requests: [ExportRequest] = []
-            for target in targets {
+            for (index, target) in targets.enumerated() {
                 let adjustments: PhotoAdjustments
                 if target.id == openPhotoID {
                     adjustments = liveAdjustments
                 } else {
                     adjustments = (try? await loadAdjustments(target)) ?? .neutral
                 }
-                requests.append(self.batchExportRequest(target, library: library, directory: directory, options: options, adjustments: adjustments))
+                requests.append(self.batchExportRequest(
+                    target, sequence: index + 1, library: library, directory: directory, options: options, adjustments: adjustments
+                ))
             }
 
             guard !Task.isCancelled else {
@@ -1060,23 +1097,34 @@ public final class LibraryViewModel: ObservableObject {
 
     private func batchExportRequest(
         _ photo: PhotoAsset,
+        sequence: Int,
         library: LibraryFolder,
         directory: URL,
         options: MacExportOptions,
         adjustments: PhotoAdjustments
     ) -> ExportRequest {
-        ExportRequest(
+        let baseFilename = options.namingTemplate.render(ExportNamingTemplate.Context(
+            originalFilename: photo.baseFilename,
+            sequence: sequence,
+            date: photo.metadata.captureDate,
+            // See the matching comment in `export(photo:to:options:)`.
+            presetName: nil,
+            virtualCopyName: photo.variantName
+        ))
+        return ExportRequest(
             sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
             adjustments: adjustments,
             destinationDirectory: directory,
-            baseFilename: photo.baseFilename,
+            baseFilename: baseFilename,
             format: options.format,
             quality: options.quality,
             bitDepth: options.bitDepth,
             maximumWidth: options.maximumWidth,
             maximumHeight: options.maximumHeight,
             dpi: options.dpi,
-            exifRetentionPolicy: options.exifRetentionPolicy
+            exifRetentionPolicy: options.exifRetentionPolicy,
+            collisionPolicy: options.collisionPolicy,
+            watermark: options.watermark
         )
     }
 }

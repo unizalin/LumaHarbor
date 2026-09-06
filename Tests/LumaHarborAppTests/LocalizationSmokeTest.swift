@@ -236,4 +236,26 @@ final class LocalizationSmokeTest: XCTestCase {
             XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
         }
     }
+
+    /// Phase 5 Task 5.2: every new user-facing string the export naming
+    /// template, collision policy, and watermark options introduce.
+    func testEveryExportRenameCollisionAndWatermarkStringHasAChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Increment (DSC0001-1)", "Skip", "Ask Each Time", "If a File Exists",
+            "Rename", "Original Filename", "Original Filename + Sequence",
+            "Date + Original Filename", "Preset Name + Original Filename",
+            "Original Filename + Copy Name",
+            "Add Watermark", "Watermark Text", "Opacity", "Watermark Size",
+            "Top Left", "Top Right", "Bottom Left", "Bottom Right", "Center",
+            "Skipped",
+            "A file with this name already exists, so this export was skipped.",
+            "Asking before each export isn't supported yet.",
+            "Choose Increment or Skip instead."
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
 }
