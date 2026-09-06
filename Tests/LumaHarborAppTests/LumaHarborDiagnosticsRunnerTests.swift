@@ -108,6 +108,41 @@ final class LumaHarborDiagnosticsRunnerTests: XCTestCase {
         }
     }
 
+    // MARK: - Theme check does not touch the real UserDefaults.standard
+
+    /// Integration hardening review finding: `themePreferenceCheck()`
+    /// originally hardcoded `UserDefaults.standard` with no way to inject
+    /// a different store, so a test could never observe its behavior for a
+    /// specific stored value without writing into (and cleaning up after
+    /// itself in) this process's *real* `UserDefaults.standard` domain --
+    /// exactly the "test/real settings coupling" this checks against.
+    func testThemeCheckReadsFromAnInjectedUserDefaultsNotTheRealStandardDomain() throws {
+        let suiteName = "LumaHarborDiagnosticsRunnerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set("dark", forKey: "appTheme")
+        let reportWithDark = LumaHarborDiagnosticsRunner.run(environment: [:], userDefaults: defaults)
+        let checkWithDark = try XCTUnwrap(reportWithDark.checks.first { $0.id == "theme.preference" })
+        XCTAssertEqual(checkWithDark.status, .pass)
+        XCTAssertTrue(checkWithDark.message.contains("stored preference parses"))
+
+        defaults.set("not-a-real-theme", forKey: "appTheme")
+        let reportWithGarbage = LumaHarborDiagnosticsRunner.run(environment: [:], userDefaults: defaults)
+        let checkWithGarbage = try XCTUnwrap(reportWithGarbage.checks.first { $0.id == "theme.preference" })
+        XCTAssertEqual(checkWithGarbage.status, .warning, "an unparseable stored value must warn, not hard-fail -- the app itself falls back to the default rather than crashing")
+    }
+
+    func testThemeCheckPassesWithNoStoredPreferenceInAFreshStore() throws {
+        let suiteName = "LumaHarborDiagnosticsRunnerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let report = LumaHarborDiagnosticsRunner.run(environment: [:], userDefaults: defaults)
+        let check = try XCTUnwrap(report.checks.first { $0.id == "theme.preference" })
+        XCTAssertEqual(check.status, .pass)
+    }
+
     // MARK: - Report encoding contracts (stable machine-readable + text output)
 
     func testReportEncodesToJSONAndRoundTrips() throws {
@@ -115,6 +150,36 @@ final class LumaHarborDiagnosticsRunnerTests: XCTestCase {
         let data = try JSONEncoder().encode(report)
         let decoded = try JSONDecoder().decode(DiagnosticsReport.self, from: data)
         XCTAssertEqual(decoded, report)
+    }
+
+    /// Integration hardening review finding: `jsonString()`/`JSONEncoder`
+    /// only encoded the `checks` array -- `passed` and the per-status
+    /// counts are computed properties, which Swift's synthesized `Codable`
+    /// silently drops. A machine consuming the JSON (a CI step, say) had no
+    /// way to read "did this pass overall" without re-implementing this
+    /// type's own pass/fail logic itself. The JSON contract must carry
+    /// both explicitly.
+    func testJSONReportIncludesOverallStatusAndSummaryCounts() throws {
+        let report = LumaHarborDiagnosticsRunner.run(environment: [:])
+        let data = try JSONEncoder().encode(report)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["overallStatus"] as? String, "pass")
+
+        let summary = try XCTUnwrap(object["summary"] as? [String: Int])
+        XCTAssertEqual(summary["pass"], report.count(.pass))
+        XCTAssertEqual(summary["warning"], report.count(.warning))
+        XCTAssertEqual(summary["fail"], report.count(.fail))
+        XCTAssertEqual(summary["skipped"], report.count(.skipped))
+    }
+
+    func testJSONReportOverallStatusReflectsAFailingCheck() throws {
+        let report = DiagnosticsReport(checks: [
+            DiagnosticCheck(id: "x", title: "X", message: "broken", status: .fail),
+        ])
+        let data = try JSONEncoder().encode(report)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["overallStatus"] as? String, "fail")
     }
 
     /// Text output is what a CI log or terminal actually shows; it must

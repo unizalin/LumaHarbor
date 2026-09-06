@@ -78,4 +78,17 @@ final class SettingsViewContractTests: XCTestCase {
             "expected the preferred color scheme applied to the main window, ExportSheet, and BatchExportSheet (3 call sites), found \(occurrences)"
         )
     }
+
+    /// Integration hardening review finding: the Settings window itself
+    /// bound `theme` (to drive its own picker) but never applied
+    /// `.preferredColorScheme` to its own content, so it stayed on the
+    /// system appearance regardless of what the user picked -- the one
+    /// window in the app that could visibly disagree with its own setting.
+    func testSettingsViewAppliesThePreferredColorSchemeToItself() throws {
+        let source = try Self.settingsViewSource()
+        XCTAssertTrue(
+            source.contains(".preferredColorScheme(theme.colorScheme)"),
+            "the Settings window must follow the theme it lets the user choose, not stay on the system appearance"
+        )
+    }
 }
