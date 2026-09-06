@@ -2,7 +2,42 @@
 
 Updated: 2026-09-06
 
-Updated by: Claude（Phase 5 Task 5.3 Mac theme system：System/Light/Dark；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+Updated by: Claude（Phase 5 Task 5.4 八語 localization coverage gate；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+
+## Phase 5 Task 5.4：Eight-language localization coverage gate (2026-09-06, Claude, code + tests + resources, in this worktree/branch)
+
+- **狀態**：`DONE`（coverage gate + 六個新語言的機器輔助翻譯，見下方誠實揭露）。接續 `b248aa1`（Phase 5 Task 5.3 Mac theme system）。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `b248aa1`。沒有重寫任何 UI、沒有做 theme custom tokens、沒有做 headless diagnostics、沒有做 Phase 4.6 最終驗收。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**，本輪未嘗試任何驗證，未標成 `PASS`。沒有碰任何 iPad app 檔案。
+- **八語清單來源**：`docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-roadmap.md` Task 5.4 原文明確列出 `zh-Hant, en, ja, ko, zh-Hans, de, fr, es`，與 `docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md` §6.13「多語需求」（繁體中文、English、日本語、한국어、简体中文、Deutsch、Français、Español）完全一致。這輪直接沿用文件既有定義，沒有自行發明語言清單。
+- **翻譯品質誠實揭露（roadmap 原文：「Initial translations may be rough but must be marked machine-assisted in docs if not human reviewed」）**：
+  - `en`、`zh-Hant`：既有的人工維護內容（Phase 1–5.3 累積），未變動品質等級。
+  - `ja`、`ko`、`zh-Hans`、`de`、`fr`、`es`：**這六個語言的全部 524 個 key 都是這次由 Claude（LLM）直接撰寫的機器輔助翻譯，沒有經過任何母語者或專業譯者審校**。翻譯時盡量做到語意正確、符合專業修圖軟體慣用詞（例如日文用「レンズ」「絞り」、法文保留「Vibrance」「Photo」等 Adobe Lightroom 慣用外來語），但這輪的目標是**建立可測試的覆蓋率 gate，不是最終人工翻譯品質驗收**——這點請下一個接手的人或使用者在做任何語言相關的產品發布判斷前，務必先安排真人母語審校。
+  - 所有六語言檔案已通過完整的 524-key 覆蓋率檢查、格式解析檢查、空字串檢查、明顯 placeholder 字樣檢查（`TODO`/`TBD`/`MISSING`/`TRANSLATE_ME`，大小寫敏感比對，見下方「發現並修正的測試邏輯 bug」）。
+- **Gate 實作**：新增 `Tests/LumaHarborAppTests/EightLanguageLocalizationGateTests.swift`，涵蓋：
+  1. 八個語言的 `.lproj` resource bundle 都存在（`testEveryRequiredLanguageHasAnLprojResourceBundle`）。
+  2. 每個語言的 `Localizable.strings` 都能被 `PropertyListSerialization` 解析成 `[String: String]`（`testEveryRequiredLanguagesLocalizableStringsParses`）。
+  3. 每個語言都包含 `en` baseline 的全部 524 個 key（`testEveryRequiredLanguageContainsEveryEnglishBaselineKey`）。
+  4. 沒有任何語言有空字串值（`testNoRequiredLanguageHasAnyEmptyStringValue`）。
+  5. 沒有任何語言含有明顯 placeholder 字樣（`testNoRequiredLanguageHasObviousPlaceholderText`）。
+  6. **明確 allowlist**：`testUntranslatedKeysOutsideTheAllowlistDoNotSilentlyMatchEnglish` 逐一比對每個非英文語言的每個 key，若翻譯值與英文完全相同、且該 key 不在 `intentionalEnglishMatchAllowlist` 這個明確列出的集合裡，就直接判定失敗——避免任何「忘記翻譯」的 key 被默默放過。目前允許清單只包含真正跨語言通用的技術詞彙/單位（JPEG、PNG、TIFF、HEIC、DPI、EXIF、ISO、8-bit、16-bit、GB/MB 單位）與逐一人工核對過的真實同形詞（例如德文 System/Format/Name、法文 Photo/Grain/Orange/Vibrance、西班牙文 Color/Original 等——這些詞在對應語言的專業修圖軟體介面中本來就是同一個字，不是翻譯遺漏；核對方式是比照 Adobe Lightroom/Photoshop 對應語言介面的實際用詞）。
+  7. Phase 5.1/5.2/5.3 新增字串（theme、batch export、rename、collision、watermark）在全部八個語言都有非空翻譯（`testPhase5StringsAreTranslatedInEveryRequiredLanguage`），不只是 zh-Hant。
+- **發現並修正的測試邏輯 bug（過程中的兩個真實發現，不是預先知道才寫的）**：
+  1. `Bundle.module.path(forResource: "zh-Hant", ofType: "lproj")`（大小寫完全比對）一開始找不到 zh-Hant，因為 SwiftPM 的資源處理器會把 `.lproj` 目錄名稱轉成小寫存進建置後的資源包（用 `find .build -iname "*Localization*.bundle"` 實際檢查過建置產物內容證實）。修法：先用 `Bundle.module.localizations`（大小寫不敏感比對）找出磁碟上實際的名稱，再用那個名稱去 `path(forResource:ofType:)`。這個修法同時解釋了 `L10n.resolveBundle` 為什麼原本就沒踩到這個坑——它一直是先過 `Bundle.preferredLocalizations(from:forPreferences:)`（本來就大小寫不敏感）才拿到路徑用的名稱。
+  2. Placeholder 檢查原本用 `value.uppercased().contains("TODO")`，結果西班牙文「Todo」（意思是「全部」，對應到 `All`/`Preserve all`/`Reset All` 等 key）被誤判成含有 placeholder `TODO`。修法：改成對原始（未轉大寫）字串做大小寫敏感比對——真正的開發者 placeholder 慣例上都是全大寫寫死的 `TODO`，跟西語自然詞「Todo」的大小寫不同，這樣就能正確區分。
+- **既有測試的必要更新**：`Tests/LumaHarborAppTests/LocalizationSmokeTest.swift` 的 `testAnUnsupportedPreferenceFallsBackToEnglish` 原本用 `["fr-FR", "de-DE"]` 當作「不支援、應該 fallback 回英文」的例子——但這輪加入真正的 `fr`/`de` 資源後，這兩個偏好現在會正確解析成法文/德文，不再 fallback，導致這個既有測試失敗（這是預期且正確的行為改變，不是回歸）。已改用 `["it-IT", "pt-PT"]`（義大利文/葡萄牙文，不在八語清單內）繼續驗證 fallback 行為本身沒有壞掉。
+- **驗證**：
+  - `swift build` PASS。
+  - `swift test --filter EightLanguageLocalizationGateTests` PASS（8 tests, 0 failures）。
+  - `swift test --filter LocalizationSmokeTest` PASS（17 tests, 0 failures，含上述必要更新後的 fallback 測試）。
+  - `swift test --filter 'AppThemeTests|SettingsViewContractTests|ExportSheetContractTests|BatchExportSheetContractTests'` PASS（43 tests, 0 failures）——確認 Phase 5.1/5.2/5.3 既有 UI contract 沒有被這輪改動影響。
+  - `swift test`（完整）PASS（1705 tests, 9 skipped, 0 failures）。
+  - `git diff --check` PASS。
+  - 隱私掃描：對六個新語言的 `Localizable.strings` 檔案與新增/修改的測試檔案以 `/Users/|/Volumes/|/private/|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|TEAM_ID|UDID` 掃描，零命中。
+- **已知限制**：
+  - ja/ko/zh-Hans/de/fr/es 六語言的翻譯品質是「LLM 機器輔助、未經母語審校」，見上方誠實揭露；正式產品發布前應安排真人母語者審校，特別是較長的錯誤訊息句子。
+  - 這個 gate 只驗證「覆蓋率與結構」（每個 key 都存在、非空、非 placeholder、非默默 fallback），**不驗證語法正確性、用詞是否道地、或 UI 排版是否因為字串變長而破版**（例如德文字串普遍比英文長，八語 UI 若有固定寬度的按鈕/標籤，之後可能需要額外的排版驗證，這輪沒有做）。
+  - 沒有做 `.xcstrings` 遷移評估（design spec §6.13 提到「初期可先用現有 .strings，之後評估搬到 .xcstrings」）——這輪維持現有 `.strings` 格式，符合 spec 的「初期」階段，沒有超出這輪的 gate/tooling 範圍去做格式遷移。
+  - `intentionalEnglishMatchAllowlist` 是全域（跨所有八語共用）而非逐語言設計；目前收錄的詞彙在核對過的語言中都合理，但如果未來某個 key 在某語言合理相同、卻在另一語言其實忘記翻譯，這個全域 allowlist 目前無法區分——這是一個已知的設計簡化，如果之後語言數量或字串量顯著增加，可能需要改成逐語言 allowlist。
+- **Next action**：可選 Phase 5.5 headless diagnostics（若使用者決定繼續走 roadmap），或安排真人母語審校六個新語言，或繼續 A11 真人實機驗證。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5 Task 5.3：Mac theme system — System/Light/Dark (2026-09-06, Claude, code + tests, in this worktree/branch)
 

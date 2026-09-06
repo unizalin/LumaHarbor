@@ -28,8 +28,14 @@ final class LocalizationSmokeTest: XCTestCase {
         )
     }
 
+    /// "fr-FR"/"de-DE" used to be the unsupported pair here, but Phase 5
+    /// Task 5.4 added real fr/de resources (see
+    /// `EightLanguageLocalizationGateTests`), so preferring them now
+    /// correctly resolves to French/German rather than falling back --
+    /// this test needs preferences genuinely outside the eight-language
+    /// list to still exercise the fallback path.
     func testAnUnsupportedPreferenceFallsBackToEnglish() {
-        let bundle = L10n.resolveBundle(preferences: ["fr-FR", "de-DE"])
+        let bundle = L10n.resolveBundle(preferences: ["it-IT", "pt-PT"])
         XCTAssertEqual(bundle.localizedString(forKey: "Cancel", value: nil, table: "Localizable"), "Cancel")
     }
 
