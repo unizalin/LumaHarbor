@@ -2,7 +2,26 @@
 
 Updated: 2026-09-06
 
-Updated by: Claude（Phase 5.6 RC verification：report-only，僅自動化驗證，見 `docs/coordination/PHASE5_RC_VERIFICATION.md`；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪未嘗試，不做 Phase 4.6 最終驗收）
+Updated by: Codex（Phase 5 automated verification follow-up：補跑 Codex 可執行的自動 gate，見 `docs/coordination/CODEX_PHASE5_AUTOMATED_VERIFICATION.md`；A11 真人實體鍵盤最終驗證仍 NOT RUN，不做 Phase 4.6 最終驗收）
+
+## Phase 5 Automated Verification Follow-up (2026-09-06, Codex, docs only — independent automated/source review)
+
+- **狀態**：`DONE / AUTOMATED VERIFICATION ONLY`。接續 `9ba07cf`（Claude Phase 5.6 RC verification report-only commit）。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `9ba07cf686d39b730da31facd75e8bf6bbdf5641`。這輪沒有改 product code、沒有改 tests、沒有 push/merge/rebase、沒有碰 iPad 檔案；只補跑 Codex 能誠實執行的自動 gate，並新增一份驗測報告。**A11 真人實體鍵盤驗證仍是 `NOT RUN`**；**Phase 4.6 最終手動驗收仍是 `NOT RUN`**。
+- **產出**：新增 `docs/coordination/CODEX_PHASE5_AUTOMATED_VERIFICATION.md`，記錄 Codex 這輪補跑的自動驗證、真 RAW fixture 測試、iOS generic build、MVP preflight 阻擋點、靜態/privacy scan 與仍需真人處理的清單。
+- **Codex 已完成的自動 gate**：
+  - `swift build` PASS。
+  - `swift run LumaHarborDiagnosticsCLI` PASS（default env：4 pass / 3 skipped，exit 0）。
+  - `swift run LumaHarborDiagnosticsCLI --json` PASS（含 `overallStatus` 與 `summary`，exit 0）。
+  - 以本機可用 RAW fixture + APFS scratch env 執行 `swift run LumaHarborDiagnosticsCLI --json` PASS（6 pass / 1 skipped；唯一 skipped 是 exFAT env 未設）。
+  - `swift test --filter RawFixtureTests` PASS（9 tests, 0 failures；真 RAW fixture 測試有實際執行）。
+  - 以本機可用 RAW fixture + APFS scratch env 執行完整 `swift test` PASS（1721 tests, 0 failures；本輪此執行沒有 XCTest skips）。
+  - iOS generic build PASS：`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` 成功，未修改任何 iPad 檔案或 signing 設定。
+  - `git diff --check 5702c9a^..HEAD` PASS。
+  - Phase 5 diff 靜態掃描 PASS：未發現 product code 新增 `fatalError`、`try!`、`TODO`、`FIXME`、`TBD`、簽署 ID 或 provisioning 字串；命中只來自 localization gate 自己的 placeholder 測試常數與文件描述。
+  - Phase 5 diff privacy scan PASS：只命中既有 synthetic 假路徑防回歸測試與文件引用，沒有真實使用者路徑、Team ID、UDID 或 provisioning profile。
+- **MVP acceptance 狀態**：以本機可用 RAW fixture + APFS scratch env 執行 `Scripts/run-mvp-acceptance.zsh --preflight-only`，machine/Xcode/Swift/RAW/APFS checks 皆 PASS，但 `LUMAHARBOR_EXFAT_TEST_DIR` 未設，因此 preflight 在 exFAT gate 停止。完整 MVP acceptance 仍是 `NOT RUN / BLOCKED BY MISSING EXFAT TEST DIRECTORY`，不是 product failure。
+- **Independent review 結論**：Codex 針對 Phase 5 diff range 與 RC report scope 做獨立自動/source review，沒有發現需要這輪修補的新 code/test/doc 問題。Claude RC 報告中列出的已知限制仍準確。
+- **仍需使用者/真人處理**：A11 實體鍵盤驗證、Phase 4.6 最終手動驗收、exFAT 測試目錄補齊後的完整 MVP acceptance、真人 Mac visual QA、六語母語審校與截斷檢查、iPad hands-on subset checklist。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5.6：RC Verification Plan / Report (2026-09-06, Claude, docs only — report + this pointer, in this worktree/branch)
 
