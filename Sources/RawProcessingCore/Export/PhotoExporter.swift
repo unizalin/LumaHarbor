@@ -27,6 +27,10 @@ public struct ExportRequest: Sendable {
     /// Defaults to `.increment`, the behaviour every export had before this
     /// field existed, so no existing call site's behaviour changes.
     public var collisionPolicy: ExportCollisionPolicy
+    /// `nil` (the default) adds no watermark, byte-for-byte identical to
+    /// every export before this field existed (design spec §6.11; roadmap
+    /// Phase 5 Task 5.2).
+    public var watermark: Watermark?
 
     public init(
         sourceURL: URL,
@@ -40,7 +44,8 @@ public struct ExportRequest: Sendable {
         maximumHeight: Int? = nil,
         dpi: Double? = nil,
         exifRetentionPolicy: ExifRetentionPolicy = .preserveAll,
-        collisionPolicy: ExportCollisionPolicy = .increment
+        collisionPolicy: ExportCollisionPolicy = .increment,
+        watermark: Watermark? = nil
     ) {
         self.sourceURL = sourceURL
         self.adjustments = adjustments
@@ -53,6 +58,7 @@ public struct ExportRequest: Sendable {
         self.maximumHeight = maximumHeight
         self.dpi = dpi
         self.exifRetentionPolicy = exifRetentionPolicy
+        self.watermark = watermark
         self.collisionPolicy = collisionPolicy
     }
 }
@@ -264,6 +270,7 @@ public actor PhotoExporter {
         let exifPolicy = request.exifRetentionPolicy
         let maximumWidth = request.maximumWidth
         let maximumHeight = request.maximumHeight
+        let watermark = request.watermark
 
         // Spec §11: no decoding or encoding on the main thread. Spec §6.3: the
         // export stays cancellable while it runs.
@@ -301,11 +308,15 @@ public actor PhotoExporter {
                 maximumHeight: maximumHeight
             )
             let resized = resizeTransform == .identity ? withLocalAdjustments : withLocalAdjustments.transformed(by: resizeTransform)
+            // Watermarked last, against the final output pixel size --
+            // `sizeFraction`/position are meant to read consistently on the
+            // actual exported dimensions, not the pre-resize native ones.
+            let watermarked = WatermarkRenderer.apply(watermark, to: resized)
 
             try Task.checkCancellation()
             let exifProperties = ExportMetadataBuilder.imageProperties(from: exifPolicy.apply(to: decoded.metadata))
             try renderService.writeExport(
-                resized,
+                watermarked,
                 to: temporaryURL,
                 format: format,
                 quality: quality,

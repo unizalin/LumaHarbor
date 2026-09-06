@@ -162,7 +162,8 @@ final class PhotoExportTests: XCTestCase {
         maximumHeight: Int? = nil,
         dpi: Double? = nil,
         exifRetentionPolicy: ExifRetentionPolicy = .preserveAll,
-        collisionPolicy: ExportCollisionPolicy = .increment
+        collisionPolicy: ExportCollisionPolicy = .increment,
+        watermark: Watermark? = nil
     ) -> ExportRequest {
         ExportRequest(
             sourceURL: sourceURL,
@@ -176,8 +177,26 @@ final class PhotoExportTests: XCTestCase {
             maximumHeight: maximumHeight,
             dpi: dpi,
             exifRetentionPolicy: exifRetentionPolicy,
-            collisionPolicy: collisionPolicy
+            collisionPolicy: collisionPolicy,
+            watermark: watermark
         )
+    }
+
+    /// Averages every pixel inside `region` (image coordinates, origin
+    /// top-left, matching `CGImage.cropping(to:)`'s own convention) into a
+    /// single brightness value.
+    private static func regionAverageBrightness(_ image: CGImage, region: CGRect) throws -> Int {
+        guard let cropped = image.cropping(to: region) else {
+            throw XCTSkip("region \(region) is outside the \(image.width)x\(image.height) image")
+        }
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return Int(bytes[0]) + Int(bytes[1]) + Int(bytes[2])
     }
 
     private func leftoverTemporaryFiles() throws -> [String] {
@@ -330,6 +349,32 @@ final class PhotoExportTests: XCTestCase {
         XCTAssertEqual(try leftoverTemporaryFiles(), [], "an unsupported policy must leave no temp file behind")
         let noOutput = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".jpg") }
         XCTAssertEqual(noOutput, [], "an unsupported policy must never write an output file")
+    }
+
+    // MARK: - Watermark (Phase 5 Task 5.2)
+
+    /// End-to-end: `WatermarkRendererTests` already proves the renderer
+    /// itself positions/fades text correctly on a synthetic `CIImage` --
+    /// this proves `PhotoExporter` actually calls it and the result reaches
+    /// the real written file, not just the in-memory render.
+    func testWatermarkTextReachesTheWrittenFile() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 200, height: 100)))
+        let watermark = Watermark(text: "LumaHarbor", position: .bottomRight, opacity: 1, sizeFraction: 0.3)
+        let outcome = try await exporter.export(makeRequest(format: .png, watermark: watermark))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+
+        let plainOutcome = try await exporter.export(makeRequest(baseFilename: "DSC0002", format: .png, watermark: nil))
+        let plainSource = try XCTUnwrap(CGImageSourceCreateWithURL(plainOutcome.url as CFURL, nil))
+        let plainImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(plainSource, 0, nil))
+
+        let region = CGRect(x: image.width / 2, y: image.height / 2, width: image.width / 2, height: image.height / 2)
+        XCTAssertNotEqual(
+            try Self.regionAverageBrightness(image, region: region),
+            try Self.regionAverageBrightness(plainImage, region: region),
+            "the watermarked export's bottom-right corner must differ from the same export with no watermark"
+        )
     }
 
     func testEveryCollisionPolicyErrorOffersANextStep() {

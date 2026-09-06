@@ -79,6 +79,11 @@
 "Batch Sync Undone" = "Batch Sync Undone";
 "Blacks" = "Blacks";
 "Blue" = "Blue";
+"Bottom Left" = "Bottom Left";
+"Bottom Right" = "Bottom Right";
+"Top Left" = "Top Left";
+"Top Right" = "Top Right";
+"Center" = "Center";
 "Built-In" = "Built-In";
 "Camera" = "Camera";
 "Can't open this photo" = "Can't open this photo";

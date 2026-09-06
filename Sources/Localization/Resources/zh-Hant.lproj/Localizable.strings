@@ -79,6 +79,11 @@
 "Batch Sync Undone" = "批次同步已復原";
 "Blacks" = "黑色";
 "Blue" = "藍";
+"Bottom Left" = "左下";
+"Bottom Right" = "右下";
+"Top Left" = "左上";
+"Top Right" = "右上";
+"Center" = "置中";
 "Built-In" = "內建";
 "Camera" = "相機";
 "Can't open this photo" = "無法開啟這張照片";
