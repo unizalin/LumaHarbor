@@ -2,7 +2,39 @@
 
 Updated: 2026-09-06
 
-Updated by: Claude（Phase 5 Task 5.4 八語 localization coverage gate；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+Updated by: Claude（Phase 5 Task 5.5 headless diagnostics runner；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+
+## Phase 5 Task 5.5：Headless diagnostics runner (2026-09-06, Claude, code + tests + Package.swift, in this worktree/branch)
+
+- **狀態**：`DONE`（縮小範圍版，見下方「與 roadmap 原文的差異」）。接續 `e007fcc`（Phase 5 Task 5.4 八語 localization coverage gate）。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `e007fcc`。沒有做 Phase 4.6 最終驗收、沒有碰任何 iPad 檔案、沒有做真人 QA。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**，本輪未嘗試任何驗證，未標成 `PASS`。
+- **與 roadmap 原文的差異（依這輪 prompt 明確指示）**：roadmap Task 5.5 原文列了四個命令 `selftest`/`exporttest`/`shot`/`gallery`，其中 `shot`（開啟 fixture library 產生 UI 截圖）與 `gallery`（縮圖/預覽回歸證據）都需要真正開一個視窗、需要真的 fixture 照片——這跟這輪 prompt 明確要求的「不啟動完整 GUI、不依賴真人操作」互相矛盾。這輪依照 prompt 的「建議實作範圍」為準，只做：diagnostics model、headless runner（涵蓋 localization/theme/export/batch export capability + 三個 fixture env var 存在性檢查）、CLI entry point、tests、文件。**沒有做 `shot`／`gallery`**，這是刻意的範圍決定，已在程式碼的 doc comment 與這裡都明確記錄，不是遺漏。
+- **TDD**：先寫 `Tests/LumaHarborAppTests/LumaHarborDiagnosticsRunnerTests.swift`（新檔，10 個測試），RED 具體如下：`LumaHarborDiagnosticsRunner`／`DiagnosticsReport`／`DiagnosticCheck` 型別都還不存在，`swift test --filter LumaHarborDiagnosticsRunnerTests` 一開始因為 `cannot find 'LumaHarborDiagnosticsRunner' in scope`、`cannot find 'DiagnosticsReport' in scope`、`type 'Equatable' has no member 'pass'` 等一連串編譯錯誤完全無法建置。實作模型 + runner + `L10n` 新增的公開 API 後，10 個測試全部轉綠。
+- **Diagnostics model**（`Sources/LumaHarborApp/Diagnostics/DiagnosticCheck.swift`）：
+  - `DiagnosticStatus`：`pass` / `warning` / `fail` / `skipped` 四態（不是布林值），呼應 design spec §8.3「failed / skipped / not run 不得偽裝成成功」與既有 `BatchExportItemStatus` 的同一設計哲學。
+  - `DiagnosticCheck`：`id`（穩定 dotted identifier，例如 `"localization.eightLanguages"`）、`title`、`message`、`status`、`remediation`（optional）。全部 `Codable`，`id`/`title`/`message`/`remediation` 明確要求絕對不能含有真實檔案路徑（見下方隱私設計）。
+  - `DiagnosticsReport`：包裝 `[DiagnosticCheck]`；`passed` 在**任何一個 check 是 `.fail`** 或**整份報告是空陣列**時都回傳 `false`——直接對應 roadmap 原文「Add tests that scripts do not report PASS for zero executed tests」這個明確要求。提供 `jsonString()`（`JSONEncoder` + `.sortedKeys`）與 `textReport()`（沿用 `Scripts/run-mvp-acceptance.zsh` 既有的 `label: STATE (detail)` 這一行式格式，沒有另外發明一套新格式）。
+- **Headless runner**（`Sources/LumaHarborApp/Diagnostics/LumaHarborDiagnosticsRunner.swift`）：`run(environment:)` 是純同步函式，`environment` 可注入（預設 `ProcessInfo.processInfo.environment`），讓測試能在不動真的行程環境變數的情況下模擬「fixture 存在／不存在」。`expectedCheckIDs` 固定 7 個：
+  1. `localization.eightLanguages`——透過新增到 `Sources/Localization/L10n.swift` 的 `L10n.availableLanguageCodes` 與 `L10n.keyCount(for:)`（新公開 API，供 `Localization` 模組外部呼叫；沿用既有 `EightLanguageLocalizationGateTests` 已經驗證過的「SwiftPM 把 `.lproj` 目錄名轉小寫」大小寫不敏感比對手法）確認八個語言都有可讀、非空的 `Localizable.strings`。
+  2. `theme.preference`——確認 `AppTheme.default == .system` 且每個 case 的 `rawValue` 都能 round-trip；再讀 `UserDefaults.standard.string(forKey: "appTheme")`，沒有值時視為 PASS（代表沿用預設值，不是問題），有值但無法解析時回報 `.warning`（不是 `.fail`——app 本身會自動退回預設值，不會 crash）。
+  3. `export.formatsCapability`——確認 `ExportFormat.allCases` 每個 case 都有非空 `displayName`/`fileExtension`，並呼叫 `ExportFormat.systemEncodableTypeIdentifiers()` 統計這台機器實際能編碼幾種格式（純資訊性，不因某格式在某平台不支援就判定失敗）。
+  4. `batchExport.queueCapability`——確認 `BatchExportQueue()`（跟 `LibraryViewModel.batchExportQueue` 用的同一個預設建構子）能正常建構，不 crash。這輪範圍就是「capability 可建構」，不含真的跑一次匯出（那需要真實 RAW 來源，屬於 `fixture.rawDirectory` 的範疇）。
+  5. `fixture.rawDirectory` / `fixture.apfsTestDirectory` / `fixture.exfatTestDirectory`——分別對應 `LUMAHARBOR_RAW_FIXTURE_DIR` / `LUMAHARBOR_APFS_TEST_DIR` / `LUMAHARBOR_EXFAT_TEST_DIR`（跟 `Scripts/run-mvp-acceptance.zsh`、`Tests/LumaHarborIntegrationTests/RawFixtureTests.swift` 用的是同一組環境變數名稱，沒有另外發明新名稱）。env var 沒設 → `.skipped`；env var 設了但目錄不存在 → `.warning`（不是 `.fail`，因為這是本機開發環境設定問題，不是程式碼缺陷）；env var 設了且目錄存在 → `.pass`。
+- **隱私設計（這輪特別要求的重點）**：`fixtureDirectoryCheck` 這個函式**完全不把路徑值放進任何欄位**——訊息裡只出現固定的環境變數「名稱」字串（例如 `"LUMAHARBOR_RAW_FIXTURE_DIR is not set"`），從來不 interpolate 實際路徑，連 basename 都不顯示（比「redact 或只顯示 basename」更保守，判斷是 basename 本身也可能洩漏敏感資訊，例如目錄取名為使用者真名）。`LumaHarborDiagnosticsRunnerTests` 有兩個測試直接驗證這件事：一個用假路徑（`/Users/private-test-user/Secret RAW Fixtures/Do Not Print`，明確標注是 synthetic、不對應真實檔案）確認即使目錄不存在，整份報告的每個欄位都不含路徑片段；另一個用測試自己建立的真實暫存目錄（`FileManager.default.temporaryDirectory` 底下的隨機子目錄，執行完就刪除）確認即使目錄真的存在、check 回報 PASS，報告裡依然不含該目錄的路徑或 basename。
+- **CLI entry point**：`Package.swift` 新增 `.executableTarget(name: "LumaHarborDiagnosticsCLI", dependencies: ["LumaHarborApp"])`（沿用既有 `PendingLeaseHelper` 的「小型、非 shipping product 的 executable target」模式，沒有另外註冊成 `products:`）。`Sources/LumaHarborDiagnosticsCLI/main.swift` 呼叫 `LumaHarborDiagnosticsRunner.run()`，預設印文字報告，`--json` 印 JSON；exit code 0 = 全部 PASS（含 skipped/warning），1 = 有 `.fail`。已手動執行驗證過三種情境：(1) 無 fixture env var → 全部 4 個核心 check PASS、3 個 fixture check SKIPPED、exit 0；(2) `--json` 輸出格式正確；(3) 設一個假的、不存在的 `LUMAHARBOR_RAW_FIXTURE_DIR` → 該 check 變成 WARNING 且訊息裡完全沒有路徑，exit 仍是 0（因為沒有真的 FAIL）。
+- **已知限制／未涵蓋範圍**：
+  - `shot`／`gallery` 兩個 roadmap 原文命令完全沒做（見上方差異說明）；`selftest`／`exporttest` 的完整版本（真的解碼一個 RAW、真的跑一次匯出並比對像素容差）也沒做——這輪只做了「capability 可建構/可讀取」層級的檢查，不是「真的執行一次完整流程」層級。如果之後要做完整版，需要 `LUMAHARBOR_RAW_FIXTURE_DIR` 指到真實 RAW 檔案，並比照 `RawFixtureTests.swift` 的 `XCTSkip` 慣例。
+  - App bundle / resource lookup（例如檢查 `.app` bundle 內部資源）這輪判斷不適合 headless 環境——`swift test`/`swift run` 底下沒有真正簽署過的 `.app` bundle，`Bundle.main` 在這個情境下沒有代表性意義，所以沒有加這個 check，是刻意跳過而不是遺漏。
+  - `theme.preference` check 會讀取執行當下這個 process 的真實 `UserDefaults.standard`（bundle identifier 底下）——這是唯讀操作，不會寫入或修改任何東西，但這代表這個 check 的結果會受「執行環境之前是否曾經跑過這個 app 並儲存過偏好設定」影響；這輪判斷這個副作用可接受（純讀取、無害），已在程式碼註解中說明。
+  - Diagnostics 的訊息文字都是純英文（開發者/CI 導向），沒有走 `L10n.t`——這是刻意的，因為這是 CI/開發者工具輸出，不是使用者可見 UI，跟 `Scripts/run-mvp-acceptance.zsh` 既有的純英文輸出慣例一致。
+- **驗證**：
+  - `swift build` PASS。
+  - `swift run LumaHarborDiagnosticsCLI` 與 `swift run LumaHarborDiagnosticsCLI --json` 手動執行過，輸出格式與 exit code 都符合預期（見上方「CLI entry point」）。
+  - `swift test --filter Diagnostics` PASS（10 個新測試全過；filter 也命中了幾個既有、名稱含 "Diagnostics" 但完全不相關的測試，同樣全部 PASS，沒有回歸）。
+  - `swift test --filter 'EightLanguageLocalizationGateTests|LocalizationSmokeTest|AppThemeTests|ExportSheetContractTests|BatchExportSheetContractTests'` PASS（63 tests, 0 failures）——確認 Phase 5.1–5.4 既有測試沒有被這輪改動（尤其是 `L10n.swift` 新增的公開 API）影響。
+  - `swift test`（完整）PASS（1715 tests, 9 skipped, 0 failures）。
+  - `git diff --check` PASS。
+  - 隱私掃描：對本輪新增/修改的所有檔案以 `/Users/|/Volumes/|/private/|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|TEAM_ID|UDID` 掃描，唯一命中的是 `Tests/LumaHarborAppTests/LumaHarborDiagnosticsRunnerTests.swift` 裡刻意使用的 synthetic 假路徑 `/Users/private-test-user/Secret RAW Fixtures/Do Not Print`（測試自己的 doc comment 已明確標注「never created on disk」「not meant to resemble a real fixture location」）——不是真實使用者路徑。沒有 Team ID、UDID、provisioning profile 內容。
+- **Next action**：可選 Phase 5.6 RC verification（若使用者決定繼續走 roadmap，但要注意這需要 Phase 4.6/A11 等前置項目一起收斂，這輪明確被要求不碰），或繼續 A11 真人實機驗證，或視需要把 `selftest`/`exporttest` 擴充成真的跑一次 RAW 解碼/匯出（需要 `LUMAHARBOR_RAW_FIXTURE_DIR`）。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5 Task 5.4：Eight-language localization coverage gate (2026-09-06, Claude, code + tests + resources, in this worktree/branch)
 
