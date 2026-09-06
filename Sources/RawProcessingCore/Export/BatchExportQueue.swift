@@ -1,4 +1,5 @@
 import Foundation
+import Localization
 
 /// One batch export item's lifecycle (design spec §6.11: "per-file 成功/
 /// 失敗報告"; roadmap Phase 5 Task 5.1: "pending/running/succeeded/failed/
@@ -125,7 +126,58 @@ public actor BatchExportQueue {
         return BatchExportReport(items: items)
     }
 
+    /// Never forwards an unrecognized error's own `errorDescription`/
+    /// `localizedDescription` -- a bare `NSError` (e.g. from `FileManager`)
+    /// routinely embeds an absolute path in that text. Only `ExportError`
+    /// and `RawDecodingError` are known well enough here to forward their
+    /// own `errorDescription` case by case, and `RawDecodingError
+    /// .fileUnavailable`'s `errorDescription` is the one case in this whole
+    /// module that embeds the source file's absolute path (see
+    /// `RawDecodingError.swift`), so it gets a fixed, path-free string
+    /// instead. Mirrors `EditorCore/SafeErrorPresentation.swift`'s
+    /// convention and reuses the same already-localized strings, without
+    /// adding a dependency on `EditorCore` itself.
     private static func safeDescription(for error: Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? (error as NSError).localizedDescription
+        if error is CancellationError {
+            return L10n.t("The operation was cancelled.")
+        }
+        if let exportError = error as? ExportError {
+            return safeDescription(for: exportError)
+        }
+        if let decodingError = error as? RawDecodingError {
+            return safeDescription(for: decodingError)
+        }
+        return L10n.t("Something went wrong.")
+    }
+
+    private static func safeDescription(for error: ExportError) -> String {
+        switch error {
+        case .decoding(let decodingError):
+            return safeDescription(for: decodingError)
+        case .destinationNotWritable, .destinationUnavailable, .couldNotFindUniqueName,
+             .insufficientDiskSpace, .cancelled, .rendering, .formatNotSupported:
+            // Every other case's own `errorDescription` has been read end to
+            // end and never embeds a path -- verified again here rather than
+            // assumed, the same discipline `SafeErrorPresentation` uses.
+            return error.errorDescription ?? L10n.t("Something went wrong.")
+        }
+    }
+
+    private static func safeDescription(for error: RawDecodingError) -> String {
+        switch error {
+        case .fileUnavailable:
+            return L10n.t("The original file isn't available right now.")
+        case .unsupportedFormat:
+            return L10n.t("This camera's RAW format isn't supported yet.")
+        case .corruptedFile:
+            return L10n.t("This RAW file appears to be damaged.")
+        case .decodeFailed:
+            // `reason` is a system/decoder-supplied string of unknown
+            // provenance and is not trusted to be path-free, so it is never
+            // forwarded -- same call `SafeErrorPresentation` makes.
+            return L10n.t("The RAW file couldn't be decoded.")
+        case .cancelled:
+            return L10n.t("The operation was cancelled.")
+        }
     }
 }

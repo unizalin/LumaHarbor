@@ -160,6 +160,33 @@ final class BatchExportQueueTests: XCTestCase {
         XCTAssertEqual(report.cancelledCount, 0)
     }
 
+    /// Regression: `RawDecodingError.fileUnavailable`'s own `errorDescription`
+    /// embeds the source file's absolute path (see `RawDecodingError.swift`),
+    /// and `PhotoExporter` wraps a decoder's thrown `RawDecodingError` in
+    /// `ExportError.decoding(_:)` before this queue ever sees it. A per-file
+    /// failure message built from that raw description would put a private
+    /// filesystem path -- including whatever the user's macOS account name
+    /// is -- into a report the UI shows and the user might screenshot or
+    /// share, which conflicts with this project's path-free diagnostic
+    /// convention (`EditorCore/SafeErrorPresentation.swift`).
+    func testFailedStatusMessageNeverIncludesTheSourceFilesAbsolutePath() async {
+        let leakedPath = "/Users/private-name/Pictures/DSC0001.ARW"
+        let decoder = SyntheticRawDecoder(failure: .fileUnavailable(path: leakedPath))
+        let queue = BatchExportQueue(exporter: PhotoExporter(decoder: decoder))
+        let requests = zip(sourceURLs, ["a", "b", "c"]).map { makeRequest($0, baseFilename: $1) }
+
+        let report = await queue.run(requests)
+
+        for file in report.files {
+            guard case .failed(let message) = file.status else {
+                return XCTFail("expected every item to fail when the decoder always throws .fileUnavailable, got \(file.status)")
+            }
+            XCTAssertFalse(message.contains(leakedPath), "failed message must not leak the source file's absolute path: \(message)")
+            XCTAssertFalse(message.contains("/Users/"), "failed message must not leak any absolute user path: \(message)")
+            XCTAssertFalse(message.contains("private-name"), "failed message must not leak the username segment of a path: \(message)")
+        }
+    }
+
     // MARK: - Cancel cleanup
 
     func testCancellingMidQueueLeavesNoTemporaryFilesForAnyFile() async throws {

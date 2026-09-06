@@ -1,8 +1,17 @@
 # Current Coordination State
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
-Updated by: Claude（A11 ⌘Z 工程修復：移除自訂 `.undoRedo` CommandGroup + local monitor，改用未替換的系統 Undo/Redo 選單項目 + `LumaHarborAppDelegate` 的真實 `undo:`/`redo:` responder chain；自動化 contract test PASS，真人實體鍵盤最終驗證仍 NOT RUN）
+Updated by: Codex（Phase 5 Task 5.1 batch export queue core model 的 per-file failure report 隱私 follow-up；A11 真人實體鍵盤最終驗證仍 NOT RUN）
+
+## Phase 5 Task 5.1 follow-up：Batch export per-file failure report 不洩漏絕對路徑 (2026-09-06, Codex, code + tests, in this worktree/branch)
+
+- **狀態**：`DONE`（小型隱私 follow-up）。接續 `efb87ec` 的 Phase 5 Task 5.1 batch export queue core model；沒有做 Mac batch export UI、沒有做 Phase 5.2 rename/DPI/EXIF/watermark、沒有做 theme/localization/diagnostics，也沒有處理 Phase 4.6 最終驗收。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**。
+- **問題**：`BatchExportQueue.safeDescription(for:)` 原本直接轉送 `(error as? LocalizedError)?.errorDescription ?? (error as NSError).localizedDescription`。但 `RawDecodingError.fileUnavailable(path:)` 的 `errorDescription` 會包含來源 RAW 的絕對路徑；batch export 的 per-file report 會顯示或被截圖分享，不能把 `/Users/...`、帳號名稱或其他私人路徑片段帶出去。
+- **修法**：`Sources/RawProcessingCore/Export/BatchExportQueue.swift` 改成只對已知、逐 case 審過的 `ExportError`/`RawDecodingError` 產生 path-free 訊息；`fileUnavailable` 與 `decodeFailed(reason:)` 不再轉送原始 path/reason，未知 error 也回固定通用訊息。為了不讓 `RawProcessingCore` 依賴 `EditorCore`，只沿用 `SafeErrorPresentation` 的 path-free 診斷精神，沒有引入跨 module dependency。
+- **測試**：`Tests/RawProcessingCoreTests/BatchExportQueueTests.swift` 新增 `testFailedStatusMessageNeverIncludesTheSourceFilesAbsolutePath`，用 `/Users/private-name/...` 的 decoder failure 驗證 per-file failed message 不含完整路徑、`/Users/` 或 username segment。
+- **驗證**：`swift test --filter BatchExportQueueTests` PASS（9 tests, 0 failures）；`swift test` PASS（1610 tests, 9 skipped, 0 failures）；`git diff --check` PASS；本次改動檔案隱私掃描（`/Users/|/Volumes/|/private/|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|TEAM_ID|UDID`）只命中測試與這則文件裡刻意用來防回歸的 synthetic `/Users/private-name/...` 字串，沒有真實私人路徑、簽署設定、Team ID 或 UDID。
+- **Next action**：Phase 5 Task 5.1 的 core model 已有 queue 狀態、per-file report、cancel cleanup 與 path-free failure report；下一步可接 Mac batch export queue UI / ViewModel action wiring。A11 仍可繼續跳過，但不能標成 PASS，也不能宣稱 Phase 4.6 完整驗收完成。
 
 ## A11（實體鍵盤 ⌘Z）工程修復：改用真實 NSResponder chain 取代 local key-down monitor (2026-09-05, Claude, code + tests, in this worktree/branch)
 
