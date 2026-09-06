@@ -2,7 +2,28 @@
 
 Updated: 2026-09-06
 
-Updated by: Claude（Phase 5 整合強化 review pass：修 4 個小型接線缺口；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪未嘗試，不做 Phase 4.6 最終驗收）
+Updated by: Claude（Phase 5.6 RC verification：report-only，僅自動化驗證，見 `docs/coordination/PHASE5_RC_VERIFICATION.md`；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪未嘗試，不做 Phase 4.6 最終驗收）
+
+## Phase 5.6：RC Verification Plan / Report (2026-09-06, Claude, docs only — report + this pointer, in this worktree/branch)
+
+- **狀態**：`REPORT-ONLY / AUTOMATED VERIFICATION ONLY`。接續 `eef4097`（Phase 5 整合強化 review pass）。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `eef4097`。這輪**沒有新增功能、沒有改架構、沒有改 product code**——純粹是 read-only audit + 重跑一次完整自動化驗證 + 產出一份 RC 狀態文件。沒有做真人 A11、沒有做 Phase 4.6、沒有啟動 GUI 做任何手動驗收。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**，本輪未嘗試任何驗證，未標成 `PASS`。
+- **產出**：新增 `docs/coordination/PHASE5_RC_VERIFICATION.md`，內容包含：commit range（`5702c9a`..`eef4097`，11 個 commit）、Phase 5 feature matrix（5.1–5.5 + integration hardening，逐項標 PASS/PARTIAL/NOT RUN 並附對應測試檔）、roadmap Task 5.6 自己列的 9 個 RC 驗收子項目逐一比對現況、diagnostics CLI 文字與 JSON 實際輸出全文、隱私掃描結果、已知限制、下一步建議。
+- **Read-only audit 發現**：重新核對了 `docs/coordination/CURRENT.md`、roadmap Phase 5 全文、Package.swift、`Sources/LumaHarborApp/Diagnostics/*`、`ExportSheet.swift`/`BatchExportSheet.swift`/`SettingsView.swift`、八個 `.lproj` 的 `Localizable.strings`（皆為 524 keys，數量一致）、以及 Diagnostics/Localization/Export/Theme/Settings 相關測試檔案是否存在——**全部與文件描述一致，沒有發現新的不一致或需要修正的地方**。這輪沒有修任何 code/test（跟上一輪「Phase 5 整合強化」不同，那輪確實修了 4 個小缺口；這輪純粹確認狀態）。
+- **驗證**（全部在這輪重新跑過一次，結果詳見 `PHASE5_RC_VERIFICATION.md`）：
+  - `swift build` PASS。
+  - `swift run LumaHarborDiagnosticsCLI` 與 `--json` 都手動執行過，輸出內容、`overallStatus`/`summary`、exit code 皆符合預期，沒有洩漏任何路徑。
+  - `swift test --filter Diagnostics` PASS（21 tests）。
+  - `swift test --filter 'EightLanguageLocalizationGateTests|LocalizationSmokeTest'` PASS（26 tests）。
+  - `swift test --filter 'AppThemeTests|SettingsViewContractTests'` PASS（14 tests）。
+  - `swift test --filter 'ExportNamingTemplateTests|ExportCollisionPolicyTests|WatermarkRendererTests'` PASS（31 tests）。
+  - `swift test --filter 'ExportSheetContractTests|BatchExportSheetContractTests|ExportOptionsWiringTests'` PASS（35 tests）。
+  - `swift test --filter 'BatchExportQueueTests|BatchExportQueueWiringTests'` PASS（17 tests）。
+  - `swift test`（完整）PASS（1721 tests, 9 skipped, 0 failures）。
+  - `git diff --check` PASS。
+  - 隱私掃描：對本輪列出的所有 Phase 5 相關檔案（Diagnostics/CLI/ExportSheet/BatchExportSheet/SettingsView/LibraryViewModel/RawProcessingCore Export/八個 `.lproj`/對應測試檔/Package.swift）掃描，命中 3 處，全部是先前各輪已標注過的 synthetic 假路徑（`LumaHarborDiagnosticsRunnerTests.swift`、`BatchExportQueueTests.swift`、`PhotoExportTests.swift` 各自既有的假路徑防回歸測試），沒有真實使用者路徑、Team ID、UDID、provisioning profile。完整清單見 `PHASE5_RC_VERIFICATION.md`。
+- **RC 結論**：Phase 5.1–5.5 與整合強化都有完整、目前全綠的自動化覆蓋，且範圍跟 `CURRENT.md` 各自的記錄一致。**這不代表 Phase 5 或整個 app 已經可以出 RC/上線**——roadmap Task 5.6 自己列的九個子項目裡，只有「full swift test」「Mac app build」「privacy scan」這三項能靠自動化滿足；「iOS generic build」「MVP acceptance」「export fixture tolerance report」「manual Mac checklist」「iPad subset checklist」「independent review」都需要真人、真實 fixture 或 iPad 環境，這輪明確不碰。真正阻擋 RC 的仍然是 A11 與 Phase 4.6。
+- **已知限制**：完整清單在 `PHASE5_RC_VERIFICATION.md`，摘要：A11 `NOT RUN`；Phase 4.6 未做；沒有任何真人 visual QA；六語翻譯未經母語審校；naming template 的 preset name/virtual copy name fallback 限制（已知、已文件化，未修）；diagnostics 不做真的 RAW decode/app bundle 簽署資源查找；`selftest`/`exporttest`/`shot`/`gallery` 完整版未做（`shot`/`gallery` 完全沒做，理由已記錄）；iOS build/iPad checklist/independent review 皆 NOT RUN。
+- **Next action**：見 `PHASE5_RC_VERIFICATION.md`「Next recommended actions」——優先序是 A11 真人實機驗證 → Phase 4.6 → 六語母語審校 → （optional）classicDark/warmPaper 完整主題 → （optional）diagnostics 真 fixture 擴充 → manual/iPad checklist + independent review。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5 整合強化 / Review Pass (2026-09-06, Claude, code + tests + docs, in this worktree/branch)
 
