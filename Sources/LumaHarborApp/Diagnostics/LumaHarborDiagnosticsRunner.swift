@@ -44,11 +44,19 @@ public enum LumaHarborDiagnosticsRunner {
     /// `environment` is injectable (defaults to the real process
     /// environment) so tests can simulate "fixture configured" / "fixture
     /// missing" without touching the actual process's environment, which
-    /// Swift has no supported way to mutate at runtime anyway.
-    public static func run(environment: [String: String] = ProcessInfo.processInfo.environment) -> DiagnosticsReport {
+    /// Swift has no supported way to mutate at runtime anyway. `userDefaults`
+    /// is injectable for the same reason: `themePreferenceCheck()` used to
+    /// hardcode `UserDefaults.standard`, coupling its tests to this
+    /// process's real settings domain (integration hardening review
+    /// finding) -- defaults to `.standard` so production callers (the CLI)
+    /// see this process's actual preference exactly as before.
+    public static func run(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        userDefaults: UserDefaults = .standard
+    ) -> DiagnosticsReport {
         DiagnosticsReport(checks: [
             localizationCheck(),
-            themePreferenceCheck(),
+            themePreferenceCheck(userDefaults: userDefaults),
             exportFormatsCheck(),
             batchExportQueueCheck(),
             fixtureDirectoryCheck(
@@ -116,7 +124,7 @@ public enum LumaHarborDiagnosticsRunner {
     /// (the app has never been run, or the user never changed it): it just
     /// means `AppTheme.default` applies, same as `RootView`'s own
     /// `@AppStorage` default.
-    private static func themePreferenceCheck() -> DiagnosticCheck {
+    private static func themePreferenceCheck(userDefaults: UserDefaults) -> DiagnosticCheck {
         guard AppTheme.default == .system,
               AppTheme.allCases.allSatisfy({ AppTheme(rawValue: $0.rawValue) == $0 }) else {
             return DiagnosticCheck(
@@ -127,7 +135,7 @@ public enum LumaHarborDiagnosticsRunner {
             )
         }
 
-        let storedRawValue = UserDefaults.standard.string(forKey: "appTheme")
+        let storedRawValue = userDefaults.string(forKey: "appTheme")
         guard let storedRawValue else {
             return DiagnosticCheck(
                 id: "theme.preference",

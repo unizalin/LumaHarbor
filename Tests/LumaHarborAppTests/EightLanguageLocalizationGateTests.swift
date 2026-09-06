@@ -23,29 +23,47 @@ final class EightLanguageLocalizationGateTests: XCTestCase {
     /// The roadmap's own list, in the order it names them.
     static let requiredLanguageCodes = ["zh-Hant", "en", "ja", "ko", "zh-Hans", "de", "fr", "es"]
 
-    /// Keys that are deliberately identical across every language -- real
-    /// technical terms/format names/units with no standard translated form
-    /// in professional photo-editing software (a Japanese or German RAW
-    /// editor still says "JPEG", "DPI", "sRGB"), not keys someone forgot to
+    /// Keys that are deliberately identical to English in a *specific*
+    /// language -- real technical terms/format names/units with no
+    /// standard translated form in professional photo-editing software (a
+    /// Japanese RAW editor still says "8-bit"), not keys someone forgot to
     /// translate. `testUntranslatedKeysOutsideTheAllowlistDoNotSilentlyMatchEnglish`
-    /// is what keeps this list honest: any key equal to the English value
-    /// in a non-English language, and not listed here, fails that test --
-    /// so growing this list is always a visible, deliberate diff, never a
-    /// silent gap (the task's own "不可默默放過" requirement).
-    static let intentionalEnglishMatchAllowlist: Set<String> = [
-        "JPEG", "PNG", "TIFF", "HEIC", "DPI", "EXIF", "ISO", "8-bit", "16-bit",
-        "1 GB", "2 GB", "5 GB", "10 GB", "512 MB",
-        // Genuine cognates/loanwords in at least one of ja/ko/zh-Hans/de/fr/es
-        // -- e.g. German "System"/"Format"/"Name", French "Photo"/"Grain"/
-        // "Orange" (several of French origin to begin with), Spanish
-        // "Color"/"Original" are the *correct* professional-software
-        // translation, not an untranslated leftover. Verified by hand,
-        // one at a time, against how Adobe's own localized Lightroom/
-        // Photoshop UIs render each of these in the corresponding language.
-        "Detail", "Radius", "System", "Format", "Magenta", "Name", "Offline",
-        "OK", "Orange", "Original", "Vignette", "Luminance", "Dimensions",
-        "Grain", "Orientation", "Photo", "photos", "1 photo", "Saturation",
-        "Sources", "Vibrance", "Color", "Mode",
+    /// is what keeps this honest: any key equal to the English value in a
+    /// language whose own set here doesn't list it fails that test -- so
+    /// growing this is always a visible, deliberate diff, never a silent
+    /// gap (the task's own "不可默默放過" requirement).
+    ///
+    /// Scoped **per language** rather than one flat set shared by all six
+    /// -- integration hardening review finding: cross-checking every
+    /// candidate key against this repo's own six `Localizable.strings`
+    /// files (one Python pass over each file's actual key/value pairs, not
+    /// a guess) showed several keys are only genuinely identical to
+    /// English in one or two of the six languages; every other language
+    /// already translates them properly (e.g. "8-bit" stays literal only
+    /// in Japanese -- Korean/Chinese/German/French/Spanish all render
+    /// "8비트"/"8 位"/"8 Bit"/"8 bits"/"8 bits"). A flat set would have hidden
+    /// an accidental untranslated "8-bit" in any of those five behind the
+    /// one language that legitimately needs it. `testAllowlistIsScopedPerLanguageRatherThanGlobal`
+    /// pins the "8-bit" example directly. Genuine cognates/loanwords (e.g.
+    /// German "System"/"Format"/"Name", French "Photo"/"Grain"/"Orange",
+    /// Spanish "Color"/"Original") were verified by hand, one at a time,
+    /// against how Adobe's own localized Lightroom/Photoshop UIs render
+    /// each in the corresponding language.
+    static let intentionalEnglishMatchAllowlist: [String: Set<String>] = [
+        "zh-Hant": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "TIFF"],
+        "ja": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "OK", "PNG", "TIFF"],
+        "ko": ["DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "TIFF"],
+        "zh-Hans": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "TIFF"],
+        "de": [
+            "1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "Detail", "EXIF", "Format", "HEIC", "ISO", "JPEG",
+            "Magenta", "Name", "OK", "Offline", "Orange", "Original", "PNG", "Radius", "System", "TIFF", "Vignette",
+        ],
+        "fr": [
+            "1 photo", "DPI", "Dimensions", "EXIF", "Format", "Grain", "HEIC", "ISO", "JPEG", "Luminance", "Magenta",
+            "Mode", "OK", "Orange", "Orientation", "Original", "PNG", "Photo", "Saturation", "Sources", "TIFF",
+            "Vibrance", "photos",
+        ],
+        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Color", "EXIF", "HEIC", "ISO", "JPEG", "Magenta", "Original", "PNG", "TIFF"],
     ]
 
     /// SwiftPM's resource processor lowercases `.lproj` directory names
@@ -179,12 +197,36 @@ final class EightLanguageLocalizationGateTests: XCTestCase {
         let english = try Self.stringsDictionary(for: "en")
         for code in Self.requiredLanguageCodes where code != "en" {
             let table = try Self.stringsDictionary(for: code)
+            let allowed = Self.intentionalEnglishMatchAllowlist[code] ?? []
             for (key, englishValue) in english {
                 guard let localizedValue = table[key] else { continue } // covered by the key-coverage test
-                if localizedValue == englishValue, !Self.intentionalEnglishMatchAllowlist.contains(key) {
-                    XCTFail("\(code) key \"\(key)\" silently matches the English value (\"\(englishValue)\") and is not in intentionalEnglishMatchAllowlist")
+                if localizedValue == englishValue, !allowed.contains(key) {
+                    XCTFail("\(code) key \"\(key)\" silently matches the English value (\"\(englishValue)\") and is not in intentionalEnglishMatchAllowlist[\"\(code)\"]")
                 }
             }
+        }
+    }
+
+    /// Integration hardening review finding: the allowlist used to be one
+    /// flat `Set<String>` shared by all six non-English languages. Cross-
+    /// checking every entry against each language's actual shipped value
+    /// showed several keys (e.g. "8-bit"/"16-bit", the GB/MB size keys)
+    /// are only genuinely identical to English in *one or two* of the six
+    /// languages -- every other language already translates them properly.
+    /// A flat allowlist hid that distinction: if French's own "8-bit" had
+    /// been accidentally left as literal "8-bit" instead of "8 bits", the
+    /// old global allowlist (permitting "8-bit" for every language because
+    /// Japanese needs it) would have let that slip through silently. Now
+    /// scoped per language, computed by cross-checking this repo's own
+    /// six `Localizable.strings` files key by key -- see the comment on
+    /// `intentionalEnglishMatchAllowlist` for exactly how.
+    func testAllowlistIsScopedPerLanguageRatherThanGlobal() {
+        XCTAssertEqual(Self.intentionalEnglishMatchAllowlist["ja"]?.contains("8-bit"), true, "Japanese is the one language that keeps \"8-bit\" as-is")
+        for code in ["ko", "zh-Hans", "de", "fr", "es"] {
+            XCTAssertNotEqual(
+                Self.intentionalEnglishMatchAllowlist[code]?.contains("8-bit"), true,
+                "\(code) properly translates \"8-bit\" (e.g. \"8 Bit\"/\"8 bits\"/\"8비트\"/\"8 位\"); it must not be allowlisted to silently match English there"
+            )
         }
     }
 

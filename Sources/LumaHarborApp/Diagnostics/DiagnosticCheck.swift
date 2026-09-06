@@ -40,7 +40,7 @@ public struct DiagnosticCheck: Equatable, Codable, Sendable {
 
 /// The full result of one `LumaHarborDiagnosticsRunner.run(environment:)`
 /// call.
-public struct DiagnosticsReport: Equatable, Codable, Sendable {
+public struct DiagnosticsReport: Equatable, Sendable {
     public var checks: [DiagnosticCheck]
 
     public init(checks: [DiagnosticCheck]) {
@@ -87,5 +87,45 @@ public struct DiagnosticsReport: Equatable, Codable, Sendable {
             + "\(count(.fail)) fail, \(count(.skipped)) skipped -- overall \(passed ? "PASS" : "FAIL")"
         )
         return lines.joined(separator: "\n")
+    }
+}
+
+extension DiagnosticsReport: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case checks
+        case overallStatus
+        case summary
+    }
+
+    private struct Summary: Codable, Equatable {
+        var pass: Int
+        var warning: Int
+        var fail: Int
+        var skipped: Int
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // `overallStatus`/`summary` are derived from `checks`, not
+        // independent state -- decoding recomputes them from `checks`
+        // rather than trusting whatever a hand-edited or stale JSON
+        // document claims, so they can never drift out of sync with the
+        // checks that are actually present.
+        checks = try container.decode([DiagnosticCheck].self, forKey: .checks)
+    }
+
+    /// Encodes `overallStatus` ("pass"/"fail") and per-status `summary`
+    /// counts alongside `checks` -- integration hardening review finding:
+    /// the original synthesized `Codable` only encoded the stored `checks`
+    /// array, so a machine reading the JSON had no way to learn "did this
+    /// pass overall" without re-implementing `passed`'s own logic itself.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(checks, forKey: .checks)
+        try container.encode(passed ? "pass" : "fail", forKey: .overallStatus)
+        try container.encode(
+            Summary(pass: count(.pass), warning: count(.warning), fail: count(.fail), skipped: count(.skipped)),
+            forKey: .summary
+        )
     }
 }

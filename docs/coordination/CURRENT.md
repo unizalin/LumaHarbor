@@ -2,7 +2,48 @@
 
 Updated: 2026-09-06
 
-Updated by: Claude（Phase 5 Task 5.5 headless diagnostics runner；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+Updated by: Claude（Phase 5 整合強化 review pass：修 4 個小型接線缺口；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪未嘗試，不做 Phase 4.6 最終驗收）
+
+## Phase 5 整合強化 / Review Pass (2026-09-06, Claude, code + tests + docs, in this worktree/branch)
+
+- **狀態**：`DONE`（review + 4 個小型修正，非重構、非新功能）。接續 `84a5659`（Phase 5 Task 5.5 headless diagnostics runner）。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `84a5659`。沒有做 Phase 4.6 最終驗收、沒有碰任何 iPad 檔案、沒有做真人 QA。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**，本輪未嘗試任何驗證，未標成 `PASS`。這輪明確定位為「review + 小型修正」，不是新功能開發，也沒有把任何區塊重構。
+- **Review 範圍**：依 prompt 指定的六個區域逐一檢查（batch export/export pro 接線、theme 接線、localization 接線、diagnostics 接線、docs 準確性、隱私/安全），過程是 read-only 檢查（讀程式碼 + 寫小型驗證用的 Python 腳本比對 `.strings` 內容），只有確認是「小型、可用自動測試證明」的問題才動手修。
+- **Review 發現摘要（逐項）**：
+  1. **Batch/single export 共用同一套 `MacExportOptions`／`ExportRequest` contract**：確認 `LibraryViewModel.export(photo:to:options:)` 與 `batchExportRequest(...)` 都從同一個 `MacExportOptions` 建構 `ExportRequest`，naming template/collision policy/watermark 三者行為一致，`presetName` 也一致傳 `nil`（fallback 限制已在程式碼註解中說明，理由不變）。**沒有發現問題，未修改**。
+  2. **`.ask` collision policy 是否明確 disabled/rejected**：確認 `ExportSheet`/`BatchExportSheet` 都在選到 `.ask` 時停用匯出動作，`PhotoExporter.export(_:)` 也在核心層再擋一次（丟 `ExportError.collisionPolicyNotSupported`，不碰 decoder、不寫檔），UI 與 core 兩層防禦一致。**沒有發現問題，未修改**。
+  3. **`.skipped` status 計算**：確認 `BatchExportReport.skippedCount` 與 `BatchExportSheet` 的 UI 總計都用獨立、互斥的 `case`/`==` 比對，不會跟 succeeded/failed 重疊計算。**沒有發現問題，未修改**。
+  4. **failed/skipped/cancelled 訊息 path-free**：確認 `ExportError.skippedExistingFile`／`.collisionPolicyNotSupported` 的 `errorDescription` 都是固定字串，沒有 interpolate 任何路徑。**沒有發現問題，未修改**。
+  5. **Theme 接線**：確認 `RootView`（主視窗 + `ExportSheet` + `BatchExportSheet`，共 3 處）都套用同一個 `@AppStorage("appTheme")` 的 `theme.colorScheme`。**發現真實缺口**：`SettingsView` 只綁定同一把 key 讓使用者選擇，卻沒有把 `.preferredColorScheme` 套到自己身上——使用者在 Settings 選了 Dark，Settings 視窗本身仍然停留在系統外觀。已修正（見下方「實際修了什麼」第 3 項）。
+  6. **Localization allowlist 過寬**：用 Python 腳本逐一比對 `intentionalEnglishMatchAllowlist` 裡每個 key 在六個新語言各自的實際翻譯值，確認目前沒有任何一個 key 因為這個過寬的全域 allowlist 而**真的**放過一個遺漏翻譯（六個語言目前都翻得正確），但allowlist 的設計本身是「跨語言共用一份 flat Set」，例如 `"8-bit"`／`"16-bit"` 只有日文需要（其他五語都已正確翻譯成「8비트」「8 位」「8 Bit」「8 bits」「8 bits」），若之後某語言不小心漏翻成英文原文，這個過寬的全域 allowlist 會**默默放過**，違反 `EightLanguageLocalizationGateTests.swift` 自己文件裡寫的「不可默默放過」原則。這是 Phase 5.4 文件本身就已經記錄的已知限制，這輪確認風險真實存在後把它收斂成逐語言 allowlist（見下方「實際修了什麼」第 4 項）。
+  7. **Diagnostics JSON contract**：確認 `DiagnosticsReport` 原本用 Swift 合成的 `Codable`，只會序列化儲存屬性 `checks`，`passed`（computed property）完全沒有進到 JSON 裡——用 `swift run LumaHarborDiagnosticsCLI --json` 手動驗證過，輸出真的只有 `{"checks": [...]}`，沒有任何整體 pass/fail 欄位。這是一個真實的 JSON contract 缺口：CI 腳本要讀這份 JSON 判斷整體是否通過，必須自己重新實作一次 `passed` 的邏輯。已修正（見下方「實際修了什麼」第 1 項）。
+  8. **Diagnostics theme check 耦合真實 `UserDefaults.standard`**：確認 `themePreferenceCheck()` 原本寫死 `UserDefaults.standard`，沒有注入點，測試沒辦法在不碰真實 process 設定的情況下驗證「有儲存值/儲存值壞掉」這兩種情境。已修正（見下方「實際修了什麼」第 2 項）。
+  9. **CLI exit code / text-JSON path-free / fixture env var 狀態語意**：手動執行過 `swift run LumaHarborDiagnosticsCLI`（無 fixture、全部 pass/skipped → exit 0）與注入一個假的不存在路徑（→ warning、exit 仍 0，訊息完全不含路徑）。**符合 docs 描述，沒有發現問題，未修改**。
+  10. **Package.swift 新增 executable target 風險**：這輪重新跑過完整 `swift build`/`swift test`，1721 tests 全過，確認 `LumaHarborDiagnosticsCLI` 沒有影響任何既有 target。**沒有發現問題，未修改**。
+  11. **Docs 準確性**：檢查過 `docs/coordination/CURRENT.md` 從 Phase 5.1 到 5.5 的每一則「狀態」開頭句，全部都正確標注 A11 `NOT RUN`、Phase 4.6 未做；Phase 5.3 的用詞已經正確區分「這輪做的是 System/Light/Dark，不是 roadmap 原文的 classicDark/warmPaper 自訂配色」，沒有發現誤導性措辭。**沒有發現問題，未修改**。
+  12. **preset name / virtual copy name fallback 是否有 UI 暗示過度支援**：`ExportNamingTemplate.swift` 的 "Preset Name + Original Filename" 選項在 picker 裡沒有任何說明文字，選了它但目前恆 fallback 成原始檔名（因為沒有任何地方追蹤「這張照片最後套用過哪個 preset」）。**判斷為已知限制而非新 bug**——這個限制已經在 Phase 5.2 的 CURRENT.md 記錄過，程式碼裡也有對應註解；要修正 UI 端的說明文字需要新增至少一個字串並補齊全部八語（八語 gate 的 `testEveryRequiredLanguageContainsEveryEnglishBaselineKey` 會強制要求），這超出「小型、低風險」的門檻，這輪選擇不做，維持記錄在已知限制裡。
+- **實際修了什麼（4 項，全部 TDD：先寫 failing test，再最小修正）**：
+  1. **Diagnostics JSON 補上 `overallStatus`／`summary`**（`Sources/LumaHarborApp/Diagnostics/DiagnosticCheck.swift`）：`DiagnosticsReport` 改成手動 `Codable`（`encode(to:)` 額外寫入 `overallStatus`："pass"/"fail" 字串；`summary`：`{pass, warning, fail, skipped}` 四個計數；`init(from:)` 只解回 `checks`，`overallStatus`/`summary` 一律從 `checks` 重新算，不信任 JSON 裡可能過期的值）。`Equatable`/`Sendable` 保留（`Equatable` 改回合成，只比較 `checks`，跟原本語意一致）。
+  2. **Diagnostics theme check 改成可注入 `UserDefaults`**（同一個檔案 + `LumaHarborDiagnosticsRunner.swift`）：`LumaHarborDiagnosticsRunner.run(environment:userDefaults:)` 新增 `userDefaults: UserDefaults = .standard` 參數，`themePreferenceCheck(userDefaults:)` 改吃這個參數而不是寫死 `.standard`。CLI 呼叫端沒有改動（`LumaHarborDiagnosticsCLI/main.swift` 呼叫 `run()` 沒帶這個參數，沿用預設值 `.standard`，行為對真實使用者完全不變）。
+  3. **`SettingsView` 補上 `.preferredColorScheme(theme.colorScheme)`**（`Sources/LumaHarborApp/Views/SettingsView.swift`）：一行修正，讓 Settings 視窗本身也跟著使用者當下選的主題走，不再永遠停留在系統外觀。
+  4. **Localization allowlist 收斂成逐語言**（`Tests/LumaHarborAppTests/EightLanguageLocalizationGateTests.swift`）：`intentionalEnglishMatchAllowlist` 從 `Set<String>`（跨六語共用）改成 `[String: Set<String>]`（每個語言各自的集合，用 Python 腳本逐一比對這個 repo 目前六個新語言 `.strings` 檔案的實際內容算出來，不是憑印象猜的）；`zh-Hant`（既有、人工維護的檔案）也補上自己的一份（`1 GB`/`10 GB`/`16-bit`/`2 GB`/`5 GB`/`512 MB`/`8-bit`/`DPI`/`EXIF`/`HEIC`/`ISO`/`JPEG`/`PNG`/`TIFF`，同樣是腳本算出來，不是猜的）。`testUntranslatedKeysOutsideTheAllowlistDoNotSilentlyMatchEnglish` 改成查對應語言自己的集合；新增 `testAllowlistIsScopedPerLanguageRatherThanGlobal` 直接釘住「日文的 `8-bit` 允許例外，不代表韓文/中文/德文/法文/西班牙文的 `8-bit` 也被允許」這件事。
+- **TDD RED/GREEN 記錄**：
+  - JSON contract：`testJSONReportIncludesOverallStatusAndSummaryCounts`／`testJSONReportOverallStatusReflectsAFailingCheck` 先寫，RED 因為 JSON 輸出裡真的沒有 `overallStatus`/`summary` 這兩個 key（`XCTAssertEqual failed: ("nil") is not equal to ("Optional("pass")")`）；補上手動 `Codable` 後轉綠。
+  - Theme UserDefaults：`testThemeCheckReadsFromAnInjectedUserDefaultsNotTheRealStandardDomain`／`testThemeCheckPassesWithNoStoredPreferenceInAFreshStore` 先寫，RED 因為 `run(environment:)` 根本沒有 `userDefaults:` 參數（`extra argument 'userDefaults' in call`，完全無法編譯）；加上參數後轉綠。
+  - Settings preferredColorScheme：`testSettingsViewAppliesThePreferredColorSchemeToItself` 先寫，RED 因為當時的 `SettingsView.swift` 原始碼裡真的沒有這行（`XCTAssertTrue failed`）；加上這行之後轉綠。
+  - Localization allowlist：`testAllowlistIsScopedPerLanguageRatherThanGlobal` 先寫，RED 因為 `intentionalEnglishMatchAllowlist` 當時還是 `Set<String>`，用 `["ja"]` 下標會編譯失敗（`cannot convert value of type 'String' to expected argument type 'Set<String>.Index'`）；改成 `[String: Set<String>]` 後，第一次跑 `testUntranslatedKeysOutsideTheAllowlistDoNotSilentlyMatchEnglish` 又冒出 14 個新的 RED（忘記把 `zh-Hant` 自己的合法例外也搬進新結構），補上 `zh-Hant` 那份（用腳本重新算過，不是猜的）後全部轉綠。
+- **驗證**：
+  - `swift build` PASS。
+  - `swift run LumaHarborDiagnosticsCLI` 與 `swift run LumaHarborDiagnosticsCLI --json` 都重新手動執行過，JSON 輸出確認包含 `overallStatus: "pass"` 與 `summary: {fail:0, pass:4, skipped:3, warning:0}`，exit code 都是 0。
+  - `swift test --filter Diagnostics` PASS（21 tests, 0 failures）。
+  - `swift test --filter 'EightLanguageLocalizationGateTests|LocalizationSmokeTest|AppThemeTests|SettingsViewContractTests|ExportSheetContractTests|BatchExportSheetContractTests'` PASS（70 tests, 0 failures）。
+  - `swift test`（完整）PASS（1721 tests, 9 skipped, 0 failures）。
+  - `git diff --check` PASS。
+  - 隱私掃描：對本輪所有修改的檔案以 `/Users/|/Volumes/|/private/|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|TEAM_ID|UDID` 掃描，唯一命中的是 `Tests/LumaHarborAppTests/LumaHarborDiagnosticsRunnerTests.swift` 裡**既有（Phase 5.5 就已存在，這輪沒有新增或修改這幾行）**的 synthetic 假路徑 `/Users/private-test-user/Secret RAW Fixtures/Do Not Print`，該測試自己的 doc comment 已標注「never created on disk」。沒有真實使用者路徑、Team ID、UDID、provisioning profile。
+- **已知限制 / 未修**：
+  - Preset name 選項在 UI 沒有加說明文字（見上方發現 #12）——判斷需要新增字串並補八語，超出這輪「小型」門檻，維持現狀，已記錄。
+  - Diagnostics 的 `localization.eightLanguages` check 本身沒有重新驗證 `EightLanguageLocalizationGateTests.swift` 的完整覆蓋率邏輯（只做「8 個語言都有可讀的 Localizable.strings」這種粗粒度檢查），完整覆蓋率驗證仍然只在 `swift test` 才會跑——這是刻意的分工，不是遺漏（diagnostics 是給 CI/開發者快速掃描用，完整 gate 測試才是權威來源）。
+  - 這輪沒有處理 roadmap 更大範圍的項目（Phase 5.6 RC verification、真的把 `selftest`/`exporttest` 擴充成跑一次真實 RAW 解碼/匯出、`shot`/`gallery`），都維持先前各輪記錄的「未做」狀態不變。
+- **Next action**：可選繼續 Phase 5.6 RC verification 的非 A11/非 Phase-4.6 部分，或安排真人母語審校六個新語言，或繼續 A11 真人實機驗證。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5 Task 5.5：Headless diagnostics runner (2026-09-06, Claude, code + tests + Package.swift, in this worktree/branch)
 
