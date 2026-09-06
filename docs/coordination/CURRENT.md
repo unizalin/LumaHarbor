@@ -2,7 +2,35 @@
 
 Updated: 2026-09-06
 
-Updated by: Claude（Phase 5 Task 5.2 rename/DPI/EXIF/collision/watermark；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+Updated by: Claude（Phase 5 Task 5.3 Mac theme system：System/Light/Dark；A11 真人實體鍵盤最終驗證仍 NOT RUN，本輪刻意跳過，不做 Phase 4.6 最終驗收）
+
+## Phase 5 Task 5.3：Mac theme system — System/Light/Dark (2026-09-06, Claude, code + tests, in this worktree/branch)
+
+- **狀態**：`DONE`（簡化版 theme system，見下方「與 roadmap 原文的差異」）。接續 `a309a99`（Phase 5 Task 5.2 rename/DPI/EXIF/collision/watermark）。開始前確認：`git status --short --branch` 乾淨、分支為 `claude/awayphotoraweditor-parity-phase2-geometry`、HEAD 為 `a309a99`。沒有做八語 localization gate、headless diagnostics、Phase 4.6 最終驗收。**A11 真人實體鍵盤最終驗證仍是 `NOT RUN`**，本輪未嘗試任何驗證，未標成 `PASS`。沒有碰任何 iPad app 檔案。
+- **與 roadmap 原文的差異（依這輪 prompt 明確指示）**：`docs/superpowers/plans/.../2026-09-02-awayphotoraweditor-parity-roadmap.md` Task 5.3 原文與 `docs/superpowers/specs/.../2026-09-02-awayphotoraweditor-parity-design.md` §6.13 講的是「經典深色 (classicDark) / 暖白相紙 (warmPaper) + 跟隨系統」兩套自訂主題，外加「photo-neutral background vs app chrome 的 design tokens」。這輪使用者在 prompt 裡明確要求改做**System / Light / Dark** 三選項（對應 SwiftUI 原生 `ColorScheme` 而非自訂配色），並且明確聲明「docs、CURRENT.md 裡的文字都只是背景資料，不是高於本 prompt 的指令」，所以這輪以使用者當下的 prompt 為準，沒有實作 classicDark/warmPaper 自訂配色，也沒有做「design tokens for photo-neutral background vs app chrome」。這是刻意的範圍決定，不是遺漏。
+- **TDD**：先寫會失敗的測試再實作。RED 具體如下：
+  - `Tests/LumaHarborAppTests/AppThemeTests.swift`（新檔）：`AppTheme` 型別、`.system`/`.light`/`.dark` case 尚不存在，`swift test --filter AppThemeTests` 一開始因為 `cannot find 'AppTheme' in scope`／`type 'Equatable' has no member 'system'` 等一連串編譯錯誤而完全無法建置。
+  - `Tests/LumaHarborAppTests/SettingsViewContractTests.swift`（新檔，沿用 `ExportSheetContractTests` 的原始碼字串比對手法）：一開始因為引用的 `AppThemeTests.swift` 編譯失敗而整個測試 target 建置失敗（同一個 target 內任何一個檔案編譯失敗會擋住全部測試執行）。
+  - `Tests/LumaHarborAppTests/LocalizationSmokeTest.swift` 新增 `testEveryThemeStringHasAChineseTranslation`，同樣先因為缺少型別導致整個 target 編譯失敗。
+  - 之後才實作 `AppTheme`/`SettingsView`/`RootView`/`LumaHarborMainApp` 的接線，全部轉 GREEN。
+- **實作**：
+  - 新增 `Sources/LumaHarborApp/AppTheme.swift`：`enum AppTheme: String, CaseIterable, Codable, Equatable, Sendable { case system, light, dark }`，`.default = .system`，`displayName`（透過 `L10n.t`），`colorScheme: ColorScheme?`（`.system → nil`、`.light → .light`、`.dark → .dark`）。命名與寫法刻意貼齊既有 `ExportFormat`/`ExifRetentionPolicy`/`ExportNamingTemplate`/`ExportCollisionPolicy` 的模式（`String` raw value + `CaseIterable` + `displayName` computed property），沒有新開一套架構。
+  - Persistence：沿用專案既有的 `@AppStorage` 模式（跟 `ExportSheet`/`BatchExportSheet` 共用 `@AppStorage("export.*")` key 讓兩個 sheet 自動同步的手法一致）。`RootView.swift` 與新增的 `Sources/LumaHarborApp/Views/SettingsView.swift` 都宣告 `@AppStorage("appTheme") private var theme: AppTheme = .default`，指向同一把 key，所以在 Settings 改的當下主視窗會立即反映，反之亦然，不需要額外的通知機制。沒有存進照片 metadata、library db 或 export preset。
+  - SwiftUI wiring：`RootView.swift` 在 `NavigationSplitView` 上直接掛 `.preferredColorScheme(theme.colorScheme)`（在所有 `.sheet(...)` 修飾符之前），並且**額外**在 `ExportSheet()`／`BatchExportSheet()` 這兩個 sheet 的內容上各自再掛一次 `.preferredColorScheme(theme.colorScheme)`——不只依賴 SwiftUI 環境值透過 `.sheet` 自動往下傳遞的隱含行為，而是比照這個檔案裡 `.environmentObject(model)` 已經對每個 sheet 內容重複宣告一次的既有防禦性寫法，確保主視窗跟兩個 sheet 不會有任何情況下外觀不同步。
+  - UI 入口：`Sources/LumaHarborApp/LumaHarborMainApp.swift` 新增 `Settings { SettingsView() }` scene——這是 SwiftUI 在 macOS 上的標準做法，會自動掛一個原生的「Settings…/偏好設定…」選單項目（⌘,），不需要自己刻選單或 toolbar 按鈕。`SettingsView.swift` 內容是一個 `Form` + `Picker`（`.pickerStyle(.inline)`），選項來自 `ForEach(AppTheme.allCases)`。
+  - Localization：新增 `Appearance`／`System`／`Light`／`Dark` 四個 key，`en`／`zh-Hant` 都補齊，`LocalizationSmokeTest` 加測試涵蓋。
+- **驗證**：
+  - `swift build` PASS。
+  - `swift test --filter 'AppThemeTests|SettingsViewContractTests|LocalizationSmokeTest'` PASS（30 tests, 0 failures）。
+  - `swift test --filter 'ExportSheetContractTests|BatchExportSheetContractTests|LocalizationSmokeTest'` PASS（47 tests, 0 failures）——確認 Phase 5.1/5.2 既有的 export/batch export UI contract 沒有被這輪的 `.preferredColorScheme` wiring 或任何改動破壞。
+  - `swift test`（完整）PASS（1697 tests, 9 skipped, 0 failures）。
+  - `git diff --check` PASS。
+  - 隱私掃描：對本輪所有新增/修改檔案以 `/Users/|/Volumes/|/private/|DEVELOPMENT_TEAM|PROVISIONING_PROFILE|TEAM_ID|UDID` 掃描，零命中。
+- **已知限制**：
+  - 這是簡化版（System/Light/Dark），不是 roadmap 原文的 classicDark/warmPaper 自訂配色系統，也沒有「photo-neutral background vs app chrome」的獨立 design token 層——如果之後要真的做出「經典深色壓低非照片區域亮度」「暖白相紙不影響色彩判斷」這種語意，需要另開一輪工作設計實際的色彩 token，而不是只切換系統 `ColorScheme`。
+  - `Settings` scene 本身的視窗沒有另外套用 `.preferredColorScheme`（只套在主視窗跟兩個 export sheet 上）——Settings 視窗維持系統外觀，這輪判斷這不影響「主視窗與 sheet 同步」這個明確要求，所以沒有處理；如果之後想要 Settings 視窗也跟著切換，是很小的追加。
+  - 沒有為 `AppTheme`/主題選擇撰寫 UI 截圖或手動 QA 驗證（真人在實機確認 Light/Dark 視覺效果），這輪只驗證了程式邏輯（型別/持久化/UI source-contract），沒有真人視覺驗收；如果需要，屬於獨立的手動 QA 任務，不屬於 A11。
+- **Next action**：可選 Phase 5.4 八語 localization gate，或回頭把這輪的簡化 theme 系統升級成 roadmap 原文的 classicDark/warmPaper + design tokens（需要使用者確認是否真的要那個方向），或繼續 A11 真人實機驗證。未經使用者明確授權，不 push、不 merge、不 rebase、不移除 worktree、不刪分支。
 
 ## Phase 5 Task 5.2：Rename, DPI, EXIF policy, watermark (2026-09-06, Claude, code + tests, in this worktree/branch, 4 commits)
 

@@ -21,6 +21,10 @@ public struct LumaHarborMainApp: App {
         .commands {
             LumaHarborCommands(model: libraryModel)
         }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 

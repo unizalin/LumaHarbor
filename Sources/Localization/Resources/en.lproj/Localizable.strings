@@ -75,6 +75,10 @@
 "TIFF" = "TIFF";
 "App Copies" = "App Copies";
 "Aperture" = "Aperture";
+"Appearance" = "Appearance";
+"System" = "System";
+"Light" = "Light";
+"Dark" = "Dark";
 "Applies this preset using the current merge or replace mode" = "Applies this preset using the current merge or replace mode";
 "Apply mode" = "Apply mode";
 "Apply preset" = "Apply preset";

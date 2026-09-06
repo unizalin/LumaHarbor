@@ -6,6 +6,9 @@ import Localization
 struct RootView: View {
     @EnvironmentObject private var model: LibraryViewModel
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+    /// Roadmap Phase 5 Task 5.3. Same key `SettingsView`'s picker binds, so
+    /// a change there is visible here immediately.
+    @AppStorage("appTheme") private var theme: AppTheme = .default
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -22,6 +25,7 @@ struct RootView: View {
                     .frame(width: 300)
             }
         }
+        .preferredColorScheme(theme.colorScheme)
         .task {
             await model.bootstrap()
         }
@@ -37,10 +41,12 @@ struct RootView: View {
         .sheet(isPresented: $model.isShowingExportSheet) {
             ExportSheet()
                 .environmentObject(model)
+                .preferredColorScheme(theme.colorScheme)
         }
         .sheet(isPresented: $model.isShowingBatchExportSheet) {
             BatchExportSheet()
                 .environmentObject(model)
+                .preferredColorScheme(theme.colorScheme)
         }
         .onReceive(
             NotificationCenter.default.publisher(
