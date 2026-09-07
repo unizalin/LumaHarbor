@@ -36,6 +36,7 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 
 cp "${BINARY_PATH}" "${APP_DIR}/Contents/MacOS/${APP_NAME}"
 cp "${ROOT_DIR}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
+cp "${ROOT_DIR}/Resources/LumaHarbor.icns" "${APP_DIR}/Contents/Resources/LumaHarbor.icns"
 printf 'APPL????' > "${APP_DIR}/Contents/PkgInfo"
 
 # Ad-hoc signature. Enough for local runs; a distribution build needs a real

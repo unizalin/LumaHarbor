@@ -8,6 +8,8 @@
 	<string>LumaHarbor</string>
 	<key>CFBundleExecutable</key>
 	<string>LumaHarbor</string>
+	<key>CFBundleIconFile</key>
+	<string>LumaHarbor.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>org.lumaharbor.LumaHarbor</string>
 	<key>CFBundlePackageType</key>
