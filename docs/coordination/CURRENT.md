@@ -4,6 +4,17 @@ Updated: 2026-09-07
 
 Updated by: Codex（A11 修正版真人實體鍵盤複測 PASS；Phase 4.6 完整驗證完成）
 
+## App icon, Mac/iPad usage, and small-group artifact (2026-09-07, Codex + Claude)
+
+- **狀態**：`VERIFIED / READY FOR TRUSTED SMALL-GROUP TESTING`。Codex 在 `codex/open-source-release-prep` 完成跨平台圖示、接線、建置與安全驗證；Claude 在獨立 `claude/app-icon-user-guide` worktree 完成繁中快速入門與既有文件入口（Claude commit `049731e`，整合 commit `c90a1e9`），Codex 審查後另修正 Mac／iPad 移除資料行為的差異。兩個代理沒有共用可寫工作目錄，也沒有覆蓋未提交變更。
+- **圖示資產**：`Resources/AppIcon-1024.png` 為 1024×1024、不透明 RGB PNG；Mac 由 `Resources/MacAssets.xcassets` 經 `Scripts/generate-app-icons.sh`／Xcode `actool` 重建 `Resources/LumaHarbor.icns`，iPad target 使用同一張主圖。Finder bundle 圖示預覽可正確顯示港灣／相機光圈，實際 Release app 啟動後既有照片庫、縮圖與工具列正常。
+- **Mac 接線與驗證**：`Resources/Info.plist` 宣告 `CFBundleIconFile = LumaHarbor.icns`，bundle script 將圖示放入 `Contents/Resources`。Release build PASS；`codesign --verify --deep --strict` PASS；產物為 macOS 14+、arm64、ad-hoc signature、Team ID 未設定。
+- **iPad 接線與隱私修正**：新增 iPad `Assets.xcassets/AppIcon.appiconset` 並接入 Resources phase，Debug／Release 均指定 `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`。舊的個人名稱 bundle identifier 已改為 `org.lumaharbor.LumaHarborPad`；兩個 `DEVELOPMENT_TEAM` 保持空白。generic iOS Simulator 與 unsigned generic iOS device build 均 `BUILD SUCCEEDED`，產物含 `Assets.car` 與 AppIcon PNG；既有 launch configuration warning 與本輪無關。
+- **自動驗證**：`AppIconAssetContractTests` PASS（4 tests）；完整 `swift test` PASS（1729 tests, 9 fixture-dependent skipped, 0 failures）；`git diff main --check` PASS。changed-text 高訊號掃描未發現真實 `/Users`／`/Volumes` 路徑、非空 Team ID、UDID 值、provisioning profile、API key、private key、token、password 或 secret；命中只有 implementation plan 內用來說明掃描規則的泛用字樣。
+- **新 Mac alpha**：`build/LumaHarbor-0.1.0-alpha-bc5bf3b.zip`（約 2.1 MB）已用 `--norsrc` 封裝，沒有多餘 `._` AppleDouble 檔；`unzip -t` PASS；SHA-256 `885fa8175a31a2a90aef1bef7d0a600272595ad057b67e8d54878fd38dff7394`。舊的 `LumaHarbor-0.1.0-alpha-853b837.zip` 未覆寫。
+- **使用與分發**：繁中說明在 `docs/testing/beta/QUICK_START_ZH-HANT.md`。Mac ZIP 可以交給了解 alpha 風險的 Apple Silicon Mac 測試者，但因未使用 Developer ID／notarization，首次開啟仍可能被 Gatekeeper 阻擋。Mac ZIP 不能安裝到 iPad；iPad App 已存在且有先前實機 PASS 證據，自己使用時從 `Apps/LumaHarborPad.xcodeproj` 選自己的 Team 後 Run。提供別人需走 TestFlight、Ad Hoc，或由對方自行用 Xcode 簽署，目前沒有可直接轉交的 IPA。
+- **仍有限制**：本輪沒有重新執行最新 commit 的 iPad 實機 hands-on checklist；六個新增語言仍是機器輔助翻譯、未經母語審校；Mac build 仍未 notarize。這些不影響 source build 與已知小範圍測試，但仍不應稱為一般公開下載版或 production release。
+
 ## Alpha 853b837 distribution verification (2026-09-07, Codex, artifact + documentation)
 
 - **狀態**：`READY FOR TRUSTED SMALL-GROUP TESTING / NOT GENERAL DISTRIBUTION`。新增 `docs/testing/beta/ALPHA_853B837_TEST_REPORT.md`，作為可與 `build/LumaHarbor-0.1.0-alpha-853b837.zip` 一起交付的繁中驗測與開啟說明。
