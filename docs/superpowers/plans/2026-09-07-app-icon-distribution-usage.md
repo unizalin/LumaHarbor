@@ -481,6 +481,6 @@ git add docs/coordination/CURRENT.md
 git commit -m "docs: record app icon distribution verification"
 ```
 
-- [ ] **Step 8: Landing**
+- [x] **Step 8: Landing**
 
 Verify both worktrees are clean, fast-forward the finished branch into `main`, push only after all checks pass, and compare `origin/main` SHA to local HEAD. Do not delete any branch or worktree.
