@@ -11,6 +11,7 @@ Updated by: Codex（修正舊本機索引 physical schema 已更新但版本標�
 - **修正**：`PhotoIndexStore` 的 v1 -> v2 與 v2 -> v3 migration 改為先查 `PRAGMA table_info`，只新增缺少的欄位；migration indexes 改用 `CREATE INDEX IF NOT EXISTS`。所有操作、backfill、migration hook 與版本更新仍在同一筆 transaction；真正失敗仍整筆 rollback，但可安全辨識的 stale marker 狀態會自我修復。
 - **自動驗證**：新增測試轉 GREEN；`swift test --filter PhotoIndexMigrationTests` PASS（8 tests）；完整 `swift test` PASS（1722 tests, 9 fixture-dependent skipped, 0 failures）；release app bundle build PASS；`git diff --check` PASS。
 - **真實資料安全與驗證**：先正常關閉舊 App，將整個 Application Support 資料存到 repository 外的本機備份目錄；備份與原索引 SHA-256 相同、`quick_check = ok`，且修復前為 8 個 library rows / 109 個 photo rows。用修正版啟動後，版本標記從 1 更新為 3，`quick_check` 仍為 `ok`，row counts 仍為 8 / 109；App 畫面恢復既有來源，Sony-ARW 顯示 81 張照片，原紅色索引錯誤消失。沒有刪除、重建或提交任何使用者照片、bookmark、sidecar、cache 或本機路徑。
+- **更新後 alpha**：從整合 commit `f281604` 重建 `build/LumaHarbor.app`，並封裝為 `build/LumaHarbor-0.1.0-alpha-f281604.zip`；`codesign --verify --deep --strict` 與 `unzip -t` 均 PASS，SHA-256 `66ad29052d4e4c80d4e78296f0b3c35e789ef531ff203cac17485d91589962f0`。這份取代先前不含 stale-marker 修正的 `fa5f610` alpha，維持 ad-hoc／未 notarize 的 small-group testing 限制。
 
 ## Open-source release preparation (2026-09-07, Codex, docs/security settings only)
 
