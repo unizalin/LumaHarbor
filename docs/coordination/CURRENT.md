@@ -2,18 +2,26 @@
 
 Updated: 2026-09-07
 
-Updated by: Codex（修正 macOS Undo/Redo key equivalent 派送；A11 舊版真人測試為 FAIL，新修正版待真人重測；Phase 4.6 仍未完成）
+Updated by: Codex（A11 修正版真人實體鍵盤複測 PASS；Phase 4.6 完整驗證完成）
+
+## Phase 4 Task 4.6 final verification (2026-09-07, Codex + user physical-keyboard verification)
+
+- **狀態**：`DONE / PASS`。使用者在整合 commit `853b837` 的 Release build 內實際修改曝光後，以實體鍵盤按 `⌘Z` 與 `⇧⌘Z`，回報兩者均有作用；A11 因此正式由舊版 `FAIL`／修正版待複測改為 `PASS`。這是使用者本人在真 Mac app 的實體鍵盤結果，不是 CUA、AppleScript 或 CGEvent 合成事件。
+- **Focused verification**：`LocalAdjustmentTests|LocalAdjustmentRendererTests|LinearGradientDragMathTests|LinearGradientOverlayContractTests|SpotHealDragMathTests|SpotHealOverlayContractTests|LumaHarborAppDelegateUndoRedoTests` PASS（90 tests, 0 failures）。
+- **完整驗證**：Claude 在相同 `main@a8e0652` read-only 重跑 `swift build` PASS、帶 RAW/APFS fixture 的完整 `swift test` PASS（1725 tests, 0 failures, 0 skipped）、`RawFixtureTests` PASS（9 tests）、diagnostics PASS（6 pass / 1 exFAT skipped）及 `git diff --check` PASS。tracked-file 安全掃描未發現真實 API key、private key、私人絕對路徑、Team ID、UDID 或 provisioning profile。
+- **手動清單**：`docs/testing/beta/PHASE4_MANUAL_CHECKLIST.md` 的 A1-A13 與 B1-B13 現均為 PASS；既有截圖、sidecar JSON 與匯出像素證據仍保留。Phase 4.6 roadmap 要求的 focused tests、完整測試、diff check、隱私掃描與 Mac manual checklist 均已具備通過證據，因此 Phase 4 正式結案。
+- **不屬於 Phase 4.6 的剩餘項目**：完整 MVP acceptance 仍因 exFAT 測試磁碟未掛載而 blocked；六語母語審校、真人 Mac 全介面視覺 QA 與 iPad hands-on checklist 仍未執行，故整體專案仍不宣稱 production-ready。
 
 ## A11 macOS Undo/Redo key equivalent repair (2026-09-07, Codex, code + tests + app-level verification)
 
-- **狀態**：`ENGINEERING FIX DONE / AUTOMATED END-TO-END PASS / HUMAN RETEST REQUIRED`。使用者用實體鍵盤測試前一版修法後明確回報按鍵沒有作用，因此 A11 對該版的結果改記為 `FAIL`，不再維持 `NOT RUN`。修正版程式 commit 為 `853b837`；在使用者用此 commit 的 build 再按一次實體鍵盤前，不把 A11 改成 `PASS`，Phase 4.6 仍被這項人工 gate 擋住。
+- **狀態**：`PASS`。使用者用實體鍵盤測試前一版修法後明確回報按鍵沒有作用，因此 A11 對該版的結果記為 `FAIL`；修正版程式 commit `853b837` 完成後，使用者於 2026-09-07 在該 Release build 實體按下 `⌘Z` 與 `⇧⌘Z`，確認復原與重做兩者均有作用。工程、自動化端到端與真人實體鍵盤三層驗證現已全部通過。
 - **根因**：編輯器本身的 undo history 正常，工具列 Undo 也可用；但 SwiftUI 標準 Edit 選單會在每次更新時重新建立 `undo:`/`redo:` 項目，且 hosting responder 先取得 action、卻因空的系統 `UndoManager` 將項目驗證為 disabled。只在 app 啟動或模型變更後設定 `NSMenuItem.target` 會被下一次 `menuNeedsUpdate` 蓋掉，所以 `⌘Z` 在送到 `LumaHarborAppDelegate` 前就被吃掉。
 - **修正**：保留 SwiftUI 原本的私有 `NSMenuDelegate`，用 `UndoRedoMenuDelegateProxy` 完整轉送既有 optional delegate callbacks；只在原 delegate 完成 `menuNeedsUpdate` 後，將 Undo/Redo 項目 target 接到 `LumaHarborAppDelegate`。文字欄位仍優先使用自己的 `UndoManager`，照片編輯器才是 fallback；沒有使用 global hotkey、event tap 或 Accessibility 權限。
 - **TDD**：先新增「SwiftUI 重建選單後 target 會被清空」與「proxy 必須先呼叫既有 delegate、再接回 Undo，且其他 delegate callback 仍被轉送」測試；RED 分別呈現缺少重新接線能力與缺少 proxy API，實作後 `LumaHarborAppDelegateUndoRedoTests` PASS（8 tests）。曾以全域 menu notification 驗證時序，但真 Release app 啟動會與 SwiftUI menu graph 互相干擾；該方案與所有診斷碼均已移除，沒有留在 commit。
 - **真 App 自動驗證**：以 `Scripts/build-app-bundle.sh release` 重建並啟動真 `.app`，對 `_DSC1896.ARW` 將曝光從 `+1.08` 調到 `+2.08`；CUA `super+z` 復原回 `+1.08`，工具列切為 Undo disabled / Redo enabled；CUA `super+shift+z` 重做到 `+2.08`，狀態反向切換；展開 Edit 選單時 Undo 顯示 enabled、Redo 依 history 正確 disabled。最後再復原到 `+1.08`，沒有把測試增量留在照片設定中。這是 app-level 合成按鍵驗證，不能取代使用者實體鍵盤重測。
 - **完整驗證與安全**：release app build PASS；`swift test` PASS（1725 tests, 9 fixture-dependent skipped, 0 failures）；`git diff --check` PASS；本輪兩個 code/test changed files 的私人路徑、volume、Team ID、UDID、provisioning profile、private key、API key/secret/password 掃描零命中。
 - **更新後 alpha**：在整合後的 `main` 重建 `build/LumaHarbor.app`，封裝為 `build/LumaHarbor-0.1.0-alpha-853b837.zip`；`codesign --verify --deep --strict`、`unzip -t` 與整合後 `LumaHarborAppDelegateUndoRedoTests`（8 tests）均 PASS。SHA-256 為 `50125d3fcf03a12d8535c197aa0bb6f85f7114797816a4155356e7c359518af9`。這份取代不含 A11 第二次修正的 `f281604` alpha，仍是 ad-hoc／未 notarize，只供已知小範圍測試者使用。
-- **Next action**：使用者在目前開著的 `853b837` Release build 裡做一筆新調整，實體按 `⌘Z`，再按 `⇧⌘Z`。兩步都生效後才把 A11 改為 `PASS`，接著完成 Phase 4.6 最終人工驗收。
+- **Next action**：A11 與 Phase 4.6 已完成；後續優先補齊 exFAT fixture 後的完整 MVP acceptance，再安排六語母語審校與 iPad hands-on checklist。
 
 ## Local index stale schema marker recovery (2026-09-07, Codex, code + test + real-data verification)
 
