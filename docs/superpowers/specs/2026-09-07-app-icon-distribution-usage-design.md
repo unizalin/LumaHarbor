@@ -10,6 +10,12 @@
 3. 清楚說明 iPad 版目前可如何安裝、哪些方式可以提供給別人，以及 Mac ZIP 為何不能安裝到 iPad。
 4. 保持目前「少量已知測試者、不上架 App Store」的分發前提，不假裝已完成 Developer ID、notarization、TestFlight 或 Ad Hoc provisioning。
 
+## 既有 iPad 狀態
+
+iPad App 已存在且曾在使用者的實體 iPad 上完成安裝與驗測，不是本輪才要建立。2026-08-31 至 2026-09-01 的既有證據確認：APFS 加入／掃描／重啟、exFAT 離線／重連、Files provider 重新授權、三來源瀏覽，以及 Sony ARW 編輯／自動保存／重開／原檔 checksum 均為 PASS。當時的安裝方式是從 `Apps/LumaHarborPad.xcodeproj` 選擇使用者自己的 Development Team，再由 Xcode Run 到實體 iPad。
+
+本輪不重做 iPad App；只加入新圖示、補齊一般使用與分發說明，並驗證最新 source 仍可由 stable Xcode project 編譯。Mac 的 `.zip` 是 macOS 專用產物，不能直接安裝到 iPad；這不代表 iPad 版不能使用。
+
 ## 視覺設計
 
 採用單一品牌主圖，再輸出兩個平台所需資產。
