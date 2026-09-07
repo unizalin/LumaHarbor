@@ -12,6 +12,7 @@ Updated by: Codex（修正 macOS Undo/Redo key equivalent 派送；A11 舊版真
 - **TDD**：先新增「SwiftUI 重建選單後 target 會被清空」與「proxy 必須先呼叫既有 delegate、再接回 Undo，且其他 delegate callback 仍被轉送」測試；RED 分別呈現缺少重新接線能力與缺少 proxy API，實作後 `LumaHarborAppDelegateUndoRedoTests` PASS（8 tests）。曾以全域 menu notification 驗證時序，但真 Release app 啟動會與 SwiftUI menu graph 互相干擾；該方案與所有診斷碼均已移除，沒有留在 commit。
 - **真 App 自動驗證**：以 `Scripts/build-app-bundle.sh release` 重建並啟動真 `.app`，對 `_DSC1896.ARW` 將曝光從 `+1.08` 調到 `+2.08`；CUA `super+z` 復原回 `+1.08`，工具列切為 Undo disabled / Redo enabled；CUA `super+shift+z` 重做到 `+2.08`，狀態反向切換；展開 Edit 選單時 Undo 顯示 enabled、Redo 依 history 正確 disabled。最後再復原到 `+1.08`，沒有把測試增量留在照片設定中。這是 app-level 合成按鍵驗證，不能取代使用者實體鍵盤重測。
 - **完整驗證與安全**：release app build PASS；`swift test` PASS（1725 tests, 9 fixture-dependent skipped, 0 failures）；`git diff --check` PASS；本輪兩個 code/test changed files 的私人路徑、volume、Team ID、UDID、provisioning profile、private key、API key/secret/password 掃描零命中。
+- **更新後 alpha**：在整合後的 `main` 重建 `build/LumaHarbor.app`，封裝為 `build/LumaHarbor-0.1.0-alpha-853b837.zip`；`codesign --verify --deep --strict`、`unzip -t` 與整合後 `LumaHarborAppDelegateUndoRedoTests`（8 tests）均 PASS。SHA-256 為 `50125d3fcf03a12d8535c197aa0bb6f85f7114797816a4155356e7c359518af9`。這份取代不含 A11 第二次修正的 `f281604` alpha，仍是 ad-hoc／未 notarize，只供已知小範圍測試者使用。
 - **Next action**：使用者在目前開著的 `853b837` Release build 裡做一筆新調整，實體按 `⌘Z`，再按 `⇧⌘Z`。兩步都生效後才把 A11 改為 `PASS`，接著完成 Phase 4.6 最終人工驗收。
 
 ## Local index stale schema marker recovery (2026-09-07, Codex, code + test + real-data verification)
