@@ -202,7 +202,7 @@ git commit -m "feat: add LumaHarbor harbor aperture icon"
 - Consumes: `Resources/LumaHarbor.icns` from Task 2.
 - Produces: a Mac `.app` whose Info.plist declares `LumaHarbor.icns` and whose `Contents/Resources` contains that file.
 
-- [ ] **Step 1: 在 Info.plist 宣告圖示**
+- [x] **Step 1: 在 Info.plist 宣告圖示**
 
 Add immediately after `CFBundleExecutable`:
 
@@ -211,7 +211,7 @@ Add immediately after `CFBundleExecutable`:
 <string>LumaHarbor.icns</string>
 ```
 
-- [ ] **Step 2: 在 bundle script 複製圖示**
+- [x] **Step 2: 在 bundle script 複製圖示**
 
 Add after copying `Info.plist`:
 
@@ -219,7 +219,7 @@ Add after copying `Info.plist`:
 cp "${ROOT_DIR}/Resources/LumaHarbor.icns" "${APP_DIR}/Contents/Resources/LumaHarbor.icns"
 ```
 
-- [ ] **Step 3: 執行 focused contract test**
+- [x] **Step 3: 執行 focused contract test**
 
 ```bash
 swift test --filter AppIconAssetContractTests/testMacBundleDeclaresAndCopiesICNS
@@ -227,7 +227,7 @@ swift test --filter AppIconAssetContractTests/testMacBundleDeclaresAndCopiesICNS
 
 Expected: PASS。
 
-- [ ] **Step 4: 建置並檢查真 Mac bundle**
+- [x] **Step 4: 建置並檢查真 Mac bundle**
 
 ```bash
 Scripts/build-app-bundle.sh release
@@ -238,7 +238,7 @@ codesign --verify --deep --strict build/LumaHarbor.app
 
 Expected: build PASS；plist 顯示 `CFBundleIconFile => LumaHarbor.icns`；file test 與 codesign exit 0。
 
-- [ ] **Step 5: 提交 Mac 接線**
+- [x] **Step 5: 提交 Mac 接線**
 
 ```bash
 git add Resources/Info.plist Scripts/build-app-bundle.sh
