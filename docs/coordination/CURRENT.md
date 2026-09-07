@@ -2,17 +2,18 @@
 
 Updated: 2026-09-07
 
-Updated by: Codex（公開開源整理與合併前驗證；產品基線仍為 `e8792a86259747b1499082ade1b19ec8a923d3ab`；A11 真人實體鍵盤與 Phase 4.6 最終人工驗收仍為 NOT RUN）
+Updated by: Codex（公開開源整理、main 快轉整合與小範圍 alpha 交付驗證；產品程式碼基線仍為 `e8792a86259747b1499082ade1b19ec8a923d3ab`；A11 真人實體鍵盤與 Phase 4.6 最終人工驗收仍為 NOT RUN）
 
 ## Open-source release preparation (2026-09-07, Codex, docs/security settings only)
 
-- **狀態**：`DONE / READY TO LAND`。使用者已明確決定維持公開開源，並授權整理、commit、merge 與 push。Codex 從 Claude 已驗證的 `e8792a86259747b1499082ade1b19ec8a923d3ab` 建立獨立 `codex/open-source-release-prep` worktree；沒有直接寫入 Claude worktree，也沒有改 product code、tests、signing project settings 或 private fixtures。
+- **狀態**：`LANDED / POST-MERGE VERIFIED / READY TO PUSH`。使用者已明確決定維持公開開源，並授權整理、commit、merge 與 push。Codex 從 Claude 已驗證的 `e8792a86259747b1499082ade1b19ec8a923d3ab` 建立獨立 `codex/open-source-release-prep` worktree，將公開文件與隱私整理提交為 `fa5f610af78aa2fa827431713f2b25b75e24e446`，再以 `--ff-only` 快轉整合到本機 `main`；沒有直接寫入 Claude worktree，也沒有改 product code、tests、signing project settings 或 private fixtures。
 - **公開文件**：重寫 `README.md`，更新 Phase 2-5、iPad、八語、diagnostics 與 alpha 狀態；新增 `SECURITY.md` 和 `docs/testing/beta/SMALL_GROUP_ALPHA.md`，說明私密漏洞回報、ad-hoc build 限制、Developer ID/notarization、TestFlight/Ad Hoc 與測試者資料安全。
 - **隱私整理**：目前 tracked snapshot 裡的真實本機帳號 worktree 路徑、外接測試磁碟路徑與 signing Team ID 字面值已改成 branch 說明或 `<...>` placeholder。保留測試與 acceptance runner 裡的 synthetic `/Users/alice`、`/Users/private-name`、`/Volumes/SSD` 等假路徑，因為它們是 path-redaction 防回歸輸入。Git 歷史沒有重寫，因此過往公開 commit 仍可能保留舊字面值；未來提交 email 已在本機 repository config 改為 GitHub noreply。
-- **GitHub security setting**：已啟用 private vulnerability reporting；既有 secret scanning 與 push protection 維持啟用。
-- **驗證**：乾淨 worktree 首次 `swift build` 揭露本機缺少 Apple Metal Toolchain，依 Xcode 指示執行 `xcodebuild -downloadComponent MetalToolchain` 後重跑 PASS；README 已補這項 prerequisite。`swift test` PASS（1721 tests, 9 fixture-dependent skipped, 0 failures）；`swift run LumaHarborDiagnosticsCLI --json` PASS（overall pass，4 pass / 3 fixture checks skipped）；iOS generic unsigned build PASS；`Apps/LumaHarborPad.xcodeproj/project.pbxproj` SHA-256 在 build 前後同為 `b4773746374c55acd8bb64bf77777e6235f9313f61498b94b4143024b42f0d89`；`git diff --check` PASS；本輪 changed-content high-signal secret scan零命中。
+- **GitHub security setting**：已啟用 private vulnerability reporting；既有 secret scanning 與 push protection 維持啟用；`main` 已禁止 force push 與 branch deletion，並要求 linear history。現階段沒有硬性 PR review 或 required status check，保留少人維護時的直接推送流程。
+- **驗證**：乾淨 worktree 首次 `swift build` 揭露本機缺少 Apple Metal Toolchain，依 Xcode 指示執行 `xcodebuild -downloadComponent MetalToolchain` 後重跑 PASS；README 已補這項 prerequisite。整合前與本機 `main` 整合後的 `swift test` 均 PASS（1721 tests, 9 fixture-dependent skipped, 0 failures）；`swift run LumaHarborDiagnosticsCLI --json` PASS（overall pass，4 pass / 3 fixture checks skipped）；iOS generic unsigned build PASS；`Apps/LumaHarborPad.xcodeproj/project.pbxproj` SHA-256 在 build 前後同為 `b4773746374c55acd8bb64bf77777e6235f9313f61498b94b4143024b42f0d89`；`git diff --check` PASS；本輪 changed-content high-signal secret scan零命中。
+- **小範圍 Mac alpha**：`Scripts/build-app-bundle.sh release` PASS，產出 `build/LumaHarbor.app`（version `0.1.0`、arm64、ad-hoc signature、沒有 Team ID）；`codesign --verify --deep --strict` PASS。封裝檔為 `build/LumaHarbor-0.1.0-alpha-fa5f610.zip`（約 2 MB），`unzip -t` PASS，SHA-256 `ccd32369ad2ebf236133796d4b858e79279e7a24574d33abd05d8c31a548ee0c`。由於沒有 Developer ID 與 notarization，Gatekeeper assessment 未通過；只適合已知測試者依 `docs/testing/beta/SMALL_GROUP_ALPHA.md` 指引測試，不是一般公開下載版。
 - **仍未執行**：A11 真人實體鍵盤、Phase 4.6 Mac 人工驗收、目前環境的 RAW/APFS/exFAT 完整 fixture runner、六語母語審校與截斷檢查、iPad hands-on checklist。這些維持 `NOT RUN` 或 `SKIPPED`，不影響合併自動化全綠的程式碼，但仍阻擋把 build 稱為 RC 或 production release。
-- **Next action**：commit 本輪文件／隱私整理，fast-forward land 到本機 `main`，在 `main` 重跑 smoke verification，建立 ad-hoc small-group alpha artifact，然後 push `main`。不刪除任何舊 branch 或 worktree。
+- **Next action**：將這份 landing verification 紀錄提交並以 `--ff-only` 整合到本機 `main`，完成推送前隱私／Git 狀態核對後 push `main`。不刪除任何舊 branch 或 worktree。
 
 ## Phase 5 Automated Verification Follow-up (2026-09-06, Codex, docs only — independent automated/source review)
 
