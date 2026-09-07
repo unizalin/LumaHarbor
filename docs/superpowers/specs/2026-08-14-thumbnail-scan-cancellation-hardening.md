@@ -168,7 +168,7 @@ Claude 實作階段不得 commit/push；由 Codex review 後處理。交付前�
 2. 固定 neutral thumbnail API 與 cache key version，再做 coalescing/cancellation/invalidation。
 3. 修 scan cancellation state semantics。
 4. 最後處理 lossless bounded scan pipeline；不得以 drop batches 的方式快速收尾。
-5. 每一小段更新 `/Users/u/AI-Shared/HANDOFF.md`；context 使用約 80% 或出現 usage warning 時停止新增功能、保留可 build 的 dirty tree交給 Codex。
+5. 每一小段更新 `<SHARED_HANDOFF_PATH>`；context 使用約 80% 或出現 usage warning 時停止新增功能、保留可 build 的 dirty tree交給 Codex。
 
 ## 7. 實作狀態（2026-08-15，Codex review 通過）
 

@@ -2,7 +2,7 @@
 
 Date: 2026-09-03
 Branch: `claude/awayphotoraweditor-parity-phase2-geometry`
-Worktree: `/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`
+Worktree: `<CLAUDE_PHASE2_WORKTREE>`
 Base: local `main@fb7109a4fd76035bb9ca3f492b1fa45f511a60ec` (Phase 1 + its independent-review P1 fix, merged; `main` remains unpushed, 27 commits ahead of `origin/main`)
 HEAD at report time: `91b425a`
 Roadmap: `docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-roadmap.md` ("Phase 2: Geometry and White Balance Tools")
@@ -56,7 +56,7 @@ Re-run fresh for this report (not carried over from each task's own round) — e
 | — skipped tests identity | as expected | all 9 skips are `LumaHarborIntegrationTests.RawFixtureTests` (`testEveryFixtureDecodes`, `testExportingNeverModifiesTheOriginal`, `testFullDecodeReturnsNativeResolution`, `testFullResolutionExportMatchesTheSourceDimensions`, `testInteractivePreviewLatencyForARealPhoto`, `testPreviewDecodeHonoursTheRequestedSize`, `testPreviewSchedulerDeliversARenderedFrameForARealRaw`, `testSonyArwReportsPlausibleMetadata`, `testWhiteBalanceOffsetChangesTheRender`) — the same fixture-dependent baseline (`LUMAHARBOR_RAW_FIXTURE_DIR` unset in this environment) every prior round on this project has reported, unchanged by Phase 2 |
 | `git diff --check` (working tree) | PASS | no output |
 | `git diff --check` (full range `fb7109a..HEAD`) | PASS | no output at all — cleaner than Phase 1's own equivalent gate, which flagged pre-existing whitespace in a docs commit that predates Phase 2 entirely; Phase 2 touched none of those files |
-| Privacy scan (`rg -n "/Users/\|/Volumes/\|/private/\|7KM4ZM25P3\|teamIdentifier:\|DEVELOPMENT_TEAM"` over `git diff fb7109a..HEAD`) | PASS | every hit is inside `docs/coordination/CURRENT.md`'s own prose, referencing this worktree's own already-public path (the same pattern every prior round accepted) or the old Claude worktree's already-documented preserved-signing-file path; zero hits for the strict signing/device-only patterns (`7KM4ZM25P3`, `teamIdentifier:`, `DEVELOPMENT_TEAM`) and zero real `/Volumes/` mount paths |
+| Privacy scan (`rg -n "/Users/\|/Volumes/\|/private/\|<TEAM_ID>\|teamIdentifier:\|DEVELOPMENT_TEAM"` over `git diff fb7109a..HEAD`) | PASS | every hit is inside `docs/coordination/CURRENT.md`'s own prose, referencing this worktree's own already-public path (the same pattern every prior round accepted) or the old Claude worktree's already-documented preserved-signing-file path; zero hits for the strict signing/device-only patterns (`<TEAM_ID>`, `teamIdentifier:`, `DEVELOPMENT_TEAM`) and zero real `/Volumes/` mount paths |
 | Mac app build (`swift build`) | PASS | `Build complete!` |
 | iOS generic build (`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' -derivedDataPath /private/tmp/LumaHarbor-Phase2Task5-DerivedData CODE_SIGNING_ALLOWED=NO build`) | PASS | `** BUILD SUCCEEDED **`; run because every task this phase touched shared `RawProcessingCore`/`EditorCore`/`AdjustmentUI`/`Localization` API the iPad `.swiftpm` package also depends on |
 | Local signing/project file | untouched | `Apps/LumaHarborPad.xcodeproj/project.pbxproj` never appeared in `git status` at any point across all four tasks or this verification round |
@@ -87,4 +87,4 @@ No second agent has independently reviewed this phase's diff (`fb7109a..HEAD`) f
 
 ## Landing readiness
 
-Not landed, merged, rebased, or pushed. `claude/awayphotoraweditor-parity-phase2-geometry` remains a separate branch/worktree at `/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`, unpushed, with no signing/local-project setting committed. Recommended next step: independent review (see above), then either continue to Task 2.5's remaining item (none — this report is Task 2.5) → next phase (Phase 3: Preset, Batch, Virtual Copy) per the roadmap, or land this phase per the user's own merge process. Local `main` itself remains at `fb7109a`, 27 commits ahead of `origin/main`, unpushed — unaffected by this branch.
+Not landed, merged, rebased, or pushed. `claude/awayphotoraweditor-parity-phase2-geometry` remains a separate, unpushed branch/worktree, with no signing/local-project setting committed. Recommended next step: independent review (see above), then either continue to Task 2.5's remaining item (none — this report is Task 2.5) → next phase (Phase 3: Preset, Batch, Virtual Copy) per the roadmap, or land this phase per the user's own merge process. Local `main` itself remains at `fb7109a`, 27 commits ahead of `origin/main`, unpushed — unaffected by this branch.

@@ -4,7 +4,7 @@
 
 DONE
 
-- Worktree: `/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability`
+- Worktree: `<CODEX_IPAD_DURABILITY_WORKTREE>`
 - Branch: `codex/ipad-multi-source-library-durability`
 - Starting HEAD: `cfc3cebb8fe0e369c70299fb1bcd91c4e7ba9e92`
 - Commit subject: `Fix fail-closed library identity restore`

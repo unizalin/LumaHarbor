@@ -206,7 +206,7 @@ PhotoLibraryService 沿用 decoder gate、index/manifest fixtures；如不足，
 3. 把 `FolderScanner.scan` 換成 `FolderScanSequence`，跑既有與 bounded tests。
 4. 把 `PhotoLibraryService.scan` 換成 `LibraryScanSequence`，所有 send 改為 await。
 5. 補 cancellation、generation、slow UI 與 end-to-end high-water tests。
-6. 跑 §8 全部驗證，再更新 addendum §6.4 狀態與 `/Users/u/AI-Shared/HANDOFF.md`。
+6. 跑 §8 全部驗證，再更新 addendum §6.4 狀態與 `<SHARED_HANDOFF_PATH>`。
 
 每一步都需保持 compile；不得先刪除既有取消保護再等待後續步驟補回。
 
@@ -233,7 +233,7 @@ Claude 交付應包含：
 - channel／sequence／cursor production code。
 - channel、FolderScanner、PhotoLibraryService 與 integration tests。
 - 本文件與 hardening addendum 的 implementation status 更新。
-- `/Users/u/AI-Shared/HANDOFF.md` 的進度、驗證、剩餘風險與 Codex review checklist。
+- `<SHARED_HANDOFF_PATH>` 的進度、驗證、剩餘風險與 Codex review checklist。
 
 不得包含 commit、push、無關格式化或 MVP 以外功能。
 

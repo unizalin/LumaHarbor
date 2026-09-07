@@ -2,7 +2,7 @@
 
 日期：2026-09-04
 分支：`claude/awayphotoraweditor-parity-phase2-geometry`
-Worktree：`/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`
+Worktree：`<CLAUDE_PHASE2_WORKTREE>`
 Base：本機 `main@fb7109a4fd76035bb9ca3f492b1fa45f511a60ec`（Phase 1、Phase 2 皆已在這個分支上完成並經獨立審查；`main` 本身尚未 push）
 本報告最初撰寫時的 HEAD：`025a14abca4786b49180723a71dec56a649c1409`；Task 3.5 follow-up 審查修正驗證至 `8e5caf1`；Mac 手動驗測已於 `9593582d9acbfa1115df039c7b82b399cfca5644` 開始，但 A6 失敗中止。
 Roadmap：`docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-roadmap.md`（"Phase 3" 段落）
@@ -79,7 +79,7 @@ Design spec：`docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-desig
 | `git diff --check`（工作目錄） | PASS | 無輸出 |
 | `git diff --check`（`fb7109a..HEAD`，整個分支範圍，含 Phase 2） | PASS | 無輸出 |
 | `git diff --check`（`382d799..HEAD`，Phase 3 自己的範圍） | PASS | 無輸出 |
-| 隱私掃描（`rg -n "/Users/\|/Volumes/\|/private/\|7KM4ZM25P3\|teamIdentifier:\|DEVELOPMENT_TEAM"` 對 `git diff fb7109a..HEAD`） | PASS | 20 處命中，全部逐一確認都落在 `docs/coordination/CURRENT.md` 自己的文字裡，內容是這個 worktree 本身已公開的路徑（跟前面每一輪的既有慣例一致），或是這份 `rg` 樣式字串本身被貼在文件裡（不是真的洩漏）；另外用 `git diff --name-only -- Sources/ Tests/ Apps/` 篩出這個範圍內每一個被改到的 product/test 檔案單獨重跑同一組 pattern，零命中；沒有任何簽章／裝置專屬樣式（`7KM4ZM25P3`／`teamIdentifier:`／`DEVELOPMENT_TEAM`）的真實命中 |
+| 隱私掃描（`rg -n "/Users/\|/Volumes/\|/private/\|<TEAM_ID>\|teamIdentifier:\|DEVELOPMENT_TEAM"` 對 `git diff fb7109a..HEAD`） | PASS | 20 處命中，全部逐一確認都落在 `docs/coordination/CURRENT.md` 自己的文字裡，內容是這個 worktree 本身已公開的路徑（跟前面每一輪的既有慣例一致），或是這份 `rg` 樣式字串本身被貼在文件裡（不是真的洩漏）；另外用 `git diff --name-only -- Sources/ Tests/ Apps/` 篩出這個範圍內每一個被改到的 product/test 檔案單獨重跑同一組 pattern，零命中；沒有任何簽章／裝置專屬樣式（`<TEAM_ID>`／`teamIdentifier:`／`DEVELOPMENT_TEAM`）的真實命中 |
 | Mac app build（`swift build`） | PASS | `Build complete!` |
 | iOS generic build（`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build`） | PASS | `** BUILD SUCCEEDED **`；`PhotoLibraryCore` 是 iPad app 依賴的共用 target，故納入這個 gate |
 | 本機簽章／專案檔 | 未變動 | `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 在 iOS build 前後 `git status --porcelain` 皆為空 |
@@ -97,6 +97,6 @@ Phase 3 五個 task（3.1 起到 3.5 止，含 3.4 與 3.5 的 follow-up 回合�
 
 ## 上線準備度
 
-尚未 land、merge、rebase 或 push。`claude/awayphotoraweditor-parity-phase2-geometry` 仍是獨立分支／worktree，位於 `/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry`，未 push，沒有任何簽章／本機專案設定被提交。本機 `main` 仍在 `fb7109a`，領先 `origin/main` 27 個 commit，未 push，不受這個分支影響。
+尚未 land、merge、rebase 或 push。`claude/awayphotoraweditor-parity-phase2-geometry` 仍是獨立、未 push 的分支／worktree，沒有任何簽章／本機專案設定被提交。本機 `main` 仍在 `fb7109a`，領先 `origin/main` 27 個 commit，未 push，不受這個分支影響。
 
 建議下一步：先修 A6 Restore Presets 完成摘要沒有出現的 Mac UI 問題；修好並驗證後，再重跑 `docs/testing/beta/PHASE3_MANUAL_CHECKLIST.md`。全數 PASS 後，再由使用者明確授權是否將這個分支合併進 `main`。下一個 Phase 的規劃可以在獨立 worktree 進行，但不應建立在尚未完成手動 gate 的 Phase 3 分支上。

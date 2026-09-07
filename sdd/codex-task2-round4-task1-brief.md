@@ -6,7 +6,7 @@ This is the first of two sequential repair tasks on top of commit `cfc3ceb`. It 
 
 ## Worktree and boundaries
 
-- Worktree: `/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability`
+- Worktree: `<CODEX_IPAD_DURABILITY_WORKTREE>`
 - Branch: `codex/ipad-multi-source-library-durability`
 - Expected starting HEAD: `cfc3cebb8fe0e369c70299fb1bcd91c4e7ba9e92`
 - No push, merge, rebase, amend, squash, or edits outside this worktree.

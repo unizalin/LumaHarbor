@@ -4,13 +4,13 @@ Continue only the remaining Task 2 Round 4 review fix. The authoritative brief
 is stored beside this handoff so it is available to both Codex and Claude:
 
 ```text
-/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability/sdd/codex-task2-round4-task2-brief.md
+<CODEX_IPAD_DURABILITY_WORKTREE>/sdd/codex-task2-round4-task2-brief.md
 ```
 
 ## Start here
 
 1. Work only in:
-   `/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability`
+   `<CODEX_IPAD_DURABILITY_WORKTREE>`
 2. Read the brief above completely.
 3. Read the existing report:
    `sdd/codex-task2-round4-task2-report.md`.

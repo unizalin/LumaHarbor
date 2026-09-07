@@ -9,7 +9,7 @@ still leak the newly staged security-scope handle.
 ## Worktree and boundaries
 
 - Worktree:
-  `/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability`
+  `<CODEX_IPAD_DURABILITY_WORKTREE>`
 - Branch: `codex/ipad-multi-source-library-durability`
 - Expected starting HEAD:
   `4c3545bf97b07b5fa5e85e89d6a53f4b35f0750c`

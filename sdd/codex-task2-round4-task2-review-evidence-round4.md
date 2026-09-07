@@ -9,7 +9,7 @@ production source code.
 ## Worktree and boundaries
 
 - Worktree:
-  `/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability`
+  `<CODEX_IPAD_DURABILITY_WORKTREE>`
 - Branch: `codex/ipad-multi-source-library-durability`
 - Expected starting HEAD:
   `da885c2b321b07ca5dcda8fefdc14dff0502b874`
