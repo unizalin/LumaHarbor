@@ -25,7 +25,7 @@ iPad App 已存在且曾在使用者的實體 iPad 上完成安裝與驗測，�
 - 色彩：深墨色作底、青綠水面、暖金色光線，避免單一藍紫色調。
 - 風格：精緻、安靜、偏專業攝影工具；不使用照片拼貼、文字、字母、細小刻度或過度寫實元素。
 - 輸出：1024×1024、不透明 PNG 主圖。iPad 交由系統套用平台遮罩；圖面本身不烘焙透明圓角。
-- Mac：由同一主圖產生完整 `.iconset` 尺寸與 `.icns`，保留適合 Dock 顯示的安全留白。
+- Mac：由同一主圖產生完整 macOS asset catalog 尺寸，再以 Xcode `actool` 編譯為 `.icns`，保留適合 Dock 顯示的安全留白。
 - iPad：建立 `Assets.xcassets/AppIcon.appiconset`，以 1024×1024 universal iOS marketing icon 為主，依目前 Xcode asset catalog 規格宣告。
 
 ## 平台接線
@@ -35,7 +35,7 @@ iPad App 已存在且曾在使用者的實體 iPad 上完成安裝與驗測，�
 - 將主圖與產生後的 `.icns` 放在 repository 的公開資產目錄。
 - `Scripts/build-app-bundle.sh` 在組裝 `.app` 時複製 `.icns` 到 `Contents/Resources`。
 - `Resources/Info.plist` 宣告 `CFBundleIconFile`。
-- 產物需通過 `plutil`、`iconutil`／圖檔尺寸檢查、Release build 與 `codesign --verify --deep --strict`。
+- 產物需通過 `plutil`、`actool`／圖檔尺寸檢查、Release build 與 `codesign --verify --deep --strict`。
 
 ### iPadOS
 
@@ -77,7 +77,7 @@ iPad App 已存在且曾在使用者的實體 iPad 上完成安裝與驗測，�
 
 - 主圖為 1024×1024、RGBA/RGB、不透明，沒有意外文字或浮水印。
 - 所有產生尺寸存在且像素尺寸正確。
-- Mac `.icns` 可由 `iconutil` 讀取，Release app 內含圖示並由 Info.plist 指向它。
+- Mac `.icns` 可由 Xcode `actool` 從完整 asset catalog 重建，Release app 內含圖示並由 Info.plist 指向它。
 - Mac app build、`codesign --verify --deep --strict`、ZIP 重建與 `unzip -t` 通過。
 - iPad asset catalog 由 Xcode 編譯成功；generic simulator 與 unsigned generic device build通過。
 - 現有完整 `swift test` 不受影響。
