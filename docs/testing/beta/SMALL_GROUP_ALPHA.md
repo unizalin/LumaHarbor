@@ -6,6 +6,8 @@ This guide covers sharing LumaHarbor with a small number of known testers withou
 
 LumaHarbor is pre-release alpha software. Test only with copied or fully backed-up photo libraries. Do not present an alpha build as notarized, production-ready, or fully accepted while a required manual gate remains `NOT RUN`.
 
+For a short Traditional Chinese walkthrough covering both Mac and iPad, see [`QUICK_START_ZH-HANT.md`](QUICK_START_ZH-HANT.md).
+
 ## macOS: recommended path
 
 For a build that ordinary testers can open without weakening Gatekeeper:

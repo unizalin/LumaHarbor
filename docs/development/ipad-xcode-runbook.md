@@ -2,6 +2,8 @@
 
 Updated: 2026-09-01
 
+For a short Traditional Chinese walkthrough of installing to your own iPad, see [`docs/testing/beta/QUICK_START_ZH-HANT.md`](../testing/beta/QUICK_START_ZH-HANT.md).
+
 ## Use this project for real-device iPad testing
 
 Open:

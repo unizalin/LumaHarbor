@@ -1,5 +1,7 @@
 # LumaHarborPad 私人 Beta 測試指南
 
+快速上手（含 Mac 與 iPad）另見 [`QUICK_START_ZH-HANT.md`](QUICK_START_ZH-HANT.md)。
+
 ## 測試定位
 
 這是私人 Beta／RC 驗測，不是正式版核准，也不代表 App Store 上架準備完成。測試目的是確認 iPad 能從多種來源瀏覽、開啟及非破壞式編輯 Sony `.ARW`，並在重新啟動、來源中斷與重新授權後維持正確狀態。
