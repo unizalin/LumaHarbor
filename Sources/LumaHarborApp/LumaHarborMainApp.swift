@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// The SwiftUI app entry point.
@@ -38,25 +39,53 @@ public struct LumaHarborMainApp: App {
 /// other Mac app (including TextEdit, confirmed by the same control test)
 /// relies on for ⌘Z to work at all.
 ///
-/// This fix instead leaves `.undoRedo` *unreplaced* -- so SwiftUI keeps
-/// generating the system's own Undo/Redo menu items, with their OS-standard
-/// ⌘Z/⌘⇧Z key equivalents and target `nil` (first-responder-chain dispatch)
-/// -- and gives the app delegate real `undo(_:)`/`redo(_:)` methods so that
-/// chain has somewhere to land regardless of which view currently has focus.
-/// `NSApplication`'s delegate is the last stop in `NSApp.target(for:)`'s
-/// search order, after the key window and its responder chain, so a focused
-/// text field's own undo (e.g. mid-rename) still wins over this app-level
-/// fallback, matching standard multi-level Mac undo behavior.
+/// SwiftUI's standard Undo/Redo items keep the OS key equivalents, but its
+/// hosting responder can claim `undo:` while reporting an empty UndoManager;
+/// that disables the menu before dispatch ever reaches the app delegate.
+/// Routing only those two items explicitly to this delegate avoids that dead
+/// end. Focused editable text still gets first priority through its own
+/// UndoManager, then the photo editor is the app-level fallback.
 @MainActor
 final class LumaHarborAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
-    weak var model: LibraryViewModel?
+    private var modelObservation: AnyCancellable?
+    private var menuDelegateProxies: [ObjectIdentifier: UndoRedoMenuDelegateProxy] = [:]
+    var mainMenuProvider: () -> NSMenu? = { NSApplication.shared.mainMenu }
+
+    weak var model: LibraryViewModel? {
+        didSet {
+            modelObservation = model?.objectWillChange.sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.installUndoRedoMenuRouting(in: self?.mainMenuProvider())
+                }
+            }
+            installUndoRedoMenuRouting(in: mainMenuProvider())
+        }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.installUndoRedoMenuRouting(in: self?.mainMenuProvider())
+        }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        installUndoRedoMenuRouting(in: mainMenuProvider())
+    }
 
     @objc func undo(_ sender: Any?) {
-        model?.editor.undo()
+        if let textView = focusedEditableTextView {
+            textView.undoManager?.undo()
+        } else {
+            model?.editor.undo()
+        }
     }
 
     @objc func redo(_ sender: Any?) {
-        model?.editor.redo()
+        if let textView = focusedEditableTextView {
+            textView.undoManager?.redo()
+        } else {
+            model?.editor.redo()
+        }
     }
 
     /// AppKit calls this on whichever responder it found for the menu item's
@@ -65,9 +94,94 @@ final class LumaHarborAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVa
     /// matching `NSMenuItemValidation`'s "no opinion" default.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
-        case #selector(undo(_:)): return model?.editor.canUndo ?? false
-        case #selector(redo(_:)): return model?.editor.canRedo ?? false
+        case #selector(undo(_:)):
+            return focusedEditableTextView?.undoManager?.canUndo
+                ?? model?.editor.canUndo
+                ?? false
+        case #selector(redo(_:)):
+            return focusedEditableTextView?.undoManager?.canRedo
+                ?? model?.editor.canRedo
+                ?? false
         default: return true
         }
+    }
+
+    func routeUndoRedoMenuItems(in menu: NSMenu?) {
+        for item in menu?.items ?? [] {
+            switch item.action {
+            case #selector(undo(_:)), #selector(redo(_:)):
+                if item.target !== self {
+                    item.target = self
+                }
+            default:
+                break
+            }
+            routeUndoRedoMenuItems(in: item.submenu)
+        }
+    }
+
+    func installUndoRedoMenuRouting(in menu: NSMenu?) {
+        guard let menu else { return }
+        routeUndoRedoMenuItems(in: menu)
+
+        for item in menu.items {
+            guard let submenu = item.submenu else { continue }
+            let containsUndoRedo = submenu.items.contains {
+                $0.action == #selector(undo(_:)) || $0.action == #selector(redo(_:))
+            }
+            if containsUndoRedo {
+                let identifier = ObjectIdentifier(submenu)
+                if let proxy = submenu.delegate as? UndoRedoMenuDelegateProxy {
+                    menuDelegateProxies[identifier] = proxy
+                } else {
+                    let proxy = UndoRedoMenuDelegateProxy(
+                        downstream: submenu.delegate,
+                        owner: self
+                    )
+                    menuDelegateProxies[identifier] = proxy
+                    submenu.delegate = proxy
+                }
+            }
+            installUndoRedoMenuRouting(in: submenu)
+        }
+    }
+
+    private var focusedEditableTextView: NSTextView? {
+        guard let textView = NSApplication.shared.keyWindow?.firstResponder as? NSTextView,
+              textView.isEditable else { return nil }
+        return textView
+    }
+}
+
+/// Keeps SwiftUI's private menu delegate in charge of rebuilding the menu,
+/// then patches Undo/Redo only after that rebuild finishes. Optional delegate
+/// callbacks not implemented here continue to the original delegate through
+/// Objective-C forwarding.
+@MainActor
+private final class UndoRedoMenuDelegateProxy: NSObject, NSMenuDelegate {
+    private weak var downstream: (any NSMenuDelegate)?
+    private weak var owner: LumaHarborAppDelegate?
+
+    init(downstream: (any NSMenuDelegate)?, owner: LumaHarborAppDelegate) {
+        self.downstream = downstream
+        self.owner = owner
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        downstream?.menuNeedsUpdate?(menu)
+        owner?.routeUndoRedoMenuItems(in: menu)
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        selector == #selector(NSMenuDelegate.menuNeedsUpdate(_:))
+            || downstream?.responds(to: selector) == true
+            || super.responds(to: selector)
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        if downstream?.responds(to: selector) == true {
+            return downstream
+        }
+        return super.forwardingTarget(for: selector)
     }
 }

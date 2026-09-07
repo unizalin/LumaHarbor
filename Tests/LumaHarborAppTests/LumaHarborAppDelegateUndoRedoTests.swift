@@ -4,6 +4,21 @@ import XCTest
 @testable import LumaHarborApp
 import PhotoLibraryCore
 
+@MainActor
+private final class RecordingMenuDelegate: NSObject, NSMenuDelegate {
+    private(set) var updateCount = 0
+    private(set) var willOpenCount = 0
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        updateCount += 1
+        menu.items.first { $0.action == #selector(LumaHarborAppDelegate.undo(_:)) }?.target = nil
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        willOpenCount += 1
+    }
+}
+
 /// `LumaHarborAppDelegate` is the fix for ⌘Z/⌘⇧Z doing nothing (see its doc
 /// comment in `LumaHarborMainApp.swift`): it gives the app delegate real
 /// `undo(_:)`/`redo(_:)` methods so the *unreplaced* system `.undoRedo`
@@ -86,6 +101,94 @@ final class LumaHarborAppDelegateUndoRedoTests: XCTestCase {
         model.editor.undo()
         XCTAssertFalse(delegate.validateMenuItem(undoItem))
         XCTAssertTrue(delegate.validateMenuItem(redoItem))
+    }
+
+    func testRoutingUndoRedoMenuItemsTargetsTheDelegateWithoutChangingOtherEditActions() {
+        let delegate = LumaHarborAppDelegate()
+        let mainMenu = NSMenu()
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        let undoItem = NSMenuItem(
+            title: "Undo",
+            action: #selector(LumaHarborAppDelegate.undo(_:)),
+            keyEquivalent: "z"
+        )
+        let redoItem = NSMenuItem(
+            title: "Redo",
+            action: #selector(LumaHarborAppDelegate.redo(_:)),
+            keyEquivalent: "Z"
+        )
+        let copyItem = NSMenuItem(
+            title: "Copy",
+            action: #selector(NSText.copy(_:)),
+            keyEquivalent: "c"
+        )
+        editMenu.addItem(undoItem)
+        editMenu.addItem(redoItem)
+        editMenu.addItem(copyItem)
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
+        delegate.routeUndoRedoMenuItems(in: mainMenu)
+
+        XCTAssertTrue(undoItem.target === delegate)
+        XCTAssertTrue(redoItem.target === delegate)
+        XCTAssertNil(copyItem.target)
+        XCTAssertEqual(undoItem.keyEquivalent, "z")
+        XCTAssertEqual(redoItem.keyEquivalent, "Z")
+    }
+
+    func testModelChangeReroutesUndoAfterSwiftUIRebuildsTheEditMenu() async {
+        let delegate = LumaHarborAppDelegate()
+        let model = makeOpenModel()
+        let mainMenu = NSMenu()
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        let undoItem = NSMenuItem(
+            title: "Undo",
+            action: #selector(LumaHarborAppDelegate.undo(_:)),
+            keyEquivalent: "z"
+        )
+        editMenu.addItem(undoItem)
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        delegate.mainMenuProvider = { mainMenu }
+        delegate.model = model
+        XCTAssertTrue(undoItem.target === delegate)
+
+        // SwiftUI regenerates standard menu items after observable state
+        // changes, which clears the explicit AppKit target installed above.
+        undoItem.target = nil
+        model.editor.setAdjustment(.exposure, to: 1.25)
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertTrue(undoItem.target === delegate)
+    }
+
+    func testMenuDelegateProxyRoutesUndoAfterTheExistingDelegateUpdatesTheMenu() {
+        let mainMenu = NSMenu()
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        let undoItem = NSMenuItem(
+            title: "Undo",
+            action: #selector(LumaHarborAppDelegate.undo(_:)),
+            keyEquivalent: "z"
+        )
+        let existingDelegate = RecordingMenuDelegate()
+        editMenu.addItem(undoItem)
+        editMenu.delegate = existingDelegate
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        let delegate = LumaHarborAppDelegate()
+
+        delegate.installUndoRedoMenuRouting(in: mainMenu)
+        editMenu.delegate?.menuNeedsUpdate?(editMenu)
+        editMenu.delegate?.menuWillOpen?(editMenu)
+
+        XCTAssertEqual(existingDelegate.updateCount, 1)
+        XCTAssertEqual(existingDelegate.willOpenCount, 1)
+        XCTAssertTrue(undoItem.target === delegate)
     }
 
     /// Regression: without a model attached yet (e.g. before the window's
