@@ -418,7 +418,7 @@ git commit -m "docs: explain Mac and iPad alpha usage"
 - Consumes: all code/assets/docs from Tasks 1-5.
 - Produces: verified icon-bearing Mac ZIP, checksum, iPad build evidence, and coordination record.
 
-- [ ] **Step 1: 執行所有 icon contracts**
+- [x] **Step 1: 執行所有 icon contracts**
 
 ```bash
 swift test --filter AppIconAssetContractTests
@@ -426,7 +426,7 @@ swift test --filter AppIconAssetContractTests
 
 Expected: all tests PASS。
 
-- [ ] **Step 2: 執行完整 regression suite**
+- [x] **Step 2: 執行完整 regression suite**
 
 ```bash
 swift test
@@ -434,7 +434,7 @@ swift test
 
 Expected: 0 failures；fixture-dependent skips 必須照實記錄。
 
-- [ ] **Step 3: 重建 Mac App 並視覺驗證圖示**
+- [x] **Step 3: 重建 Mac App 並視覺驗證圖示**
 
 ```bash
 Scripts/build-app-bundle.sh release
@@ -443,7 +443,7 @@ codesign --verify --deep --strict build/LumaHarbor.app
 
 Open the app and inspect Finder/Dock using CUA or a screenshot. Expected: icon is nonblank, centered, recognizable, and no UI regressions are visible at launch.
 
-- [ ] **Step 4: 產生新的 ZIP，不覆蓋舊 artifact**
+- [x] **Step 4: 產生新的 ZIP，不覆蓋舊 artifact**
 
 ```bash
 ICON_COMMIT="$(git rev-parse --short HEAD)"
@@ -454,7 +454,7 @@ shasum -a 256 "build/LumaHarbor-0.1.0-alpha-${ICON_COMMIT}.zip"
 
 Expected: ZIP test PASS and one SHA-256 recorded。Do not rename or overwrite `LumaHarbor-0.1.0-alpha-853b837.zip`。
 
-- [ ] **Step 5: Final iPad builds**
+- [x] **Step 5: Final iPad builds**
 
 ```bash
 xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' -derivedDataPath /private/tmp/LumaHarbor-AppIcon-Final-Simulator CODE_SIGNING_ALLOWED=NO build
@@ -463,7 +463,7 @@ xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destinat
 
 Expected: both builds PASS；do not interpret unsigned generic build as a distributable IPA。
 
-- [ ] **Step 6: 最終安全與差異檢查**
+- [x] **Step 6: 最終安全與差異檢查**
 
 ```bash
 git diff --check
@@ -472,7 +472,7 @@ git status --short --branch
 
 Inspect changed content for real `/Users/...`、`/Volumes/...`、non-empty Team ID、UDID、provisioning profile、API key、private key and secret values. Expected: no real private values and no unintended signing changes。
 
-- [ ] **Step 7: 更新 coordination record 並提交**
+- [x] **Step 7: 更新 coordination record 並提交**
 
 Add a new top section to `docs/coordination/CURRENT.md` containing exact commit range, asset paths, contract/full test counts, Mac/iPad build outcomes, ZIP filename/checksum, privacy result, and the truthful remaining signing/distribution limitations.
 
