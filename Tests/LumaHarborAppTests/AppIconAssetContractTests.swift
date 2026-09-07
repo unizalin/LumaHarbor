@@ -60,4 +60,10 @@ final class AppIconAssetContractTests: XCTestCase {
         XCTAssertTrue(project.contains("Assets.xcassets in Resources"))
         XCTAssertTrue(project.contains("ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;"))
     }
+
+    func testIPadProjectDoesNotContainPersonalBundleIdentifier() throws {
+        let project = try text("Apps/LumaHarborPad.xcodeproj/project.pbxproj")
+        XCTAssertFalse(project.lowercased().contains("unizalin"))
+        XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = org.lumaharbor.LumaHarborPad;"))
+    }
 }
