@@ -2,7 +2,7 @@
 
 狀態：給 Claude / Codex 接續開發用  
 日期：2026-09-02  
-Worktree：`/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-awayphotoraweditor-parity-phase1`  
+Worktree：`<CODEX_PHASE1_WORKTREE>`
 Branch：`codex/awayphotoraweditor-parity-phase1`  
 Base：local `main@8a400edb0f07082d157abb28b9c688d18db98f34`  
 總 spec：`docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`  
@@ -25,7 +25,7 @@ Phase 1 plan：`docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-phas
 - Post-merge iOS generic build：`** BUILD SUCCEEDED **`。
 - 本機 `main` 尚未 push 到 origin。
 - 舊 Claude worktree 仍保留本機 signing dirty file：
-  - `/Users/private-builder/github/LumaHarbor/.worktrees/claude-ipad-ui-polish-finish/Apps/LumaHarborPad.xcodeproj/project.pbxproj`
+  - `<CLAUDE_IPAD_POLISH_WORKTREE>/Apps/LumaHarborPad.xcodeproj/project.pbxproj`
   - 不要提交它。
 
 ---
@@ -48,7 +48,7 @@ Phase 1 plan：`docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-phas
 Claude prompt：
 
 ```text
-Work in /Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-awayphotoraweditor-parity-phase1 on branch codex/awayphotoraweditor-parity-phase1.
+Work in a dedicated worktree on branch codex/awayphotoraweditor-parity-phase1.
 
 Read:
 - docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md
@@ -149,7 +149,7 @@ public struct NormalizedCropRect: Codable, Equatable, Hashable, Sendable {
 ## Claude prompt
 
 ```text
-Continue in /Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-awayphotoraweditor-parity-phase1 unless a newer phase branch exists.
+Continue in the dedicated codex/awayphotoraweditor-parity-phase1 worktree unless a newer phase branch exists.
 
 Read the parity roadmap and total spec. Implement Phase 2 Task 2.1 only first: Geometry model and sidecar compatibility. Use TDD, commit only Task 2.1 when GREEN, and report exact SHA. Do not start render/UI until Task 2.1 is reviewed or explicitly approved.
 ```
@@ -441,4 +441,3 @@ Implement Phase 5 Task 5.1 only. Do not start themes/languages/diagnostics in th
 11. Phase 5 export pro/theme/language/diagnostics。
 
 不要跳過 Phase 1。後面的 batch/local/export pro 都需要 Phase 1 的 metadata、histogram、inspector、export foundation 先穩。
-

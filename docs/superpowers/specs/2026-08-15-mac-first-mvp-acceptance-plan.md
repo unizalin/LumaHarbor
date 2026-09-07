@@ -258,7 +258,7 @@ Apple Silicon + Instruments：
 ### Claude
 
 - 依明確工作包實作 runner、測試缺口或具體 regression fix。
-- 不 commit／push；接近用量上限時先更新 `/Users/u/AI-Shared/HANDOFF.md`。
+- 不 commit／push；接近用量上限時先更新 `<SHARED_HANDOFF_PATH>`。
 - 不因環境失敗改動產品語意，也不把 skip 宣稱為 pass。
 
 ### Codex

@@ -14,7 +14,7 @@ Written 2026-09-03, Claude, at the end of Phase 3 Task 3.3. Supplements — does
 - Ahead/behind base: 20 ahead, 0 behind (`git rev-list --left-right --count main...HEAD`)
 - Upstream: **none configured** (`git rev-parse @{u}` fails — this branch has never been pushed)
 - Push / merge / rebase: **none occurred** at any point on this branch. Local `main` itself remains unpushed relative to `origin/main` (a pre-existing state from Phase 1, not something this branch changed).
-- Worktree: `/Users/private-builder/github/LumaHarbor/.worktrees/claude-awayphotoraweditor-parity-phase2-geometry` (do not remove without explicit user authorization — several other worktrees for unrelated branches also exist under `/Users/private-builder/github/LumaHarbor/.worktrees/` and `/Users/private-builder/Documents/ChatGPT/LumaHarbor/`; this handoff only concerns this one)
+- Worktree: `<CLAUDE_PHASE2_WORKTREE>` (do not remove without explicit user authorization; this handoff only concerns this worktree)
 
 ## Changes
 
@@ -59,7 +59,7 @@ Most recently run in full, at the tip of this branch (`c6b6b0b`):
 
 - `swift test` (from the worktree root) — **1433 executed, 9 skipped, 0 failures**, exit 0. The 9 skips are `LumaHarborIntegrationTests.RawFixtureTests`, gated on `LUMAHARBOR_RAW_FIXTURE_DIR` (no camera RAW fixtures in this environment) — `SKIPPED`, not `NOT RUN`, and unchanged across every round on this branch.
 - `git diff --check` — clean, exit 0.
-- Privacy scan (`rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:|DEVELOPMENT_TEAM"` over every file each round's own commit touched, individually) — no hits, every round.
+- Privacy scan (`rg -n "/Users/|/Volumes/|/private/|<TEAM_ID>|teamIdentifier:|DEVELOPMENT_TEAM"` over every file each round's own commit touched, individually) — no hits, every round.
 - `swift build` (Mac) — clean.
 - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` — `** BUILD SUCCEEDED **`, every round.
 - `Apps/LumaHarborPad.xcodeproj/project.pbxproj` — confirmed untouched before and after every build, every round.

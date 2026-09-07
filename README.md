@@ -1,22 +1,73 @@
 # LumaHarbor
 
-LumaHarbor is an open-source, native, non-destructive RAW photo editor for macOS and iPadOS.
+LumaHarbor is an open-source, native, non-destructive RAW photo editor for macOS and iPadOS. It is an independent Swift implementation built with SwiftUI, Core Image, CryptoKit, and SQLite.
 
-The Mac-first MVP is complete and signed off: the automated acceptance suite passes on Apple Silicon with a full Xcode toolchain (strict-concurrency build, the complete XCTest suite, and the real-hardware `RawFixtureTests` against Sony `.ARW` files all run clean — see [`Scripts/run-mvp-acceptance.zsh`](Scripts/run-mvp-acceptance.zsh)), and the manual acceptance checklist in [`docs/superpowers/specs/2026-08-15-mac-first-mvp-acceptance-plan.md`](docs/superpowers/specs/2026-08-15-mac-first-mvp-acceptance-plan.md) — bookmark lifecycle across APFS/exFAT, SSD pull/reconnect, read-only and corrupt-file handling, disk-full handling, and a full UI/performance walkthrough — has all ten of the main spec's §13 sign-off conditions passing with evidence (see [`docs/testing/reports/2026-08-19-mvp-acceptance.md`](docs/testing/reports/2026-08-19-mvp-acceptance.md)). It browses Sony `.ARW` files directly from an external SSD, applies non-destructive basic adjustments, and exports full-resolution JPEG files. The UI follows macOS's own Language & Region setting; English and Traditional Chinese are currently translated. A handful of known, non-blocking limitations (documented in the acceptance report) remain — most notably that the Undo/Redo keyboard shortcuts don't register on some setups, though the menu items themselves work. iPadOS support will follow now that the Mac-first workflow is stable.
+> **Project status:** pre-release alpha. The automated build and test suites are healthy, but several hands-on Mac, external-drive, translation, and iPad checks remain open. Use copies or backed-up photo libraries while testing.
 
-## Design
+## Highlights
 
-The approved Mac-first MVP specification is available in [`docs/superpowers/specs/2026-08-13-mac-first-mvp-design.md`](docs/superpowers/specs/2026-08-13-mac-first-mvp-design.md).
+- Browse RAW folders and external drives without importing or modifying source files.
+- Apply non-destructive basic, color, detail, effects, geometry, local-mask, gradient, spot-heal, and clone adjustments.
+- Save portable edit sidecars, create virtual copies, and organize reusable presets.
+- Export individual or selected photos with resizing, bit depth, metadata, naming, collision, DPI, and text-watermark options.
+- Browse multiple sources on iPad, retain indexes and cached thumbnails while a source is offline, and relink it later.
+- Use English, Traditional Chinese, Simplified Chinese, Japanese, Korean, German, French, or Spanish UI text.
+- Keep editing local: shipping targets contain no analytics, account system, cloud backend, or application-level network client.
 
-The iPad multi-source photo library specification and implementation plan are tracked in [`docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md`](docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md) and [`docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md`](docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md). Automated acceptance evidence is produced by [`Scripts/run-ipad-library-acceptance.zsh`](Scripts/run-ipad-library-acceptance.zsh) and recorded in [`docs/testing/reports/2026-08-26-ipad-multi-source-library.md`](docs/testing/reports/2026-08-26-ipad-multi-source-library.md); final sign-off still requires the full fixture run and real M1+ iPad checklist.
+RAW compatibility follows the platform's `CIRAWFilter` support. Sony `.ARW` files are the project's mandatory real-fixture format.
 
-## Running it
+## Requirements
+
+- macOS 14 or later
+- Xcode with the matching Command Line Tools
+- Xcode's Metal Toolchain component (`xcodebuild -downloadComponent MetalToolchain`)
+- iOS or iPadOS 17 or later for the iPad target
+
+## Run on macOS
+
+From the repository root:
 
 ```sh
 swift run LumaHarbor
 ```
 
-Or open [`Package.swift`](Package.swift) in Xcode and run the `LumaHarbor` scheme.
+For a local `.app` bundle:
+
+```sh
+Scripts/build-app-bundle.sh release
+open build/LumaHarbor.app
+```
+
+The script creates an ad-hoc signed development build. It is suitable for local testing, not a trusted public release. See the [small-group alpha distribution guide](docs/testing/beta/SMALL_GROUP_ALPHA.md) before sharing a build.
+
+## Run on iPad
+
+Open `Apps/LumaHarborPad.xcodeproj`, select the `LumaHarborPad` scheme and choose a simulator or device. Real-device installation requires selecting your own Development Team in Xcode; personal signing settings must not be committed.
+
+The complete setup is in the [iPad Xcode runbook](docs/development/ipad-xcode-runbook.md).
+
+## Verify
+
+```sh
+swift build
+swift test
+swift run LumaHarborDiagnosticsCLI
+swift run LumaHarborDiagnosticsCLI --json
+```
+
+Fixture and device-dependent acceptance remains separate from the ordinary test suite. Current evidence and open manual gates are tracked in [`docs/coordination/CURRENT.md`](docs/coordination/CURRENT.md).
+
+## Data and privacy
+
+LumaHarbor reads the folders users explicitly select. Depending on the workflow, it stores `.lumaharbor` sidecars beside source photos and keeps indexes, bookmarks, thumbnails, presets, and app-copy documents in the user's Application Support container. These local records may contain filenames and metadata and are not separately encrypted by LumaHarbor.
+
+Source RAW files are intended to remain immutable. Security-sensitive defects should be reported through the process in [`SECURITY.md`](SECURITY.md), not in a public issue.
+
+## Design and development
+
+The original Mac MVP design is in [`docs/superpowers/specs/2026-08-13-mac-first-mvp-design.md`](docs/superpowers/specs/2026-08-13-mac-first-mvp-design.md). The iPad multi-source design and implementation plan are in [`docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md`](docs/superpowers/specs/2026-08-26-ipad-multi-source-photo-library-design.md) and [`docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md`](docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md).
+
+Contributions should preserve RAW immutability, dependency-free shipping targets, path-free user-facing diagnostics, and the distinction between automated `PASS`, fixture `SKIPPED`, and hardware `NOT RUN` evidence.
 
 ## License
 
@@ -24,4 +75,4 @@ LumaHarbor is available under the [MIT License](LICENSE).
 
 ## Acknowledgements
 
-LumaHarbor is an independent Swift implementation. Its early product exploration was informed in part by [AwayPhotoRawEditor](https://github.com/awaysu/AwayPhotoRawEditor) by Awaysu. LumaHarbor is not affiliated with or endorsed by that project or its author. No AwayPhotoRawEditor source code, artwork, icons, or user interface assets are included in this repository.
+Early product exploration was informed in part by [AwayPhotoRawEditor](https://github.com/awaysu/AwayPhotoRawEditor) by Awaysu. LumaHarbor is not affiliated with or endorsed by that project or its author. No AwayPhotoRawEditor source code, artwork, icons, or user interface assets are included in this repository.

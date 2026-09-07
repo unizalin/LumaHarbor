@@ -16,7 +16,7 @@
 ## 測試用資料
 
 - `Fixtures/Private/APFS-Test`：6 張 fixture 副本（來自 `Fixtures/Private/Sony-ARW`）
-- `/Volumes/Untitled/LumaHarbor-exFAT-Test`：11 張（6 張同上 + 5 張從使用者相機記憶卡 `/Volumes/Untitled/DCIM/100MSDCF` 額外複製，**都是複製，原始檔／記憶卡沒動過**）
+- `<EXFAT_FIXTURE_DIR>`：11 張（6 張同上 + 5 張從使用者相機記憶卡 `<CAMERA_CARD_DIR>` 額外複製，**都是複製，原始檔／記憶卡沒動過**）
 
 ## Gate D／E／F 進度
 
@@ -29,7 +29,7 @@
   - 點照片、拉滑桿，畫面會跟著變（但延遲明顯，見下方效能問題）。
   - **完全關閉 App（⌘Q）後重開，重新選同一資料夾，剛剛調整的滑桿數值有正確保留**（使用者原話「有都有在」）——這代表 sidecar 自動保存＋重啟後恢復這條路徑是通的。
 
-- **exFAT 資料夾**（2026-08-17 補測，`/Volumes/Untitled/LumaHarbor-exFAT-Test`，11 張）：
+- **exFAT 資料夾**（2026-08-17 補測，`<EXFAT_FIXTURE_DIR>`，11 張）：
   - 加入資料夾成功、縮圖增量出現、拉滑桿有反應（延遲跟 APFS 一樣，屬於同一個已知效能問題，非 exFAT 特有）、完全關閉 App 重開後滑桿數值有保留。**4 項行為跟 APFS 完全一致**。
   - 過程中另外踩到一個 Xcode 操作雷：scheme 選單預設停在 `LumaHarbor-Package`（umbrella scheme），按 Run 只會 build 不會真的啟動 App，跟筆記原本記的「只按到 Build 沒按到 Run」是不同根因但同一種症狀（Build Succeeded、沒有 Running）。改選 `LumaHarbor` scheme，或改用 `swift run LumaHarbor` 可繞開。
 
@@ -165,7 +165,7 @@ editorForwarding = editor.objectWillChange.sink { [weak self] in
 
 ## 2026-08-18（續五）：Gate E 第 7、8 項（拔插 exFAT SSD）人工測完，通過
 
-用 `/Volumes/Untitled/LumaHarbor-exFAT-Test`（11 張），照片開著、有一個未存檔的調整（Temperature +31）時直接拔隨身碟：
+用 `<EXFAT_FIXTURE_DIR>`（11 張），照片開著、有一個未存檔的調整（Temperature +31）時直接拔隨身碟：
 
 - **拔掉當下**：App 沒有 crash；縮圖跟已快取的預覽圖都還在畫面上；未存檔的 Temperature +31 調整值原樣保留（沒有被清空或 reset）；側邊欄該資料夾正確顯示「Offline」，底部出現清楚的「Offline — reconnect the drive to edit or export」+「Reconnect…」按鈕；工具列同時顯示警告圖示。**通過。**
 - **重插回去**：側邊欄自動變回正常（不再顯示 Offline，照片數量正常顯示回 11 photos），底部變成「Ready」；不需要使用者手動介入。**通過。**
@@ -329,7 +329,7 @@ spec §11 目標：≤150ms
 
 建了一個 130MB APFS disk image：`Fixtures/Private/DiskFull-Test.dmg`（跟其他 `Fixtures/Private/` 底下的東西一樣被 `.gitignore` 排除，不會誤 commit）。裡面複製了 3 張真實 ARW（`_DSC1896`/`_DSC1897`/`_DSC1899`，跟 `ReadOnly-Test`/`Corrupt-Test` 用的同一批），再用 padding 檔案把剩餘空間灌到真的寫不進新東西為止——**已經實測驗證過連建立 `.lumaharbor` 目錄、寫入幾百 bytes 的小檔案都會直接收到 `ENOSPC`（"No space left on device"）**，不是「快滿了」而是真的滿到任何新寫入都會失敗。
 
-**目前狀態**：已經 `hdiutil attach` 掛載在 `/Volumes/LumaHarbor-DiskFull-Test`，現在就可以直接在 App 裡「加入照片資料夾」選這個磁碟測試。之後如果 volume 被卸載或重開機，用這行指令重新掛載：
+**目前狀態**：已經 `hdiutil attach` 掛載在 `<DISK_FULL_TEST_VOLUME>`，現在就可以直接在 App 裡「加入照片資料夾」選這個磁碟測試。之後如果 volume 被卸載或重開機，用報告中已遮蔽的本機指令重新掛載：
 ```sh
 hdiutil attach Fixtures/Private/DiskFull-Test.dmg
 ```
@@ -340,7 +340,7 @@ hdiutil attach Fixtures/Private/DiskFull-Test.dmg
 
 ## 2026-08-19（續九）：人工測 disk-full 時發現一個真的 bug，已修——訊息對了，下一步指引卻是唯讀那句
 
-**人工測試結果（截圖）**：加入 `/Volumes/LumaHarbor-DiskFull-Test` 後，跳出「已掃描，但無法更新相片庫檔案」alert，`message` 正確顯示「空間不足，無法儲存你的編輯。」——**這部分是對的**。但 `nextStep` 顯示「你的照片仍然可以瀏覽。解鎖磁碟即可把變更存回去。」——**「解鎖磁碟」對空間不足的情境完全沒有意義**（解鎖權限不會生出磁碟空間），這是唯讀情境專用的建議，被誤用在空間不足的情境上。
+**人工測試結果（截圖）**：加入 `<DISK_FULL_TEST_VOLUME>` 後，跳出「已掃描，但無法更新相片庫檔案」alert，`message` 正確顯示「空間不足，無法儲存你的編輯。」——**這部分是對的**。但 `nextStep` 顯示「你的照片仍然可以瀏覽。解鎖磁碟即可把變更存回去。」——**「解鎖磁碟」對空間不足的情境完全沒有意義**（解鎖權限不會生出磁碟空間），這是唯讀情境專用的建議，被誤用在空間不足的情境上。
 
 **根因**：`LibraryViewModel.swift`（修前）掃描完成時，只要 `result.manifestWriteFailure` 有值（不管實際原因是唯讀還是空間不足還是磁碟離線），`nextStep` 一律寫死成同一句「Unlock the drive to save changes back to it.」。而 `PhotoLibraryService.swift` 那邊，`manifestFailure`（傳給 `LibraryViewModel` 的錯誤描述文字）只擷取了失敗錯誤的 `errorDescription`，完全沒有把同一個錯誤物件的 `recoverySuggestion`（每種錯誤原因各自對應的正確建議，例如唯讀該說「解鎖磁碟」、空間不足該說「騰出空間」）一起往上傳——`message` 是對的因為它來自 `errorDescription`，`nextStep` 是錯的因為它根本沒用到 `recoverySuggestion`，是另外寫死的一句話。
 

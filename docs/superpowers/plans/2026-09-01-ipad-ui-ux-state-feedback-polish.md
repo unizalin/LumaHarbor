@@ -453,7 +453,7 @@ swift test --filter PadLibraryAccessibilityContractTests
 swift test --filter PhotoDocumentEditorLibraryOpenTests
 swift test
 git diff --check
-rg -n "/Users/|/Volumes/|/private/|7KM4ZM25P3|teamIdentifier:" docs Sources Apps Tests
+rg -n "/Users/|/Volumes/|/private/|<TEAM_ID>|teamIdentifier:" docs Sources Apps Tests
 ```
 
 Expected:

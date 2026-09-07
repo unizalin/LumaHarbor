@@ -13,7 +13,7 @@ Do not reimplement Task 2, redesign the journal, or start product Task 3.
 ## Worktree and boundaries
 
 - Worktree:
-  `/Users/private-builder/Documents/ChatGPT/LumaHarbor/codex-ipad-multi-source-library-durability`
+  `<CODEX_IPAD_DURABILITY_WORKTREE>`
 - Branch: `codex/ipad-multi-source-library-durability`
 - Expected starting HEAD:
   `60f270125fedc32da92d33851ad8fd015c7399d0`
