@@ -2,7 +2,17 @@
 
 Updated: 2026-09-07
 
-Updated by: Codex（修正舊本機索引 physical schema 已更新但版本標記落後造成的啟動錯誤；A11 真人實體鍵盤與 Phase 4.6 最終人工驗收仍為 NOT RUN）
+Updated by: Codex（修正 macOS Undo/Redo key equivalent 派送；A11 舊版真人測試為 FAIL，新修正版待真人重測；Phase 4.6 仍未完成）
+
+## A11 macOS Undo/Redo key equivalent repair (2026-09-07, Codex, code + tests + app-level verification)
+
+- **狀態**：`ENGINEERING FIX DONE / AUTOMATED END-TO-END PASS / HUMAN RETEST REQUIRED`。使用者用實體鍵盤測試前一版修法後明確回報按鍵沒有作用，因此 A11 對該版的結果改記為 `FAIL`，不再維持 `NOT RUN`。修正版程式 commit 為 `853b837`；在使用者用此 commit 的 build 再按一次實體鍵盤前，不把 A11 改成 `PASS`，Phase 4.6 仍被這項人工 gate 擋住。
+- **根因**：編輯器本身的 undo history 正常，工具列 Undo 也可用；但 SwiftUI 標準 Edit 選單會在每次更新時重新建立 `undo:`/`redo:` 項目，且 hosting responder 先取得 action、卻因空的系統 `UndoManager` 將項目驗證為 disabled。只在 app 啟動或模型變更後設定 `NSMenuItem.target` 會被下一次 `menuNeedsUpdate` 蓋掉，所以 `⌘Z` 在送到 `LumaHarborAppDelegate` 前就被吃掉。
+- **修正**：保留 SwiftUI 原本的私有 `NSMenuDelegate`，用 `UndoRedoMenuDelegateProxy` 完整轉送既有 optional delegate callbacks；只在原 delegate 完成 `menuNeedsUpdate` 後，將 Undo/Redo 項目 target 接到 `LumaHarborAppDelegate`。文字欄位仍優先使用自己的 `UndoManager`，照片編輯器才是 fallback；沒有使用 global hotkey、event tap 或 Accessibility 權限。
+- **TDD**：先新增「SwiftUI 重建選單後 target 會被清空」與「proxy 必須先呼叫既有 delegate、再接回 Undo，且其他 delegate callback 仍被轉送」測試；RED 分別呈現缺少重新接線能力與缺少 proxy API，實作後 `LumaHarborAppDelegateUndoRedoTests` PASS（8 tests）。曾以全域 menu notification 驗證時序，但真 Release app 啟動會與 SwiftUI menu graph 互相干擾；該方案與所有診斷碼均已移除，沒有留在 commit。
+- **真 App 自動驗證**：以 `Scripts/build-app-bundle.sh release` 重建並啟動真 `.app`，對 `_DSC1896.ARW` 將曝光從 `+1.08` 調到 `+2.08`；CUA `super+z` 復原回 `+1.08`，工具列切為 Undo disabled / Redo enabled；CUA `super+shift+z` 重做到 `+2.08`，狀態反向切換；展開 Edit 選單時 Undo 顯示 enabled、Redo 依 history 正確 disabled。最後再復原到 `+1.08`，沒有把測試增量留在照片設定中。這是 app-level 合成按鍵驗證，不能取代使用者實體鍵盤重測。
+- **完整驗證與安全**：release app build PASS；`swift test` PASS（1725 tests, 9 fixture-dependent skipped, 0 failures）；`git diff --check` PASS；本輪兩個 code/test changed files 的私人路徑、volume、Team ID、UDID、provisioning profile、private key、API key/secret/password 掃描零命中。
+- **Next action**：使用者在目前開著的 `853b837` Release build 裡做一筆新調整，實體按 `⌘Z`，再按 `⇧⌘Z`。兩步都生效後才把 A11 改為 `PASS`，接著完成 Phase 4.6 最終人工驗收。
 
 ## Local index stale schema marker recovery (2026-09-07, Codex, code + test + real-data verification)
 
