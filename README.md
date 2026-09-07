@@ -46,6 +46,8 @@ Open `Apps/LumaHarborPad.xcodeproj`, select the `LumaHarborPad` scheme and choos
 
 The complete setup is in the [iPad Xcode runbook](docs/development/ipad-xcode-runbook.md).
 
+For a short Traditional Chinese walkthrough of both platforms, see the [quick start guide](docs/testing/beta/QUICK_START_ZH-HANT.md).
+
 ## Verify
 
 ```sh

@@ -5,6 +5,8 @@
 對應修正 commit：`853b837`  
 用途：少量、已知身分測試者的 macOS alpha 測試，不是正式發行版
 
+快速上手（含 Mac 與 iPad）另見 [`QUICK_START_ZH-HANT.md`](QUICK_START_ZH-HANT.md)。
+
 ## 結論
 
 這個 ZIP 可以提供給使用 Apple Silicon Mac、macOS 14 或更新版本的已知測試者。ZIP 完整、解壓後的 App 簽章結構有效，已在實際 App 中完成 RAW 開啟、編輯及實體鍵盤 Undo/Redo 驗證，相關自動化測試也全部通過。
