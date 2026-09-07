@@ -120,13 +120,10 @@ public final class PhotoIndexStore: @unchecked Sendable {
     /// at, up to `Self.schemaVersion`, happens inside one transaction.
     /// `ALTER TABLE`, `CREATE INDEX`, backfills and the version bump all run
     /// under the same `BEGIN IMMEDIATE`/`COMMIT` pair, so a thrown error at
-    /// any point — including from `migrationHook` — rolls every change back
-    /// and leaves the database exactly as it was opened. Each step is
-    /// gated on the *starting* version, not `else`-chained, so a database
-    /// already at an intermediate version (e.g. an existing v2 database
-    /// picking up Phase 3 Task 3.5's v3 columns) runs only the steps it
-    /// actually still needs — re-running the v1 -> v2 `ALTER TABLE`s on an
-    /// already-v2 database would fail with "duplicate column name".
+    /// any point — including from `migrationHook` — rolls every change back.
+    /// Each step is gated on the starting version, while column and index
+    /// creation is idempotent so a legacy database whose physical schema is
+    /// newer than its stale version marker can repair that marker safely.
     private func migrateToLatestSchemaIfNeeded(migrationHook: () throws -> Void) throws {
         let version = try currentSchemaVersion()
         guard version < Self.schemaVersion else { return }
@@ -134,24 +131,41 @@ public final class PhotoIndexStore: @unchecked Sendable {
         try withLock {
             try database.transaction {
                 if version < 2 {
-                    try database.execute("""
-                        ALTER TABLE library ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'externalFolder';
-                        ALTER TABLE library ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'ready';
-                        ALTER TABLE library ADD COLUMN scan_state TEXT NOT NULL DEFAULT 'idle';
-                        ALTER TABLE photo ADD COLUMN filename_normalized TEXT NOT NULL DEFAULT '';
-                        ALTER TABLE photo ADD COLUMN relative_directory TEXT NOT NULL DEFAULT '';
-                        ALTER TABLE photo ADD COLUMN last_edit_at REAL;
-                        """)
+                    try addColumnIfNeeded(
+                        "source_kind", to: "library",
+                        definition: "TEXT NOT NULL DEFAULT 'externalFolder'"
+                    )
+                    try addColumnIfNeeded(
+                        "connection_state", to: "library",
+                        definition: "TEXT NOT NULL DEFAULT 'ready'"
+                    )
+                    try addColumnIfNeeded(
+                        "scan_state", to: "library",
+                        definition: "TEXT NOT NULL DEFAULT 'idle'"
+                    )
+                    try addColumnIfNeeded(
+                        "filename_normalized", to: "photo",
+                        definition: "TEXT NOT NULL DEFAULT ''"
+                    )
+                    try addColumnIfNeeded(
+                        "relative_directory", to: "photo",
+                        definition: "TEXT NOT NULL DEFAULT ''"
+                    )
+                    try addColumnIfNeeded("last_edit_at", to: "photo", definition: "REAL")
 
                     try backfillFilenameNormalizedAndDirectory()
 
                     try database.execute("""
-                        CREATE INDEX photo_all_capture_desc ON photo (capture_date DESC, photo_id);
-                        CREATE INDEX photo_library_capture_desc ON photo (library_id, capture_date DESC, photo_id);
-                        CREATE INDEX photo_library_directory_capture_desc
+                        CREATE INDEX IF NOT EXISTS photo_all_capture_desc
+                            ON photo (capture_date DESC, photo_id);
+                        CREATE INDEX IF NOT EXISTS photo_library_capture_desc
+                            ON photo (library_id, capture_date DESC, photo_id);
+                        CREATE INDEX IF NOT EXISTS photo_library_directory_capture_desc
                             ON photo (library_id, relative_directory, capture_date DESC, photo_id);
-                        CREATE INDEX photo_filename_normalized ON photo (filename_normalized, photo_id);
-                        CREATE INDEX photo_last_edit_desc ON photo (last_edit_at DESC, photo_id)
+                        CREATE INDEX IF NOT EXISTS photo_filename_normalized
+                            ON photo (filename_normalized, photo_id);
+                        CREATE INDEX IF NOT EXISTS photo_last_edit_desc
+                            ON photo (last_edit_at DESC, photo_id)
                             WHERE last_edit_at IS NOT NULL;
                         """)
                 }
@@ -160,10 +174,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
                     // Phase 3 Task 3.5: nullable, no backfill needed -- every
                     // existing row is an original (`variant_of IS NULL`),
                     // which is exactly the value absent columns default to.
-                    try database.execute("""
-                        ALTER TABLE photo ADD COLUMN variant_of TEXT;
-                        ALTER TABLE photo ADD COLUMN variant_name TEXT;
-                        """)
+                    try addColumnIfNeeded("variant_of", to: "photo", definition: "TEXT")
+                    try addColumnIfNeeded("variant_name", to: "photo", definition: "TEXT")
                 }
 
                 try migrationHook()
@@ -174,6 +186,16 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 )
             }
         }
+    }
+
+    private func addColumnIfNeeded(
+        _ column: String,
+        to table: String,
+        definition: String
+    ) throws {
+        let columns = try database.query("PRAGMA table_info(\(table));") { $0.string(1) }
+        guard !columns.contains(column) else { return }
+        try database.execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
     }
 
     /// `filename_normalized`/`relative_directory` can't be computed in SQL —
