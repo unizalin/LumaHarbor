@@ -2,7 +2,15 @@
 
 Updated: 2026-09-07
 
-Updated by: Codex（公開開源整理、main 快轉整合與小範圍 alpha 交付驗證；產品程式碼基線仍為 `e8792a86259747b1499082ade1b19ec8a923d3ab`；A11 真人實體鍵盤與 Phase 4.6 最終人工驗收仍為 NOT RUN）
+Updated by: Codex（修正舊本機索引 physical schema 已更新但版本標記落後造成的啟動錯誤；A11 真人實體鍵盤與 Phase 4.6 最終人工驗收仍為 NOT RUN）
+
+## Local index stale schema marker recovery (2026-09-07, Codex, code + test + real-data verification)
+
+- **狀態**：`DONE / REAL DATA VERIFIED`。使用者以公開 alpha build 啟動 App 時，空白資料庫畫面顯示「LumaHarbor 的本機索引回報了一個錯誤」。先只讀檢查，確認 SQLite `quick_check = ok`，資料仍在；實際 physical schema 已具備 v2/v3 全部欄位，但 `schema_info.schemaVersion` 仍為 `1`，導致啟動時重跑 v1 -> v2 `ALTER TABLE` 並因 `duplicate column name: source_kind` 失敗。
+- **TDD RED**：新增 `testOpeningLatestSchemaShapeWithStaleVersionRepairsTheVersionAndPreservesData`，建立最新版 physical schema 後把版本標記降回 1；現行程式如預期以 `duplicate column name: source_kind` 失敗。
+- **修正**：`PhotoIndexStore` 的 v1 -> v2 與 v2 -> v3 migration 改為先查 `PRAGMA table_info`，只新增缺少的欄位；migration indexes 改用 `CREATE INDEX IF NOT EXISTS`。所有操作、backfill、migration hook 與版本更新仍在同一筆 transaction；真正失敗仍整筆 rollback，但可安全辨識的 stale marker 狀態會自我修復。
+- **自動驗證**：新增測試轉 GREEN；`swift test --filter PhotoIndexMigrationTests` PASS（8 tests）；完整 `swift test` PASS（1722 tests, 9 fixture-dependent skipped, 0 failures）；release app bundle build PASS；`git diff --check` PASS。
+- **真實資料安全與驗證**：先正常關閉舊 App，將整個 Application Support 資料存到 repository 外的本機備份目錄；備份與原索引 SHA-256 相同、`quick_check = ok`，且修復前為 8 個 library rows / 109 個 photo rows。用修正版啟動後，版本標記從 1 更新為 3，`quick_check` 仍為 `ok`，row counts 仍為 8 / 109；App 畫面恢復既有來源，Sony-ARW 顯示 81 張照片，原紅色索引錯誤消失。沒有刪除、重建或提交任何使用者照片、bookmark、sidecar、cache 或本機路徑。
 
 ## Open-source release preparation (2026-09-07, Codex, docs/security settings only)
 

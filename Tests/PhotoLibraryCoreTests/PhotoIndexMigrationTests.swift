@@ -1,10 +1,10 @@
 import XCTest
 @testable import PhotoLibraryCore
 
-/// Spec §8: schema v1 -> v2 must happen inside one transaction. A database
-/// deleted mid-migration must still be either fully v1 or fully v2, never a
-/// half-applied mix — the index is disposable cache, so the fallback the app
-/// offers on failure is "rescan", not "attempt a partial repair".
+/// Spec §8: migrations happen inside one transaction. Genuine failures roll
+/// back every change, while a legacy database with a stale version marker but
+/// an already-complete physical schema can repair the marker without losing
+/// its rebuildable index data.
 final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
     private let fixtureLibraryID = LibraryID(uuidString: "11111111-1111-1111-1111-111111111111")!
 
@@ -87,6 +87,25 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let reopened = try PhotoIndexStore(databaseURL: url)
         defer { reopened.close() }
         XCTAssertEqual(try reopened.photoCount(inLibrary: fixtureLibraryID), 1)
+    }
+
+    func testOpeningLatestSchemaShapeWithStaleVersionRepairsTheVersionAndPreservesData() throws {
+        let url = temporaryDirectory.appendingPathComponent("library.sqlite")
+        try makeSchemaV2Database(at: url, photoCount: 2)
+        let migrated = try PhotoIndexStore(databaseURL: url)
+        migrated.close()
+
+        let raw = try SQLiteDatabase(url: url)
+        try raw.run("UPDATE schema_info SET value = '1' WHERE key = 'schemaVersion';")
+        raw.close()
+
+        let repaired = try PhotoIndexStore(databaseURL: url)
+        defer { repaired.close() }
+
+        XCTAssertEqual(try readSchemaVersion(at: url), PhotoIndexStore.schemaVersion)
+        XCTAssertEqual(try repaired.photoCount(inLibrary: fixtureLibraryID), 2)
+        XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
+        XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
     }
 
     func testMigrationBackfillsNormalizedFilenameAndDirectory() throws {
