@@ -63,7 +63,7 @@ final class AppIconAssetContractTests: XCTestCase {
 
     func testIPadProjectDoesNotContainPersonalBundleIdentifier() throws {
         let project = try text("Apps/LumaHarborPad.xcodeproj/project.pbxproj")
-        XCTAssertFalse(project.lowercased().contains("unizalin"))
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = org.lumaharbor.LumaHarborPad;"))
+        XCTAssertEqual(project.components(separatedBy: "DEVELOPMENT_TEAM = \"\";").count - 1, 2)
     }
 }
