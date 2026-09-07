@@ -6,7 +6,7 @@
 
 **Architecture:** 以一張 1024×1024 不透明主圖作為唯一視覺來源，透過可重跑的 shell script 產生 Mac `.icns`，iPad asset catalog 直接使用同一主圖。以 XCTest source-contract 鎖住兩個 target 的接線，再用真實 Mac bundle 與 Xcode asset compiler 驗證產物；文件沿用既有 alpha 安全與 iPad runbook，不建立第二套互相矛盾的流程。
 
-**Tech Stack:** Swift/XCTest、ImageIO、SwiftPM、Xcode asset catalogs、`sips`、`iconutil`、Bash、macOS AppKit bundle、iPadOS 17 Xcode project、Markdown。
+**Tech Stack:** Swift/XCTest、ImageIO、SwiftPM、Xcode asset catalogs、`sips`、Xcode `actool`、Bash、macOS AppKit bundle、iPadOS 17 Xcode project、Markdown。
 
 ## Global Constraints
 
@@ -101,29 +101,22 @@ git commit -m "test: define app icon asset contracts"
 
 ---
 
-### Task 2: Generate the Harbor Aperture Master and Mac Icon Set
+### Task 2: Generate the Harbor Aperture Master and Mac Icon Assets
 
 **Files:**
 - Create: `Resources/AppIcon-1024.png`
-- Create: `Resources/LumaHarbor.iconset/icon_16x16.png`
-- Create: `Resources/LumaHarbor.iconset/icon_16x16@2x.png`
-- Create: `Resources/LumaHarbor.iconset/icon_32x32.png`
-- Create: `Resources/LumaHarbor.iconset/icon_32x32@2x.png`
-- Create: `Resources/LumaHarbor.iconset/icon_128x128.png`
-- Create: `Resources/LumaHarbor.iconset/icon_128x128@2x.png`
-- Create: `Resources/LumaHarbor.iconset/icon_256x256.png`
-- Create: `Resources/LumaHarbor.iconset/icon_256x256@2x.png`
-- Create: `Resources/LumaHarbor.iconset/icon_512x512.png`
-- Create: `Resources/LumaHarbor.iconset/icon_512x512@2x.png`
+- Create: `Resources/MacAssets.xcassets/Contents.json`
+- Create: `Resources/MacAssets.xcassets/AppIcon.appiconset/Contents.json`
+- Create: `Resources/MacAssets.xcassets/AppIcon.appiconset/*.png`
 - Create: `Resources/LumaHarbor.icns`
 - Create: `Scripts/generate-app-icons.sh`
 - Test: `Tests/LumaHarborAppTests/AppIconAssetContractTests.swift`
 
 **Interfaces:**
 - Consumes: the approved visual design and built-in `image_gen` output.
-- Produces: canonical `Resources/AppIcon-1024.png`, reproducible `Resources/LumaHarbor.iconset`, and `Resources/LumaHarbor.icns` for both platform wiring tasks.
+- Produces: canonical `Resources/AppIcon-1024.png`, reproducible `Resources/MacAssets.xcassets`, and `Resources/LumaHarbor.icns` for both platform wiring tasks.
 
-- [ ] **Step 1: 以 built-in image generation 產生主圖**
+- [x] **Step 1: 以 built-in image generation 產生主圖**
 
 Use this exact prompt:
 
@@ -142,7 +135,7 @@ Avoid: stock-photo appearance, neon cyberpunk colors, blue-purple dominance, bei
 
 Save the selected opaque output as `Resources/AppIcon-1024.png` and inspect it at full size before continuing.
 
-- [ ] **Step 2: 建立可重跑的 icon generator**
+- [x] **Step 2: 建立可重跑的 icon generator**
 
 ```bash
 #!/bin/bash
@@ -150,23 +143,23 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MASTER="${ROOT_DIR}/Resources/AppIcon-1024.png"
-ICONSET="${ROOT_DIR}/Resources/LumaHarbor.iconset"
 ICNS="${ROOT_DIR}/Resources/LumaHarbor.icns"
+MAC_CATALOG="${ROOT_DIR}/Resources/MacAssets.xcassets"
+MAC_APPICONSET="${MAC_CATALOG}/AppIcon.appiconset"
+OUTPUT_DIR="${ROOT_DIR}/.build/app-icon-assets"
 
 test -f "${MASTER}"
-mkdir -p "${ICONSET}"
+mkdir -p "${MAC_APPICONSET}" "${OUTPUT_DIR}"
 
-sips -z 16 16 "${MASTER}" --out "${ICONSET}/icon_16x16.png"
-sips -z 32 32 "${MASTER}" --out "${ICONSET}/icon_16x16@2x.png"
-sips -z 32 32 "${MASTER}" --out "${ICONSET}/icon_32x32.png"
-sips -z 64 64 "${MASTER}" --out "${ICONSET}/icon_32x32@2x.png"
-sips -z 128 128 "${MASTER}" --out "${ICONSET}/icon_128x128.png"
-sips -z 256 256 "${MASTER}" --out "${ICONSET}/icon_128x128@2x.png"
-sips -z 256 256 "${MASTER}" --out "${ICONSET}/icon_256x256.png"
-sips -z 512 512 "${MASTER}" --out "${ICONSET}/icon_256x256@2x.png"
-sips -z 512 512 "${MASTER}" --out "${ICONSET}/icon_512x512.png"
-cp "${MASTER}" "${ICONSET}/icon_512x512@2x.png"
-iconutil -c icns "${ICONSET}" -o "${ICNS}"
+sips -z 16 16 "${MASTER}" --out "${MAC_APPICONSET}/icon_16x16.png"
+sips -z 32 32 "${MASTER}" --out "${MAC_APPICONSET}/icon_16x16@2x.png"
+# Repeat for the 32, 128, 256, and 512 point catalog slots.
+cp "${MASTER}" "${MAC_APPICONSET}/icon_512x512@2x.png"
+xcrun actool --compile "${OUTPUT_DIR}" --platform macosx \
+  --minimum-deployment-target 14.0 --app-icon AppIcon \
+  --output-partial-info-plist "${OUTPUT_DIR}/partial-info.plist" \
+  "${MAC_CATALOG}"
+cp "${OUTPUT_DIR}/AppIcon.icns" "${ICNS}"
 ```
 
 Make the script executable and run it:
@@ -176,9 +169,9 @@ chmod +x Scripts/generate-app-icons.sh
 Scripts/generate-app-icons.sh
 ```
 
-Expected: `Resources/LumaHarbor.icns` exists and `iconutil -c iconset Resources/LumaHarbor.icns -o /private/tmp/LumaHarbor-verify.iconset` exits 0.
+Expected: `Resources/LumaHarbor.icns` exists and `xcrun actool` exits 0 without missing-slot or alpha-channel errors.
 
-- [ ] **Step 3: 視覺與像素驗證**
+- [x] **Step 3: 視覺與像素驗證**
 
 Run:
 
@@ -189,10 +182,10 @@ file Resources/LumaHarbor.icns
 
 Expected: 1024×1024；`hasAlpha: no`；ICNS recognized as macOS icon resource。用 `view_image` 檢查港灣／光圈主體置中、無文字、32 px 輪廓仍清楚。
 
-- [ ] **Step 4: 提交主圖與產生器**
+- [x] **Step 4: 提交主圖與產生器**
 
 ```bash
-git add Resources/AppIcon-1024.png Resources/LumaHarbor.iconset Resources/LumaHarbor.icns Scripts/generate-app-icons.sh
+git add Resources/AppIcon-1024.png Resources/MacAssets.xcassets Resources/LumaHarbor.icns Scripts/generate-app-icons.sh
 git commit -m "feat: add LumaHarbor harbor aperture icon"
 ```
 
