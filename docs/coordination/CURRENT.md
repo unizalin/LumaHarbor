@@ -4,6 +4,12 @@ Updated: 2026-09-07
 
 Updated by: Codex（A11 修正版真人實體鍵盤複測 PASS；Phase 4.6 完整驗證完成）
 
+## Alpha 853b837 distribution verification (2026-09-07, Codex, artifact + documentation)
+
+- **狀態**：`READY FOR TRUSTED SMALL-GROUP TESTING / NOT GENERAL DISTRIBUTION`。新增 `docs/testing/beta/ALPHA_853B837_TEST_REPORT.md`，作為可與 `build/LumaHarbor-0.1.0-alpha-853b837.zip` 一起交付的繁中驗測與開啟說明。
+- **重新驗證 ZIP**：SHA-256 為 `50125d3fcf03a12d8535c197aa0bb6f85f7114797816a4155356e7c359518af9`；`unzip -t` PASS；從 ZIP 實際解壓後執行 `codesign --verify --deep --strict` PASS。App 為 `0.1.0 (1)`、最低 macOS 14、arm64 only。
+- **分發限制**：簽章為 ad-hoc，Team ID 未設定，沒有 Developer ID/notarization；`spctl` 未接受此 build。因此可交給已知、信任來源且了解 alpha 風險的 Apple Silicon Mac 測試者，但不能保證一般使用者下載後直接雙擊即可開啟，也不宣稱 production-ready。
+
 ## Phase 4 Task 4.6 final verification (2026-09-07, Codex + user physical-keyboard verification)
 
 - **狀態**：`DONE / PASS`。使用者在整合 commit `853b837` 的 Release build 內實際修改曝光後，以實體鍵盤按 `⌘Z` 與 `⇧⌘Z`，回報兩者均有作用；A11 因此正式由舊版 `FAIL`／修正版待複測改為 `PASS`。這是使用者本人在真 Mac app 的實體鍵盤結果，不是 CUA、AppleScript 或 CGEvent 合成事件。
