@@ -20,6 +20,7 @@
 		12000000000000000000000B /* PadLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000000B /* PadLibraryView.swift */; };
 		12000000000000000000000C /* PadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000000C /* PadRootView.swift */; };
 		12000000000000000000000D /* PadThumbnailCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000000D /* PadThumbnailCell.swift */; };
+		12000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000000E /* Assets.xcassets */; };
 		120000000000000000000101 /* EditorCore in Frameworks */ = {isa = PBXBuildFile; productRef = 12A000000000000000000001 /* EditorCore */; };
 		120000000000000000000102 /* AdjustmentUI in Frameworks */ = {isa = PBXBuildFile; productRef = 12A000000000000000000002 /* AdjustmentUI */; };
 		120000000000000000000103 /* PhotoLibraryCore in Frameworks */ = {isa = PBXBuildFile; productRef = 12A000000000000000000003 /* PhotoLibraryCore */; };
@@ -40,6 +41,7 @@
 		12100000000000000000000B /* PadLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadLibraryView.swift; sourceTree = "<group>"; };
 		12100000000000000000000C /* PadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadRootView.swift; sourceTree = "<group>"; };
 		12100000000000000000000D /* PadThumbnailCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadThumbnailCell.swift; sourceTree = "<group>"; };
+		12100000000000000000000E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		121000000000000000000100 /* LumaHarborPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumaHarborPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -82,6 +84,7 @@
 				12100000000000000000000B /* PadLibraryView.swift */,
 				12100000000000000000000C /* PadRootView.swift */,
 				12100000000000000000000D /* PadThumbnailCell.swift */,
+				12100000000000000000000E /* Assets.xcassets */,
 			);
 			path = LumaHarborPad.swiftpm/Sources/LumaHarborPadApp;
 			sourceTree = "<group>";
@@ -162,6 +165,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				12000000000000000000000E /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -307,6 +311,7 @@
 		126000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -326,7 +331,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.unizalin.LumaHarborPad;
+				PRODUCT_BUNDLE_IDENTIFIER = org.lumaharbor.LumaHarborPad;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -340,6 +345,7 @@
 		126000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -359,7 +365,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.unizalin.LumaHarborPad;
+				PRODUCT_BUNDLE_IDENTIFIER = org.lumaharbor.LumaHarborPad;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

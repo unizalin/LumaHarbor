@@ -260,7 +260,7 @@ git commit -m "feat: bundle app icon on macOS"
 - Consumes: `Resources/AppIcon-1024.png` from Task 2.
 - Produces: iPad `Assets.xcassets` resource and Xcode `AppIcon` build setting without any signing identity.
 
-- [ ] **Step 1: 建立 asset catalog metadata**
+- [x] **Step 1: 建立 asset catalog metadata**
 
 Root `Contents.json`:
 
@@ -298,7 +298,7 @@ Copy the canonical master without modification:
 cp Resources/AppIcon-1024.png Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 ```
 
-- [ ] **Step 2: 將 asset catalog 接進 Xcode project**
+- [x] **Step 2: 將 asset catalog 接進 Xcode project**
 
 Add one `PBXFileReference` for `Assets.xcassets`, one `PBXBuildFile` named `Assets.xcassets in Resources`, place the file reference in group `123000000000000000000002`, and place the build file in resources phase `122000000000000000000003`.
 
@@ -329,7 +329,7 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 
 Do not modify either existing empty `DEVELOPMENT_TEAM = "";` line.
 
-- [ ] **Step 3: 執行 iPad contract test**
+- [x] **Step 3: 執行 iPad contract test**
 
 ```bash
 swift test --filter AppIconAssetContractTests/testIPadAssetCatalogAndProjectAreWired
@@ -337,7 +337,7 @@ swift test --filter AppIconAssetContractTests/testIPadAssetCatalogAndProjectAreW
 
 Expected: PASS。
 
-- [ ] **Step 4: 執行 Xcode asset/build gates**
+- [x] **Step 4: 執行 Xcode asset/build gates**
 
 ```bash
 xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' -derivedDataPath /private/tmp/LumaHarbor-AppIcon-Simulator CODE_SIGNING_ALLOWED=NO build
@@ -346,7 +346,7 @@ xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destinat
 
 Expected: both commands end with `** BUILD SUCCEEDED **` and asset compiler reports no missing AppIcon slot or alpha-channel error。
 
-- [ ] **Step 5: 提交 iPad 接線**
+- [x] **Step 5: 提交 iPad 接線**
 
 ```bash
 git add Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/Assets.xcassets Apps/LumaHarborPad.xcodeproj/project.pbxproj
