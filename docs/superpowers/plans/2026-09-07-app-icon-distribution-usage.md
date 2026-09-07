@@ -32,7 +32,7 @@
 - Consumes: repository-relative `Resources/AppIcon-1024.png`、`Resources/LumaHarbor.icns`、`Resources/Info.plist`、`Scripts/build-app-bundle.sh`、iPad asset catalog 與 Xcode project。
 - Produces: `AppIconAssetContractTests`，後續每個接線 task 都以同一個 test class 作為 gate。
 
-- [ ] **Step 1: 建立會因目前完全沒有圖示資產而失敗的 contract tests**
+- [x] **Step 1: 建立會因目前完全沒有圖示資產而失敗的 contract tests**
 
 ```swift
 import CoreGraphics
@@ -82,7 +82,7 @@ final class AppIconAssetContractTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: 執行測試確認 RED**
+- [x] **Step 2: 執行測試確認 RED**
 
 Run:
 
@@ -92,7 +92,7 @@ swift test --filter AppIconAssetContractTests
 
 Expected: FAIL，第一個 failure 是 `Resources/AppIcon-1024.png` 不存在，其他 assertions 也指出 `.icns`、plist、build script 與 iPad asset catalog 尚未接線。
 
-- [ ] **Step 3: 提交 RED tests**
+- [x] **Step 3: 提交 RED tests**
 
 ```bash
 git add Tests/LumaHarborAppTests/AppIconAssetContractTests.swift
