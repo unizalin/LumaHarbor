@@ -1,11 +1,11 @@
 # AwayPhotoRawEditor Parity：完整分階段 Implementation Roadmap
 
-狀態：給 Claude / Codex 接續開發用  
-日期：2026-09-02  
+狀態：給 Claude / Codex 接續開發用
+日期：2026-09-02
 Worktree：`<CODEX_PHASE1_WORKTREE>`
-Branch：`codex/awayphotoraweditor-parity-phase1`  
-Base：local `main@8a400edb0f07082d157abb28b9c688d18db98f34`  
-總 spec：`docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`  
+Branch：`codex/awayphotoraweditor-parity-phase1`
+Base：local `main@8a400edb0f07082d157abb28b9c688d18db98f34`
+總 spec：`docs/superpowers/specs/2026-09-02-awayphotoraweditor-parity-design.md`
 Phase 1 plan：`docs/superpowers/plans/2026-09-02-awayphotoraweditor-parity-phase1.md`
 
 ## 核心規則
