@@ -60,7 +60,7 @@ LumaHarbor 的 iPad App 已經存在，並且在實體 iPad 上完成過安裝�
 
 - LumaHarbor 不會直接改寫 RAW 原始檔案。
 - 對可寫入的照片資料夾，App 可能會在旁邊建立 `.lumaharbor` sidecar 檔案，用來儲存非破壞式編輯紀錄。
-- 索引、書籤、縮圖、預設集與 app-copy 文件會存放在使用者的 Application Support 容器內。
-- 移除 App（不論 Mac 或 iPad）**不會**自動刪除上述 `.lumaharbor` sidecar 或 Application Support 裡的資料，需要的話要自行清除。
+- Mac 的索引、書籤、縮圖與預設集會存放在使用者的 Application Support 目錄；只把 Mac App 丟進垃圾桶不會自動刪除該目錄。
+- iPad 刪除 App 時會一併移除 App sandbox 內的資料；但照片資料夾內的原檔與 `.lumaharbor` sidecar 不屬於 App sandbox，不會因此被刪除。
 - 這些本機記錄可能包含檔名與 metadata，LumaHarbor 本身不會另外加密這些檔案。
 - 不要提供私人 RAW 樣本、真實 sidecar、Application Support 資料庫、憑證、provisioning profile 或其他使用者的本機資料給第三方。

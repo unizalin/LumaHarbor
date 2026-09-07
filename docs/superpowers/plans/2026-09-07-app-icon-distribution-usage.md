@@ -369,7 +369,7 @@ git commit -m "feat: add app icon to iPad target"
 - Consumes: current Mac ZIP limitations, stable iPad Xcode project, and prior real-device PASS evidence.
 - Produces: one user-facing Traditional Chinese quick start plus links from all existing distribution entry points.
 
-- [ ] **Step 1: 建立繁中快速入門**
+- [x] **Step 1: 建立繁中快速入門**
 
 The document must contain these literal headings so source review can verify coverage:
 
@@ -386,11 +386,11 @@ Mac instructions must include checksum verification, Gatekeeper right-click/Open
 
 iPad instructions must state that the app already works on iPad, use `Apps/LumaHarborPad.xcodeproj`, select the `LumaHarborPad` scheme/device/Development Team, then Run. External distribution must distinguish TestFlight, Ad Hoc, and recipient-owned Xcode signing, and must explicitly say the Mac ZIP cannot be installed on iPad.
 
-- [ ] **Step 2: 更新既有入口文件**
+- [x] **Step 2: 更新既有入口文件**
 
 Add a `快速開始` link to `README.md`; add the same link and existing real-device PASS summary to `docs/development/ipad-xcode-runbook.md`; link the quick start from both alpha distribution documents. Preserve the existing ad-hoc/notarization warnings.
 
-- [ ] **Step 3: 執行文字與隱私檢查**
+- [x] **Step 3: 執行文字與隱私檢查**
 
 ```bash
 rg -n 'Mac：第一次開啟|iPad：從 Xcode 安裝到自己的 iPad|Mac ZIP 不能安裝到 iPad|TestFlight|Ad Hoc|\.lumaharbor' docs/testing/beta/QUICK_START_ZH-HANT.md
@@ -399,7 +399,7 @@ rg -n '/Users/[^<]|/Volumes/[^<]|DEVELOPMENT_TEAM = [A-Z0-9]|UDID|BEGIN PRIVATE 
 
 Expected: first command finds every required topic；second command has no real private value（generic labels such as `UDID` in safety prose are allowed after manual inspection）。
 
-- [ ] **Step 4: 提交文件**
+- [x] **Step 4: 提交文件**
 
 ```bash
 git add README.md docs/development/ipad-xcode-runbook.md docs/testing/beta/QUICK_START_ZH-HANT.md docs/testing/beta/SMALL_GROUP_ALPHA.md docs/testing/beta/ALPHA_853B837_TEST_REPORT.md
