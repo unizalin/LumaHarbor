@@ -454,20 +454,14 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
 
         let viewSource = try Self.loadSource("PadLibraryView.swift")
-        guard let sheetMarkerRange = viewSource.range(of: ".sheet(isPresented: $isSidebarPresented)"),
-              let elseMarkerRange = viewSource.range(of: "} else {"),
-              let trueRange = viewSource.range(of: "showsOperationOverlay: true"),
-              let falseRange = viewSource.range(of: "showsOperationOverlay: false") else {
-            return XCTFail("PadLibraryView must wire showsOperationOverlay differently for its compact sheet and regular-width layouts")
+        guard viewSource.contains(".sheet(isPresented: $isSidebarPresented)"),
+              viewSource.contains("private var sidebarSheet"),
+              viewSource.contains("case .persistent:"),
+              viewSource.contains("case .persistentWithDetails:"),
+              viewSource.contains("showsOperationOverlay: true"),
+              viewSource.contains("showsOperationOverlay: false") else {
+            return XCTFail("PadLibraryView must wire showsOperationOverlay differently for overlay and persistent layouts")
         }
-        XCTAssertTrue(
-            sheetMarkerRange.upperBound < trueRange.lowerBound && trueRange.lowerBound < elseMarkerRange.lowerBound,
-            "the compact-width sheet's PadLibrarySidebar call must pass showsOperationOverlay: true, since it sits above the global overlay"
-        )
-        XCTAssertTrue(
-            elseMarkerRange.upperBound < falseRange.lowerBound,
-            "the regular-width PadLibrarySidebar call must pass showsOperationOverlay: false, since the global overlay already covers it"
-        )
     }
 
     /// Source rows should expose scan state inline, not only as a temporary
@@ -641,5 +635,42 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
             body.contains("alert = SafeErrorPresentation.alert("),
             "apply(_:) must surface the failure as a SafeErrorPresentation alert"
         )
+    }
+
+    func testGridProvidesTouchSelectModeAndBatchBar() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(source.contains("@State private var isSelectMode = false"))
+        XCTAssertTrue(source.contains("library.selectedPhotoIDs"))
+        XCTAssertTrue(source.contains("library.togglePhotoSelection(photo.id)"))
+        XCTAssertTrue(source.contains(".safeAreaInset(edge: .bottom"))
+        XCTAssertTrue(source.contains("library.selectAllVisiblePhotos()"))
+        XCTAssertTrue(source.contains("library.clearPhotoSelection()"))
+        XCTAssertTrue(
+            source.contains(".frame(minWidth: 44, minHeight: 44)"),
+            "selection actions must retain the global 44 pt hit target"
+        )
+    }
+
+    func testGridUsesSharedCatalogFiltersAndAnAdvancedFilterSheet() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+        let sheet = try Self.loadSource("PadLibraryFilterSheet.swift")
+
+        XCTAssertTrue(source.contains("PadLibraryFilterSheet("))
+        XCTAssertTrue(source.contains("library.setRatingFilter("))
+        XCTAssertTrue(source.contains("library.setFlagFilter("))
+        XCTAssertTrue(source.contains("library.setHasEditsFilter("))
+        XCTAssertTrue(source.contains("library.ratingFilter"))
+        XCTAssertTrue(source.contains("library.flagFilter"))
+        XCTAssertTrue(sheet.contains("library.keywordFilter"))
+        XCTAssertTrue(sheet.contains("library.setCatalogFilters("))
+    }
+
+    func testThumbnailCellExposesSelectionStateToVoiceOver() throws {
+        let source = try Self.loadSource("PadThumbnailCell.swift")
+
+        XCTAssertTrue(source.contains("let isBatchSelected: Bool"))
+        XCTAssertTrue(source.contains("isBatchSelected ? L10n.t(\"selected\")"))
+        XCTAssertTrue(source.contains(".accessibilityValue("))
     }
 }

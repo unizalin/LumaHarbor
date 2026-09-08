@@ -8,53 +8,115 @@ import SwiftUI
 /// Right pane: the shared basic adjustments alongside Mac-only preset controls.
 struct InspectorView: View {
     @EnvironmentObject private var model: LibraryViewModel
+    @State private var selectedTab: InspectorTab = .adjustments
+    @State private var expandedGroups: Set<InspectorGroup> = [.basic, .color]
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
 
-            if let photo = model.editor.photo {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        HistogramPanel(histogram: model.editor.histogram)
-                        Divider()
-                        MetadataPanel(snapshot: EditorMetadataSnapshot(photo: photo))
-                        Divider()
-                        PresetBrowserView()
-                        Divider()
-                        Text(L10n.t("Basic")).font(.headline)
-                        BasicAdjustmentPanel(editor: model.editor)
-                        Divider()
-                        HStack {
-                            Text(L10n.t("Color")).font(.headline)
-                            Spacer()
-                            WhiteBalanceEyedropperButton(editor: model.editor)
-                        }
-                        ColorAdjustmentPanel(editor: model.editor)
-                        Divider()
-                        Text(L10n.t("Curve")).font(.headline)
-                        CurveAdjustmentPanel(editor: model.editor)
-                        Divider()
-                        Text(L10n.t("Detail")).font(.headline)
-                        DetailAdjustmentPanel(editor: model.editor)
-                        Divider()
-                        Text(L10n.t("Effects")).font(.headline)
-                        EffectsAdjustmentPanel(editor: model.editor)
-                        Divider()
-                        Text(L10n.t("Geometry")).font(.headline)
-                        GeometryAdjustmentPanel(editor: model.editor)
-                        Divider()
-                        Text(L10n.t("Local Adjustments")).font(.headline)
-                        LocalAdjustmentsPanel(editor: model.editor)
-                    }
-                    .padding(14)
+            Picker("", selection: $selectedTab) {
+                ForEach(InspectorTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
                 }
-            } else {
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
+
+            if model.editor.photo == nil {
                 ContentUnavailableMessage()
+            } else {
+                switch selectedTab {
+                case .adjustments:
+                    adjustmentContent
+                case .presets:
+                    PresetBrowserView()
+                case .metadata:
+                    metadataContent
+                }
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var adjustmentContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HistogramPanel(histogram: model.editor.histogram)
+                inspectorGroup(.basic, title: L10n.t("Basic")) {
+                    BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
+                }
+                inspectorGroup(.color, title: L10n.t("Color")) {
+                    HStack {
+                        Text(L10n.t("White Balance")).font(.headline)
+                        Spacer()
+                        WhiteBalanceEyedropperButton(editor: model.editor)
+                    }
+                    BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.whiteBalanceKinds)
+                    ColorAdjustmentPanel(editor: model.editor)
+                }
+                inspectorGroup(.curve, title: L10n.t("Curve")) {
+                    CurveAdjustmentPanel(editor: model.editor)
+                }
+                inspectorGroup(.detail, title: L10n.t("Detail")) {
+                    DetailAdjustmentPanel(editor: model.editor)
+                }
+                inspectorGroup(.effects, title: L10n.t("Effects")) {
+                    EffectsAdjustmentPanel(editor: model.editor)
+                }
+                inspectorGroup(.geometry, title: L10n.t("Geometry")) {
+                    GeometryAdjustmentPanel(editor: model.editor)
+                }
+                inspectorGroup(.local, title: L10n.t("Local Adjustments")) {
+                    LocalAdjustmentsPanel(editor: model.editor)
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private var metadataContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let photo = model.editor.photo {
+                    MetadataPanel(snapshot: EditorMetadataSnapshot(photo: photo))
+                }
+                Divider()
+                SaveStatePanel(state: model.editor.saveState)
+            }
+            .padding(14)
+        }
+    }
+
+    @ViewBuilder
+    private func inspectorGroup<Content: View>(
+        _ group: InspectorGroup,
+        title: String,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { expandedGroups.contains(group) },
+                set: { isExpanded in
+                    if isExpanded {
+                        expandedGroups.insert(group)
+                    } else {
+                        expandedGroups.remove(group)
+                    }
+                }
+            )
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                content()
+            }
+            .padding(.top, 8)
+        } label: {
+            Text(title).font(.headline)
+        }
     }
 
     private var header: some View {
@@ -62,14 +124,95 @@ struct InspectorView: View {
             Text(L10n.t("Adjustments"))
                 .font(.headline)
             Spacer()
+            adjustmentActionsMenu
             Button(L10n.t("Reset All")) {
                 model.editor.resetAll()
             }
             .controlSize(.small)
-            .disabled(model.editor.photo == nil || !model.editor.hasEdits)
+            .disabled(selectedTab != .adjustments || model.editor.photo == nil || !model.editor.hasEdits)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    /// Phase 2.2 (spec §6.2): "Copy Adjustments" / "Paste Adjustments" /
+    /// "Sync to Selected Photos", plus the two opt-in toggles that decide
+    /// whether the *next* copy also captures Geometry/Local Adjustments
+    /// (off by default -- global adjustments are always copied).
+    private var adjustmentActionsMenu: some View {
+        Menu {
+            Toggle(L10n.t("Include Geometry"), isOn: $model.copyIncludesGeometry)
+            Toggle(L10n.t("Include Local Adjustments"), isOn: $model.copyIncludesLocalAdjustments)
+            Divider()
+            Button(L10n.t("Copy Adjustments")) {
+                model.copyAdjustments()
+            }
+            .disabled(model.editor.photo == nil)
+            Button(L10n.t("Paste Adjustments")) {
+                model.pasteAdjustments()
+            }
+            .disabled(model.editor.photo == nil || model.adjustmentClipboard == nil)
+            Button(L10n.t("Sync to Selected Photos")) {
+                Task { await model.syncAdjustmentsToSelectedPhotos() }
+            }
+            .disabled(model.adjustmentClipboard == nil || model.selectedPhotoIDs.count <= 1)
+        } label: {
+            Label(L10n.t("Adjustments Actions"), systemImage: "doc.on.doc")
+        }
+        .controlSize(.small)
+        .disabled(selectedTab != .adjustments)
+    }
+}
+
+private enum InspectorTab: String, CaseIterable, Identifiable {
+    case adjustments
+    case presets
+    case metadata
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .adjustments: return L10n.t("Adjustments")
+        case .presets: return L10n.t("Presets")
+        case .metadata: return L10n.t("Metadata")
+        }
+    }
+}
+
+private enum InspectorGroup: Hashable {
+    case basic, color, curve, detail, effects, geometry, local
+}
+
+private enum MacBasicAdjustmentPanel {
+    static let toneKinds: [AdjustmentKind] = [
+        .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .vibrance, .saturation
+    ]
+    static let whiteBalanceKinds: [AdjustmentKind] = [.temperature, .tint]
+}
+
+private struct SaveStatePanel: View {
+    let state: SaveState
+
+    var body: some View {
+        switch state {
+        case .unchanged:
+            Label(L10n.t("Saved"), systemImage: "checkmark.circle")
+                .foregroundStyle(.secondary)
+        case .pending:
+            Label(L10n.t("Unsaved"), systemImage: "circle.dotted")
+                .foregroundStyle(.secondary)
+        case .saving:
+            Label(L10n.t("Saving…"), systemImage: "arrow.triangle.2.circlepath")
+                .foregroundStyle(.secondary)
+        case .saved:
+            Label(L10n.t("Saved"), systemImage: "checkmark.circle")
+                .foregroundStyle(.secondary)
+        case .failed(let message):
+            Label(L10n.t("Not saved"), systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .help(message)
+        }
     }
 }
 

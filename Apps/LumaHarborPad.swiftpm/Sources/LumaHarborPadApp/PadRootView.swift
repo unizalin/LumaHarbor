@@ -1,3 +1,4 @@
+import AdjustmentUI
 import EditorCore
 import Localization
 import SwiftUI
@@ -10,6 +11,16 @@ struct PadRootView: View {
     @State private var isImporting = false
     @State private var isRelinking = false
     @State private var isShowingSettings = false
+
+    /// Scene-scoped presentation preferences (sidebar visibility, inspector
+    /// tab, filmstrip, handedness) -- never an adjustment, undo entry, or
+    /// sidecar write. Held here, at the top of the scene, rather than inside
+    /// `PadLibraryView`/`PadEditorView` themselves, so it survives the route
+    /// switch between library and editor: `content` below recreates whichever
+    /// of those two views isn't currently showing every time the route
+    /// changes, which would otherwise reset any `@State` scoped to the
+    /// discarded view.
+    @State private var workspaceState = PadWorkspaceState.initial
 
     var body: some View {
         NavigationStack {
@@ -139,7 +150,7 @@ struct PadRootView: View {
     @ViewBuilder
     private var content: some View {
         if editor.document != nil {
-            PadEditorView(model: editor)
+            PadEditorView(model: editor, exporter: services.exporter)
         } else if editor.pendingRelink != nil {
             // No "Cancel" here, deliberately: this prompt is the only way
             // back to this specific document, and dismissing the file
@@ -159,7 +170,7 @@ struct PadRootView: View {
         } else if editor.isPreparingDocument {
             ProgressView(L10n.t("Opening photo…"))
         } else {
-            PadLibraryView(library: library, editor: editor, services: services)
+            PadLibraryView(library: library, editor: editor, services: services, workspaceState: $workspaceState)
         }
     }
 

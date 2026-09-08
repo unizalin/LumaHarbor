@@ -125,6 +125,26 @@ struct PhotoGridCell: View {
                         .help(L10n.t("Virtual copy"))
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                if photo.rating > 0 || photo.flag != .none {
+                    HStack(spacing: 4) {
+                        if photo.rating > 0 {
+                            Label("\(photo.rating)", systemImage: "star.fill")
+                                .foregroundStyle(.yellow)
+                        }
+                        if photo.flag != .none {
+                            Image(systemName: photo.flag == .pick ? "flag.fill" : "xmark.octagon.fill")
+                                .foregroundStyle(photo.flag == .pick ? .green : .red)
+                        }
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(4)
+                    .help(L10n.t("Photo rating and flag"))
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 4)
                     .strokeBorder(

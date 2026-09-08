@@ -28,32 +28,85 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 820, height: 1180), .bottomDrawer)
     }
 
-    // MARK: - The 899/900pt width boundary, in landscape
+    // MARK: - Adaptive workspace width profiles
 
-    func testWidthExactly900InLandscapeUsesDock() {
-        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 900, height: 700), .trailingDock)
+    func testWidthProfilesUseAvailableWidthNotDeviceOrientation() {
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 699.5), .compact)
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 700), .standard)
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 1_099.5), .standard)
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 1_100), .expanded)
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 1_359.5), .expanded)
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 1_360), .wide)
     }
 
-    func testWidthOf899InLandscapeUsesBottomDrawer() {
-        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 899, height: 700), .bottomDrawer)
+    func testAdaptiveWorkspaceLayoutKeepsPrimaryContentAsWidthShrinks() {
+        let compact = PadWorkspaceLayoutPolicy.layout(forWidth: 600)
+        XCTAssertEqual(compact.librarySidebar, .overlay)
+        XCTAssertEqual(compact.editorInspector, .bottomDrawer)
+        XCTAssertFalse(compact.showsDetailsColumn)
+        XCTAssertFalse(compact.showsFilmstrip)
+
+        let standard = PadWorkspaceLayoutPolicy.layout(forWidth: 900)
+        XCTAssertEqual(standard.librarySidebar, .overlay)
+        XCTAssertEqual(standard.editorInspector, .bottomDrawer)
+        XCTAssertFalse(standard.showsDetailsColumn)
+        XCTAssertFalse(standard.showsFilmstrip)
+
+        let expanded = PadWorkspaceLayoutPolicy.layout(forWidth: 1_180)
+        XCTAssertEqual(expanded.librarySidebar, .persistent)
+        XCTAssertEqual(expanded.editorInspector, .trailingDock)
+        XCTAssertTrue(expanded.showsFilmstrip)
+
+        let wide = PadWorkspaceLayoutPolicy.layout(forWidth: 1_400)
+        XCTAssertEqual(wide.librarySidebar, .persistentWithDetails)
+        XCTAssertTrue(wide.showsDetailsColumn)
+        XCTAssertTrue(wide.showsFilmstrip)
     }
 
-    /// Same boundary, expressed as a fractional point just below and at
-    /// 900 — `>=` must not be silently rounding or truncating.
-    func testWidthJustBelow900InLandscapeUsesBottomDrawer() {
-        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 899.5, height: 700), .bottomDrawer)
+    func testNegativeAndZeroWidthsStayCompact() {
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: -1), .compact)
+        XCTAssertEqual(PadWorkspaceLayoutPolicy.profile(forWidth: 0), .compact)
     }
 
-    func testWidthJustAbove900InLandscapeUsesDock() {
-        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 900.5, height: 700), .trailingDock)
+    func testWorkspaceStateContainsOnlyPresentationPreferences() {
+        let state = PadWorkspaceState(
+            isSidebarVisible: false,
+            inspectorTab: .info,
+            isFilmstripVisible: true,
+            usesLeftHandedLayout: true
+        )
+
+        XCTAssertFalse(state.isSidebarVisible)
+        XCTAssertEqual(state.inspectorTab, .info)
+        XCTAssertTrue(state.isFilmstripVisible)
+        XCTAssertTrue(state.usesLeftHandedLayout)
+        XCTAssertEqual(PadWorkspaceState.initial.inspectorTab, .adjustments)
+    }
+
+    // MARK: - The 1,100pt width boundary, in landscape
+
+    func testWidthExactly1100InLandscapeUsesDock() {
+        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_100, height: 700), .trailingDock)
+    }
+
+    func testWidthOf1099InLandscapeUsesBottomDrawer() {
+        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_099, height: 700), .bottomDrawer)
+    }
+
+    /// Same boundary, expressed as fractional points around 1,100 — `>=`
+    /// must not be silently rounding or truncating.
+    func testWidthJustBelow1100InLandscapeUsesBottomDrawer() {
+        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_099.5, height: 700), .bottomDrawer)
+    }
+
+    func testWidthJustAbove1100InLandscapeUsesDock() {
+        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_100.5, height: 700), .trailingDock)
     }
 
     // MARK: - Square
 
-    func testSquareAtOrAboveTheWidthThresholdUsesDock() {
-        // width == height, and width >= 900 -- "width >= height" is
-        // satisfied by equality, not just strict landscape.
-        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_024, height: 1_024), .trailingDock)
+    func testSquareBelowTheExpandedWidthThresholdUsesBottomDrawer() {
+        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_024, height: 1_024), .bottomDrawer)
     }
 
     func testSquareBelowTheWidthThresholdUsesBottomDrawer() {
@@ -76,15 +129,15 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
     }
 
     /// A 2/3-width Split View pane, wide enough to be landscape-shaped
-    /// but still under the 900pt dock threshold.
+    /// but still under the 1,100pt dock threshold.
     func testModeratelyWideSplitViewPaneBelowThresholdUsesBottomDrawer() {
         XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 750, height: 700), .bottomDrawer)
     }
 
-    /// A 2/3-width Split View pane on a 12.9" iPad, wide enough to clear
-    /// the dock threshold even while sharing the screen with another app.
-    func testWideSplitViewPaneAtOrAboveThresholdUsesDock() {
-        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 950, height: 700), .trailingDock)
+    /// A 2/3-width Split View pane on a 13" iPad, still under the expanded
+    /// width threshold while sharing the screen with another app.
+    func testWideSplitViewPaneBelowExpandedThresholdUsesBottomDrawer() {
+        XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 950, height: 700), .bottomDrawer)
     }
 
     // MARK: - Degenerate sizes

@@ -51,6 +51,8 @@ struct PadLibraryGrid: View {
 
     @AppStorage("PadLibraryGridDensity") private var densityRawValue = PadLibraryGridDensity.medium.rawValue
     @State private var openingPhotoID: PhotoID?
+    @State private var isSelectMode = false
+    @State private var isShowingFilters = false
 
     /// How close to the end of `library.photos` a visible cell must be
     /// before it triggers `loadNextPage()` -- the brief's "last 20 visible
@@ -74,6 +76,19 @@ struct PadLibraryGrid: View {
         innerContent
             .searchable(text: searchBinding, prompt: Text(L10n.t("Search by filename")))
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        isSelectMode.toggle()
+                    } label: {
+                        Label(
+                            L10n.t(isSelectMode ? "Done" : "Select"),
+                            systemImage: isSelectMode ? "checkmark" : "checkmark.circle"
+                        )
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHint(Text(L10n.t("Select photos for batch actions")))
+                }
+                ToolbarItem(placement: .primaryAction) { filterMenu }
                 ToolbarItem(placement: .primaryAction) { sortMenu }
                 ToolbarItem(placement: .primaryAction) { densityMenu }
             }
@@ -86,6 +101,14 @@ struct PadLibraryGrid: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: openingPhotoID)
+            .sheet(isPresented: $isShowingFilters) {
+                PadLibraryFilterSheet(library: library)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !library.selectedPhotoIDs.isEmpty {
+                    selectionBar
+                }
+            }
     }
 
     @ViewBuilder
@@ -239,8 +262,11 @@ struct PadLibraryGrid: View {
     @ViewBuilder
     private func cell(for photo: PhotoAsset) -> some View {
         let context = cellContext(for: photo)
+        let isBatchSelected = library.selectedPhotoIDs.contains(photo.id)
         PadThumbnailCell(
             photo: photo,
+            isBatchSelected: isBatchSelected,
+            isSelectionMode: isSelectMode,
             isOnline: context.isOnline,
             sourceDisplayName: context.displayName,
             sourceStatusMessage: context.statusMessage,
@@ -249,7 +275,11 @@ struct PadLibraryGrid: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            Task { await open(photo) }
+            if isSelectMode {
+                library.togglePhotoSelection(photo.id)
+            } else {
+                Task { await open(photo) }
+            }
         }
         .onAppear {
             guard let index = library.photos.firstIndex(where: { $0.id == photo.id }) else { return }
@@ -323,6 +353,101 @@ struct PadLibraryGrid: View {
                 Text(title)
             }
         }
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Button {
+                library.setRatingFilter(nil)
+            } label: {
+                Label(L10n.t("Any Rating"), systemImage: library.ratingFilter == nil ? "checkmark" : "")
+            }
+            Button {
+                library.setRatingFilter(.unrated)
+            } label: {
+                Label(L10n.t("Unrated"), systemImage: library.ratingFilter == .unrated ? "checkmark" : "")
+            }
+            ForEach(1...5, id: \.self) { value in
+                Button {
+                    library.setRatingFilter(.exact(value))
+                } label: {
+                    Label(
+                        "\(L10n.t("Rating")) \(value)",
+                        systemImage: library.ratingFilter == .exact(value) ? "checkmark" : ""
+                    )
+                }
+            }
+
+            Divider()
+            Button {
+                library.setFlagFilter(nil)
+            } label: {
+                Label(L10n.t("Any Flag"), systemImage: library.flagFilter == nil ? "checkmark" : "")
+            }
+            Button {
+                library.setFlagFilter(.pick)
+            } label: {
+                Label(L10n.t("Pick"), systemImage: library.flagFilter == .pick ? "checkmark" : "")
+            }
+            Button {
+                library.setFlagFilter(.reject)
+            } label: {
+                Label(L10n.t("Reject"), systemImage: library.flagFilter == .reject ? "checkmark" : "")
+            }
+            Button {
+                library.setFlagFilter(PhotoFlag.none)
+            } label: {
+                Label(L10n.t("No Flag"), systemImage: library.flagFilter == PhotoFlag.none ? "checkmark" : "")
+            }
+
+            Divider()
+            Button {
+                library.setHasEditsFilter(library.hasEditsFilter == true ? nil : true)
+            } label: {
+                Label(L10n.t("Edited"), systemImage: library.hasEditsFilter == true ? "checkmark" : "")
+            }
+            Button {
+                isShowingFilters = true
+            } label: {
+                Label(L10n.t("Advanced Filters"), systemImage: "slider.horizontal.3")
+            }
+            Button {
+                library.clearCatalogFilters()
+            } label: {
+                Label(L10n.t("Clear"), systemImage: "xmark.circle")
+            }
+        } label: {
+            Label(L10n.t("Filter"), systemImage: "line.3.horizontal.decrease.circle")
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityHint(Text(L10n.t("Filter photos by curation state")))
+    }
+
+    private var selectionBar: some View {
+        HStack(spacing: 12) {
+            Label(
+                "\(library.selectedPhotoIDs.count) \(L10n.t("selected"))",
+                systemImage: "checkmark.circle.fill"
+            )
+            .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Button(L10n.t("Select All")) {
+                library.selectAllVisiblePhotos()
+            }
+            .frame(minWidth: 44, minHeight: 44)
+
+            Button(L10n.t("Clear")) {
+                library.clearPhotoSelection()
+                isSelectMode = false
+            }
+            .frame(minWidth: 44, minHeight: 44)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 56)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
     }
 
     private var densityMenu: some View {

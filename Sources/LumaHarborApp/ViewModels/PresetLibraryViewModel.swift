@@ -374,7 +374,7 @@ final class PresetLibraryViewModel: ObservableObject {
         var failureCount = 0
         for url in urls {
             do {
-                let data = try Data(contentsOf: url)
+                let data = try Self.readBoundedPresetData(from: url)
                 let suggestedName = url.deletingPathExtension().lastPathComponent
                 // Task 3.2: import also accepts LumaHarbor's own `.lhpreset`
                 // files, not just `.xmp` -- distinct from `.lhpresetbackup`
@@ -472,7 +472,11 @@ final class PresetLibraryViewModel: ObservableObject {
     }
 
     func exportAsNativePreset(_ document: PresetDocument) throws -> Data {
-        try SidecarCoding.encode(document)
+        let data = try SidecarCoding.encode(document)
+        guard data.count <= PresetDocument.maximumEncodedBytes else {
+            throw PresetError.documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
+        }
+        return data
     }
 
     /// Wraps an `.lhpreset` file's own decoded document into the same
@@ -510,6 +514,18 @@ final class PresetLibraryViewModel: ObservableObject {
             preservedProperties: [],
             diagnostics: []
         )
+    }
+
+    private static func readBoundedPresetData(from url: URL) throws -> Data {
+        if let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           fileSize > PresetDocument.maximumEncodedBytes {
+            throw PresetError.documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
+        }
+        let data = try Data(contentsOf: url)
+        guard data.count <= PresetDocument.maximumEncodedBytes else {
+            throw PresetError.documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
+        }
+        return data
     }
 
     // MARK: - Backup / restore (spec: "備份、還原 preset", Task 3.2)

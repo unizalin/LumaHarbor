@@ -19,10 +19,13 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(PhotoIndexStore.schemaVersion, 3)
-        XCTAssertEqual(try readSchemaVersion(at: url), 3)
+        XCTAssertEqual(PhotoIndexStore.schemaVersion, 4)
+        XCTAssertEqual(try readSchemaVersion(at: url), 4)
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
+        XCTAssertTrue(try columnExists("photo", "rating", at: url))
+        XCTAssertTrue(try columnExists("photo", "flag", at: url))
+        XCTAssertTrue(try columnExists("photo", "format_normalized", at: url))
         XCTAssertEqual(try store.photoCount(inLibrary: fixtureLibraryID), 2)
         XCTAssertEqual(try store.page(
             matching: LibraryQuery(scope: .all, sort: .captureDateDescending),
@@ -62,9 +65,11 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(try readSchemaVersion(at: url), 3)
+        XCTAssertEqual(try readSchemaVersion(at: url), 4)
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
+        XCTAssertTrue(try columnExists("photo", "rating", at: url))
+        XCTAssertTrue(try columnExists("photo", "flag", at: url))
         // Untouched v2 data must survive exactly as it was.
         XCTAssertEqual(try store.photoCount(inLibrary: fixtureLibraryID), 2)
         let page = try store.page(
@@ -106,6 +111,8 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try repaired.photoCount(inLibrary: fixtureLibraryID), 2)
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
+        XCTAssertTrue(try columnExists("photo", "rating", at: url))
+        XCTAssertTrue(try columnExists("photo", "flag", at: url))
     }
 
     func testMigrationBackfillsNormalizedFilenameAndDirectory() throws {
@@ -166,11 +173,14 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(try readSchemaVersion(at: url), 3)
+        XCTAssertEqual(try readSchemaVersion(at: url), 4)
         XCTAssertTrue(try columnExists("photo", "filename_normalized", at: url))
         XCTAssertTrue(try columnExists("library", "source_kind", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
+        XCTAssertTrue(try tableExists("photo_keyword", at: url))
+        XCTAssertTrue(try columnExists("photo", "rating", at: url))
+        XCTAssertTrue(try columnExists("photo", "flag", at: url))
     }
 
     // MARK: - Fixture helpers
@@ -314,5 +324,15 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         defer { db.close() }
         let rows = try db.query("PRAGMA table_info(\(table));") { $0.string(1) }
         return rows.contains(column)
+    }
+
+    private func tableExists(_ table: String, at url: URL) throws -> Bool {
+        let db = try SQLiteDatabase(url: url)
+        defer { db.close() }
+        let rows = try db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?;",
+            [.text(table)]
+        ) { $0.string(0) }
+        return !rows.isEmpty
     }
 }

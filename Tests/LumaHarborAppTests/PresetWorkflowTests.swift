@@ -1044,4 +1044,18 @@ final class PresetLibraryViewModelTests: AppViewModelTestCase {
             return XCTFail("Expected .failed, got \(sut.importState)")
         }
     }
+
+    func testPreviewImportRejectsAnOversizedLhpresetBeforeDecoding() async throws {
+        let url = temporaryDirectory.appendingPathComponent("Oversized.lhpreset")
+        let data = Data(repeating: 0, count: PresetDocument.maximumEncodedBytes + 1)
+        try data.write(to: url)
+        let sut = PresetLibraryViewModel(myRepository: RecordingPresetRepository())
+
+        await sut.previewImport([url])
+
+        guard case .failed = sut.importState else {
+            return XCTFail("Expected .failed, got \(sut.importState)")
+        }
+        XCTAssertTrue(sut.importItems.isEmpty)
+    }
 }

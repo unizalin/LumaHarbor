@@ -24,6 +24,7 @@ final class PadAppServices {
     let libraryService: PhotoLibraryService
     let documentStore: PhotoDocumentStore
     let thumbnailProvider: ThumbnailProvider
+    let exporter: PhotoExporter
     let library: PadLibraryModel
     let editor: PadEditorModel
     /// Injected so `PadLibrarySettingsView` (Task 7 Step 5) can be handed
@@ -93,6 +94,7 @@ final class PadAppServices {
         self.thumbnailProvider = ThumbnailProvider(
             cache: thumbnailCache, decoder: decoder, renderService: renderService
         )
+        self.exporter = PhotoExporter(decoder: decoder, renderService: renderService)
         self.library = PadLibraryModel(dependencies: .live(service: libraryService))
         self.editor = PadEditorModel(dependencies: editorDependencies)
         self.userDefaults = userDefaults

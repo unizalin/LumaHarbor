@@ -28,6 +28,8 @@ import UIKit
 /// store" contract).
 struct PadThumbnailCell: View {
     let photo: PhotoAsset
+    let isBatchSelected: Bool
+    let isSelectionMode: Bool
     /// Whether this photo's *source* is currently reachable -- `true` for
     /// every App-copy photo (always local by construction), or the
     /// resolved `LibraryFolder.isOnline` for everything else.
@@ -65,6 +67,17 @@ struct PadThumbnailCell: View {
                             .padding(4)
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    if isSelectionMode {
+                        Image(systemName: isBatchSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(.black.opacity(0.45), in: Circle())
+                            .padding(6)
+                    }
+                }
 
             Text(photo.filename)
                 .font(.caption)
@@ -82,6 +95,7 @@ struct PadThumbnailCell: View {
         .frame(minWidth: 44, minHeight: 44)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(isSelectionMode && isBatchSelected ? L10n.t("selected") : ""))
         .task(id: photo.id) {
             await provider.withVisiblePin(photoID: photo.id) {
                 await load()
@@ -183,6 +197,9 @@ struct PadThumbnailCell: View {
         }
         if photo.hasEdits {
             components.append(L10n.t("Edited"))
+        }
+        if isSelectionMode && isBatchSelected {
+            components.append(L10n.t("selected"))
         }
         return components.joined(separator: ", ")
     }
