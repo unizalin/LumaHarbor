@@ -478,4 +478,97 @@ final class BatchAdjustmentSyncServiceTests: XCTestCase {
         XCTAssertEqual(summary.failed, 0)
         XCTAssertEqual(summary.skipped, 0)
     }
+
+    // MARK: - Phase 2.2: syncPatch (explicit "Sync to Selected Photos", spec §6.2)
+
+    /// `syncPatch` is the explicit-action sibling of `commitGesture` -- given
+    /// an already-built patch (e.g. a copied `AdjustmentClipboard`'s global
+    /// fields) instead of a diffed gesture, it must still only touch exactly
+    /// the patch's own fields on each target, preserving everything else
+    /// that target already had.
+    func testSyncPatchWritesExactlyThePatchedFieldToEveryTargetAndKeepsTheirOwnOtherFields() async {
+        let source = PhotoID()
+        let targetA = PhotoID()
+        let targetB = PhotoID()
+        var targetAOwn = PhotoAdjustments.neutral
+        targetAOwn.contrast = 20
+        let store = Store([targetA: targetAOwn, targetB: .neutral])
+        let service = makeService(store)
+
+        var patchSource = PhotoAdjustments.neutral
+        patchSource.exposure = 1.5
+        let patch = AdjustmentPatch.extracting([.basicExposure], from: patchSource)
+
+        _ = await service.syncPatch(patch, sourcePhotoID: source, targetPhotoIDs: [targetA, targetB])
+
+        let savedA = await store.current(targetA)
+        let savedB = await store.current(targetB)
+        XCTAssertEqual(savedA.exposure, 1.5)
+        XCTAssertEqual(savedA.contrast, 20, "target A's own unrelated edit must survive the sync")
+        XCTAssertEqual(savedB.exposure, 1.5)
+    }
+
+    /// One target failing to load/save must not stop the others, the same
+    /// fault-tolerance `commitGesture` already has.
+    func testSyncPatchContinuesToOtherTargetsWhenOneFails() async {
+        let source = PhotoID()
+        let targetA = PhotoID()
+        let targetB = PhotoID()
+        let store = Store([targetA: .neutral, targetB: .neutral])
+        await store.markFailing(targetA)
+        let service = makeService(store)
+
+        var patchSource = PhotoAdjustments.neutral
+        patchSource.exposure = 1.5
+        let patch = AdjustmentPatch.extracting([.basicExposure], from: patchSource)
+
+        let transaction = await service.syncPatch(patch, sourcePhotoID: source, targetPhotoIDs: [targetA, targetB])
+
+        if case .failure = transaction.results[targetA] {} else {
+            XCTFail("target A must be reported as a failure, not silently dropped")
+        }
+        XCTAssertEqual(transaction.results[targetB], .success, "target B must still succeed despite target A's failure")
+        let savedB = await store.current(targetB)
+        XCTAssertEqual(savedB.exposure, 1.5)
+    }
+
+    /// `syncPatch` never treats `sourcePhotoID` as its own target, mirroring
+    /// `beginGesture`'s own defensive exclusion.
+    func testSyncPatchExcludesTheSourcePhotoFromItsOwnTargetList() async {
+        let source = PhotoID()
+        let target = PhotoID()
+        let service = makeService(Store([target: .neutral]))
+        let patch = AdjustmentPatch.extracting([.basicExposure], from: .neutral)
+
+        let transaction = await service.syncPatch(patch, sourcePhotoID: source, targetPhotoIDs: [source, target])
+
+        XCTAssertEqual(Set(transaction.targetPhotoIDs), [target])
+    }
+
+    /// The transaction `syncPatch` returns must be revertible through the
+    /// exact same `undo(_:)` a gesture-produced transaction uses -- no
+    /// second undo code path for the explicit-action case.
+    func testSyncPatchTransactionIsUndoableTheSameWayAGestureCommitIs() async {
+        let source = PhotoID()
+        let target = PhotoID()
+        var targetOwn = PhotoAdjustments.neutral
+        targetOwn.exposure = 0.2
+        let store = Store([target: targetOwn])
+        let service = makeService(store)
+
+        var patchSource = PhotoAdjustments.neutral
+        patchSource.exposure = 1.5
+        let patch = AdjustmentPatch.extracting([.basicExposure], from: patchSource)
+
+        let transaction = await service.syncPatch(patch, sourcePhotoID: source, targetPhotoIDs: [target])
+        let afterSync = await store.current(target)
+        XCTAssertEqual(afterSync.exposure, 1.5)
+
+        let summary = await service.undo(transaction)
+
+        XCTAssertEqual(summary.affected, 1)
+        XCTAssertEqual(summary.failed, 0)
+        let afterUndo = await store.current(target)
+        XCTAssertEqual(afterUndo.exposure, 0.2, "undo must restore the target's own pre-sync value")
+    }
 }

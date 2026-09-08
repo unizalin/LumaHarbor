@@ -110,4 +110,19 @@ final class PresetBackupArchiveTests: XCTestCase {
         let data = Data("not json at all".utf8)
         XCTAssertThrowsError(try PresetBackupCoding.decode(data))
     }
+
+    func testReadingRejectsAnOversizedArchiveBeforeJSONDecoding() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaHarbor-\(UUID().uuidString).lhpresetbackup")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let data = Data(repeating: 0, count: PresetBackupArchive.maximumEncodedBytes + 1)
+        try data.write(to: url)
+
+        XCTAssertThrowsError(try PresetBackupCoding.read(from: url)) { error in
+            XCTAssertEqual(
+                error as? PresetError,
+                .documentTooLarge(limitBytes: PresetBackupArchive.maximumEncodedBytes)
+            )
+        }
+    }
 }

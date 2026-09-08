@@ -11,6 +11,8 @@ import Localization
 /// doesn't map) survives a backup/restore cycle unchanged.
 public struct PresetBackupArchive: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 1
+    /// Maximum encoded size for one backup archive.
+    public static let maximumEncodedBytes = PresetFileLimits.maximumBackupArchiveBytes
 
     public var schemaVersion: Int
     public var createdAt: Date
@@ -27,10 +29,10 @@ public struct PresetBackupArchive: Codable, Equatable, Sendable {
     }
 }
 
-/// Errors specific to reading a `PresetBackupArchive` file -- distinct from
-/// `PresetError` since these are about the *archive container*, not an
-/// individual preset's own content (an individual document's own validation
-/// still runs later, when each one is actually restored via `save`).
+/// Errors specific to reading a backup archive -- distinct from PresetError
+/// for archive schema/content errors. Size-bound failures use
+/// PresetError.documentTooLarge so the same safe user-facing message covers
+/// native presets, XMP, and backups.
 public enum PresetBackupError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(found: Int, supported: Int)
     case malformedJSON(String)
@@ -76,10 +78,17 @@ public enum PresetBackupCoding {
     }
 
     public static func encode(_ archive: PresetBackupArchive) throws -> Data {
-        try makeEncoder().encode(archive)
+        let data = try makeEncoder().encode(archive)
+        guard data.count <= PresetBackupArchive.maximumEncodedBytes else {
+            throw PresetError.documentTooLarge(limitBytes: PresetBackupArchive.maximumEncodedBytes)
+        }
+        return data
     }
 
     public static func decode(_ data: Data) throws -> PresetBackupArchive {
+        guard data.count <= PresetBackupArchive.maximumEncodedBytes else {
+            throw PresetError.documentTooLarge(limitBytes: PresetBackupArchive.maximumEncodedBytes)
+        }
         let archive: PresetBackupArchive
         do {
             archive = try makeDecoder().decode(PresetBackupArchive.self, from: data)
@@ -95,5 +104,19 @@ public enum PresetBackupCoding {
             )
         }
         return archive
+    }
+
+    /// Reads a user-selected backup after checking its filesystem size, so a
+    /// large file is rejected before Data allocates its full contents.
+    public static func read(from url: URL, fileManager: FileManager = .default) throws -> Data {
+        if let fileSize = try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber,
+           fileSize.int64Value > Int64(PresetBackupArchive.maximumEncodedBytes) {
+            throw PresetError.documentTooLarge(limitBytes: PresetBackupArchive.maximumEncodedBytes)
+        }
+        let data = try Data(contentsOf: url)
+        guard data.count <= PresetBackupArchive.maximumEncodedBytes else {
+            throw PresetError.documentTooLarge(limitBytes: PresetBackupArchive.maximumEncodedBytes)
+        }
+        return data
     }
 }

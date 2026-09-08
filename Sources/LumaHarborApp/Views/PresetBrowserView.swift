@@ -402,14 +402,15 @@ struct PresetBrowserView: View {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task {
-            guard let data = try? Data(contentsOf: url) else {
+            do {
+                let data = try PresetBackupCoding.read(from: url)
+                await presetLibrary.restoreBackupAndPresentSummary(data, into: .mine, conflict: .keepBoth)
+            } catch {
                 exportError = UserAlert(
                     title: L10n.t("Couldn't restore this backup"),
-                    message: L10n.t("That file couldn't be read.")
+                    error: error
                 )
-                return
             }
-            await presetLibrary.restoreBackupAndPresentSummary(data, into: .mine, conflict: .keepBoth)
         }
     }
 }

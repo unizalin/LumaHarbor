@@ -6,14 +6,18 @@ import SwiftUI
 /// The ten basic adjustments, usable in a Mac inspector or an iPad editing surface.
 public struct BasicAdjustmentPanel: View {
     @ObservedObject private var editor: EditorSession
+    private let kinds: [AdjustmentKind]
 
-    public init(editor: EditorSession) {
+    public init(editor: EditorSession, kinds: [AdjustmentKind]? = nil) {
         self.editor = editor
+        self.kinds = kinds ?? AdjustmentCatalog.ordered.map(\.kind)
     }
 
     public var body: some View {
         ForEach(BasicAdjustmentPanelModel.rows, id: \.kind) { definition in
-            row(definition)
+            if kinds.contains(definition.kind) {
+                row(definition)
+            }
         }
     }
 

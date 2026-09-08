@@ -10,7 +10,7 @@ import Foundation
 /// regardless of how the underlying parser would otherwise behave.
 public struct XMPCodec: Sendable {
     public enum Limits {
-        public static let maximumDocumentBytes = 10 * 1024 * 1024
+        public static let maximumDocumentBytes = PresetFileLimits.maximumNativePresetBytes
         public static let maximumDepth = 64
         public static let maximumPropertyCount = 20_000
         public static let maximumValueBytes = 1 * 1024 * 1024

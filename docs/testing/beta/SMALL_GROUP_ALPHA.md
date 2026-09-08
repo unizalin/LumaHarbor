@@ -21,14 +21,21 @@ For a build that ordinary testers can open without weakening Gatekeeper:
 
 This is direct distribution outside the Mac App Store. It does not require an App Store product listing.
 
-The repository's current helper only creates a local ad-hoc build:
+The repository includes a repeatable packaging helper. For a local or explicitly trusted alpha archive:
 
 ```sh
-Scripts/build-app-bundle.sh release
-codesign --verify --deep --strict build/LumaHarbor.app
-ditto -c -k --keepParent build/LumaHarbor.app build/LumaHarbor-alpha.zip
-shasum -a 256 build/LumaHarbor-alpha.zip
+Scripts/package-mac-release.sh release
 ```
+
+The helper writes a versioned ZIP and SHA-256 checksum under `dist/`. For a trusted public release, provide a Developer ID identity and a `notarytool` Keychain profile:
+
+```sh
+LUMAHARBOR_SIGNING_IDENTITY='Developer ID Application: ...' \\
+LUMAHARBOR_NOTARY_PROFILE='LumaHarbor-notary' \\
+Scripts/package-mac-release.sh release
+```
+
+It signs, submits, staples, validates, and then re-packages the notarized app. Credentials remain in the local Keychain and are never committed.
 
 An ad-hoc ZIP is acceptable only for a short, explicitly trusted test. Gatekeeper may block it after download. Testers may use Finder's **Open** contextual command or macOS **Privacy & Security > Open Anyway** after confirming the sender and checksum. Do not ask testers to disable Gatekeeper globally.
 

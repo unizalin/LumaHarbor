@@ -9,6 +9,9 @@ xcuserdata/
 # Built app bundle produced by Scripts/build-app-bundle.sh
 /build/
 
+# Release archives and checksums produced by Scripts/package-mac-release.sh
+/dist/
+
 # Private camera samples. Large RAW files must never enter Git history;
 # point LUMAHARBOR_RAW_FIXTURE_DIR at a local folder instead.
 Fixtures/Private/

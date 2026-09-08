@@ -43,6 +43,8 @@ public enum PresetSource: Codable, Equatable, Sendable {
 /// UTF-8 JSON. UUID is identity; `name` is display-only.
 public struct PresetDocument: Codable, Equatable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
+    /// Maximum encoded size for one native preset file.
+    public static let maximumEncodedBytes = PresetFileLimits.maximumNativePresetBytes
     /// Display name after `.trimmingCharacters(in: .whitespacesAndNewlines)`
     /// may not exceed this many extended grapheme clusters.
     public static let maximumNameLength = 120

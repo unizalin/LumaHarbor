@@ -29,6 +29,142 @@ public enum PadWorkspaceMode: Equatable, Sendable {
     case focus
 }
 
+/// Which navigation surface the library can afford at a given window width.
+/// The primary grid remains visible in every profile; only secondary columns
+/// change presentation as the window narrows.
+public enum PadLibrarySidebarPresentation: Equatable, Sendable {
+    case overlay
+    case persistent
+    case persistentWithDetails
+}
+
+/// Width-driven layout profiles shared by the iPad library and editor.
+/// These are based on the view's available width, not the physical device or
+/// orientation, so Stage Manager and Split View use the same deterministic
+/// policy as full-screen layouts.
+public enum PadWorkspaceWidthProfile: Equatable, Sendable {
+    case compact
+    case standard
+    case expanded
+    case wide
+}
+
+/// The complete adaptive workspace decision for one available width.
+public struct PadWorkspaceLayout: Equatable, Sendable {
+    public let profile: PadWorkspaceWidthProfile
+    public let librarySidebar: PadLibrarySidebarPresentation
+    public let editorInspector: PadInspectorPresentation
+    public let showsDetailsColumn: Bool
+    public let showsFilmstrip: Bool
+
+    public init(
+        profile: PadWorkspaceWidthProfile,
+        librarySidebar: PadLibrarySidebarPresentation,
+        editorInspector: PadInspectorPresentation,
+        showsDetailsColumn: Bool,
+        showsFilmstrip: Bool
+    ) {
+        self.profile = profile
+        self.librarySidebar = librarySidebar
+        self.editorInspector = editorInspector
+        self.showsDetailsColumn = showsDetailsColumn
+        self.showsFilmstrip = showsFilmstrip
+    }
+}
+
+/// Inspector sections are presentation state, not photo-editing state.
+public enum PadWorkspaceInspectorTab: Equatable, Sendable {
+    case adjustments
+    case presets
+    case info
+}
+
+/// Scene-scoped iPad workspace preferences. None of these values belong in a
+/// RAW sidecar or an `EditorSession` undo stack.
+public struct PadWorkspaceState: Equatable, Sendable {
+    public var isSidebarVisible: Bool
+    public var inspectorTab: PadWorkspaceInspectorTab
+    public var isFilmstripVisible: Bool
+    public var usesLeftHandedLayout: Bool
+
+    public init(
+        isSidebarVisible: Bool,
+        inspectorTab: PadWorkspaceInspectorTab,
+        isFilmstripVisible: Bool,
+        usesLeftHandedLayout: Bool
+    ) {
+        self.isSidebarVisible = isSidebarVisible
+        self.inspectorTab = inspectorTab
+        self.isFilmstripVisible = isFilmstripVisible
+        self.usesLeftHandedLayout = usesLeftHandedLayout
+    }
+
+    public static let initial = PadWorkspaceState(
+        isSidebarVisible: true,
+        inspectorTab: .adjustments,
+        isFilmstripVisible: true,
+        usesLeftHandedLayout: false
+    )
+}
+
+/// Converts available width into a stable layout profile and its secondary
+/// surfaces. Keeping this pure lets the iPad UI and tests share one contract.
+public enum PadWorkspaceLayoutPolicy {
+    public static let compactMaximumWidth: CGFloat = 700
+    public static let expandedMinimumWidth: CGFloat = 1_100
+    public static let wideMinimumWidth: CGFloat = 1_360
+
+    public static func profile(forWidth width: CGFloat) -> PadWorkspaceWidthProfile {
+        switch width {
+        case ..<compactMaximumWidth:
+            return .compact
+        case ..<expandedMinimumWidth:
+            return .standard
+        case ..<wideMinimumWidth:
+            return .expanded
+        default:
+            return .wide
+        }
+    }
+
+    public static func layout(forWidth width: CGFloat) -> PadWorkspaceLayout {
+        switch profile(forWidth: width) {
+        case .compact:
+            return PadWorkspaceLayout(
+                profile: .compact,
+                librarySidebar: .overlay,
+                editorInspector: .bottomDrawer,
+                showsDetailsColumn: false,
+                showsFilmstrip: false
+            )
+        case .standard:
+            return PadWorkspaceLayout(
+                profile: .standard,
+                librarySidebar: .overlay,
+                editorInspector: .bottomDrawer,
+                showsDetailsColumn: false,
+                showsFilmstrip: false
+            )
+        case .expanded:
+            return PadWorkspaceLayout(
+                profile: .expanded,
+                librarySidebar: .persistent,
+                editorInspector: .trailingDock,
+                showsDetailsColumn: false,
+                showsFilmstrip: true
+            )
+        case .wide:
+            return PadWorkspaceLayout(
+                profile: .wide,
+                librarySidebar: .persistentWithDetails,
+                editorInspector: .trailingDock,
+                showsDetailsColumn: true,
+                showsFilmstrip: true
+            )
+        }
+    }
+}
+
 /// Chooses where the adjustment controls should live for a given
 /// available size.
 ///
@@ -39,16 +175,16 @@ public enum PadWorkspaceMode: Equatable, Sendable {
 /// device, or simulating rotation. `PadEditorView` is the only thing that
 /// turns this into an actual container.
 public enum PadEditorLayoutPolicy {
-    /// The width, in points, at or above which a landscape-or-wider
-    /// canvas gets a persistent trailing dock instead of a bottom drawer.
-    public static let trailingDockMinimumWidth: CGFloat = 900
+    /// The width, in points, at or above which the Expanded profile gets a
+    /// persistent trailing dock instead of a bottom drawer.
+    public static let trailingDockMinimumWidth = PadWorkspaceLayoutPolicy.expandedMinimumWidth
 
     /// - Parameters:
     ///   - width: The available width, in points, of the space the
     ///     canvas and its controls together have to fill.
     ///   - height: The available height, in points, of that same space.
     public static func presentation(forWidth width: CGFloat, height: CGFloat) -> PadInspectorPresentation {
-        width >= height && width >= trailingDockMinimumWidth ? .trailingDock : .bottomDrawer
+        PadWorkspaceLayoutPolicy.layout(forWidth: width).editorInspector
     }
 }
 

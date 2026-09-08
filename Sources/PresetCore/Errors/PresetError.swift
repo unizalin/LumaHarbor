@@ -53,7 +53,7 @@ extension PresetError: LocalizedError {
         case .unsafeXMLConstruct(let construct):
             return "\(L10n.t("This XMP file was rejected because it contains a disallowed construct.")) (\(construct))"
         case .documentTooLarge(let limit):
-            return "\(L10n.t("This file is larger than LumaHarbor allows for a preset or XMP document.")) (\(limit) bytes)"
+            return "\(L10n.t("This file is larger than LumaHarbor allows for a preset, XMP, or backup document.")) (\(limit) bytes)"
         case .documentTooDeep(let limit):
             return "\(L10n.t("This XMP file is nested deeper than LumaHarbor allows.")) (\(limit))"
         case .tooManyProperties(let limit):

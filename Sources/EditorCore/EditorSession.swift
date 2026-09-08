@@ -73,6 +73,25 @@ public final class EditorSession: ObservableObject {
     @Published public var isShowingOriginal = false
     @Published public var alert: EditorAlert?
 
+    /// Before/after comparison layout (spec §6.1). `.single` is the
+    /// pre-existing hold-to-peek/click-to-pin behavior driven by
+    /// `isShowingOriginal`; `.sideBySide` and `.verticalWipe` show both
+    /// images at once. Purely UI/view state -- like `toolMode`, it never
+    /// touches `history`, `saveState` or the sidecar.
+    public enum CompareMode: Equatable, Sendable {
+        case single
+        case sideBySide
+        case verticalWipe
+    }
+
+    @Published public private(set) var compareMode: CompareMode = .single
+    /// Fraction (0...1) of the canvas width where the vertical wipe divider
+    /// sits, clamped away from the very edges so dragging it can never fully
+    /// collapse the comparison down to showing only one image.
+    @Published public private(set) var wipePosition: Double = 0.5
+    public static let minimumWipePosition: Double = 0.02
+    public static let maximumWipePosition: Double = 0.98
+
     /// Which on-canvas tool is active right now (design spec §6.5). Reset to
     /// `.adjust` on every `open()`/`close()` so switching photos never
     /// leaves a crop overlay armed against a photo the user didn't ask to
@@ -281,6 +300,8 @@ public final class EditorSession: ObservableObject {
         self.histogram = nil
         self.originalImage = nil
         self.isShowingOriginal = false
+        self.compareMode = .single
+        self.wipePosition = 0.5
         self.saveState = .unchanged
         self.lastDisplayedGeneration = 0
         self.whiteBalanceBaseline = nil
@@ -312,6 +333,8 @@ public final class EditorSession: ObservableObject {
         decodeFailed = false
         histogram = nil
         originalImage = nil
+        compareMode = .single
+        wipePosition = 0.5
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
         whiteBalanceBaseline = nil
@@ -421,6 +444,24 @@ public final class EditorSession: ObservableObject {
         toolMode = mode
     }
 
+    /// Switches the before/after comparison layout (spec §6.1). Entering
+    /// `.sideBySide`/`.verticalWipe` requires both an original to compare
+    /// against and an actual edit to show -- the same gate the pre-existing
+    /// hold/pin compare control already uses (`canCompareWithOriginal`) --
+    /// so a stale menu selection can never leave the canvas trying to show a
+    /// comparison with nothing real to compare. `.single` is always allowed,
+    /// so leaving a comparison layout never gets stuck.
+    public func setCompareMode(_ mode: CompareMode) {
+        guard mode == .single || canCompareWithOriginal else { return }
+        compareMode = mode
+    }
+
+    /// Moves the vertical wipe divider (spec §6.1: "wipe 分隔位置要可由拖曳調整並
+    /// clamp 在合理範圍"). Purely UI state, like `compareMode` itself.
+    public func setWipePosition(_ position: Double) {
+        wipePosition = min(max(position, Self.minimumWipePosition), Self.maximumWipePosition)
+    }
+
     public func redo() {
         guard history.redo() != nil else { return }
         didChangeAdjustments()
@@ -514,6 +555,33 @@ public final class EditorSession: ObservableObject {
             alert = EditorAlert(title: L10n.t("This preset was applied with some limitations"), message: message)
         }
         guard recorded else { return }
+        didChangeAdjustments()
+    }
+
+    /// Phase 2.2 "Paste Adjustments" (spec §6.2): applies a copied
+    /// `AdjustmentPatch` as one undoable step, the same "one action, one
+    /// Undo entry" contract `commitPreset` already gives preset application.
+    /// `patch` goes through the same `.merge`-mode `PresetApplicator` path a
+    /// preset does, so any field the patch doesn't include is left exactly
+    /// as this photo's own edits left it -- never a blind overwrite.
+    /// `geometry`/`localAdjustments` are copied verbatim only when the
+    /// caller passes them (the clipboard's own opt-in checkboxes), never
+    /// partially or inferred; passing `nil` for either leaves this photo's
+    /// own current value untouched.
+    public func pasteAdjustments(patch: AdjustmentPatch, geometry: GeometryAdjustments?, localAdjustments: [LocalAdjustment]?) {
+        guard photo != nil else { return }
+        let context = PresetApplicationContext(
+            baselineTemperatureKelvin: whiteBalanceBaseline?.temperatureKelvin,
+            baselineTint: whiteBalanceBaseline?.tint
+        )
+        var result = PresetApplicator().apply(patch, to: history.current, mode: .merge, context: context).adjustments
+        if let geometry {
+            result.geometry = geometry
+        }
+        if let localAdjustments {
+            result.localAdjustments = localAdjustments
+        }
+        guard history.record(result) else { return }
         didChangeAdjustments()
     }
 

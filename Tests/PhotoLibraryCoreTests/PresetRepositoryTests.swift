@@ -71,6 +71,23 @@ final class PresetRepositoryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(Set(listed.map(\.id)), [a.id, b.id])
     }
 
+    func testLoadingAnOversizedNativePresetFailsBeforeJSONDecoding() async throws {
+        let id = UUID()
+        let url = presetsRoot.appendingPathComponent("\(id.uuidString).lhpreset")
+        let data = Data(repeating: 0, count: PresetDocument.maximumEncodedBytes + 1)
+        try data.write(to: url)
+
+        do {
+            _ = try await repository.load(id: id)
+            XCTFail("Expected an oversized preset to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? PresetError,
+                .documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
+            )
+        }
+    }
+
     // MARK: - Identity: same name, different UUID coexist (spec §8.2)
 
     func testSameNameDifferentUUIDCoexist() async throws {

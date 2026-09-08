@@ -270,6 +270,71 @@ public actor BatchAdjustmentSyncService {
         return summary
     }
 
+    /// Phase 2.2 "Sync to Selected Photos" (spec §6.2): the explicit-action
+    /// sibling of `commitGesture` -- same per-target load/merge/save/
+    /// fault-tolerance loop and the same undoable `BatchAdjustmentTransaction`
+    /// result, but driven by an already-built `patch` (e.g. an
+    /// `AdjustmentClipboard`'s copied fields) instead of diffing a live
+    /// gesture's before/after. Never touches `activeGesture` -- independent
+    /// of any slider-drag gesture that may or may not be in flight.
+    ///
+    /// `targetPhotoIDs` is expected to already be frozen by the caller (the
+    /// same "read the selection once, before any `await`" discipline
+    /// `LibraryViewModel.beginBatchGesture` uses) -- this method also
+    /// excludes `sourcePhotoID` from it as a defensive second guarantee, the
+    /// same as `beginGesture` does for the gesture path.
+    @discardableResult
+    public func syncPatch(
+        _ patch: AdjustmentPatch,
+        sourcePhotoID: PhotoID,
+        targetPhotoIDs: Set<PhotoID>
+    ) async -> BatchAdjustmentTransaction {
+        let fields = Set(AdjustmentFieldID.allCases.filter(patch.contains))
+        let targets = Array(targetPhotoIDs.subtracting([sourcePhotoID]))
+        guard !fields.isEmpty, !targets.isEmpty else {
+            return BatchAdjustmentTransaction(
+                sourcePhotoID: sourcePhotoID,
+                targetPhotoIDs: targets,
+                modifiedFieldIDs: [],
+                before: [:],
+                after: [:],
+                results: [:]
+            )
+        }
+
+        var before: [PhotoID: AdjustmentPatch] = [:]
+        var after: [PhotoID: AdjustmentPatch] = [:]
+        var results: [PhotoID: BatchWriteResult] = [:]
+
+        for targetID in targets {
+            guard !targetsInFlight.contains(targetID) else {
+                results[targetID] = .failure(Self.conflictingOperationMessage)
+                continue
+            }
+            targetsInFlight.insert(targetID)
+            defer { targetsInFlight.remove(targetID) }
+            do {
+                let current = try await loadAdjustments(targetID)
+                before[targetID] = AdjustmentPatch.extracting(fields, from: current)
+                let merged = applicator.apply(patch, to: current, mode: .merge, context: .none).adjustments
+                try await saveAdjustments(merged, targetID)
+                after[targetID] = AdjustmentPatch.extracting(fields, from: merged)
+                results[targetID] = .success
+            } catch {
+                results[targetID] = .failure(Self.safeDescription(for: error))
+            }
+        }
+
+        return BatchAdjustmentTransaction(
+            sourcePhotoID: sourcePhotoID,
+            targetPhotoIDs: targets,
+            modifiedFieldIDs: Array(fields),
+            before: before,
+            after: after,
+            results: results
+        )
+    }
+
     private static let conflictingOperationMessage = "a conflicting batch operation is already in progress for this photo"
 
     private static func safeDescription(for error: Error) -> String {

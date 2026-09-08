@@ -128,11 +128,18 @@ public actor FilePresetRepository: PresetRepository {
     // MARK: - Private
 
     private func decodedDocument(at url: URL) throws -> PresetDocument {
+        if let fileSize = try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber,
+           fileSize.int64Value > Int64(PresetDocument.maximumEncodedBytes) {
+            throw PresetError.documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
+        }
         let data: Data
         do {
             data = try Data(contentsOf: url)
         } catch {
             throw PresetError.destinationUnavailable(scope.availabilityAnchorURL.path)
+        }
+        guard data.count <= PresetDocument.maximumEncodedBytes else {
+            throw PresetError.documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
         }
         do {
             let document = try SidecarCoding.decode(PresetDocument.self, from: data)
@@ -146,8 +153,12 @@ public actor FilePresetRepository: PresetRepository {
 
     private func write(_ document: PresetDocument, to url: URL) throws {
         do {
+            let data = try SidecarCoding.encode(document)
+            guard data.count <= PresetDocument.maximumEncodedBytes else {
+                throw PresetError.documentTooLarge(limitBytes: PresetDocument.maximumEncodedBytes)
+            }
             try AtomicFileWriter.write(
-                try SidecarCoding.encode(document),
+                data,
                 to: url,
                 fileManager: fileManager
             )

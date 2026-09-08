@@ -1,17 +1,62 @@
+import AppKit
 import SwiftUI
 import Localization
 
 /// Spec §6.2's three regions: library status on the left, preview and filmstrip
 /// in the middle, adjustments on the right.
+///
+/// Phase 2.3 (spec §6.3, Mac focus workspace): whether the sidebar,
+/// inspector, and filmstrip are showing -- plus the inspector's width and
+/// whether focus mode is hiding all three -- are pure `@AppStorage`
+/// preferences, never written to a photo's sidecar. `WorkspaceLayoutState`
+/// holds the actual policy (focus mode's effect on visibility, the width
+/// clamp); this view only reads/writes the five `@AppStorage` values that
+/// back its fields and renders accordingly.
 struct RootView: View {
     @EnvironmentObject private var model: LibraryViewModel
-    @State private var columnVisibility = NavigationSplitViewVisibility.all
     /// Roadmap Phase 5 Task 5.3. Same key `SettingsView`'s picker binds, so
     /// a change there is visible here immediately.
     @AppStorage("appTheme") private var theme: AppTheme = .default
 
+    @AppStorage(WorkspaceLayoutState.StorageKey.showSidebar) private var showSidebar = true
+    @AppStorage(WorkspaceLayoutState.StorageKey.showInspector) private var showInspector = true
+    @AppStorage(WorkspaceLayoutState.StorageKey.showFilmstrip) private var showFilmstrip = true
+    @AppStorage(WorkspaceLayoutState.StorageKey.focusMode) private var focusMode = false
+    @AppStorage(WorkspaceLayoutState.StorageKey.inspectorWidth) private var inspectorWidth = WorkspaceLayoutState.defaultInspectorWidth
+
+    /// The inspector width at the start of the current divider drag, so
+    /// each `DragGesture` update is `baseline - translation` (dragging left
+    /// widens the right-hand inspector) rather than accumulating error
+    /// across frames.
+    @State private var inspectorWidthDragBaseline: Double?
+
+    private var layout: WorkspaceLayoutState {
+        WorkspaceLayoutState(
+            showSidebar: showSidebar,
+            showInspector: showInspector,
+            showFilmstrip: showFilmstrip,
+            focusMode: focusMode,
+            inspectorWidth: inspectorWidth
+        )
+    }
+
+    /// `NavigationSplitView`'s own sidebar collapse (its built-in toolbar
+    /// button, or a user drag) is kept in sync with `showSidebar` in both
+    /// directions -- except while focus mode is on, when the native control
+    /// is ignored so it can never silently overwrite the preference focus
+    /// mode is temporarily overriding.
+    private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { layout.effectiveShowSidebar ? .all : .detailOnly },
+            set: { newValue in
+                guard !focusMode else { return }
+                showSidebar = newValue != .detailOnly
+            }
+        )
+    }
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: columnVisibilityBinding) {
             LibrarySidebarView()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
@@ -19,10 +64,16 @@ struct RootView: View {
                 centerPane
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Divider()
-
-                InspectorView()
-                    .frame(width: 300)
+                if layout.effectiveShowInspector {
+                    inspectorResizeHandle
+                    InspectorView()
+                        .frame(width: layout.inspectorWidth)
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                workspaceMenu
             }
         }
         .preferredColorScheme(theme.colorScheme)
@@ -56,6 +107,73 @@ struct RootView: View {
             // Cheapest reliable way to notice the SSD came back or went away.
             Task { await model.refreshAvailability() }
         }
+    }
+
+    /// Icon + localized label (spec §6.3: "不能使用三個外觀相同的圓角文字按鈕代替" for the
+    /// inspector tabs applies just as much here -- one clearly labelled
+    /// entry point, not several look-alike buttons).
+    private var workspaceMenu: some View {
+        Menu {
+            Toggle(L10n.t("Show Sidebar"), isOn: $showSidebar)
+            Toggle(L10n.t("Show Inspector"), isOn: $showInspector)
+            Toggle(L10n.t("Show Filmstrip"), isOn: $showFilmstrip)
+            Divider()
+            Toggle(L10n.t("Distraction-Free Mode"), isOn: $focusMode)
+            Divider()
+            Slider(
+                value: inspectorWidthBinding,
+                in: WorkspaceLayoutState.minimumInspectorWidth...WorkspaceLayoutState.maximumInspectorWidth
+            ) {
+                Text(L10n.t("Inspector Width"))
+            }
+            .disabled(!showInspector)
+        } label: {
+            Label(L10n.t("Workspace"), systemImage: "sidebar.squares.left")
+        }
+        .help(L10n.t("Show, hide, or resize workspace panels"))
+    }
+
+    /// Reads/writes the same clamped value the drag handle below applies,
+    /// so a value restored from an older or corrupted `@AppStorage` entry
+    /// can never put the slider outside its own declared range.
+    private var inspectorWidthBinding: Binding<Double> {
+        Binding(
+            get: { WorkspaceLayoutState.clampedInspectorWidth(inspectorWidth) },
+            set: { inspectorWidth = WorkspaceLayoutState.clampedInspectorWidth($0) }
+        )
+    }
+
+    /// A wide, invisible hit area centred on the visible `Divider()`, so the
+    /// inspector is comfortably resizable without needing pixel-perfect
+    /// aim on a 1pt line (spec §6.3: inspector width adjustable, clamped to
+    /// 280-420 pt -- the same clamp `WorkspaceLayoutState.clampedInspectorWidth`
+    /// enforces, applied here on every drag update rather than once at the
+    /// end, so the inspector never visibly overshoots mid-drag).
+    private var inspectorResizeHandle: some View {
+        Divider()
+            .overlay {
+                Color.clear
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let baseline = inspectorWidthDragBaseline ?? inspectorWidth
+                                inspectorWidthDragBaseline = baseline
+                                inspectorWidth = WorkspaceLayoutState.clampedInspectorWidth(
+                                    baseline - value.translation.width
+                                )
+                            }
+                            .onEnded { _ in inspectorWidthDragBaseline = nil }
+                    )
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.resizeLeftRight.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+            }
     }
 
     @ViewBuilder

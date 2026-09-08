@@ -1,7 +1,10 @@
 import AdjustmentUI
 import EditorCore
 import Localization
+import Photos
+import RawProcessingCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The adaptive editing surface (Task 7): the same canvas and the same ten
 /// basic sliders as Task 6, but the *container* the sliders live in adapts
@@ -28,6 +31,7 @@ import SwiftUI
 struct PadEditorView: View {
     @ObservedObject var model: PadEditorModel
     @ObservedObject private var editor: EditorSession
+    let exporter: PhotoExporter
 
     /// Work/focus mode, canvas zoom, and floating-panel position — see the
     /// type's own documentation for why these three travel together and
@@ -54,6 +58,14 @@ struct PadEditorView: View {
     /// re-clamp before the very first real measurement still behaves
     /// sanely rather than clamping against a degenerate zero-size box.
     @State private var floatingPanelMeasuredSize = CGSize(width: 320, height: 400)
+    @State private var exportedURL: URL?
+    @State private var isExporting = false
+    @State private var isSavingToPhotos = false
+    /// Drives the explicit "Save to Files" `fileExporter` flow (spec
+    /// §5.5.1), alongside the existing ShareLink/Photos destinations --
+    /// never a second export path, only a second *destination picker* over
+    /// the same already-exported file at `exportedURL`.
+    @State private var isPresentingFileExporter = false
 
     @GestureState private var floatingPanelDragTranslation: CGSize = .zero
     @GestureState private var canvasMagnification: CGFloat = 1
@@ -65,9 +77,10 @@ struct PadEditorView: View {
     private static let floatingPanelMinimumVisibleEdge: CGFloat = 44
     private static let floatingPanelDefaultOrigin = CGPoint(x: 24, y: 24)
 
-    init(model: PadEditorModel) {
+    init(model: PadEditorModel, exporter: PhotoExporter) {
         self.model = model
         self.editor = model.editor
+        self.exporter = exporter
     }
 
     var body: some View {
@@ -108,6 +121,46 @@ struct PadEditorView: View {
             ToolbarItem(placement: .primaryAction) {
                 workspaceModeToggle
             }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    exportFullResolution()
+                } label: {
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(L10n.t("Export"), systemImage: "square.and.arrow.up")
+                    }
+                }
+                .disabled(isExporting || model.document == nil)
+                .accessibilityLabel(Text(L10n.t("Export")))
+
+                if let exportedURL {
+                    ShareLink(item: exportedURL) {
+                        Label(L10n.t("Share"), systemImage: "square.and.arrow.up.on.square")
+                    }
+                    .accessibilityLabel(Text(L10n.t("Share exported photo")))
+
+                    Button {
+                        saveToPhotos(exportedURL)
+                    } label: {
+                        if isSavingToPhotos {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label(L10n.t("Save to Photos"), systemImage: "photo.badge.plus")
+                        }
+                    }
+                    .disabled(isSavingToPhotos)
+
+                    Button {
+                        isPresentingFileExporter = true
+                    } label: {
+                        Label(L10n.t("Save to Files"), systemImage: "folder")
+                    }
+                    .accessibilityLabel(Text(L10n.t("Save to Files")))
+                }
+            }
         }
         .alert(item: $editor.alert) { alert in
             Alert(
@@ -115,6 +168,31 @@ struct PadEditorView: View {
                 message: Text(alertBody(alert)),
                 dismissButton: .default(Text(L10n.t("OK")))
             )
+        }
+        // Spec §5.5.1/§5.5.2: a third, explicit destination over the exact
+        // same full-resolution export `exportFullResolution()` already
+        // produced -- never a second encode of the photo, just a
+        // `FileDocument` wrapper (`ExportedPhotoFileDocument`) around the
+        // bytes already on disk at `exportedURL`.
+        .fileExporter(
+            isPresented: $isPresentingFileExporter,
+            document: exportedURL.map { ExportedPhotoFileDocument(fileURL: $0) },
+            contentType: .jpeg,
+            defaultFilename: exportedURL?.deletingPathExtension().lastPathComponent
+        ) { result in
+            switch result {
+            case .success:
+                break
+            case .failure(let error):
+                // Spec §5.5.3/§5.5.4: the user dismissing the picker is
+                // `cancelled`, never shown as a failure alert.
+                guard (error as? CocoaError)?.code != .userCancelled else { return }
+                model.alert = EditorAlert(
+                    title: L10n.t("Couldn't save to Files"),
+                    message: error.localizedDescription,
+                    nextStep: L10n.t("Try again.")
+                )
+            }
         }
         // The open document's identity, not this view's own lifetime, is
         // what scopes `workspaceState` — see the type's documentation.
@@ -246,6 +324,71 @@ struct PadEditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+    }
+
+    // MARK: - Full-resolution export
+
+    private func exportFullResolution() {
+        guard let document = model.document else { return }
+        isExporting = true
+
+        Task {
+            do {
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("LumaHarbor-Exports", isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                let request = ExportRequest(
+                    sourceURL: document.workingURL,
+                    adjustments: editor.adjustments,
+                    destinationDirectory: directory,
+                    baseFilename: document.workingURL.deletingPathExtension().lastPathComponent,
+                    format: .jpeg,
+                    quality: 1,
+                    exifRetentionPolicy: .preserveAll
+                )
+                let outcome = try await exporter.export(request)
+                exportedURL = outcome.url
+            } catch {
+                model.alert = EditorAlert(
+                    title: L10n.t("Export failed"),
+                    message: error.localizedDescription,
+                    nextStep: L10n.t("Try again.")
+                )
+            }
+            isExporting = false
+        }
+    }
+
+    private func saveToPhotos(_ url: URL) {
+        isSavingToPhotos = true
+        Task {
+            let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+            guard authorization == .authorized || authorization == .limited else {
+                model.alert = EditorAlert(
+                    title: L10n.t("Photos access is needed"),
+                    message: L10n.t("Allow LumaHarbor to add exported photos in Settings."),
+                    nextStep: nil
+                )
+                isSavingToPhotos = false
+                return
+            }
+
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                }
+            } catch {
+                model.alert = EditorAlert(
+                    title: L10n.t("Couldn't save to Photos"),
+                    message: error.localizedDescription,
+                    nextStep: L10n.t("Try again.")
+                )
+            }
+            isSavingToPhotos = false
+        }
     }
 
     // MARK: - Work mode: trailing dock
@@ -432,5 +575,32 @@ private struct FloatingPanelSizeKey: PreferenceKey {
     static var defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
+    }
+}
+
+/// Wraps an already-exported photo file so SwiftUI's `fileExporter` can
+/// hand it to the system Files picker (spec §5.5.1's "Save to Files")
+/// without this view re-encoding or re-deriving anything: the bytes were
+/// already produced by `PhotoExporter` in `exportFullResolution()`, and
+/// `fileWrapper(configuration:)` below just reads them back off disk.
+private struct ExportedPhotoFileDocument: FileDocument {
+    /// Never actually read back through this type -- `fileExporter` only
+    /// writes -- but the protocol requires a non-empty answer for the
+    /// picker to treat this as an exportable kind at all.
+    static var readableContentTypes: [UTType] { [.jpeg, .heic, .png, .tiff] }
+    static var writableContentTypes: [UTType] { [.jpeg, .heic, .png, .tiff] }
+
+    let fileURL: URL
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.fileReadUnsupportedScheme)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        try FileWrapper(url: fileURL, options: .immediate)
     }
 }

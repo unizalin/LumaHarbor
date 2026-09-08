@@ -59,6 +59,29 @@ final class ExportOptionsWiringTests: AppViewModelTestCase {
         XCTAssertEqual(filenames, ["A_001", "B_002", "C_003"])
     }
 
+    func testBatchExportExcludesRejectedPhotosUnlessExplicitlyIncluded() async throws {
+        try seedPhotos(["A.ARW", "B.ARW"])
+        let services = try makeServices(decoder: SucceedingRawDecoder())
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let index = await services.libraryService.indexStore
+        let rejected = try XCTUnwrap(
+            try index.photos(inLibrary: library.id).first { $0.relativePath == "B.ARW" }
+        )
+        try index.setFlag(.reject, for: rejected.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        for photo in model.photos { model.toggleMultiSelect(photo.id) }
+        model.startBatchExport(to: try destinationDirectory(), options: .default)
+        await waitUntilAppCondition("the default batch export to finish") { await !model.isBatchExporting }
+        XCTAssertEqual(model.batchExportItems.map(\.request.baseFilename), ["A"])
+
+        model.includeRejectedInBatchExport = true
+        model.startBatchExport(to: try destinationDirectory(), options: .default)
+        await waitUntilAppCondition("the reject-inclusive batch export to finish") { await !model.isBatchExporting }
+        XCTAssertEqual(Set(model.batchExportItems.map(\.request.baseFilename)), ["A", "B"])
+    }
+
     func testNamingTemplateUsesTheVirtualCopysNameWhenExportingACopy() async throws {
         try seedPhotos(["A.ARW"])
         let services = try makeServices(decoder: SucceedingRawDecoder())

@@ -137,6 +137,23 @@ final class PadLibraryCompositionContractTests: XCTestCase {
         )
     }
 
+    func testPadLibraryViewUsesWidthPolicyForSidebarPresentation() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("PadLibraryView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(
+            source.contains("PadWorkspaceLayoutPolicy.layout(forWidth:"),
+            "PadLibraryView must derive its layout from the shared available-width policy"
+        )
+        XCTAssertTrue(
+            source.contains("case .overlay:") && source.contains("case .persistent:") && source.contains("case .persistentWithDetails:"),
+            "PadLibraryView must handle overlay and persistent sidebar profiles explicitly"
+        )
+        XCTAssertFalse(
+            source.contains(".frame(width: 280)"),
+            "PadLibraryView must not hard-code the regular sidebar width"
+        )
+    }
+
     /// Task 2: the main content area's empty grid must distinguish "no
     /// sources at all" from an offline/needs-access selected source, an
     /// empty search, and a source with no supported RAW files -- and give
@@ -151,6 +168,58 @@ final class PadLibraryCompositionContractTests: XCTestCase {
         XCTAssertTrue(source.contains("No supported RAW files found"))
         XCTAssertTrue(source.contains("Connect the drive again"))
         XCTAssertTrue(source.contains("Choose the original folder again"))
+    }
+
+    /// Claude iPad Phase 1 handoff: `PadWorkspaceState` (sidebar/inspector
+    /// tab/filmstrip/handedness -- presentation state only, never an
+    /// adjustment or undo entry) must actually be wired at scene level, not
+    /// left as dead code `PadLibraryView`/`PadEditorView` never construct.
+    /// It must live in `PadRootView`, above the library/editor route switch,
+    /// so it survives `PadLibraryView` being torn down and recreated every
+    /// time the route flips from library to editor and back -- a `@State`
+    /// declared inside `PadLibraryView` itself would not.
+    func testPadRootViewOwnsSceneScopedWorkspaceStateAndPassesItToLibrary() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("PadRootView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(
+            source.contains("@State private var workspaceState = PadWorkspaceState.initial"),
+            "PadRootView must own the scene-scoped PadWorkspaceState above the library/editor route switch"
+        )
+        XCTAssertTrue(
+            source.contains("PadLibraryView(library: library, editor: editor, services: services, workspaceState: $workspaceState)"),
+            "PadRootView must pass its own workspaceState binding into PadLibraryView"
+        )
+    }
+
+    /// `PadLibraryGrid` (referenced as `content`) owns its own Select-mode,
+    /// filter-sheet, and photo-opening `@State`. If `content` is referenced
+    /// from more than one branch of `workspace(forWidth:)`'s switch/if
+    /// (as it was before this fix -- once inside the `.overlay` case, again
+    /// inside a `.persistent`-only helper), SwiftUI treats each occurrence
+    /// as a distinct view identity, so crossing a width-profile breakpoint
+    /// (rotation, Stage Manager resize) tears the first down and mounts the
+    /// second fresh, silently resetting Select mode and the filter sheet
+    /// even though `library.selectedPhotoIDs`/`pendingScrollAnchor`
+    /// (an `@ObservedObject`, not view-local) survive regardless. `content`
+    /// must appear exactly once, as a stable sibling next to an appearing/
+    /// disappearing sidebar, never duplicated across branches.
+    func testPadLibraryViewKeepsGridContentAtAStablePositionAcrossSidebarPresentations() throws {
+        let source = try String(contentsOf: Self.padAppSourceURL("PadLibraryView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("@Binding var workspaceState: PadWorkspaceState"))
+        XCTAssertTrue(
+            source.contains("workspaceState.isSidebarVisible"),
+            "the persistent sidebar's shown/collapsed state must be driven by the scene-scoped workspaceState"
+        )
+
+        let bareContentReferences = source
+            .components(separatedBy: "\n")
+            .filter { $0.trimmingCharacters(in: .whitespaces) == "content" }
+        XCTAssertEqual(
+            bareContentReferences.count, 1,
+            "content must be referenced exactly once so PadLibraryGrid keeps one stable SwiftUI identity " +
+                "across every width profile and sidebar-visibility toggle"
+        )
     }
 
     /// Task 3: a failed save must never read as neutral "not saved" -- it

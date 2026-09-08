@@ -43,6 +43,11 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
     /// identical in the grid. `nil` for an original photo, or an
     /// unnamed copy.
     public var variantName: String?
+    /// Curation metadata belongs to this photo identity and is independent of
+    /// the scanned file facts.
+    public var rating: Int
+    public var flag: PhotoFlag
+    public var keywords: [PhotoKeyword]
 
     public init(
         id: PhotoID,
@@ -56,7 +61,10 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         hasEdits: Bool = false,
         lastEditAt: Date? = nil,
         variantOf: PhotoID? = nil,
-        variantName: String? = nil
+        variantName: String? = nil,
+        rating: Int = 0,
+        flag: PhotoFlag = .none,
+        keywords: [PhotoKeyword] = []
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -70,6 +78,9 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         self.lastEditAt = lastEditAt
         self.variantOf = variantOf
         self.variantName = variantName
+        self.rating = min(max(rating, 0), 5)
+        self.flag = flag
+        self.keywords = keywords
     }
 
     /// `true` for a virtual copy (`variantOf != nil`), `false` for an

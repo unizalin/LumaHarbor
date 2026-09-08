@@ -4,6 +4,7 @@ import Combine
 import EditorCore
 import Foundation
 import PhotoLibraryCore
+import PresetCore
 import RawProcessingCore
 import SwiftUI
 
@@ -69,6 +70,30 @@ struct MacExportOptions: Equatable {
     )
 }
 
+enum MacGridDensity: String, CaseIterable, Identifiable {
+    case compact
+    case standard
+    case large
+
+    var id: Self { self }
+
+    var minimumWidth: CGFloat {
+        switch self {
+        case .compact: return 132
+        case .standard: return 180
+        case .large: return 260
+        }
+    }
+
+    var maximumWidth: CGFloat {
+        switch self {
+        case .compact: return 190
+        case .standard: return 260
+        case .large: return 360
+        }
+    }
+}
+
 /// Owns library-level state: which folders exist, which photos are in them, and
 /// which photo is open.
 @MainActor
@@ -91,11 +116,49 @@ public final class LibraryViewModel: ObservableObject {
     /// without changing which photo is actually open in the editor;
     /// `toggleMultiSelect(_:)` is the only mutator.
     @Published private(set) var selectedPhotoIDs: Set<PhotoID> = []
+    @Published var searchText = ""
+    @Published var sort: PhotoSort = .captureDateDescending
+    /// Phase 3 curation filters. They live in the query value and therefore
+    /// compose with filename search without a second Swift-side filtering pass.
+    @Published var ratingFilter: PhotoRatingFilter?
+    @Published var flagFilter: PhotoFlag?
+    @Published var hasEditsFilter: Bool?
+    @Published var formatFilter: String?
+    @Published var cameraFilter: String?
+    @Published var lensFilter: String?
+    @Published var captureDateStartFilter: Date?
+    @Published var captureDateEndFilter: Date?
+    @Published var keywordFilter: String?
+    /// Rejects are excluded from batch export by default; the export sheet
+    /// opts in explicitly for a deliberate reject-inclusive export.
+    @Published var includeRejectedInBatchExport = false
+    @Published var gridDensity: MacGridDensity = .standard
+    /// The grid's actual contents: `photos` filtered/sorted by `searchText`/
+    /// `sort`. Spec §5.3.1/§4.2: this is driven entirely by
+    /// `PhotoIndexStore.page(matching:after:limit:)` -- the same SQL filename
+    /// search (Unicode normalization, `%`/`_` escaping) and `ORDER BY`/
+    /// tie-break rules the iPad browser already uses -- rather than a second,
+    /// hand-rolled Swift-side filter/sort. See `scheduleVisibleQuery(debounced:)`.
+    @Published private(set) var visiblePhotos: [PhotoAsset] = []
+    @Published private(set) var isSelecting = false
+    @Published private(set) var selectionAnchor: PhotoID?
     /// Phase 3 Task 3.4: the most recent batch sync that actually changed
     /// something, kept around for exactly one "Undo Batch Sync" -- `nil`
     /// whenever there's nothing to undo (no batch sync has happened yet, a
     /// gesture's diff was empty, or the last one was already undone).
     @Published private(set) var lastBatchTransaction: BatchAdjustmentTransaction?
+    /// Phase 2.2 (spec §6.2): the most recently copied adjustments, or
+    /// `nil` if nothing has been copied yet this session. UI-only -- never
+    /// written to any photo's sidecar.
+    @Published private(set) var adjustmentClipboard: AdjustmentClipboard?
+    /// Whether the *next* "Copy Adjustments" also captures the open photo's
+    /// committed crop/rotate geometry. Off by default (spec §6.2: "Geometry
+    /// 與 Local Adjustments 必須由使用者明確勾選").
+    @Published var copyIncludesGeometry = false
+    /// Whether the *next* "Copy Adjustments" also captures the open photo's
+    /// local adjustment brushes. Off by default, same reasoning as
+    /// `copyIncludesGeometry`.
+    @Published var copyIncludesLocalAdjustments = false
     @Published private(set) var scanProgress: ScanProgress?
     @Published private(set) var exportState: ExportState?
     /// Phase 5 Task 5.1: live per-file status for the batch export currently
@@ -123,6 +186,15 @@ public final class LibraryViewModel: ObservableObject {
     private var editorForwarding: AnyCancellable?
     /// Same reasoning as `editorForwarding`, for `presetLibrary`.
     private var presetLibraryForwarding: AnyCancellable?
+    /// Re-runs `visiblePhotos`'s query whenever `searchText` (debounced),
+    /// `sort` or `photos` (both immediate) changes -- see
+    /// `scheduleVisibleQuery(debounced:)`.
+    private var visibleQueryForwarding: Set<AnyCancellable> = []
+    /// Bumped on every new query; a page result is only committed if it's
+    /// still current when it lands (mirrors `LibraryBrowserSession`'s own
+    /// `queryGeneration` guard).
+    private var visibleQueryGeneration: UInt64 = 0
+    private var visibleQueryTask: Task<Void, Never>?
 
     private var services: AppServices?
     private var scanTask: Task<Void, Never>?
@@ -200,6 +272,30 @@ public final class LibraryViewModel: ObservableObject {
         presetLibraryForwarding = presetLibrary.objectWillChange.sink { [weak self] in
             self?.objectWillChange.send()
         }
+
+        // Spec §5.3.1: search is debounced 250ms; sort and the underlying
+        // `photos` snapshot (a fresh library selection, a scan batch, or an
+        // edit-badge update) re-query immediately.
+        $searchText
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.scheduleVisibleQuery(debounced: true) }
+            .store(in: &visibleQueryForwarding)
+        Publishers.Merge($sort.removeDuplicates().map { _ in () }, $photos.map { _ in () })
+            .sink { [weak self] _ in self?.scheduleVisibleQuery(debounced: false) }
+            .store(in: &visibleQueryForwarding)
+        Publishers.MergeMany(
+            $ratingFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $flagFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $hasEditsFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $formatFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $cameraFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $lensFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $captureDateStartFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $captureDateEndFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            $keywordFilter.removeDuplicates().map { _ in () }.eraseToAnyPublisher()
+        )
+        .sink { [weak self] _ in self?.scheduleVisibleQuery(debounced: false) }
+        .store(in: &visibleQueryForwarding)
     }
 
     private func install(services: AppServices) {
@@ -262,11 +358,178 @@ public final class LibraryViewModel: ObservableObject {
     /// the editor. Purely local UI state -- unlike `requestSelectPhoto`,
     /// there is no sidecar to flush, so this never needs to be async.
     func toggleMultiSelect(_ photoID: PhotoID) {
+        isSelecting = true
         if selectedPhotoIDs.contains(photoID) {
             selectedPhotoIDs.remove(photoID)
         } else {
             selectedPhotoIDs.insert(photoID)
         }
+        selectionAnchor = photoID
+    }
+
+    func beginSelection() {
+        isSelecting = true
+        selectionAnchor = selectedPhotoID ?? selectedPhotoIDs.first
+    }
+
+    func finishSelection() {
+        isSelecting = false
+        selectionAnchor = nil
+    }
+
+    func clearSelection() {
+        selectedPhotoIDs = []
+        selectionAnchor = nil
+    }
+
+    func selectAllVisible() {
+        isSelecting = true
+        selectedPhotoIDs.formUnion(visiblePhotos.map(\.id))
+        selectionAnchor = visiblePhotos.first?.id
+    }
+
+    func selectRange(to photoID: PhotoID) {
+        let orderedIDs = visiblePhotos.map(\.id)
+        guard let anchor = selectionAnchor,
+              let start = orderedIDs.firstIndex(of: anchor),
+              let end = orderedIDs.firstIndex(of: photoID) else {
+            toggleMultiSelect(photoID)
+            return
+        }
+        let range = start <= end ? start...end : end...start
+        isSelecting = true
+        selectedPhotoIDs.formUnion(range.map { orderedIDs[$0] })
+        selectionAnchor = photoID
+    }
+
+    func editSelectedPhotos() {
+        guard let photoID = selectionAnchor ?? visiblePhotos.first(where: { selectedPhotoIDs.contains($0.id) })?.id else {
+            return
+        }
+        requestSelectPhoto(photoID)
+    }
+
+    // MARK: - Visible-photos query (spec §5.3, §4.2)
+
+    /// Schedules a fresh `visiblePhotos` query, discarding whatever query is
+    /// already in flight. `debounced` mirrors `LibraryBrowserSession
+    /// .searchDebounceDelay`'s own 250ms so the two platforms share the same
+    /// "don't query on every keystroke" contract, not just the same SQL.
+    private func scheduleVisibleQuery(debounced: Bool) {
+        visibleQueryGeneration += 1
+        let generation = visibleQueryGeneration
+        visibleQueryTask?.cancel()
+        visibleQueryTask = Task { [weak self] in
+            if debounced {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            await self?.runVisibleQuery(generation: generation)
+        }
+    }
+
+    /// Pages through `PhotoIndexStore.page(matching:after:limit:)` -- the
+    /// exact filename-search (Unicode normalization, `%`/`_` escaping) and
+    /// `ORDER BY`/tie-break contract `LibraryBrowserSession` already relies
+    /// on for iPad -- accumulating every page for the current library into
+    /// `visiblePhotos`. A generation check before *and* after every `await`
+    /// means a stale query (superseded by a newer search/sort/library
+    /// change) can never clobber a fresher one's result, the same pattern
+    /// `LibraryBrowserSession.loadFirstPage` uses.
+    private func runVisibleQuery(generation: UInt64) async {
+        guard generation == visibleQueryGeneration else { return }
+        guard let services, let libraryID = selectedLibraryID else {
+            if generation == visibleQueryGeneration { visiblePhotos = [] }
+            return
+        }
+
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = LibraryQuery(
+            scope: .source(libraryID),
+            filenameSearch: trimmedSearch.isEmpty ? nil : trimmedSearch,
+            sort: sort,
+            rating: ratingFilter,
+            flag: flagFilter,
+            hasEdits: hasEditsFilter,
+            format: formatFilter,
+            camera: cameraFilter,
+            lens: lensFilter,
+            captureDate: (captureDateStartFilter != nil || captureDateEndFilter != nil)
+                ? PhotoDateRange(start: captureDateStartFilter, end: captureDateEndFilter)
+                : nil,
+            keyword: keywordFilter
+        )
+        let indexStore = await services.libraryService.indexStore
+
+        var results: [PhotoAsset] = []
+        var cursor: PhotoPageCursor?
+        repeat {
+            guard generation == visibleQueryGeneration else { return }
+            guard let page = try? indexStore.page(matching: query, after: cursor, limit: 200) else { break }
+            results.append(contentsOf: page.photos)
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        guard generation == visibleQueryGeneration else { return }
+        visiblePhotos = results
+    }
+
+    // MARK: - Curation metadata
+
+    func setRatingForSelectedPhoto(_ rating: Int) {
+        guard let photoID = selectedPhotoID, let services else { return }
+        Task { [weak self] in
+            do {
+                let indexStore = await services.libraryService.indexStore
+                try indexStore.setRating(rating, for: photoID)
+                await self?.reloadPhotos()
+            } catch {
+                self?.alert = UserAlert(title: L10n.t("Couldn't save rating"), error: error)
+            }
+        }
+    }
+
+    func setFlagForSelectedPhoto(_ flag: PhotoFlag) {
+        guard let photoID = selectedPhotoID, let services else { return }
+        Task { [weak self] in
+            do {
+                let indexStore = await services.libraryService.indexStore
+                try indexStore.setFlag(flag, for: photoID)
+                await self?.reloadPhotos()
+            } catch {
+                self?.alert = UserAlert(title: L10n.t("Couldn't save flag"), error: error)
+            }
+        }
+    }
+
+    func setKeywordsForPhoto(_ photoID: PhotoID, inputs: [String]) {
+        guard let services else { return }
+        Task { [weak self] in
+            do {
+                let indexStore = await services.libraryService.indexStore
+                try indexStore.setKeywords(inputs, for: photoID)
+                await self?.reloadPhotos()
+            } catch {
+                self?.alert = UserAlert(title: L10n.t("Couldn't save keywords"), error: error)
+            }
+        }
+    }
+
+    func setKeywordsForSelectedPhoto(_ inputs: [String]) {
+        guard let photoID = selectedPhotoID else { return }
+        setKeywordsForPhoto(photoID, inputs: inputs)
+    }
+
+    func clearCatalogFilters() {
+        ratingFilter = nil
+        flagFilter = nil
+        hasEditsFilter = nil
+        formatFilter = nil
+        cameraFilter = nil
+        lensFilter = nil
+        captureDateStartFilter = nil
+        captureDateEndFilter = nil
+        keywordFilter = nil
     }
 
     /// `EditorDependencies.onBeginAdjustmentGesture`'s target -- snapshots
@@ -362,6 +625,96 @@ public final class LibraryViewModel: ObservableObject {
         if summary.failed > 0 { parts.append("\(summary.failed) \(L10n.t("failed to revert"))") }
         if summary.skipped > 0 { parts.append("\(summary.skipped) \(L10n.t("skipped"))") }
         return parts.isEmpty ? L10n.t("Nothing to undo.") : parts.joined(separator: ", ")
+    }
+
+    // MARK: - Phase 2.2: copy, paste, sync adjustments (spec §6.2)
+
+    /// Snapshots the currently-open photo's own current adjustments into
+    /// `adjustmentClipboard` -- UI-only in-memory state, never written to
+    /// any photo's sidecar. Global adjustments are captured as exactly the
+    /// fields that differ from neutral (`AdjustmentPatch.modifiedFields(in:)`
+    /// -- the same "only what was actually changed" diff the slider-drag
+    /// batch sync already uses), not a blind snapshot of every
+    /// `AdjustmentFieldID`: a target photo's own deliberate edit on a field
+    /// the source never touched must survive a later paste/sync, the same
+    /// way it already survives a drag-triggered sync. Geometry and Local
+    /// Adjustments are captured only when
+    /// `copyIncludesGeometry`/`copyIncludesLocalAdjustments` are on.
+    func copyAdjustments() {
+        guard editor.photo != nil else { return }
+        let current = editor.adjustments
+        let modifiedFields = AdjustmentPatch.modifiedFields(in: current)
+        adjustmentClipboard = AdjustmentClipboard(
+            patch: AdjustmentPatch.extracting(modifiedFields, from: current),
+            geometry: copyIncludesGeometry ? current.geometry : nil,
+            localAdjustments: copyIncludesLocalAdjustments ? current.localAdjustments : nil
+        )
+    }
+
+    /// Applies `adjustmentClipboard` to the currently-open photo as one
+    /// undoable step (`EditorSession.pasteAdjustments` records history
+    /// exactly once). A no-op with nothing copied yet, or no photo open.
+    func pasteAdjustments() {
+        guard let clipboard = adjustmentClipboard else { return }
+        editor.pasteAdjustments(
+            patch: clipboard.patch,
+            geometry: clipboard.geometry,
+            localAdjustments: clipboard.localAdjustments
+        )
+    }
+
+    /// "Sync to Selected Photos": pushes `adjustmentClipboard`'s global
+    /// fields onto every other currently-selected photo, reusing
+    /// `BatchAdjustmentSyncService`'s existing per-target snapshot/merge/
+    /// fault-tolerance machinery via `syncPatch(_:sourcePhotoID:targetPhotoIDs:)`
+    /// -- the explicit-action sibling of the slider-drag gesture's
+    /// `commitGesture`. Geometry/Local Adjustments in the clipboard are
+    /// never part of this: `BatchAdjustmentSyncService` only understands
+    /// `AdjustmentPatch`'s stable field IDs, and giving it a second,
+    /// parallel safety model for those fields is out of scope for this
+    /// round (see `docs/coordination/CURRENT.md`).
+    ///
+    /// The target set is frozen synchronously -- `selectedPhotoIDs` is read
+    /// into a local `let` before the `await` below, the same guarantee
+    /// `beginBatchGesture` already gives the drag path, so a selection
+    /// change while this runs cannot retarget it. The source photo itself
+    /// (always a member of `selectedPhotoIDs` while it's open) is never its
+    /// own sync target -- reported as `skipped` in the summary alert rather
+    /// than silently dropped.
+    @discardableResult
+    func syncAdjustmentsToSelectedPhotos() async -> BatchAdjustmentTransaction? {
+        guard let clipboard = adjustmentClipboard, let source = selectedPhotoID else { return nil }
+        let frozenSelection = selectedPhotoIDs
+        let targets = frozenSelection.subtracting([source])
+        guard !targets.isEmpty else { return nil }
+        let skipped = frozenSelection.count - targets.count
+
+        let transaction = await batchSyncService.syncPatch(clipboard.patch, sourcePhotoID: source, targetPhotoIDs: targets)
+        lastBatchTransaction = transaction
+        for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
+            updateEditBadge(photoID: targetID, hasEdits: true)
+        }
+        let succeeded = transaction.results.values.filter { $0 == .success }.count
+        let failed = transaction.results.count - succeeded
+        alert = UserAlert(
+            title: L10n.t("Sync to Selected Photos"),
+            message: Self.batchSyncSummaryMessage(succeeded: succeeded, failed: failed, skipped: skipped)
+        )
+        return transaction
+    }
+
+    /// "Succeeded N, failed M, skipped K" report copy for
+    /// `syncAdjustmentsToSelectedPhotos()`, following the same
+    /// additive-parts convention `batchUndoSummaryMessage` already
+    /// established. `skipped` here counts the source photo itself -- it's
+    /// always part of the frozen selection snapshot but never its own sync
+    /// target.
+    nonisolated static func batchSyncSummaryMessage(succeeded: Int, failed: Int, skipped: Int) -> String {
+        var parts: [String] = []
+        if succeeded > 0 { parts.append("\(succeeded) \(L10n.t("synced"))") }
+        if failed > 0 { parts.append("\(failed) \(L10n.t("failed to sync"))") }
+        if skipped > 0 { parts.append("\(skipped) \(L10n.t("skipped"))") }
+        return parts.isEmpty ? L10n.t("Nothing to sync.") : parts.joined(separator: ", ")
     }
 
     /// For `List(selection:)` and anything else that needs a two-way binding.
@@ -1015,7 +1368,11 @@ public final class LibraryViewModel: ObservableObject {
         panel.allowsMultipleSelection = false
 
         guard panel.runModal() == .OK, let directory = panel.url else { return }
-        startBatchExport(to: directory, options: options)
+        startBatchExport(
+            to: directory,
+            options: options,
+            includeRejected: includeRejectedInBatchExport
+        )
     }
 
     /// Exports every photo in `selectedPhotoIDs` through `batchExportQueue`,
@@ -1028,9 +1385,16 @@ public final class LibraryViewModel: ObservableObject {
     /// single-photo export of that same photo would use), its saved sidecar
     /// otherwise -- every other selected photo is, by definition, not open
     /// in the editor.
-    func startBatchExport(to directory: URL, options: MacExportOptions) {
+    func startBatchExport(
+        to directory: URL,
+        options: MacExportOptions,
+        includeRejected: Bool? = nil
+    ) {
         guard let services, let library = selectedLibrary else { return }
-        let targets = photos.filter { selectedPhotoIDs.contains($0.id) }
+        let includeRejected = includeRejected ?? includeRejectedInBatchExport
+        let targets = photos.filter {
+            selectedPhotoIDs.contains($0.id) && (includeRejected || $0.flag != .reject)
+        }
         guard !targets.isEmpty else { return }
 
         batchExportTask?.cancel()
