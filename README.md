@@ -50,6 +50,8 @@ Scripts/package-mac-release.sh release
 
 產物會寫入 `dist/`，包含帶版本號的 ZIP 與 SHA-256 checksum。沒有設定簽章環境變數時，腳本會產生 ad-hoc 版本，只適合自己使用或提供給明確信任來源的小規模測試者。
 
+封裝流程會強制帶入多語系與 RAW Metal kernel 資源，使用中性暫存目錄建置，並檢查 App、ZIP 解壓內容及 checksum 是否含有建置者的私人絕對路徑。任一檢查失敗時不應散布該產物。
+
 若未來要公開下載並讓 macOS 正常辨識開發者，需要安裝 Developer ID Application 憑證與 `notarytool` Keychain profile，再執行：
 
 ```sh
@@ -127,6 +129,8 @@ Scripts/package-mac-release.sh release
 
 將 ZIP、checksum 與對應的測試 commit 一起提供。對方只需要驗證 checksum、解壓縮並開啟 `LumaHarbor.app`；ad-hoc Alpha 第一次啟動可能要在 Finder 按右鍵選「打開」，或到「系統設定 > 隱私權與安全性」選「仍要打開」。不需要提供或匯出你的 Apple 開發憑證，也不要要求對方關閉 Gatekeeper。
 
+重新建置後請只分享最高 build number 的 ZIP 與同名 checksum，不要沿用較舊的 Alpha 壓縮檔。
+
 沒有付費 Apple Developer 帳號仍可分享 ad-hoc Mac 版本，但 macOS 會顯示未辨識開發者警告。要讓公開下載版本一般雙擊即可開啟，才需要 Developer ID 簽章與 Apple notarization。
 
 ## 開發者驗證
@@ -136,6 +140,7 @@ swift build
 swift test
 swift run LumaHarborDiagnosticsCLI
 swift run LumaHarborDiagnosticsCLI --json
+Scripts/verify-release-privacy.sh build/LumaHarbor.app
 ```
 
 需要真實 RAW、外接磁碟或實體 iPad 的驗收不包含在一般單元測試內。最新證據與尚未執行的人工 gate 記錄於 [`docs/coordination/CURRENT.md`](docs/coordination/CURRENT.md)。

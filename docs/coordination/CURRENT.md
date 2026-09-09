@@ -2,16 +2,17 @@
 
 Updated: 2026-09-09
 
-Updated by: Codex（iPad Professional Editing Phase 1／release update）
+Updated by: Codex（Mac Build 2 可攜式資源與隱私修正）
 
 ## 可推版本摘要（2026-09-09）
 
-- **分支／基準**：`codex/open-source-release-prep`，本次已驗證產品提交為 `5cf33ad`，基於 `main@a3fdb35`；推送目標為 `origin/codex/open-source-release-prep`，不改寫 `main` 歷史。
-- **本次完成範圍**：補齊 iPad Adjust／Geometry／Local／Preset／Info 工具列、精確數值輸入、histogram 與安全 metadata、調整複製／貼上／批次同步、rating／flag／keyword 編輯，以及 JPEG／PNG／HEIC／TIFF 匯出選項；README 已改為繁體中文版並補上 Mac／iPad 使用與散布流程。
-- **最新版自動化證據**：完整 `swift test` 為 **1909 tests、9 skipped、0 failures**；`swift build -Xswiftc -strict-concurrency=complete` 為 **PASS** 且已消除 metadata formatter 的 Swift 6 並行警告；iPad Simulator `xcodebuild`（`CODE_SIGNING_ALLOWED=NO`）為 **PASS**；`git diff --cached --check` 與 staged 隱私掃描均為 **PASS**。詳細紀錄見 `docs/testing/reports/2026-09-09-professional-editing-phase1.md`。
-- **簽章與隱私**：公開 Xcode 專案不含 Development Team、code-sign identity 或 provisioning profile；本次提交內容不含本機 Team ID、iPad UDID、使用者絕對路徑、私鑰或已知 credential；`.superpowers/` 已加入 `.gitignore`。既有 `origin/main` 歷史中的舊 hostname email／路徑／Team ID 字串未在本輪做破壞性歷史改寫。
-- **先前實機／素材證據**：較早版本曾完成 iPad Pro 11-inch (3rd generation) signed Debug build、安裝與啟動，以及 RAW fixture／外接裝置驗收；這些證據不代表 `5cf33ad` 已完成最新一輪實機 UI 驗收。
-- **Mac 發佈檔**：已由 `2f8c640` 重建 `dist/LumaHarbor-0.1.0-1.zip`（2,533,072 bytes，SHA-256 `558ae1ef272294087a96f3beabbffb4cfd8f9f477cf2c085c56f6f2dc9d6106a`）；ZIP 完整性、AppleDouble、解壓後 ad-hoc `codesign`、`arm64` 架構與 macOS `open` 啟動冒煙測試均 PASS。此產物未使用 Developer ID 簽章或 Apple notarization。
+- **分支／基準**：`codex/open-source-release-prep`，本次 Mac 發佈修正提交為 `8dfeb0f`；推送目標為 `origin/codex/open-source-release-prep`，不改寫 `main` 歷史。
+- **本次完成範圍**：Mac App 現在會攜帶 Localization 與 RawProcessingCore 兩個 SwiftPM resource bundle，並從標準 `Contents/Resources` 載入；Release binary 會移除 debug symbols，Metal 以中性暫存來源編譯，封裝前後及 checksum 都會執行 fail-closed 私人路徑掃描。版本提升為 `0.1.0 (2)`。
+- **最新版自動化證據**：完整 `swift test` 為 **1916 tests、9 skipped、0 failures**；全新暫存目錄的 `swift build --configuration release -Xswiftc -strict-concurrency=complete` 為 **PASS**；iPad Release Simulator `xcodebuild`（`CODE_SIGNING_ALLOWED=NO`）為 **BUILD SUCCEEDED**；Mac 發佈契約測試為 **7/7 PASS**。詳細紀錄見 `docs/testing/reports/2026-09-09-professional-editing-phase1.md`。
+- **簽章與隱私**：公開 Xcode 專案不含 Development Team、code-sign identity 或 provisioning profile；Build 2 的 App、ZIP 解壓內容與 checksum 隱私掃描均 PASS，checksum 只記錄檔名。此輪未進行破壞性的 Git 歷史改寫。
+- **先前實機／素材證據**：較早版本曾完成 iPad Pro 11-inch (3rd generation) signed Debug build、安裝與啟動，以及 RAW fixture／外接裝置驗收；這些證據不代表 `8dfeb0f` 已完成最新一輪實機 UI 驗收。
+- **Mac 發佈檔**：`dist/LumaHarbor-0.1.0-2.zip`（2,402,115 bytes，SHA-256 `76d5732298a5d719d44600e80d1fa1ad0d643059fbfb6f20a25b606b36834982`）已通過 ZIP 完整性、AppleDouble、解壓後 ad-hoc `codesign --deep --strict`、`arm64` 架構、資源完整性、隱私與 macOS `open` 十秒啟動測試。此產物未使用 Developer ID 簽章或 Apple notarization。
+- **撤回產物**：所有 `0.1.0 (1)` Alpha ZIP 均不得再散布；舊包缺少 SwiftPM resource bundle，且可能保留建置環境資訊。
 - **尚未完成／已知限制**：最新提交仍需在實體 iPad／Mac 驗收視覺、旋轉、Stage Manager、Apple Pencil Pro、真實 RAW 與外接來源工作流；進階 masking、lens profile 與 Phase 2+ 不在本次 Phase 1 gate。自動化通過不等於所有硬體與人工驗收已結案。
 
 ## Codex／Claude 輪流開發協議（2026-09-08）
