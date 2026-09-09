@@ -2,17 +2,17 @@
 
 Updated: 2026-09-09
 
-Updated by: Codex（open-source release prep／Mac + iPad QA）
+Updated by: Codex（iPad Professional Editing Phase 1／release update）
 
 ## 可推版本摘要（2026-09-09）
 
-- **分支／基準**：`codex/open-source-release-prep`，功能提交 `df6ab39`、隱私防護提交 `8ec741e`，基於 `main@a3fdb35`；推送目標為 `origin/codex/open-source-release-prep`，不改寫 `main` 歷史。
-- **已完成範圍**：Mac editor／workspace UX、比較模式、篩選與 rating／flag／keyword curation、批次匯出；iPad adaptive layout、共用篩選、touch Select、多選列、VoiceOver selection state 與匯出流程；README 使用／散布說明與 Mac release packaging script。
-- **乾淨 HEAD 自動化**：由 `git archive HEAD` 建立不含本機 signing 差異的乾淨副本；完整 `swift test` 為 **1838 tests、9 skipped、0 failures**，iPad generic device `xcodebuild`（`CODE_SIGNING_ALLOWED=NO`）為 **PASS**。
-- **實機／外接裝置證據**：先前已完成 iPad Pro 11-inch (3rd generation) signed Debug build、安裝與啟動；MVP preflight、strict-concurrency build 與 `RawFixtureTests` 9/9 均 PASS，Sony ARW warm preview 約 143–145 ms。
-- **Mac 發佈檔**：`dist/LumaHarbor-0.1.0-1.zip` 可完整解壓、無 `._*` AppleDouble 檔案，ad-hoc app `codesign --verify --deep --strict` PASS；SHA-256 為 `3cc9140cc671667d121172ebe849a696504ba8c89175cfb6c45e86d304306247`。此檔尚未使用 Developer ID 簽章或 Apple notarization。
-- **隱私狀態**：目前提交內容不含本機 Team ID、iPad UDID、使用者絕對路徑或已知 credential；已加入 `.gitignore` 私密檔規則與 `.gitleaks.toml`。本機 `project.pbxproj` 的 Team ID 只保留為未提交變更。既有 `origin/main` 歷史仍含舊 hostname email／路徑／Team ID 字串，本輪不做破壞性的歷史改寫。
-- **尚未完成／已知限制**：iPad scene-level inspector／filmstrip 互動與完整 rotation／Stage Manager 人工 UI QA 尚待後續；Mac app 未 sandbox、未 notarize；Swift 6 strict-concurrency 仍有非阻斷 warning。這一版可供功能驗測，但不能宣稱整份 iPad 規格已全部結案。
+- **分支／基準**：`codex/open-source-release-prep`，本次已驗證產品提交為 `5cf33ad`，基於 `main@a3fdb35`；推送目標為 `origin/codex/open-source-release-prep`，不改寫 `main` 歷史。
+- **本次完成範圍**：補齊 iPad Adjust／Geometry／Local／Preset／Info 工具列、精確數值輸入、histogram 與安全 metadata、調整複製／貼上／批次同步、rating／flag／keyword 編輯，以及 JPEG／PNG／HEIC／TIFF 匯出選項；README 已改為繁體中文版並補上 Mac／iPad 使用與散布流程。
+- **最新版自動化證據**：完整 `swift test` 為 **1909 tests、9 skipped、0 failures**；`swift build -Xswiftc -strict-concurrency=complete` 為 **PASS** 且已消除 metadata formatter 的 Swift 6 並行警告；iPad Simulator `xcodebuild`（`CODE_SIGNING_ALLOWED=NO`）為 **PASS**；`git diff --cached --check` 與 staged 隱私掃描均為 **PASS**。詳細紀錄見 `docs/testing/reports/2026-09-09-professional-editing-phase1.md`。
+- **簽章與隱私**：公開 Xcode 專案不含 Development Team、code-sign identity 或 provisioning profile；本次提交內容不含本機 Team ID、iPad UDID、使用者絕對路徑、私鑰或已知 credential；`.superpowers/` 已加入 `.gitignore`。既有 `origin/main` 歷史中的舊 hostname email／路徑／Team ID 字串未在本輪做破壞性歷史改寫。
+- **先前實機／素材證據**：較早版本曾完成 iPad Pro 11-inch (3rd generation) signed Debug build、安裝與啟動，以及 RAW fixture／外接裝置驗收；這些證據不代表 `5cf33ad` 已完成最新一輪實機 UI 驗收。
+- **Mac 發佈檔**：先前的 `dist/LumaHarbor-0.1.0-1.zip` 曾通過解壓、AppleDouble 與 ad-hoc `codesign` 驗證，但本次 `5cf33ad` 尚未重建新的 Mac ZIP，也未使用 Developer ID 簽章或 Apple notarization。
+- **尚未完成／已知限制**：最新提交仍需在實體 iPad／Mac 驗收視覺、旋轉、Stage Manager、Apple Pencil Pro、真實 RAW 與外接來源工作流；進階 masking、lens profile 與 Phase 2+ 不在本次 Phase 1 gate。自動化通過不等於所有硬體與人工驗收已結案。
 
 ## Codex／Claude 輪流開發協議（2026-09-08）
 
