@@ -598,3 +598,6 @@
 "Separate keywords with commas or new lines." = "Separa las palabras clave con comas o saltos de línea.";
 "Edit keywords for the selected photo" = "Editar palabras clave de la foto seleccionada";
 "Couldn't save keywords" = "No se pudieron guardar las palabras clave";
+"Collision" = "Archivo existente";
+"Leave blank to keep the full resolution." = "Déjalo vacío para conservar la resolución completa.";
+"Leave blank to use the encoder default." = "Déjalo vacío para usar el valor predeterminado del codificador.";

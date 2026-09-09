@@ -27,11 +27,16 @@ public struct BasicAdjustmentPanel: View {
                 HStack {
                     Text(definition.kind.displayName)
                     Spacer()
-                    Text(BasicAdjustmentPanelModel.formatted(
-                        editor.adjustments[definition.kind],
-                        fractionDigits: definition.fractionDigits
-                    ))
-                    .monospacedDigit()
+                    AdjustmentValueInput(
+                        label: definition.kind.displayName,
+                        value: Binding(
+                            get: { editor.adjustments[definition.kind] },
+                            set: { editor.setAdjustment(definition.kind, to: $0) }
+                        ),
+                        range: definition.range,
+                        fractionDigits: definition.fractionDigits,
+                        onReset: { editor.resetAdjustment(definition.kind) }
+                    )
                 }
                 Slider(
                     value: Binding(

@@ -598,3 +598,6 @@
 "Separate keywords with commas or new lines." = "키워드는 쉼표 또는 줄바꿈으로 구분합니다.";
 "Edit keywords for the selected photo" = "선택한 사진의 키워드 편집";
 "Couldn't save keywords" = "키워드를 저장할 수 없습니다";
+"Collision" = "같은 이름의 파일";
+"Leave blank to keep the full resolution." = "전체 해상도를 유지하려면 비워 두세요.";
+"Leave blank to use the encoder default." = "인코더 기본값을 사용하려면 비워 두세요.";

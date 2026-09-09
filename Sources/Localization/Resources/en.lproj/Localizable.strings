@@ -598,3 +598,6 @@
 "Separate keywords with commas or new lines." = "Separate keywords with commas or new lines.";
 "Edit keywords for the selected photo" = "Edit keywords for the selected photo";
 "Couldn't save keywords" = "Couldn't save keywords";
+"Collision" = "Existing file";
+"Leave blank to keep the full resolution." = "Leave blank to keep the full resolution.";
+"Leave blank to use the encoder default." = "Leave blank to use the encoder default.";
