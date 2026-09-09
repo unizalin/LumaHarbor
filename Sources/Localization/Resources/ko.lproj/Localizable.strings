@@ -557,6 +557,12 @@
 "synced" = "개 동기화됨";
 "failed to sync" = "개 동기화 실패";
 "Nothing to sync." = "동기화할 항목이 없습니다.";
+"Curation" = "정리";
+"None" = "없음";
+"Save Keywords" = "키워드 저장";
+"Separate keywords with commas." = "키워드는 쉼표로 구분하세요.";
+"Updated %d photos." = "사진 %d개를 업데이트했습니다.";
+"Updated %d of %d photos." = "사진 %d/%d개를 업데이트했습니다.";
 "Workspace" = "작업 공간";
 "Show Sidebar" = "사이드바 표시";
 "Show Inspector" = "인스펙터 표시";

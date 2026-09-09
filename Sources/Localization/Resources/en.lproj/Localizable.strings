@@ -557,6 +557,12 @@
 "synced" = "synced";
 "failed to sync" = "failed to sync";
 "Nothing to sync." = "Nothing to sync.";
+"Curation" = "Curation";
+"None" = "None";
+"Save Keywords" = "Save Keywords";
+"Separate keywords with commas." = "Separate keywords with commas.";
+"Updated %d photos." = "Updated %d photos.";
+"Updated %d of %d photos." = "Updated %d of %d photos.";
 "Workspace" = "Workspace";
 "Show Sidebar" = "Show Sidebar";
 "Show Inspector" = "Show Inspector";

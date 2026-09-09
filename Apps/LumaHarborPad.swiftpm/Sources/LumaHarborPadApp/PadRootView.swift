@@ -25,27 +25,30 @@ struct PadRootView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("LumaHarbor")
+                .navigationTitle(navigationTitle)
+                .navigationBarTitleDisplayMode(editor.document == nil ? .large : .inline)
                 .toolbar {
-                    ToolbarItem {
-                        Button(L10n.t("Open RAW…")) {
-                            isImporting = true
+                    if editor.document == nil {
+                        ToolbarItem {
+                            Button(L10n.t("Open RAW…")) {
+                                isImporting = true
+                            }
+                            // A selection or restore already in flight owns
+                            // `document`/`editor` until it settles; starting a
+                            // second one here would just be immediately
+                            // pre-empted by the editor's own generation check,
+                            // so disabling this is a UX nicety, not a
+                            // correctness requirement.
+                            .disabled(editor.isPreparingDocument)
                         }
-                        // A selection or restore already in flight owns
-                        // `document`/`editor` until it settles; starting a
-                        // second one here would just be immediately
-                        // pre-empted by the editor's own generation check,
-                        // so disabling this is a UX nicety, not a
-                        // correctness requirement.
-                        .disabled(editor.isPreparingDocument)
-                    }
-                    ToolbarItem {
-                        Button {
-                            isShowingSettings = true
-                        } label: {
-                            Label(L10n.t("Settings"), systemImage: "gearshape")
+                        ToolbarItem {
+                            Button {
+                                isShowingSettings = true
+                            } label: {
+                                Label(L10n.t("Settings"), systemImage: "gearshape")
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
                         }
-                        .frame(minWidth: 44, minHeight: 44)
                     }
                 }
                 .sheet(isPresented: $isShowingSettings) {
@@ -147,10 +150,21 @@ struct PadRootView: View {
         }
     }
 
+    private var navigationTitle: String {
+        editor.document?.workingURL.deletingPathExtension().lastPathComponent ?? "LumaHarbor"
+    }
+
     @ViewBuilder
     private var content: some View {
         if editor.document != nil {
-            PadEditorView(model: editor, exporter: services.exporter)
+            PadEditorView(
+                model: editor,
+                exporter: services.exporter,
+                presetLibrary: services.presetLibrary,
+                library: library,
+                services: services,
+                sceneWorkspaceState: $workspaceState
+            )
         } else if editor.pendingRelink != nil {
             // No "Cancel" here, deliberately: this prompt is the only way
             // back to this specific document, and dismissing the file

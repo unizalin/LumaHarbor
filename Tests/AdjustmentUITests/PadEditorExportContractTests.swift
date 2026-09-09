@@ -26,8 +26,8 @@ final class PadEditorExportContractTests: XCTestCase {
     func testPadEditorOffersFullResolutionExportPhotosAndShareActions() throws {
         let source = try Self.loadSource("PadEditorView.swift")
 
-        XCTAssertTrue(source.contains("ExportRequest("))
-        XCTAssertTrue(source.contains("quality: 1"))
+        XCTAssertTrue(source.contains("exportOptions.request("))
+        XCTAssertTrue(source.contains("exporter.export(request)"))
         XCTAssertTrue(source.contains("ShareLink"))
         XCTAssertTrue(source.contains("PHPhotoLibrary"))
         XCTAssertTrue(source.contains("creationRequestForAssetFromImage"))
@@ -36,7 +36,30 @@ final class PadEditorExportContractTests: XCTestCase {
     func testPadRootPassesTheSharedExporterIntoTheEditor() throws {
         let source = try Self.loadSource("PadRootView.swift")
 
-        XCTAssertTrue(source.contains("PadEditorView(model: editor, exporter: services.exporter)"))
+        XCTAssertTrue(
+            source.contains("PadEditorView(")
+                && source.contains("exporter: services.exporter")
+                && source.contains("presetLibrary: services.presetLibrary"),
+            "the editor must receive the shared preset library from app services"
+        )
+    }
+
+    func testPadRootHidesLibraryCommandsAndLargeTitleWhileEditing() throws {
+        let source = try Self.loadSource("PadRootView.swift")
+
+        XCTAssertTrue(
+            source.contains("if editor.document == nil {"),
+            "Open RAW and Settings must only be contributed by the library route"
+        )
+        XCTAssertTrue(source.contains(".navigationTitle(navigationTitle)"))
+        XCTAssertTrue(
+            source.contains(".navigationBarTitleDisplayMode(editor.document == nil ? .large : .inline)"),
+            "the editor must not keep the library's large navigation-title row"
+        )
+        XCTAssertTrue(
+            source.contains("editor.document?.workingURL.deletingPathExtension().lastPathComponent"),
+            "the compact editor title should identify the open photo"
+        )
     }
 
     // MARK: - Explicit "Save to Files" (spec §5.5.1/§5.5.2)
@@ -58,5 +81,22 @@ final class PadEditorExportContractTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".userCancelled"))
         XCTAssertTrue(source.contains("Couldn't save to Files"))
+    }
+
+    func testEditorWiresCompareModesToCanvasAndToolbar() throws {
+        let source = try Self.loadSource("PadEditorView.swift")
+        XCTAssertTrue(source.contains("setCompareMode(.single)"))
+        XCTAssertTrue(source.contains("setCompareMode(.sideBySide)"))
+        XCTAssertTrue(source.contains("setCompareMode(.verticalWipe)"))
+        XCTAssertTrue(source.contains("comparisonCanvas"))
+        XCTAssertTrue(source.contains("setWipePosition"))
+    }
+
+    func testEditorWiresLibraryFilmstripWithoutDuplicatingPhotoData() throws {
+        let source = try Self.loadSource("PadEditorView.swift")
+        XCTAssertTrue(source.contains("PadEditorFilmstrip"))
+        XCTAssertTrue(source.contains("library.photos"))
+        XCTAssertTrue(source.contains("library.openAsset(for: photo)"))
+        XCTAssertTrue(source.contains("model.openLibraryAsset(asset)"))
     }
 }

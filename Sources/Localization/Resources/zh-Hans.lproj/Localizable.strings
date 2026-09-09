@@ -557,6 +557,12 @@
 "synced" = "张已同步";
 "failed to sync" = "张同步失败";
 "Nothing to sync." = "没有可同步的项目。";
+"Curation" = "整理";
+"None" = "无";
+"Save Keywords" = "保存关键字";
+"Separate keywords with commas." = "请用逗号分隔关键字。";
+"Updated %d photos." = "已更新 %d 张照片。";
+"Updated %d of %d photos." = "已更新 %d/%d 张照片。";
 "Workspace" = "工作区";
 "Show Sidebar" = "显示侧边栏";
 "Show Inspector" = "显示检查器";

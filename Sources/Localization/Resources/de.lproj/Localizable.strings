@@ -557,6 +557,12 @@
 "synced" = "synchronisiert";
 "failed to sync" = "fehlgeschlagen bei der Synchronisierung";
 "Nothing to sync." = "Nichts zu synchronisieren.";
+"Curation" = "Auswahl";
+"None" = "Keine";
+"Save Keywords" = "Schlagwörter sichern";
+"Separate keywords with commas." = "Schlagwörter durch Kommas trennen.";
+"Updated %d photos." = "%d Fotos aktualisiert.";
+"Updated %d of %d photos." = "%d von %d Fotos aktualisiert.";
 "Workspace" = "Arbeitsbereich";
 "Show Sidebar" = "Seitenleiste einblenden";
 "Show Inspector" = "Inspektor einblenden";

@@ -557,6 +557,12 @@
 "synced" = "張已同步";
 "failed to sync" = "張同步失敗";
 "Nothing to sync." = "沒有可同步的項目。";
+"Curation" = "整理";
+"None" = "無";
+"Save Keywords" = "儲存關鍵字";
+"Separate keywords with commas." = "請以逗號分隔關鍵字。";
+"Updated %d photos." = "已更新 %d 張照片。";
+"Updated %d of %d photos." = "已更新 %d/%d 張照片。";
 "Workspace" = "工作區";
 "Show Sidebar" = "顯示側邊欄";
 "Show Inspector" = "顯示檢閱器";

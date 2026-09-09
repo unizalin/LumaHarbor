@@ -481,6 +481,48 @@ public final class LibraryBrowserSession: ObservableObject {
         }
     }
 
+    /// Re-fetches the current query after an external library mutation (for
+    /// example a virtual-copy transaction). Presentation selection is
+    /// cleared because the returned page may contain newly-created IDs.
+    public func refresh() {
+        selectedPhotoIDs.removeAll()
+        beginNewQuery()
+    }
+
+    /// Updates the in-memory edit badge after a sidecar mutation that did not
+    /// come through the currently-open document's ordinary save callback
+    /// (for example a batch adjustment sync). Keeping this as a targeted
+    /// update preserves the user's multi-selection and avoids a full refresh
+    /// that would clear selection and reset the visible page.
+    public func markPhotoHasEdits(_ photoID: PhotoID, hasEdits: Bool) {
+        guard let index = photos.firstIndex(where: { $0.id == photoID }) else { return }
+        guard photos[index].hasEdits != hasEdits else { return }
+        photos[index].hasEdits = hasEdits
+        photos[index].lastEditAt = hasEdits ? Date() : nil
+    }
+
+    /// Applies curation metadata returned by the authoritative index store to
+    /// the currently visible projection without re-querying the page. This is
+    /// intentionally targeted so editing a rating, flag, or keyword never
+    /// clears the user's touch selection or resets their scroll window.
+    public func updatePhotoCuration(
+        photoID: PhotoID,
+        rating: Int? = nil,
+        flag: PhotoFlag? = nil,
+        keywords: [PhotoKeyword]? = nil
+    ) {
+        guard let index = photos.firstIndex(where: { $0.id == photoID }) else { return }
+        if let rating {
+            photos[index].rating = min(max(rating, 0), 5)
+        }
+        if let flag {
+            photos[index].flag = flag
+        }
+        if let keywords {
+            photos[index].keywords = keywords
+        }
+    }
+
     /// Consumes `pendingScrollAnchor` -- called by the grid immediately
     /// after it actually scrolls to the named photo, so a later, unrelated
     /// `photos` change (paging further, a background refresh) can never
