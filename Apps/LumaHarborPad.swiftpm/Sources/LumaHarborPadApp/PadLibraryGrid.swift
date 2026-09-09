@@ -53,6 +53,9 @@ struct PadLibraryGrid: View {
     @State private var openingPhotoID: PhotoID?
     @State private var isSelectMode = false
     @State private var isShowingFilters = false
+    @State private var isShowingBatchKeywords = false
+    @State private var batchKeywordsText = ""
+    @State private var batchMessage: String?
 
     /// How close to the end of `library.photos` a visible cell must be
     /// before it triggers `loadNextPage()` -- the brief's "last 20 visible
@@ -104,10 +107,48 @@ struct PadLibraryGrid: View {
             .sheet(isPresented: $isShowingFilters) {
                 PadLibraryFilterSheet(library: library)
             }
+            .sheet(isPresented: $isShowingBatchKeywords) {
+                NavigationStack {
+                    Form {
+                        Section(L10n.t("Keywords")) {
+                            TextField(L10n.t("Keyword"), text: $batchKeywordsText)
+                                .textInputAutocapitalization(.never)
+                                .disableAutocorrection(true)
+                            Text(L10n.t("Separate keywords with commas."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .navigationTitle(L10n.t("Keywords"))
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(L10n.t("Cancel")) { isShowingBatchKeywords = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button(L10n.t("Save")) {
+                                isShowingBatchKeywords = false
+                                applyKeywordsToSelected()
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !library.selectedPhotoIDs.isEmpty {
                     selectionBar
                 }
+            }
+            .alert(
+                L10n.t("Batch action"),
+                isPresented: Binding(
+                    get: { batchMessage != nil },
+                    set: { if !$0 { batchMessage = nil } }
+                )
+            ) {
+                Button(L10n.t("OK"), role: .cancel) { batchMessage = nil }
+            } message: {
+                Text(batchMessage ?? "")
             }
     }
 
@@ -443,11 +484,139 @@ struct PadLibraryGrid: View {
                 isSelectMode = false
             }
             .frame(minWidth: 44, minHeight: 44)
+
+            Menu {
+                Menu {
+                    ForEach(0...5, id: \.self) { rating in
+                        Button {
+                            applyRatingToSelected(rating)
+                        } label: {
+                            Label(
+                                rating == 0 ? L10n.t("None") : "\(rating)",
+                                systemImage: rating == 0 ? "xmark.circle" : "star.fill"
+                            )
+                        }
+                    }
+                } label: {
+                    Label(L10n.t("Rating"), systemImage: "star")
+                }
+
+                Menu {
+                    ForEach(PhotoFlag.allCases, id: \.self) { flag in
+                        Button {
+                            applyFlagToSelected(flag)
+                        } label: {
+                            Label(flagTitle(flag), systemImage: flagSymbol(flag))
+                        }
+                    }
+                } label: {
+                    Label(L10n.t("Flag"), systemImage: "flag")
+                }
+
+                Button {
+                    isShowingBatchKeywords = true
+                } label: {
+                    Label(L10n.t("Keywords"), systemImage: "tag")
+                }
+
+                Divider()
+                Button {
+                    createVirtualCopies()
+                } label: {
+                    Label(L10n.t("Create virtual copies"), systemImage: "plus.square.on.square")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(Text(L10n.t("Batch actions")))
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 56)
         .background(.bar)
         .accessibilityElement(children: .contain)
+    }
+
+    private func createVirtualCopies() {
+        let selected = library.photos.filter { library.selectedPhotoIDs.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        Task {
+            var created = 0
+            for photo in selected {
+                do {
+                    _ = try await services.libraryService.createVirtualCopy(of: photo)
+                    created += 1
+                } catch {
+                    // Keep the batch best-effort: one offline/read-only item
+                    // must not hide copies that were already created.
+                }
+            }
+            library.clearPhotoSelection()
+            isSelectMode = false
+            library.refresh()
+            batchMessage = created == selected.count
+                ? String(format: L10n.t("Created %d virtual copies."), created)
+                : String(format: L10n.t("Created %d of %d virtual copies."), created, selected.count)
+        }
+    }
+
+    private func applyRatingToSelected(_ rating: Int) {
+        applyToSelected { photoID in
+            await services.batchCoordinator.setRating(rating, for: photoID)
+        }
+    }
+
+    private func applyFlagToSelected(_ flag: PhotoFlag) {
+        applyToSelected { photoID in
+            await services.batchCoordinator.setFlag(flag, for: photoID)
+        }
+    }
+
+    private func applyKeywordsToSelected() {
+        let inputs = batchKeywordsText
+            .split(separator: ",", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        applyToSelected { photoID in
+            await services.batchCoordinator.setKeywords(inputs, for: photoID)
+        }
+    }
+
+    private func applyToSelected(
+        _ operation: @escaping (PhotoID) async -> Bool
+    ) {
+        let selected = library.selectedPhotoIDs
+        guard !selected.isEmpty else { return }
+        Task {
+            var succeeded = 0
+            for photoID in selected {
+                if await operation(photoID) {
+                    succeeded += 1
+                }
+            }
+            let key = succeeded == selected.count
+                ? "Updated %d photos."
+                : "Updated %d of %d photos."
+            batchMessage = succeeded == selected.count
+                ? String(format: L10n.t(key), succeeded)
+                : String(format: L10n.t(key), succeeded, selected.count)
+        }
+    }
+
+    private func flagTitle(_ flag: PhotoFlag) -> String {
+        switch flag {
+        case .none: return L10n.t("None")
+        case .pick: return L10n.t("Pick")
+        case .reject: return L10n.t("Reject")
+        }
+    }
+
+    private func flagSymbol(_ flag: PhotoFlag) -> String {
+        switch flag {
+        case .none: return "flag"
+        case .pick: return "flag.fill"
+        case .reject: return "flag.slash"
+        }
     }
 
     private var densityMenu: some View {

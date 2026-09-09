@@ -34,6 +34,7 @@ struct PadEditorView: View {
     @ObservedObject var model: PadEditorModel
     @ObservedObject private var editor: EditorSession
     @ObservedObject private var library: PadLibraryModel
+    @ObservedObject private var batchCoordinator: PadBatchAdjustmentCoordinator
     let exporter: PhotoExporter
     let services: PadAppServices
     @ObservedObject private var presetLibrary: PadPresetLibrary
@@ -79,6 +80,7 @@ struct PadEditorView: View {
     @State private var copyIncludesGeometry = false
     @State private var copyIncludesLocalAdjustments = false
     @State private var isSavingToPhotos = false
+    @State private var batchMessage: String?
     /// Drives the explicit "Save to Files" `fileExporter` flow (spec
     /// §5.5.1), alongside the existing ShareLink/Photos destinations --
     /// never a second export path, only a second *destination picker* over
@@ -109,6 +111,7 @@ struct PadEditorView: View {
         self.presetLibrary = presetLibrary
         self.library = library
         self.services = services
+        self._batchCoordinator = ObservedObject(wrappedValue: services.batchCoordinator)
         self._sceneWorkspaceState = sceneWorkspaceState
     }
 
@@ -209,7 +212,7 @@ struct PadEditorView: View {
         .fileExporter(
             isPresented: $isPresentingFileExporter,
             document: exportedURL.map { ExportedPhotoFileDocument(fileURL: $0) },
-            contentType: .jpeg,
+            contentType: UTType(exportOptions.format.utTypeIdentifier) ?? .data,
             defaultFilename: exportedURL?.deletingPathExtension().lastPathComponent
         ) { result in
             switch result {
@@ -231,6 +234,17 @@ struct PadEditorView: View {
                 isPresentingExportOptions = false
                 exportFullResolution()
             }
+        }
+        .alert(
+            L10n.t("Batch action"),
+            isPresented: Binding(
+                get: { batchMessage != nil },
+                set: { if !$0 { batchMessage = nil } }
+            )
+        ) {
+            Button(L10n.t("OK"), role: .cancel) { batchMessage = nil }
+        } message: {
+            Text(batchMessage ?? "")
         }
         // The open document's identity, not this view's own lifetime, is
         // what scopes `workspaceState` — see the type's documentation.
@@ -346,6 +360,33 @@ struct PadEditorView: View {
                 Label(L10n.t("Paste Adjustments"), systemImage: "doc.on.clipboard")
             }
             .disabled(editor.photo == nil || adjustmentClipboard == nil)
+
+            Button {
+                Task {
+                    let transaction = await batchCoordinator.sync(
+                        adjustmentClipboard,
+                        sourcePhotoID: editor.photo?.id
+                    )
+                    guard let transaction else {
+                        batchMessage = L10n.t("Nothing to sync.")
+                        return
+                    }
+                    batchMessage = PadBatchAdjustmentCoordinator.summaryMessage(transaction)
+                }
+            } label: {
+                Label(L10n.t("Sync to Selected Photos"), systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(editor.photo == nil || adjustmentClipboard == nil || library.selectedPhotoIDs.count < 2)
+
+            Button {
+                Task {
+                    guard let summary = await batchCoordinator.undoLastTransaction() else { return }
+                    batchMessage = PadBatchAdjustmentCoordinator.undoSummaryMessage(summary)
+                }
+            } label: {
+                Label(L10n.t("Undo Batch Sync"), systemImage: "arrow.uturn.backward")
+            }
+            .disabled(batchCoordinator.lastTransaction == nil)
         } label: {
             Image(systemName: "slider.horizontal.2.square")
         }
@@ -668,7 +709,14 @@ struct PadEditorView: View {
             }
             .padding()
             Divider()
-            PadInspectorHost(inspector: inspector, editor: editor, presetLibrary: presetLibrary, showsDomainBar: false)
+            PadInspectorHost(
+                inspector: inspector,
+                editor: editor,
+                presetLibrary: presetLibrary,
+                library: library,
+                batchCoordinator: batchCoordinator,
+                showsDomainBar: false
+            )
         }
         .frame(width: 320)
         .background(.thickMaterial)
@@ -684,7 +732,14 @@ struct PadEditorView: View {
             }
             .padding()
             Divider()
-            PadInspectorHost(inspector: inspector, editor: editor, presetLibrary: presetLibrary, showsDomainBar: true)
+            PadInspectorHost(
+                inspector: inspector,
+                editor: editor,
+                presetLibrary: presetLibrary,
+                library: library,
+                batchCoordinator: batchCoordinator,
+                showsDomainBar: true
+            )
         }
     }
 
@@ -699,7 +754,14 @@ struct PadEditorView: View {
             }
             .padding()
             Divider()
-            PadInspectorHost(inspector: inspector, editor: editor, presetLibrary: presetLibrary, showsDomainBar: true)
+            PadInspectorHost(
+                inspector: inspector,
+                editor: editor,
+                presetLibrary: presetLibrary,
+                library: library,
+                batchCoordinator: batchCoordinator,
+                showsDomainBar: true
+            )
                 .frame(maxHeight: 420)
         }
         .frame(width: 320)
@@ -917,6 +979,8 @@ private struct PadInspectorHost: View {
     @ObservedObject var inspector: PadInspectorCoordinator
     @ObservedObject var editor: EditorSession
     @ObservedObject var presetLibrary: PadPresetLibrary
+    @ObservedObject var library: PadLibraryModel
+    @ObservedObject var batchCoordinator: PadBatchAdjustmentCoordinator
     let showsDomainBar: Bool
 
     var body: some View {
@@ -1046,7 +1110,12 @@ private struct PadInspectorHost: View {
                 PadSaveStateBlock(saveState: editor.saveState)
                 Divider()
                 if let photo = editor.photo {
-                    PadMetadataBlock(snapshot: EditorMetadataSnapshot(photo: photo))
+                    let curationPhoto = library.photos.first(where: { $0.id == photo.id }) ?? photo
+                    PadMetadataBlock(
+                        snapshot: EditorMetadataSnapshot(photo: curationPhoto),
+                        photo: curationPhoto,
+                        batchCoordinator: batchCoordinator
+                    )
                 } else {
                     Text(L10n.t("Photo not yet loaded."))
                         .font(.caption)
@@ -1168,6 +1237,23 @@ private struct PadSaveStateBlock: View {
 /// Displays safe EditorMetadataSnapshot fields (no path, bookmark, or signing info).
 private struct PadMetadataBlock: View {
     let snapshot: EditorMetadataSnapshot
+    let photo: PhotoAsset
+    @ObservedObject var batchCoordinator: PadBatchAdjustmentCoordinator
+
+    @State private var keywordText: String
+    @State private var isSavingKeywords = false
+    @State private var message: String?
+
+    init(
+        snapshot: EditorMetadataSnapshot,
+        photo: PhotoAsset,
+        batchCoordinator: PadBatchAdjustmentCoordinator
+    ) {
+        self.snapshot = snapshot
+        self.photo = photo
+        self.batchCoordinator = batchCoordinator
+        _keywordText = State(initialValue: photo.keywords.map(\.displayValue).joined(separator: ", "))
+    }
 
     private struct Row: View {
         let label: String
@@ -1201,8 +1287,130 @@ private struct PadMetadataBlock: View {
             if let v = snapshot.shutterSpeedDescription { Row(label: L10n.t("Shutter"), value: v) }
             if let v = snapshot.isoDescription       { Row(label: L10n.t("ISO"),        value: v) }
             if let v = snapshot.captureDateDescription { Row(label: L10n.t("Date"),     value: v) }
+
+            Divider()
+            Text(L10n.t("Curation"))
+                .font(.subheadline.weight(.semibold))
+            ratingControls
+            flagControl
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.t("Keywords"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    TextField(L10n.t("Keyword"), text: $keywordText)
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                    Button {
+                        saveKeywords()
+                    } label: {
+                        if isSavingKeywords {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(isSavingKeywords)
+                    .accessibilityLabel(Text(L10n.t("Save Keywords")))
+                }
+            }
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .accessibilityElement(children: .contain)
+        .onChange(of: photo.id) { _, _ in
+            keywordText = photo.keywords.map(\.displayValue).joined(separator: ", ")
+        }
+    }
+
+    private var ratingControls: some View {
+        HStack(spacing: 4) {
+            Text(L10n.t("Rating"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .leading)
+            ForEach(0...5, id: \.self) { value in
+                Button {
+                    Task {
+                        let succeeded = await batchCoordinator.setRating(value, for: photo.id)
+                        if !succeeded { message = L10n.t("Couldn't save rating") }
+                    }
+                } label: {
+                    Image(systemName: value == 0 ? "xmark.circle" : "star.fill")
+                        .foregroundStyle(value > photo.rating ? Color.secondary : Color.yellow)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 32, height: 32)
+                .accessibilityLabel(Text("\(L10n.t("Rating")) \(value)"))
+            }
+            Spacer()
+        }
+    }
+
+    private var flagControl: some View {
+        HStack {
+            Text(L10n.t("Flag"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .leading)
+            Menu {
+                ForEach(PhotoFlag.allCases, id: \.self) { flag in
+                    Button {
+                        Task {
+                            let succeeded = await batchCoordinator.setFlag(flag, for: photo.id)
+                            if !succeeded { message = L10n.t("Couldn't save flag") }
+                        }
+                    } label: {
+                        Label(flagTitle(flag), systemImage: photo.flag == flag ? "checkmark" : "")
+                    }
+                }
+            } label: {
+                Label(flagTitle(photo.flag), systemImage: flagSymbol(photo.flag))
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            Spacer()
+        }
+    }
+
+    private func saveKeywords() {
+        isSavingKeywords = true
+        let inputs = keywordText
+            .split(separator: ",", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        Task {
+            let succeeded = await batchCoordinator.setKeywords(inputs, for: photo.id)
+            isSavingKeywords = false
+            if !succeeded {
+                message = L10n.t("Couldn't save keywords")
+            } else {
+                message = nil
+                keywordText = inputs.joined(separator: ", ")
+            }
+        }
+    }
+
+    private func flagTitle(_ flag: PhotoFlag) -> String {
+        switch flag {
+        case .none: return L10n.t("None")
+        case .pick: return L10n.t("Pick")
+        case .reject: return L10n.t("Reject")
+        }
+    }
+
+    private func flagSymbol(_ flag: PhotoFlag) -> String {
+        switch flag {
+        case .none: return "flag"
+        case .pick: return "flag.fill"
+        case .reject: return "flag.slash"
+        }
     }
 }
 

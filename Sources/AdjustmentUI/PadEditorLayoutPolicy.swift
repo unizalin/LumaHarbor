@@ -3,12 +3,15 @@ import Foundation
 
 /// Where the ten basic adjustments live relative to the canvas for a
 /// given available size — see `PadEditorLayoutPolicy`.
-public enum PadInspectorPresentation: Equatable, Sendable {
+public enum PadInspectorPresentation: String, Equatable, Sendable {
     /// A persistent 320pt panel trailing the canvas, side by side.
     case trailingDock
     /// A bottom sheet the user can drag between a collapsed peek, medium,
     /// and large detent, over the canvas.
     case bottomDrawer
+    /// A detached, draggable floating panel — activated in focus mode so the
+    /// canvas can fill the available space while the inspector stays reachable.
+    case floating
 }
 
 /// Which of the two adaptive workspace layouts `PadEditorView` currently

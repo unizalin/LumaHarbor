@@ -40,6 +40,10 @@ struct PadThumbnailCell: View {
     /// (e.g. "Offline", "Read-only", "Needs Access").
     let sourceStatusMessage: String?
     let provider: ThumbnailProvider
+    /// Compact presentation used by the editor filmstrip. It keeps the same
+    /// cache and offline semantics as the library grid while using a stable
+    /// 72pt thumbnail slot.
+    var compact: Bool = false
     /// Resolves the file this cell should decode from, lazily -- called
     /// only once the cell is actually visible and has no cached bytes
     /// already, not precomputed for every row up front.
@@ -56,7 +60,7 @@ struct PadThumbnailCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             thumbnail
-                .frame(height: 150)
+                .frame(height: compact ? 72 : 150)
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .topTrailing) {
                     if photo.hasEdits {

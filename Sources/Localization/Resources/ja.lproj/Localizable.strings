@@ -557,6 +557,12 @@
 "synced" = "枚を同期";
 "failed to sync" = "枚の同期に失敗";
 "Nothing to sync." = "同期する項目がありません。";
+"Curation" = "整理";
+"None" = "なし";
+"Save Keywords" = "キーワードを保存";
+"Separate keywords with commas." = "キーワードはカンマで区切ってください。";
+"Updated %d photos." = "%d枚の写真を更新しました。";
+"Updated %d of %d photos." = "%d/%d枚の写真を更新しました。";
 "Workspace" = "ワークスペース";
 "Show Sidebar" = "サイドバーを表示";
 "Show Inspector" = "インスペクタを表示";

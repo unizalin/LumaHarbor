@@ -56,7 +56,7 @@ public struct EditorMetadataSnapshot: Equatable, Sendable {
 
     private static func fileSizeDescription(bytes: Int64) -> String? {
         guard bytes > 0 else { return nil }
-        return byteCountFormatter.string(fromByteCount: bytes)
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private static func focalLengthDescription(millimeters: Double) -> String {
@@ -82,12 +82,6 @@ public struct EditorMetadataSnapshot: Equatable, Sendable {
         let denominator = Int((1 / seconds).rounded())
         return "1/\(denominator) s"
     }
-
-    private static let byteCountFormatter: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter
-    }()
 
     private static let decimalFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
