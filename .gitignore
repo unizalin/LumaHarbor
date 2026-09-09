@@ -27,3 +27,18 @@ Fixtures/Private/
 *.raf
 *.RW2
 *.rw2
+
+# Local credentials, Apple signing material, and private keys must never enter Git.
+.env
+.env.*
+!.env.example
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.pem
+*.key
+*.cer
+*.crt
+*.der
+*.secret
