@@ -6,9 +6,10 @@
 ## 已驗證
 
 - `swift test --scratch-path /private/tmp/LumaHarbor-swift-phase1-input --filter 'LibraryBrowserSessionTests/testUpdatePhotoCurationPreservesSelectionAndUpdatesLoadedProjection|PadBatchContractTests|EightLanguageLocalizationGateTests'`：PASS。
-- 完整 `swift test`：1,909 tests，9 skipped，0 failures。公開 Xcode 專案已移除本機 Development Team、code-sign identity 與 provisioning profile 設定，原本的 `AppIconAssetContractTests` 失敗已修正。
-- `swift build -Xswiftc -strict-concurrency=complete`：PASS。metadata 檔案大小格式化改用無共享狀態的 Foundation API，消除 Swift 6 並行安全警告。
-- `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -sdk iphonesimulator -configuration Debug -derivedDataPath /private/tmp/LumaHarborPad-release-verification build CODE_SIGNING_ALLOWED=NO -quiet`：PASS。
+- 完整 `swift test`：1,916 tests，9 skipped，0 failures。公開 Xcode 專案未加入本機 Development Team、code-sign identity 或 provisioning profile。
+- 全新暫存目錄的 `swift build --configuration release -Xswiftc -strict-concurrency=complete`：PASS；已消除 `PhotoExporter` 的 Sendable 預設函式警告。現有 AdjustmentUI／AppKit actor isolation 警告仍列為後續技術債，未造成建置失敗。
+- iPad Release Simulator `xcodebuild`（`CODE_SIGNING_ALLOWED=NO`）：BUILD SUCCEEDED，包含 arm64 模擬器輸出。
+- `swift test --filter MacReleasePackagingContractTests`：7 tests，0 failures。
 - `git diff --check`：PASS。
 - 八語系 localization gate：PASS。
 - `README.md` 已更新為繁體中文版，包含 Mac／iPad 安裝、操作、免費簽章限制、SHA-256 驗證與散布流程。
@@ -16,13 +17,16 @@
 
 ## Mac 發行產物
 
-- 來源提交：`2f8c640`。
+- 來源提交：`8dfeb0f`。
 - `Scripts/package-mac-release.sh release`：PASS；產生 Apple Silicon `arm64`、macOS 14 以上的 ad-hoc Alpha 版本。
-- `dist/LumaHarbor-0.1.0-1.zip`：2,533,072 bytes；ZIP 完整性測試 PASS，無 `._*` AppleDouble 項目。
-- SHA-256：`558ae1ef272294087a96f3beabbffb4cfd8f9f477cf2c085c56f6f2dc9d6106a`。
-- 從 ZIP 解壓後執行 `codesign --verify --deep --strict`：PASS；使用 macOS `open` 啟動後程序正常存活，完成冒煙測試後關閉。
-- 診斷期間曾直接執行 bundle 內的 `Contents/MacOS/LumaHarbor`；該程序在 AppKit／HIServices 註冊階段中止，尚未進入 LumaHarbor 程式碼。此啟動方式不屬於使用者流程，改用 Finder 等效的 LaunchServices `open` 後 PASS，因此未列為產品 crash。
+- `dist/LumaHarbor-0.1.0-2.zip`：2,402,115 bytes；ZIP 完整性測試 PASS，無 `._*` AppleDouble 項目。
+- SHA-256：`76d5732298a5d719d44600e80d1fa1ad0d643059fbfb6f20a25b606b36834982`；checksum 只包含檔名，不包含建置目錄。
+- App 已攜帶 `LumaHarbor_Localization.bundle` 與 `LumaHarbor_RawProcessingCore.bundle`，後者包含 `CoreImageKernels.metallib`。
+- 從 ZIP 解壓到獨立暫存目錄後執行 `codesign --verify --deep --strict`：PASS；使用 macOS `open` 啟動後程序正常存活十秒，完成冒煙測試後關閉。
+- App 封裝前、ZIP 解壓後及 checksum 的全檔案私人絕對路徑掃描均 PASS；掃描失敗會中止封裝。
 - 此產物未使用 Developer ID，也未經 Apple notarization；僅供本機或明確信任來源的小規模 Alpha 測試。
+
+先前的 `0.1.0 (1)` Alpha 壓縮檔已撤回，不得再散布。舊包缺少 SwiftPM resource bundle，換到另一台 Mac 可能在啟動時找不到多語系資源，且編譯產物可能保留建置環境資訊。
 
 ## 本階段功能
 
