@@ -14,6 +14,16 @@
 - `README.md` 已更新為繁體中文版，包含 Mac／iPad 安裝、操作、免費簽章限制、SHA-256 驗證與散布流程。
 - `.superpowers/` 已加入 `.gitignore`，不會將代理內部工作狀態提交至 Git。
 
+## Mac 發行產物
+
+- 來源提交：`2f8c640`。
+- `Scripts/package-mac-release.sh release`：PASS；產生 Apple Silicon `arm64`、macOS 14 以上的 ad-hoc Alpha 版本。
+- `dist/LumaHarbor-0.1.0-1.zip`：2,533,072 bytes；ZIP 完整性測試 PASS，無 `._*` AppleDouble 項目。
+- SHA-256：`558ae1ef272294087a96f3beabbffb4cfd8f9f477cf2c085c56f6f2dc9d6106a`。
+- 從 ZIP 解壓後執行 `codesign --verify --deep --strict`：PASS；使用 macOS `open` 啟動後程序正常存活，完成冒煙測試後關閉。
+- 診斷期間曾直接執行 bundle 內的 `Contents/MacOS/LumaHarbor`；該程序在 AppKit／HIServices 註冊階段中止，尚未進入 LumaHarbor 程式碼。此啟動方式不屬於使用者流程，改用 Finder 等效的 LaunchServices `open` 後 PASS，因此未列為產品 crash。
+- 此產物未使用 Developer ID，也未經 Apple notarization；僅供本機或明確信任來源的小規模 Alpha 測試。
+
 ## 本階段功能
 
 - iPad 精確數值輸入、格式化與範圍 clamp。
