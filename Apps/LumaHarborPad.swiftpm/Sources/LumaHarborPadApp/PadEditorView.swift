@@ -1,7 +1,9 @@
 import AdjustmentUI
 import EditorCore
 import Localization
+import PhotoLibraryCore
 import Photos
+import PresetCore
 import RawProcessingCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -31,7 +33,11 @@ import UniformTypeIdentifiers
 struct PadEditorView: View {
     @ObservedObject var model: PadEditorModel
     @ObservedObject private var editor: EditorSession
+    @ObservedObject private var library: PadLibraryModel
     let exporter: PhotoExporter
+    let services: PadAppServices
+    @ObservedObject private var presetLibrary: PadPresetLibrary
+    @Binding private var sceneWorkspaceState: PadWorkspaceState
 
     /// Work/focus mode, canvas zoom, and floating-panel position — see the
     /// type's own documentation for why these three travel together and
@@ -40,6 +46,12 @@ struct PadEditorView: View {
     /// explicitly reset (not merely "happens to survive") when the open
     /// document's id changes underneath this same view instance.
     @State private var workspaceState = PadDocumentScopedWorkspaceState.initial
+
+    /// Owns all inspector presentation state (active domain, Adjust submode,
+    /// panel hosting) for this editor surface. Scoped to this view's lifetime,
+    /// which is stable for the duration of one open-document session.
+    /// Never holds a second copy of `PhotoAdjustments` or touches undo/redo.
+    @StateObject private var inspector = PadInspectorCoordinator()
 
     /// Whether the bottom drawer sheet is currently presented — a real,
     /// toggleable binding driven by `PadBottomDrawerPolicy`, never a
@@ -60,6 +72,12 @@ struct PadEditorView: View {
     @State private var floatingPanelMeasuredSize = CGSize(width: 320, height: 400)
     @State private var exportedURL: URL?
     @State private var isExporting = false
+    @State private var isPresentingExportOptions = false
+    @State private var exportOptions = PadExportOptions()
+    @State private var adjustmentClipboard: PadAdjustmentClipboard?
+    @State private var clipboardFields = Set(AdjustmentFieldID.allCases)
+    @State private var copyIncludesGeometry = false
+    @State private var copyIncludesLocalAdjustments = false
     @State private var isSavingToPhotos = false
     /// Drives the explicit "Save to Files" `fileExporter` flow (spec
     /// §5.5.1), alongside the existing ShareLink/Photos destinations --
@@ -77,10 +95,21 @@ struct PadEditorView: View {
     private static let floatingPanelMinimumVisibleEdge: CGFloat = 44
     private static let floatingPanelDefaultOrigin = CGPoint(x: 24, y: 24)
 
-    init(model: PadEditorModel, exporter: PhotoExporter) {
+    init(
+        model: PadEditorModel,
+        exporter: PhotoExporter,
+        presetLibrary: PadPresetLibrary,
+        library: PadLibraryModel,
+        services: PadAppServices,
+        sceneWorkspaceState: Binding<PadWorkspaceState>
+    ) {
         self.model = model
         self.editor = model.editor
         self.exporter = exporter
+        self.presetLibrary = presetLibrary
+        self.library = library
+        self.services = services
+        self._sceneWorkspaceState = sceneWorkspaceState
     }
 
     var body: some View {
@@ -123,7 +152,7 @@ struct PadEditorView: View {
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    exportFullResolution()
+                    isPresentingExportOptions = true
                 } label: {
                     if isExporting {
                         ProgressView()
@@ -160,6 +189,9 @@ struct PadEditorView: View {
                     }
                     .accessibilityLabel(Text(L10n.t("Save to Files")))
                 }
+
+                compareMenu
+                adjustmentClipboardMenu
             }
         }
         .alert(item: $editor.alert) { alert in
@@ -192,6 +224,12 @@ struct PadEditorView: View {
                     message: error.localizedDescription,
                     nextStep: L10n.t("Try again.")
                 )
+            }
+        }
+        .sheet(isPresented: $isPresentingExportOptions) {
+            PadExportOptionsSheet(options: $exportOptions) {
+                isPresentingExportOptions = false
+                exportFullResolution()
             }
         }
         // The open document's identity, not this view's own lifetime, is
@@ -243,6 +281,77 @@ struct PadEditorView: View {
         .accessibilityLabel(Text(workspaceState.workspaceMode == .work ? L10n.t("Focus Mode") : L10n.t("Work Mode")))
     }
 
+    private var compareMenu: some View {
+        Menu {
+            Button {
+                editor.setCompareMode(.single)
+            } label: {
+                Label(L10n.t("Single view"), systemImage: "rectangle")
+            }
+            .disabled(editor.compareMode == .single)
+
+            Button {
+                editor.setCompareMode(.sideBySide)
+            } label: {
+                Label(L10n.t("Side by side"), systemImage: "rectangle.split.2x1")
+            }
+            .disabled(!editor.canCompareWithOriginal)
+
+            Button {
+                editor.setCompareMode(.verticalWipe)
+            } label: {
+                Label(L10n.t("Wipe comparison"), systemImage: "rectangle.split.2x1.fill")
+            }
+            .disabled(!editor.canCompareWithOriginal)
+
+            Divider()
+
+            Toggle(isOn: $editor.isShowingOriginal) {
+                Label(L10n.t("Hold Before"), systemImage: "eye")
+            }
+            .disabled(editor.compareMode != .single || !editor.canCompareWithOriginal)
+        } label: {
+            Image(systemName: "rectangle.on.rectangle")
+        }
+        .accessibilityLabel(Text(L10n.t("Compare")))
+    }
+
+    private var adjustmentClipboardMenu: some View {
+        Menu {
+            Toggle(L10n.t("Include Geometry"), isOn: $copyIncludesGeometry)
+            Toggle(L10n.t("Include Local Adjustments"), isOn: $copyIncludesLocalAdjustments)
+
+            Divider()
+
+            Button {
+                adjustmentClipboard = PadAdjustmentClipboard.copying(
+                    from: editor.adjustments,
+                    fields: clipboardFields,
+                    includeGeometry: copyIncludesGeometry,
+                    includeLocalAdjustments: copyIncludesLocalAdjustments
+                )
+            } label: {
+                Label(L10n.t("Copy Adjustments"), systemImage: "doc.on.doc")
+            }
+            .disabled(editor.photo == nil || clipboardFields.isEmpty)
+
+            Button {
+                guard let adjustmentClipboard else { return }
+                editor.pasteAdjustments(
+                    patch: adjustmentClipboard.patch,
+                    geometry: adjustmentClipboard.geometry,
+                    localAdjustments: adjustmentClipboard.localAdjustments
+                )
+            } label: {
+                Label(L10n.t("Paste Adjustments"), systemImage: "doc.on.clipboard")
+            }
+            .disabled(editor.photo == nil || adjustmentClipboard == nil)
+        } label: {
+            Image(systemName: "slider.horizontal.2.square")
+        }
+        .accessibilityLabel(Text(L10n.t("Copy Adjustments")))
+    }
+
     // MARK: - Layout selection
 
     @ViewBuilder
@@ -268,11 +377,23 @@ struct PadEditorView: View {
         switch presentation {
         case .trailingDock:
             HStack(spacing: 0) {
+                PadToolRail(selection: Binding(
+                    get: { inspector.activeDomain },
+                    set: { inspector.selectDomain($0) }
+                ))
+                Divider()
                 canvas
                 Divider()
                 trailingDockPanel
             }
         case .bottomDrawer:
+            canvas
+        case .floating:
+            // `.floating` is the focus-mode presentation and is never
+            // produced by `PadEditorLayoutPolicy` while in work mode.
+            // Treat it as canvas-only (the bottom drawer sheet, if needed,
+            // is still driven by `PadBottomDrawerPolicy` via the shared
+            // `.sheet` in `body`).
             canvas
         }
     }
@@ -295,11 +416,8 @@ struct PadEditorView: View {
     private var canvas: some View {
         ZStack {
             Color.black
-            if let image = editor.displayedImage {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .scaledToFit()
-                    .padding()
+            if editor.previewImage != nil || editor.originalImage != nil {
+                comparisonCanvas
                     .scaleEffect(workspaceState.canvasScale * canvasMagnification)
                     .gesture(
                         MagnificationGesture()
@@ -324,6 +442,158 @@ struct PadEditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if shouldShowFilmstrip {
+                PadEditorFilmstrip(
+                    photos: filmstripPhotos,
+                    currentPhotoID: editor.photo?.id,
+                    library: library,
+                    services: services,
+                    onSelect: openFilmstripPhoto
+                )
+            }
+        }
+    }
+
+    private var shouldShowFilmstrip: Bool {
+        guard workspaceState.workspaceMode == .work,
+              sceneWorkspaceState.isFilmstripVisible else { return false }
+        return PadWorkspaceLayoutPolicy.layout(
+            forWidth: availableSize.width
+        ).showsFilmstrip
+    }
+
+    private var filmstripPhotos: [PhotoAsset] {
+        guard let currentID = editor.photo?.id else { return [] }
+        guard let index = library.photos.firstIndex(where: { $0.id == currentID }) else {
+            return []
+        }
+        let start = max(0, index - 4)
+        let end = min(library.photos.count, index + 5)
+        return Array(library.photos[start..<end])
+    }
+
+    private func openFilmstripPhoto(_ photo: PhotoAsset) {
+        guard photo.id != editor.photo?.id else { return }
+        Task {
+            guard let asset = await library.openAsset(for: photo) else { return }
+            editorModelOpen(asset)
+        }
+    }
+
+    private func editorModelOpen(_ asset: LibraryOpenAsset) {
+        model.openLibraryAsset(asset)
+    }
+
+    @ViewBuilder
+    private var comparisonCanvas: some View {
+        switch editor.compareMode {
+        case .single:
+            if let image = editor.displayedImage {
+                canvasImage(image)
+            }
+        case .sideBySide:
+            HStack(spacing: 1) {
+                if let original = editor.originalImage {
+                    canvasImage(original)
+                        .frame(maxWidth: .infinity)
+                }
+                if let edited = editor.previewImage {
+                    canvasImage(edited)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding()
+        case .verticalWipe:
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    if let edited = editor.previewImage {
+                        canvasImage(edited)
+                    }
+                    if let original = editor.originalImage {
+                        canvasImage(original)
+                            .frame(width: proxy.size.width * editor.wipePosition)
+                            .clipped()
+                    }
+                    Rectangle()
+                        .fill(.white.opacity(0.9))
+                        .frame(width: 2)
+                        .offset(x: proxy.size.width * editor.wipePosition - 1)
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    guard proxy.size.width > 0 else { return }
+                                    editor.setWipePosition(value.location.x / proxy.size.width)
+                                }
+                        )
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func canvasImage(_ image: CGImage) -> some View {
+        Image(decorative: image, scale: 1)
+            .resizable()
+            .scaledToFit()
+    }
+
+    private struct PadEditorFilmstrip: View {
+        let photos: [PhotoAsset]
+        let currentPhotoID: PhotoID?
+        @ObservedObject var library: PadLibraryModel
+        let services: PadAppServices
+        let onSelect: (PhotoAsset) -> Void
+
+        var body: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(photos) { photo in
+                        let folder = library.folder(for: photo.libraryID)
+                        PadThumbnailCell(
+                            photo: photo,
+                            isBatchSelected: false,
+                            isSelectionMode: false,
+                            isOnline: photo.libraryID == .appStorage || folder?.isOnline == true,
+                            sourceDisplayName: folder?.displayName ?? L10n.t("This iPad"),
+                            sourceStatusMessage: filmstripStatus(for: folder),
+                            provider: services.thumbnailProvider,
+                            compact: true,
+                            resolveSourceURL: { photo in
+                                await services.thumbnailSourceURL(for: photo)
+                            }
+                        )
+                        .frame(width: 116, height: 100)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(
+                                    photo.id == currentPhotoID ? Color.accentColor : .clear,
+                                    lineWidth: 3
+                                )
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { onSelect(photo) }
+                        .accessibilityAddTraits(photo.id == currentPhotoID ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .frame(height: 116)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .top) { Divider() }
+            .accessibilityLabel(Text(L10n.t("Filmstrip")))
+        }
+
+        private func filmstripStatus(for folder: LibraryFolder?) -> String? {
+            guard let folder else { return nil }
+            switch folder.connectionState {
+            case .ready: return nil
+            case .readOnly: return L10n.t("Read-only")
+            case .offline: return L10n.t("Offline")
+            case .needsAuthorization: return L10n.t("Needs access")
+            }
+        }
     }
 
     // MARK: - Full-resolution export
@@ -340,14 +610,11 @@ struct PadEditorView: View {
                     at: directory,
                     withIntermediateDirectories: true
                 )
-                let request = ExportRequest(
+                let request = exportOptions.request(
                     sourceURL: document.workingURL,
                     adjustments: editor.adjustments,
                     destinationDirectory: directory,
-                    baseFilename: document.workingURL.deletingPathExtension().lastPathComponent,
-                    format: .jpeg,
-                    quality: 1,
-                    exifRetentionPolicy: .preserveAll
+                    baseFilename: document.workingURL.deletingPathExtension().lastPathComponent
                 )
                 let outcome = try await exporter.export(request)
                 exportedURL = outcome.url
@@ -394,14 +661,14 @@ struct PadEditorView: View {
     // MARK: - Work mode: trailing dock
 
     private var trailingDockPanel: some View {
-        ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
                 saveStatusIndicator
                 undoRedoControls
-                Divider()
-                BasicAdjustmentPanel(editor: editor)
             }
             .padding()
+            Divider()
+            PadInspectorHost(inspector: inspector, editor: editor, presetLibrary: presetLibrary, showsDomainBar: false)
         }
         .frame(width: 320)
         .background(.thickMaterial)
@@ -410,33 +677,31 @@ struct PadEditorView: View {
     // MARK: - Work mode: bottom drawer
 
     private var bottomDrawerPanel: some View {
-        ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
                 saveStatusIndicator
                 undoRedoControls
-                Divider()
-                BasicAdjustmentPanel(editor: editor)
             }
             .padding()
+            Divider()
+            PadInspectorHost(inspector: inspector, editor: editor, presetLibrary: presetLibrary, showsDomainBar: true)
         }
     }
 
     // MARK: - Focus mode: floating panel
 
     private var floatingPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            floatingPanelHeader
-            saveStatusIndicator
-            undoRedoControls
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    BasicAdjustmentPanel(editor: editor)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                floatingPanelHeader
+                saveStatusIndicator
+                undoRedoControls
             }
-            .frame(maxHeight: 420)
+            .padding()
+            Divider()
+            PadInspectorHost(inspector: inspector, editor: editor, presetLibrary: presetLibrary, showsDomainBar: true)
+                .frame(maxHeight: 420)
         }
-        .padding()
         .frame(width: 320)
         .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(radius: 12)
@@ -575,6 +840,978 @@ private struct FloatingPanelSizeKey: PreferenceKey {
     static var defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
+    }
+}
+
+// MARK: - PadToolRail (inlined for xcodeproj fixed source list)
+
+/// A five-item tool rail that exposes every `PadInspectorDomain` as a tappable
+/// button. Axis-agnostic: `.vertical` for the leading-edge rail in work mode,
+/// `.horizontal` for a compact domain bar. Carries no local state.
+private struct PadToolRail: View {
+    @Binding var selection: PadInspectorDomain
+    var axis: Axis = .vertical
+
+    private struct RailItem: Identifiable {
+        let id: PadInspectorDomain
+        let symbol: String
+        let labelKey: String
+    }
+
+    private static let items: [RailItem] = [
+        RailItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjust"),
+        RailItem(id: .preset,   symbol: "sparkles",            labelKey: "Presets"),
+        RailItem(id: .geometry, symbol: "crop.rotate",         labelKey: "Geometry"),
+        RailItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local"),
+        RailItem(id: .info,     symbol: "info.circle",         labelKey: "Info"),
+    ]
+
+    var body: some View {
+        Group {
+            if axis == .vertical {
+                VStack(spacing: 0) {
+                    ForEach(Self.items) { item in railButton(item) }
+                    Spacer()
+                }
+                .frame(width: 52)
+            } else {
+                HStack(spacing: 0) {
+                    ForEach(Self.items) { item in railButton(item) }
+                }
+            }
+        }
+        .padding(axis == .vertical ? .vertical : .horizontal, 8)
+        .background(.thickMaterial)
+    }
+
+    private func railButton(_ item: RailItem) -> some View {
+        let isSelected = selection == item.id
+        return Button {
+            selection = item.id
+        } label: {
+            Image(systemName: item.symbol)
+                .imageScale(.medium)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .padding(axis == .vertical ? .horizontal : .vertical, 4)
+        .accessibilityLabel(Text(L10n.t(item.labelKey)))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+// MARK: - PadInspectorHost (inlined for xcodeproj fixed source list)
+
+/// Routes the inspector panel to the correct content for the active domain.
+/// The Adjust and Preset domains are fully wired. Never holds a second copy
+/// of `PhotoAdjustments`.
+///
+/// `showsDomainBar`: pass `true` for bottom-drawer / floating-panel
+/// presentations where the vertical `PadToolRail` is absent.
+private struct PadInspectorHost: View {
+    @ObservedObject var inspector: PadInspectorCoordinator
+    @ObservedObject var editor: EditorSession
+    @ObservedObject var presetLibrary: PadPresetLibrary
+    let showsDomainBar: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsDomainBar {
+                compactDomainBar
+                Divider()
+            }
+            switch inspector.activeDomain {
+            case .adjust:
+                adjustPanel
+            case .preset:
+                PadPresetPanel(editor: editor, presetLibrary: presetLibrary)
+            case .geometry:
+                ScrollView {
+                    GeometryAdjustmentPanel(editor: editor)
+                        .padding()
+                }
+            case .local:
+                ScrollView {
+                    LocalAdjustmentsPanel(editor: editor)
+                        .padding()
+                }
+            case .info:
+                infoPanel
+            }
+        }
+    }
+
+    // MARK: Compact domain bar
+
+    private struct DomainBarItem: Identifiable {
+        let id: PadInspectorDomain
+        let symbol: String
+        let labelKey: String
+    }
+
+    private static let domainBarItems: [DomainBarItem] = [
+        DomainBarItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjust"),
+        DomainBarItem(id: .preset,   symbol: "sparkles",            labelKey: "Presets"),
+        DomainBarItem(id: .geometry, symbol: "crop.rotate",         labelKey: "Geometry"),
+        DomainBarItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local"),
+        DomainBarItem(id: .info,     symbol: "info.circle",         labelKey: "Info"),
+    ]
+
+    private var compactDomainBar: some View {
+        HStack(spacing: 0) {
+            ForEach(Self.domainBarItems) { item in
+                let isSelected = inspector.activeDomain == item.id
+                Button {
+                    inspector.selectDomain(item.id)
+                } label: {
+                    Image(systemName: item.symbol)
+                        .imageScale(.medium)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .background(
+                    isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .accessibilityLabel(Text(L10n.t(item.labelKey)))
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: Adjust domain
+
+    private static let lightKinds: [AdjustmentKind] = [
+        .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
+    ]
+
+    @ViewBuilder
+    private var adjustPanel: some View {
+        adjustSubmodePicker
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        Divider()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                adjustContent
+            }
+            .padding()
+        }
+    }
+
+    private var adjustSubmodePicker: some View {
+        Picker(L10n.t("Adjust"), selection: Binding(
+            get: { inspector.adjustSubmode },
+            set: { inspector.selectAdjustSubmode($0) }
+        )) {
+            Text(L10n.t("Light")).tag(PadAdjustSubmode.light)
+            Text(L10n.t("Color")).tag(PadAdjustSubmode.color)
+            Text(L10n.t("Detail")).tag(PadAdjustSubmode.detail)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel(Text(L10n.t("Adjust submode")))
+    }
+
+    @ViewBuilder
+    private var adjustContent: some View {
+        switch inspector.adjustSubmode {
+        case .light:
+            BasicAdjustmentPanel(editor: editor, kinds: Self.lightKinds)
+            CurveAdjustmentPanel(editor: editor)
+        case .color:
+            ColorAdjustmentPanel(editor: editor)
+        case .detail:
+            DetailAdjustmentPanel(editor: editor)
+            EffectsAdjustmentPanel(editor: editor)
+        }
+    }
+
+    // MARK: Info domain
+
+    @ViewBuilder
+    private var infoPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PadHistogramBlock(histogram: editor.histogram)
+                Divider()
+                PadSaveStateBlock(saveState: editor.saveState)
+                Divider()
+                if let photo = editor.photo {
+                    PadMetadataBlock(snapshot: EditorMetadataSnapshot(photo: photo))
+                } else {
+                    Text(L10n.t("Photo not yet loaded."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding()
+                }
+            }
+            .padding()
+        }
+    }
+
+    // MARK: Unavailable placeholder
+
+    private func unavailablePlaceholder(domain: String, symbol: String, note: String) -> some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: symbol)
+                .imageScale(.large)
+                .foregroundStyle(.secondary)
+            Text(domain)
+                .font(.headline)
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("\(domain): \(note)"))
+    }
+}
+
+// MARK: - Info panel helpers
+
+/// RGB histogram block for the Info domain. Renders the current rendered-preview
+/// histogram; shows a localized fallback while histogram is nil (still computing).
+private struct PadHistogramBlock: View {
+    let histogram: HistogramData?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.t("Histogram"))
+                .font(.subheadline.weight(.semibold))
+            if let histogram {
+                Canvas { context, size in
+                    Self.draw(histogram.red,   color: .red,   in: context, size: size)
+                    Self.draw(histogram.green, color: .green, in: context, size: size)
+                    Self.draw(histogram.blue,  color: .blue,  in: context, size: size)
+                }
+                .frame(height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .accessibilityLabel(Text(L10n.t("RGB histogram")))
+                .accessibilityHidden(false)
+            } else {
+                Text(L10n.t("Histogram not yet available."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
+            }
+        }
+    }
+
+    private static func draw(
+        _ bins: [Int], color: Color, in context: GraphicsContext, size: CGSize
+    ) {
+        guard !bins.isEmpty else { return }
+        let peak = bins.max() ?? 1
+        guard peak > 0 else { return }
+        let binWidth = size.width / CGFloat(bins.count)
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: size.height))
+        for (i, count) in bins.enumerated() {
+            let x = CGFloat(i) * binWidth
+            let y = size.height * (1 - CGFloat(count) / CGFloat(peak))
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+        path.addLine(to: CGPoint(x: size.width, y: size.height))
+        path.closeSubpath()
+        context.fill(path, with: .color(color.opacity(0.5)))
+    }
+}
+
+/// Displays the current EditorSession save state in the Info domain.
+private struct PadSaveStateBlock: View {
+    let saveState: SaveState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.t("Save State"))
+                .font(.subheadline.weight(.semibold))
+            switch saveState {
+            case .unchanged, .saved:
+                Label(L10n.t("Saved"), systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            case .pending:
+                Label(L10n.t("Unsaved changes"), systemImage: "clock")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            case .saving:
+                Label(L10n.t("Saving…"), systemImage: "arrow.clockwise")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            case .failed(let message):
+                Label(L10n.t("Save failed"), systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Displays safe EditorMetadataSnapshot fields (no path, bookmark, or signing info).
+private struct PadMetadataBlock: View {
+    let snapshot: EditorMetadataSnapshot
+
+    private struct Row: View {
+        let label: String
+        let value: String
+        var body: some View {
+            HStack(alignment: .top) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 120, alignment: .leading)
+                Text(value)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.t("File Info"))
+                .font(.subheadline.weight(.semibold))
+            Row(label: L10n.t("Filename"), value: snapshot.filename)
+            Row(label: L10n.t("Format"), value: snapshot.formatDescription)
+            if let v = snapshot.pixelDimensions   { Row(label: L10n.t("Dimensions"),   value: v) }
+            if let v = snapshot.fileSizeDescription { Row(label: L10n.t("File Size"),   value: v) }
+            if let v = snapshot.cameraDescription  { Row(label: L10n.t("Camera"),       value: v) }
+            if let v = snapshot.lensDescription    { Row(label: L10n.t("Lens"),         value: v) }
+            if let v = snapshot.focalLengthDescription { Row(label: L10n.t("Focal Length"), value: v) }
+            if let v = snapshot.apertureDescription  { Row(label: L10n.t("Aperture"),   value: v) }
+            if let v = snapshot.shutterSpeedDescription { Row(label: L10n.t("Shutter"), value: v) }
+            if let v = snapshot.isoDescription       { Row(label: L10n.t("ISO"),        value: v) }
+            if let v = snapshot.captureDateDescription { Row(label: L10n.t("Date"),     value: v) }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+// MARK: - Preset panel
+
+/// The full Preset inspector: search, scope filter, apply-mode control, and
+/// a scrollable list where a single tap previews and an explicit Apply button
+/// commits via `editor.commitPreset(_:mode:)` — one undo step per apply.
+///
+/// Never holds a second copy of `PhotoAdjustments`. Preview is cancelled
+/// automatically when the panel disappears so no stale preset render lingers.
+struct PadPresetPanel: View {
+    @ObservedObject var editor: EditorSession
+    @ObservedObject var presetLibrary: PadPresetLibrary
+
+    @State private var applicationMode: PresetApplicationMode = .merge
+    @State private var previewingPresetID: UUID?
+    @State private var isCreatingPreset = false
+    @State private var editingPreset: PresetDocument?
+    @State private var isImportingFiles = false
+    @State private var isRestoringBackup = false
+    @State private var isExportingFile = false
+    @State private var exportDocument: PadPresetDataFileDocument?
+    @State private var exportFilename = "preset.lhpreset"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            searchBar
+            Divider()
+            scopePicker
+            Divider()
+            applyModePicker
+            Divider()
+            presetList
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    presetLibrary.favoritesOnly.toggle()
+                } label: {
+                    Image(systemName: presetLibrary.favoritesOnly ? "star.fill" : "star")
+                }
+                .accessibilityLabel(Text(L10n.t("Favorites only")))
+                .accessibilityAddTraits(presetLibrary.favoritesOnly ? .isSelected : [])
+
+                Button {
+                    isCreatingPreset = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel(Text(L10n.t("Create preset")))
+
+                Menu {
+                    Button {
+                        isImportingFiles = true
+                    } label: {
+                        Label(L10n.t("Import preset files"), systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        isRestoringBackup = true
+                    } label: {
+                        Label(L10n.t("Restore backup"), systemImage: "arrow.counterclockwise")
+                    }
+                    Button {
+                        exportBackup()
+                    } label: {
+                        Label(L10n.t("Export backup"), systemImage: "archivebox")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel(Text(L10n.t("Preset actions")))
+            }
+        }
+        .task { await presetLibrary.load() }
+        .onDisappear {
+            if previewingPresetID != nil {
+                editor.cancelPresetPreview()
+                previewingPresetID = nil
+            }
+        }
+        .sheet(isPresented: $isCreatingPreset) {
+            NavigationStack {
+                PadPresetCreateSheet(
+                    adjustments: editor.adjustments,
+                    presetLibrary: presetLibrary
+                ) {
+                    isCreatingPreset = false
+                }
+            }
+        }
+        .sheet(item: $editingPreset) { preset in
+            NavigationStack {
+                PadPresetEditSheet(preset: preset, presetLibrary: presetLibrary) {
+                    editingPreset = nil
+                }
+            }
+        }
+        .fileImporter(
+            isPresented: $isImportingFiles,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: true
+        ) { result in
+            guard case .success(let urls) = result else { return }
+            Task { await presetLibrary.importFiles(urls) }
+        }
+        .fileImporter(
+            isPresented: $isRestoringBackup,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            Task {
+                guard let data = presetLibrary.readData(from: url) else {
+                    presetLibrary.message = L10n.t("This backup could not be read.")
+                    return
+                }
+                await presetLibrary.restoreBackup(data)
+            }
+        }
+        .fileExporter(
+            isPresented: $isExportingFile,
+            document: exportDocument,
+            contentType: .data,
+            defaultFilename: exportFilename
+        ) { result in
+            if case .failure = result {
+                presetLibrary.message = L10n.t("The preset file could not be saved.")
+            }
+            exportDocument = nil
+        }
+        .alert(
+            L10n.t("Preset"),
+            isPresented: Binding(
+                get: { presetLibrary.message != nil },
+                set: { if !$0 { presetLibrary.message = nil } }
+            )
+        ) {
+            Button(L10n.t("OK"), role: .cancel) { presetLibrary.message = nil }
+        } message: {
+            Text(presetLibrary.message ?? "")
+        }
+    }
+
+    private var searchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField(L10n.t("Search Presets"), text: $presetLibrary.searchQuery)
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal)
+        .frame(height: 44)
+        .accessibilityLabel(Text(L10n.t("Search Presets")))
+    }
+
+    private var scopePicker: some View {
+        Picker(L10n.t("Scope"), selection: $presetLibrary.scope) {
+            ForEach(PadPresetScope.allCases) { scope in
+                Text(L10n.t(scope.rawValue)).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .accessibilityLabel(Text(L10n.t("Preset scope")))
+    }
+
+    private var applyModePicker: some View {
+        Picker(L10n.t("Apply Mode"), selection: $applicationMode) {
+            Text(L10n.t("Merge")).tag(PresetApplicationMode.merge)
+            Text(L10n.t("Replace")).tag(PresetApplicationMode.replace)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .accessibilityLabel(Text(L10n.t("Apply mode")))
+    }
+
+    @ViewBuilder
+    private var presetList: some View {
+        if presetLibrary.isLoading {
+            Spacer()
+            ProgressView()
+                .frame(maxWidth: .infinity)
+            Spacer()
+        } else if presetLibrary.filteredPresets.isEmpty {
+            Spacer()
+            Text(presetLibrary.searchQuery.isEmpty
+                 ? L10n.t("No presets.")
+                 : L10n.t("No results."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+            Spacer()
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(presetLibrary.filteredPresets) { preset in
+                        presetRow(preset)
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    private func presetRow(_ preset: PresetDocument) -> some View {
+        let isPreviewing = previewingPresetID == preset.id
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(preset.name)
+                    .font(.body)
+                if !preset.groupPath.isEmpty {
+                    Text(preset.groupPath.joined(separator: " › "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if presetLibrary.isBuiltIn(preset) {
+                    Text(L10n.t("Built-In"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button {
+                Task { await presetLibrary.toggleFavorite(preset) }
+            } label: {
+                Image(systemName: preset.isFavorite ? "star.fill" : "star")
+                    .foregroundStyle(preset.isFavorite ? .yellow : .secondary)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(presetLibrary.isBuiltIn(preset))
+            .accessibilityLabel(Text(preset.isFavorite ? L10n.t("Remove favorite") : L10n.t("Add favorite")))
+            if isPreviewing {
+                Button(L10n.t("Apply")) {
+                    editor.commitPreset(preset, mode: applicationMode)
+                    previewingPresetID = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityLabel(Text(L10n.t("Apply") + " " + preset.name))
+            }
+            Menu {
+                if !presetLibrary.isBuiltIn(preset) {
+                    Button {
+                        editingPreset = preset
+                    } label: {
+                        Label(L10n.t("Edit preset"), systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        Task { await presetLibrary.delete(preset) }
+                    } label: {
+                        Label(L10n.t("Delete preset"), systemImage: "trash")
+                    }
+                }
+                Button {
+                    exportPreset(preset, as: .native)
+                } label: {
+                    Label(L10n.t("Export .lhpreset"), systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    exportPreset(preset, as: .xmp)
+                } label: {
+                    Label(L10n.t("Export XMP"), systemImage: "doc.text")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 44, height: 44)
+            }
+            .menuOrder(.fixed)
+            .accessibilityLabel(Text(L10n.t("Preset actions")))
+        }
+        .padding(.horizontal)
+        .frame(minHeight: 52)
+        .background(
+            isPreviewing ? Color.accentColor.opacity(0.10) : Color.clear
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isPreviewing {
+                // Second tap on the same row commits, identical to the Apply button.
+                editor.commitPreset(preset, mode: applicationMode)
+                previewingPresetID = nil
+            } else {
+                if previewingPresetID != nil {
+                    editor.cancelPresetPreview()
+                }
+                previewingPresetID = preset.id
+                editor.previewPreset(preset, mode: applicationMode)
+            }
+        }
+        .accessibilityLabel(Text(preset.name))
+        .accessibilityHint(Text(isPreviewing
+            ? L10n.t("Previewing. Tap again or use Apply button to commit.")
+            : L10n.t("Tap to preview this preset.")))
+        .accessibilityAddTraits(isPreviewing ? .isSelected : [])
+    }
+
+    private enum ExportKind { case native, xmp }
+
+    private func exportPreset(_ preset: PresetDocument, as kind: ExportKind) {
+        do {
+            let data: Data
+            switch kind {
+            case .native:
+                data = try presetLibrary.exportNative(preset)
+                exportFilename = "\(preset.name).lhpreset"
+            case .xmp:
+                data = try presetLibrary.exportXMP(preset)
+                exportFilename = "\(preset.name).xmp"
+            }
+            exportDocument = PadPresetDataFileDocument(data: data)
+            isExportingFile = true
+        } catch {
+            presetLibrary.message = L10n.t("This preset could not be exported.")
+        }
+    }
+
+    private func exportBackup() {
+        Task {
+            do {
+                let data = try await presetLibrary.exportBackup()
+                exportFilename = "LumaHarbor-Presets.lhpresetbackup"
+                exportDocument = PadPresetDataFileDocument(data: data)
+                isExportingFile = true
+            } catch {
+                presetLibrary.message = L10n.t("The preset backup could not be created.")
+            }
+        }
+    }
+}
+
+/// Data-only FileDocument used by the iPad Files picker for native presets,
+/// XMP and backup archives. The file extension is supplied by the caller; the
+/// payload is never re-encoded by the picker.
+private struct PadPresetDataFileDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.data] }
+    static var writableContentTypes: [UTType] { [.data] }
+
+    let data: Data
+
+    init(data: Data) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private struct PadPresetCreateSheet: View {
+    let adjustments: PhotoAdjustments
+    @ObservedObject var presetLibrary: PadPresetLibrary
+    let onDismiss: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var groupPath = ""
+    @State private var isFavorite = false
+    @State private var selectedFields: Set<AdjustmentFieldID>
+    @State private var isSaving = false
+
+    init(adjustments: PhotoAdjustments, presetLibrary: PadPresetLibrary, onDismiss: @escaping () -> Void) {
+        self.adjustments = adjustments
+        self.presetLibrary = presetLibrary
+        self.onDismiss = onDismiss
+        _selectedFields = State(initialValue: AdjustmentPatch.modifiedFields(in: adjustments))
+    }
+
+    var body: some View {
+        Form {
+            Section(L10n.t("Preset details")) {
+                TextField(L10n.t("Name"), text: $name)
+                TextField(L10n.t("Group (optional)"), text: $groupPath)
+                Toggle(L10n.t("Favorite"), isOn: $isFavorite)
+            }
+            PadPresetFieldSelection(selectedFields: $selectedFields)
+        }
+        .navigationTitle(L10n.t("Create preset"))
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(L10n.t("Cancel")) { dismissSheet() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(L10n.t("Save")) { save() }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            let saved = await presetLibrary.createPreset(
+                name: name,
+                groupPath: groupPath.isEmpty ? [] : [groupPath],
+                isFavorite: isFavorite,
+                selectedFields: selectedFields,
+                from: adjustments
+            )
+            isSaving = false
+            if saved { dismissSheet() }
+        }
+    }
+
+    private func dismissSheet() {
+        onDismiss()
+        dismiss()
+    }
+}
+
+private struct PadPresetEditSheet: View {
+    let preset: PresetDocument
+    @ObservedObject var presetLibrary: PadPresetLibrary
+    let onDismiss: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var groupPath: String
+    @State private var isFavorite: Bool
+    @State private var selectedFields: Set<AdjustmentFieldID>
+    @State private var isSaving = false
+
+    init(preset: PresetDocument, presetLibrary: PadPresetLibrary, onDismiss: @escaping () -> Void) {
+        self.preset = preset
+        self.presetLibrary = presetLibrary
+        self.onDismiss = onDismiss
+        _name = State(initialValue: preset.name)
+        _groupPath = State(initialValue: preset.groupPath.joined(separator: " / "))
+        _isFavorite = State(initialValue: preset.isFavorite)
+        _selectedFields = State(initialValue: Set(AdjustmentFieldID.allCases.filter { preset.patch.contains($0) }))
+    }
+
+    var body: some View {
+        Form {
+            Section(L10n.t("Preset details")) {
+                TextField(L10n.t("Name"), text: $name)
+                TextField(L10n.t("Group (optional)"), text: $groupPath)
+                Toggle(L10n.t("Favorite"), isOn: $isFavorite)
+            }
+            PadPresetFieldSelection(selectedFields: $selectedFields)
+        }
+        .navigationTitle(L10n.t("Edit preset"))
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(L10n.t("Cancel")) { dismissSheet() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(L10n.t("Save")) { save() }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            let saved = await presetLibrary.updatePreset(
+                preset,
+                name: name,
+                groupPath: groupPath.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) },
+                isFavorite: isFavorite,
+                keptFields: selectedFields
+            )
+            isSaving = false
+            if saved { dismissSheet() }
+        }
+    }
+
+    private func dismissSheet() {
+        onDismiss()
+        dismiss()
+    }
+}
+
+private struct PadPresetFieldSelection: View {
+    @Binding var selectedFields: Set<AdjustmentFieldID>
+
+    var body: some View {
+        Section(L10n.t("Included adjustments")) {
+            ForEach(AdjustmentFieldID.allCases, id: \.self) { field in
+                Toggle(isOn: binding(for: field)) {
+                    Text(L10n.t(field.rawValue))
+                }
+            }
+        }
+    }
+
+    private func binding(for field: AdjustmentFieldID) -> Binding<Bool> {
+        Binding(
+            get: { selectedFields.contains(field) },
+            set: { included in
+                if included { selectedFields.insert(field) }
+                else { selectedFields.remove(field) }
+            }
+        )
+    }
+}
+
+private struct PadExportOptionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var options: PadExportOptions
+    let onExport: () -> Void
+    @State private var maximumDimensionText: String
+    @State private var dpiText: String
+
+    init(options: Binding<PadExportOptions>, onExport: @escaping () -> Void) {
+        self._options = options
+        self.onExport = onExport
+        self._maximumDimensionText = State(initialValue: options.wrappedValue.maximumDimension.map(String.init) ?? "")
+        self._dpiText = State(initialValue: options.wrappedValue.dpi.map { String(Int($0)) } ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(L10n.t("Format")) {
+                    Picker(L10n.t("Format"), selection: $options.format) {
+                        ForEach(ExportFormat.allCases, id: \.self) { format in
+                            Text(format.displayName).tag(format)
+                        }
+                    }
+
+                    if options.format.usesQuality {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(L10n.t("Quality"))
+                                Spacer()
+                                Text("\(Int(options.qualityPercentage.rounded()))%")
+                                    .monospacedDigit()
+                            }
+                            Slider(value: $options.quality, in: 0...1, step: 0.01)
+                        }
+                    }
+
+                    if options.format.supportsBitDepthChoice {
+                        Picker(L10n.t("Bit Depth"), selection: $options.bitDepth) {
+                            ForEach(ExportBitDepth.allCases, id: \.self) { depth in
+                                Text(depth.displayName).tag(depth)
+                            }
+                        }
+                    }
+                }
+
+                Section(L10n.t("Size")) {
+                    TextField(L10n.t("Size"), text: $maximumDimensionText)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
+                    Text(L10n.t("Leave blank to keep the full resolution."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section(L10n.t("DPI")) {
+                    TextField(L10n.t("DPI"), text: $dpiText)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
+                    Text(L10n.t("Leave blank to use the encoder default."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section(L10n.t("EXIF")) {
+                    Picker(L10n.t("EXIF"), selection: $options.exifRetentionPolicy) {
+                        ForEach(ExifRetentionPolicy.allCases, id: \.self) { policy in
+                            Text(policy.displayName).tag(policy)
+                        }
+                    }
+                }
+
+                Section(L10n.t("Collision")) {
+                    Picker(L10n.t("Collision"), selection: $options.collisionPolicy) {
+                        ForEach(ExportCollisionPolicy.allCases, id: \.self) { policy in
+                            Text(policy.displayName).tag(policy)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(L10n.t("Export"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.t("Cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.t("Export")) {
+                        commitOptionalFields()
+                        onExport()
+                    }
+                }
+            }
+        }
+    }
+
+    private func commitOptionalFields() {
+        let dimension = Int(maximumDimensionText.trimmingCharacters(in: .whitespacesAndNewlines))
+        options.setMaximumDimension(dimension)
+        let dpi = Double(dpiText.trimmingCharacters(in: .whitespacesAndNewlines))
+        options.setDPI(dpi)
     }
 }
 

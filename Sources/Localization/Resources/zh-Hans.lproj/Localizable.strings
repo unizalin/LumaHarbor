@@ -598,3 +598,6 @@
 "Separate keywords with commas or new lines." = "请用逗号或换行分隔关键字。";
 "Edit keywords for the selected photo" = "编辑所选照片的关键字";
 "Couldn't save keywords" = "无法保存关键字";
+"Collision" = "同名文件";
+"Leave blank to keep the full resolution." = "留空以保留完整分辨率。";
+"Leave blank to use the encoder default." = "留空以使用编码器默认值。";

@@ -598,3 +598,6 @@
 "Separate keywords with commas or new lines." = "キーワードはカンマまたは改行で区切ります。";
 "Edit keywords for the selected photo" = "選択した写真のキーワードを編集";
 "Couldn't save keywords" = "キーワードを保存できませんでした";
+"Collision" = "同名ファイル";
+"Leave blank to keep the full resolution." = "完全な解像度を維持するには空欄にします。";
+"Leave blank to use the encoder default." = "エンコーダーのデフォルトを使用するには空欄にします。";

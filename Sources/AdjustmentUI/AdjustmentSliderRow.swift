@@ -28,8 +28,13 @@ struct AdjustmentSliderRow: View {
                 HStack {
                     Text(label)
                     Spacer()
-                    Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits))
-                        .monospacedDigit()
+                    AdjustmentValueInput(
+                        label: label,
+                        value: .init(get: { value }, set: onChange),
+                        range: range,
+                        fractionDigits: fractionDigits,
+                        onReset: onReset
+                    )
                 }
                 Slider(value: Binding(get: { value }, set: onChange), in: range, onEditingChanged: onEditingChanged)
                     .accessibilityLabel(Text(label))

@@ -598,3 +598,6 @@
 "Separate keywords with commas or new lines." = "Séparez les mots-clés par des virgules ou des retours à la ligne.";
 "Edit keywords for the selected photo" = "Modifier les mots-clés de la photo sélectionnée";
 "Couldn't save keywords" = "Impossible d’enregistrer les mots-clés";
+"Collision" = "Fichier existant";
+"Leave blank to keep the full resolution." = "Laissez vide pour conserver la résolution complète.";
+"Leave blank to use the encoder default." = "Laissez vide pour utiliser la valeur par défaut de l’encodeur.";
