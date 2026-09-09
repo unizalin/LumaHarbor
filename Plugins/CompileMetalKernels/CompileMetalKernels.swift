@@ -23,6 +23,7 @@ struct CompileMetalKernelsPlugin: BuildToolPlugin {
         let workDirectory = context.pluginWorkDirectory
         let intermediatesDirectory = workDirectory.appending(subpath: "air")
         let metallibFile = workDirectory.appending(subpath: "CoreImageKernels.metallib")
+        let sourcePathMap = shellQuote("\(module.directory.string)=LumaHarborSources")
 
         // A single shell command rather than a compile-then-link pair of
         // build commands: the intermediate .air files only need to exist
@@ -50,11 +51,20 @@ struct CompileMetalKernelsPlugin: BuildToolPlugin {
         for f in \(metalFiles.map { shellQuote($0.string) }.joined(separator: " ")); do
             base=$(basename "$f" .metal)
             air=\(shellQuote(intermediatesDirectory.string))/"$base".air
-            if [ -n "$METAL_SDK" ]; then
-                xcrun --sdk "$METAL_SDK" metal -target "$METAL_TARGET" -fcikernel -c "$f" -o "$air"
-            else
-                xcrun metal -fcikernel -c "$f" -o "$air"
-            fi
+            source_copy=\(shellQuote(intermediatesDirectory.string))/"$base".metal
+            cp "$f" "$source_copy"
+            (
+                cd \(shellQuote(intermediatesDirectory.string))
+                if [ -n "$METAL_SDK" ]; then
+                    xcrun --sdk "$METAL_SDK" metal -target "$METAL_TARGET" -fcikernel \
+                        -fdebug-prefix-map=\(sourcePathMap) -fdebug-compilation-dir=. -frecord-sources=no \
+                        -c "$base".metal -o "$base".air
+                else
+                    xcrun metal -fcikernel \
+                        -fdebug-prefix-map=\(sourcePathMap) -fdebug-compilation-dir=. -frecord-sources=no \
+                        -c "$base".metal -o "$base".air
+                fi
+            )
             AIR_FILES="$AIR_FILES $air"
         done
         if [ -n "$METAL_SDK" ]; then

@@ -266,8 +266,20 @@ public struct AdjustmentPipeline: Sendable {
     /// supports -- see the doc comment on `hslAdjust` in the .metal file for
     /// why the CIKL predecessor got away with this from a `CIColorKernel`
     /// property despite the same restriction.
+    private static let resourceBundle: Bundle? = {
+        #if LUMAHARBOR_APP_BUNDLE
+        guard let resourceURL = Bundle.main.resourceURL?
+            .appendingPathComponent("LumaHarbor_RawProcessingCore.bundle") else {
+            return nil
+        }
+        return Bundle(url: resourceURL)
+        #else
+        return Bundle.module
+        #endif
+    }()
+
     private static let kernelLibrary: Data? = {
-        guard let url = Bundle.module.url(forResource: "CoreImageKernels", withExtension: "metallib") else { return nil }
+        guard let url = resourceBundle?.url(forResource: "CoreImageKernels", withExtension: "metallib") else { return nil }
         return try? Data(contentsOf: url)
     }()
 

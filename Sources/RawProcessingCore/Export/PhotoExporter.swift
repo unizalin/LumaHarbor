@@ -165,7 +165,9 @@ public actor PhotoExporter {
         pipeline: AdjustmentPipeline = AdjustmentPipeline(),
         renderService: ImageRenderService = ImageRenderService(),
         fileManager: FileManager = .default,
-        encodableTypeIdentifiers: @escaping @Sendable () -> Set<String> = ExportFormat.systemEncodableTypeIdentifiers
+        encodableTypeIdentifiers: @escaping @Sendable () -> Set<String> = {
+            ExportFormat.systemEncodableTypeIdentifiers()
+        }
     ) {
         self.decoder = decoder
         self.pipeline = pipeline

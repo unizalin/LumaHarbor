@@ -25,13 +25,26 @@ import Foundation
 /// `docs/testing/reports/2026-08-16-mvp-acceptance-progress.md` for how this
 /// was diagnosed.
 public enum L10n {
+    static let resourceBundle: Bundle = {
+        #if LUMAHARBOR_APP_BUNDLE
+        guard let resourceURL = Bundle.main.resourceURL?
+            .appendingPathComponent("LumaHarbor_Localization.bundle"),
+              let bundle = Bundle(url: resourceURL) else {
+            Swift.fatalError("LumaHarbor localization resources are missing")
+        }
+        return bundle
+        #else
+        return Bundle.module
+        #endif
+    }()
+
     /// The bundle for whichever language actually matches the user's
     /// preferences, resolved once at first use.
     public static let bundle: Bundle = resolveBundle()
 
     static func resolveBundle(
         preferences: [String] = Locale.preferredLanguages,
-        in moduleBundle: Bundle = Bundle.module
+        in moduleBundle: Bundle = resourceBundle
     ) -> Bundle {
         let preferred = Bundle.preferredLocalizations(
             from: moduleBundle.localizations,
@@ -59,7 +72,7 @@ public enum L10n {
     /// (roadmap Phase 5 Task 5.5) can report which languages actually ship
     /// without needing `@testable import` from outside this module.
     public static var availableLanguageCodes: [String] {
-        Bundle.module.localizations
+        resourceBundle.localizations
     }
 
     /// Number of keys in `languageCode`'s own `Localizable.strings`, or
@@ -70,8 +83,8 @@ public enum L10n {
     /// shipped as -- this matches against `availableLanguageCodes` first to
     /// find the real on-disk name before resolving a path from it.
     public static func keyCount(for languageCode: String) -> Int? {
-        guard let actualName = Bundle.module.localizations.first(where: { $0.caseInsensitiveCompare(languageCode) == .orderedSame }),
-              let path = Bundle.module.path(forResource: actualName, ofType: "lproj"),
+        guard let actualName = resourceBundle.localizations.first(where: { $0.caseInsensitiveCompare(languageCode) == .orderedSame }),
+              let path = resourceBundle.path(forResource: actualName, ofType: "lproj"),
               let languageBundle = Bundle(path: path),
               let stringsURL = languageBundle.url(forResource: "Localizable", withExtension: "strings"),
               let data = try? Data(contentsOf: stringsURL) else {

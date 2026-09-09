@@ -21,6 +21,15 @@ INFO_PLIST="${ROOT_DIR}/Resources/Info.plist"
 OUTPUT_DIR="${LUMAHARBOR_RELEASE_DIR:-${ROOT_DIR}/dist}"
 SIGNING_IDENTITY="${LUMAHARBOR_SIGNING_IDENTITY:-}"
 NOTARY_PROFILE="${LUMAHARBOR_NOTARY_PROFILE:-}"
+RELEASE_SCRATCH_PARENT="${LUMAHARBOR_RELEASE_SCRATCH_PARENT:-/private/tmp}"
+RELEASE_SCRATCH_PATH=""
+VERIFY_DIR=""
+
+cleanup() {
+    [[ -z "${VERIFY_DIR}" ]] || rm -rf "${VERIFY_DIR}"
+    [[ -z "${RELEASE_SCRATCH_PATH}" ]] || rm -rf "${RELEASE_SCRATCH_PATH}"
+}
+trap cleanup EXIT
 
 if [[ -n "${NOTARY_PROFILE}" && -z "${SIGNING_IDENTITY}" ]]; then
     echo "error: LUMAHARBOR_NOTARY_PROFILE requires LUMAHARBOR_SIGNING_IDENTITY" >&2
@@ -35,6 +44,13 @@ CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
 
 cd "${ROOT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
+mkdir -p "${RELEASE_SCRATCH_PARENT}"
+
+# SwiftPM embeds the Bundle.module fallback path in the executable. Build in
+# a neutral temporary directory so release artifacts never record a builder's
+# account name or checkout location.
+RELEASE_SCRATCH_PATH="$(mktemp -d "${RELEASE_SCRATCH_PARENT%/}/LumaHarborReleaseBuild.XXXXXX")"
+export LUMAHARBOR_SCRATCH_PATH="${RELEASE_SCRATCH_PATH}"
 
 echo "==> Building ${APP_NAME} (${CONFIGURATION})"
 Scripts/build-app-bundle.sh "${CONFIGURATION}"
@@ -52,6 +68,7 @@ else
 fi
 
 codesign --verify --deep --strict --verbose=2 "${APP_DIR}"
+Scripts/verify-release-privacy.sh "${APP_DIR}"
 
 package_zip() {
     rm -f "${ARCHIVE_PATH}"
@@ -80,6 +97,21 @@ else
     echo "==> Notarization skipped; this archive is for local or explicitly trusted alpha use"
 fi
 
-shasum -a 256 "${ARCHIVE_PATH}" | tee "${CHECKSUM_PATH}"
+# Verify the bytes the recipient will actually extract, not only the build
+# directory that existed before archiving or notarization.
+VERIFY_DIR="$(mktemp -d "${RELEASE_SCRATCH_PARENT%/}/LumaHarborReleaseVerify.XXXXXX")"
+ditto -x -k "${ARCHIVE_PATH}" "${VERIFY_DIR}"
+VERIFY_APP_DIR="${VERIFY_DIR}/${APP_NAME}.app"
+if [[ ! -d "${VERIFY_APP_DIR}" ]]; then
+    echo "error: packaged app not found after archive extraction" >&2
+    exit 1
+fi
+Scripts/verify-release-privacy.sh "${VERIFY_APP_DIR}"
+
+(
+    cd "${OUTPUT_DIR}"
+    shasum -a 256 "${ARCHIVE_NAME}"
+) | tee "${CHECKSUM_PATH}"
+Scripts/verify-release-privacy.sh "${CHECKSUM_PATH}"
 echo "==> Done: ${ARCHIVE_PATH}"
 echo "    Checksum: ${CHECKSUM_PATH}"
