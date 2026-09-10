@@ -17,6 +17,7 @@ final class SidecarSchemaCompatibilityTests: XCTestCase {
         XCTAssertNil(sidecar.variantOf)
         XCTAssertEqual(sidecar.adjustments.exposure, 1.5)
         XCTAssertEqual(sidecar.sourceRelativePath, "Trip/DSC0001.ARW")
+        XCTAssertEqual(sidecar.curation, .neutral, "a v1 sidecar has no curation field; it must decode as neutral, not fail")
     }
 
     func testSchemaV2JSONDecodesWithVariantOf() throws {
@@ -29,6 +30,7 @@ final class SidecarSchemaCompatibilityTests: XCTestCase {
         XCTAssertEqual(sidecar.schemaVersion, 2)
         XCTAssertEqual(sidecar.variantOf, original)
         XCTAssertEqual(sidecar.adjustments.exposure, -0.5)
+        XCTAssertEqual(sidecar.curation, .neutral, "a v2 sidecar has no curation field; it must decode as neutral, not fail")
     }
 
     func testSidecarFromNewerSchemaIsRejectedByTheRepositoryNotByBareDecoding() throws {
