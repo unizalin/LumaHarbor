@@ -65,6 +65,24 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         XCTAssertNil(loaded)
     }
 
+    func testSidecarRoundTripsCuration() throws {
+        let sidecar = makeSidecar().updating(curation: PhotoCuration(
+            rating: 4,
+            flag: .pick,
+            keywords: [PhotoKeyword(normalized: "dog", displayValue: "Dog")]
+        ))
+        try repository.write(sidecar: sidecar)
+
+        let loaded = try XCTUnwrap(try repository.loadSidecar(for: sidecar.photoID))
+        XCTAssertEqual(loaded.curation.rating, 4)
+        XCTAssertEqual(loaded.curation.flag, .pick)
+        XCTAssertEqual(loaded.curation.keywords.map(\.displayValue), ["Dog"])
+    }
+
+    func testNewSidecarDefaultsToNeutralCuration() throws {
+        XCTAssertEqual(makeSidecar().curation, .neutral)
+    }
+
     func testSidecarJSONMatchesTheDocumentedShape() throws {
         let sidecar = makeSidecar()
         try repository.write(sidecar: sidecar)
@@ -75,7 +93,7 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         // Spec §8.2's field list.
         for key in [
             "schemaVersion", "photoID", "sourceRelativePath", "sourceFingerprint",
-            "decoder", "adjustments", "createdAt", "modifiedAt"
+            "decoder", "adjustments", "curation", "createdAt", "modifiedAt"
         ] {
             XCTAssertNotNil(object[key], "Missing \(key)")
         }
