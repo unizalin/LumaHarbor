@@ -1450,11 +1450,30 @@ public actor PhotoLibraryService {
         // spec §6.1, plan gap G1): one bulk read per scan, not one query per
         // file, of "what SQLite currently thinks" every photo's rating/flag/
         // keywords are. `CurationMigration.decide` compares this against
-        // each photo's own sidecar. An unreadable index (e.g. immediately
-        // after `resetRebuildableLocalData()` recreated it) yields an empty
-        // snapshot, which is exactly correct: every sidecar is then
-        // authoritative with nothing to migrate from.
-        let curationSnapshot = (try? index.curationSnapshot(inLibrary: libraryID)) ?? [:]
+        // each photo's own sidecar. A newly rebuilt index returns an empty
+        // snapshot normally. A thrown read error is different: fail this scan
+        // instead of treating unknown data as empty and risking a neutral
+        // projection over the last known state.
+        let curationSnapshot: [PhotoID: PhotoCuration]
+        do {
+            curationSnapshot = try index.curationSnapshot(inLibrary: libraryID)
+        } catch {
+            await emit(.failed(.indexUnavailable((error as NSError).localizedDescription)))
+            // The scan sequence contract exposes an explicit terminal result
+            // after a started run. This run has no trustworthy curation
+            // baseline, so finish it as cancelled rather than letting the
+            // consumer interpret the failure as a clean completion.
+            await emit(.finished(LibraryScanResult(
+                libraryID: libraryID,
+                indexedCount: 0,
+                failedCount: 0,
+                ambiguousCount: 0,
+                movedCount: 0,
+                wasCancelled: true,
+                completedAt: Date()
+            )))
+            return
+        }
         let decoderDescriptor = DecoderDescriptor(decoder.identifier)
 
         var indexed = 0
