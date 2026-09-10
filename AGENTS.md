@@ -56,6 +56,7 @@ Confirm the current branch, HEAD, worktree, and dirty files against `CURRENT.md`
 - Current coordination state: `docs/coordination/CURRENT.md`
 - Cross-agent decisions: `docs/coordination/DECISIONS.md`
 - Handoff template: `docs/coordination/HANDOFF_TEMPLATE.md`
+- Gemini spec reading protocol: `docs/superpowers/specs/2026-09-10-gemini-project-spec-reading-protocol.md`
 
 ## Completion and handoff
 
