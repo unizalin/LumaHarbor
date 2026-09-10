@@ -2,7 +2,25 @@
 
 Updated: 2026-09-10
 
-Updated by: Codex（P0/P1 獨立審查、資料保護修正與 Gemini 導讀規格）
+Updated by: Claude（P2 Shared Professional Inspector Catalog）
+
+## P2：Shared Professional Inspector Catalog（2026-09-10, Claude）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依使用者指示，針對 `docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` §7.1／§9／§11.3 第 18-20 條實作 P2（共用 Inspector catalog、搜尋、收藏、smart follow、pin、section／domain reset、兩平台入口收斂）。P3 以後（per-channel curves、Lens/Color/Mask、Snapshot、Cross-device final verification）完全未觸碰。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 P0/P1 完成時的 `0353dfd`；目前驗證 HEAD 為 `1be261e15bb44ee28c7c0744152a93f70ceea9c3`（單一提交）。交接文件提交完成後工作目錄應乾淨。
+- **先寫 spec**：新增 `docs/superpowers/specs/2026-09-10-shared-professional-inspector-catalog.md`，列出 8 個 catalog section 的欄位歸屬表、vibrance/saturation 統一決策、工程限制（`.xcodeproj` 固定成員清單）與測試計畫，先於程式碼撰寫完成。
+- **共用 catalog**：新增 `Sources/AdjustmentUI/InspectorCatalog/*`（`InspectorSectionID`、`InspectorPlatform`、`InspectorSectionDescriptor`、`InspectorCatalog`、`InspectorFavoritesStore`、`InspectorSmartFollow`、`InspectorNavigationModel`）。`InspectorCatalog.allSections` 是 `basic／whiteBalance／hsl／curve／detail／effects／geometry／local` 八個 section 的唯一宣告點；`resetting(_:in:)`／`resetting(domain:in:)`／`isNeutral` 為純函式；`search` 依 field ID／同義詞／標題比對；收藏（`InspectorFavoritesModel`）只存裝置本機 `UserDefaults`；Smart Follow（`InspectorSmartFollow.section(for:)`）把既有 `EditorSession.toolMode`（`.crop/.whiteBalance/.linearGradient/.spotHeal`）對應到 section，不新增第二套選取概念；`InspectorNavigationModel` 是兩平台共用的搜尋／收藏／pin／smart-follow 狀態機。
+- **既有型別相容**：`Sources/AdjustmentUI/PadInspectorCoordinator.swift` 的 `PadAdjustSubmodeKinds.light/color/detail` 改為從 `InspectorCatalog` 衍生（computed），`PadInspectorDomain`／`PadAdjustSubmode`／`PadInspectorPresentation` 保留原名與 raw value，既有測試不必改介面。
+- **Mac 接線**：`Sources/LumaHarborApp/Views/InspectorView.swift` 加入搜尋欄、每個 DisclosureGroup 標題列的收藏星號與 section reset 按鈕、header 的 pin 按鈕、Adjustments Actions 選單新增三個 domain reset 項目、`.onChange(of: model.editor.toolMode)` 接 smart follow。既有 7 個 DisclosureGroup 標題與掛載的 panel 型別不變（`InspectorAdjustmentGroupsContractTests`／`EditorWorkflowUXContractTests` 鎖定的字面文字保留）；`MacBasicAdjustmentPanel.toneKinds/whiteBalanceKinds` 改為從 catalog 衍生。
+- **iPad 接線與真實 bug 修正**：`Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift`（inline 版）與獨立但未被 `.xcodeproj` 編譯到的 `PadInspectorHost.swift`（見「已知限制」）都修正：`PadAdjustSubmodeKinds.color` 原本宣告 `basic.temperature／basic.tint` 但 `.color` submode 從未掛載對應 panel——White Balance 滑桿在 iPad 上完全不可達；本次補上 `BasicAdjustmentPanel(kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)`，與 Mac 的 `.color` DisclosureGroup（White Balance + HSL）看齊。同時把 vibrance/saturation 從 iPad 的 Color submode 移到 Light，與 Mac 的 Basic 分組一致（同屬「宣告了但從未渲染」的既有缺口，移動後無使用者可見退化）。`PadEditorView` 新增 `catalogToolbar`（搜尋欄、收藏星號、pin、domain reset，三種呈現方式共用）與 `applyInspectorNavigation(_:)` 橋接函式，把 `InspectorSectionID` 轉成 `inspector.selectDomain／selectAdjustSubmode`。
+- **測試**：新增 91 個測試（`InspectorCatalogTests` 28、`InspectorFavoritesStoreTests` 4、`InspectorSmartFollowTests` 5、`InspectorNavigationModelTests` 9、`InspectorSharedCatalogContractTests` 7、`PadCatalogWiringContractTests` 7、`LocalizationKeyParityContractTests` 5，`PadInspectorCoordinatorTests` 淨增 1）；本репо首次加入自動化 8 語 key parity 測試。
+- **本地化**：8 語 `Localizable.strings` 各新增 10 個 key（`Search Adjustments`、`Clear Search`、`No matching tools`、`Add to Favorites`、`Remove from Favorites`、`Pin Section`、`Unpin Section`、`Reset Adjust`、`Reset Geometry`、`Reset Local Adjustments`），en／zh-Hant 人工撰寫，其餘 6 語為真實翻譯（非英文直接複製），由新測試驗證 key parity 與 zh-Hant 值非 passthrough。
+- **驗證**：完整 `swift test` → **2039 executed、9 skipped、0 failures**（P0/P1 基準 1973，本輪淨增 66）；`swift build -Xswiftc -strict-concurrency=complete` → **PASS**；`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**；`git diff --check` → **PASS**；`TBD|TODO|FIXME|fatalError|try!` 掃描 → **PASS**；privacy scan（`/Users/`／`/Volumes/`／`DEVELOPMENT_TEAM`／密鑰標頭／UUID）→ **PASS**，無命中。
+- **已知限制／未解決 gap**：
+  - **真機／Simulator 人工視覺驗收本輪 NOT RUN**：本輪新增可見 UI（搜尋欄、收藏星號、pin、reset 按鈕），與 P0/P1 純資料層變更不同，沒有人看過實際渲染結果（窄寬度是否擁擠、VoiceOver 閱讀順序、Dynamic Type 最大字級）。下一次涉及此區域或即將發布前必須安排。
+  - **獨立 `PadInspectorHost.swift`／`PadToolRail.swift` 仍是第二份未被 `.xcodeproj` 編譯的副本**：確認不在 `PBXSourcesBuildPhase` 內，`swift build`／`xcodebuild` 皆不編譯到；因既有 `PadPresetContractTests`／`CurveHistogramContractTests` 會直接讀取 `PadInspectorHost.swift` 原始碼，本輪不刪除，只同步套用相同的 White Balance／vibrance 修正，未加入搜尋／收藏／pin／reset（需要額外傳入 `library`／`batchCoordinator`，超出本輪授權範圍）。下一位碰 iPad Inspector 的人需要明確決定刪除、補齊參數同步維護、或確認 `.swiftpm` 直接開啟是否真的需要這兩個檔案。
+  - `Scripts/run-mvp-acceptance.zsh` 與真機人工驗收沿用 P0/P1 既有 **NOT RUN**，本輪未嘗試關閉。
+- **Next action**：P3「Per-channel tone curves」（`docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` §16 第 3 項，檔案 `2026-09-10-per-channel-tone-curves.md` 尚未存在，須先寫）。詳見 `docs/coordination/2026-09-10-p2-shared-inspector-catalog-handoff.md`。
 
 ## P0／P1：Curation Sidecar v3 與 Migration（2026-09-10, Claude）
 
