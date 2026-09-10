@@ -9,7 +9,7 @@ Follows `docs/coordination/HANDOFF_TEMPLATE.md`.
 ## Git state
 
 - Source branch: `claude/professional-editing-completion`
-- Full HEAD commit SHA: `1be261e15bb44ee28c7c0744152a93f70ceea9c3` (`feat: add shared Professional Inspector Catalog (P2)`)
+- Full HEAD commit SHA: `37db11d163fd2fe90b974dbc50ae9476fc3ee9e9` (`docs: record P2 shared inspector catalog completion and handoff`)
 - Base branch: `main`. Not compared against `main`'s current tip this session; only this branch's own local history was inspected.
 - Ahead/behind: not measured against `main` this session (same as the prior P0/P1 handoff's own caveat).
 - Upstream: not checked/changed this session.
@@ -17,7 +17,7 @@ Follows `docs/coordination/HANDOFF_TEMPLATE.md`.
 
 ## Changes
 
-One commit, `1be261e`, on top of the P0/P1 baseline (`0353dfd`). 28 files changed, 1727 insertions, 82 deletions.
+Two commits on top of the P0/P1 baseline (`0353dfd`): implementation commit `1be261e` followed by coordination-doc commit `37db11d`. The implementation commit changed 28 files, with 1727 insertions and 82 deletions; the coordination commit adds this handoff and the CURRENT entry.
 
 ### New files
 
@@ -42,11 +42,11 @@ One commit, `1be261e`, on top of the P0/P1 baseline (`0353dfd`). 28 files change
 
 ## Verification
 
-All commands below were run in this worktree, against HEAD `1be261e`.
+All commands below were run in this worktree, against the P2 implementation at `1be261e`; the documentation correction itself is recorded in the current HEAD `37db11d`.
 
 - New test files RED→GREEN: each new test file was run immediately after being written, against not-yet-implemented types (compile failure = RED), then again after implementation (GREEN). The one genuine logic bug caught this way: `InspectorSectionDescriptor.adjustmentKinds` initially didn't strip the `basic.` prefix from `whiteBalance`'s dotted field IDs before bridging to `AdjustmentKind(rawValue:)`, so `InspectorCatalog.resetting(domain: .adjust, ...)` silently skipped resetting temperature/tint — caught by `testResettingAdjustDomainClearsAllSixFieldSectionsButNotGeometryOrLocal` and `testWhiteBalanceSectionBridgesToTemperatureAndTintKinds`, fixed, reran GREEN.
 - `swift test --filter 'InspectorCatalogTests|InspectorFavoritesStoreTests|InspectorSmartFollowTests|InspectorNavigationModelTests|PadInspectorCoordinatorTests|InspectorSharedCatalogContractTests|InspectorAdjustmentGroupsContractTests|EditorWorkflowUXContractTests|PadCatalogWiringContractTests|PadToolRailContractTests|PadPresetContractTests|CurveHistogramContractTests|LocalizationKeyParityContractTests'` (run in stages during development) → **PASS**, every stage 0 failures.
-- `swift test` (full suite) → **PASS**. 2039 executed, 9 skipped, 0 failures. (Same 9 pre-existing fixture-dependent skips as the P0/P1 baseline — 2039 − 1973 = 66 net new tests: 91 new test methods across 7 new files minus 25 replaced/removed by editing `PadInspectorCoordinatorTests.swift` in place... concretely: 28+4+5+9+7+7+5 = 65 new test methods in new files, +1 net in `PadInspectorCoordinatorTests.swift` (one test replaced, one added) = 66.)
+- `swift test` (full suite) → **PASS**. 2039 executed, 9 skipped, 0 failures. This is 66 more executed tests than the P0/P1 baseline (1973): 65 new test methods across the seven new test files, plus one net new method in `PadInspectorCoordinatorTests.swift`.
 - `swift build -Xswiftc -strict-concurrency=complete` → **PASS**, exit 0, no warnings surfaced in output.
 - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **PASS**, `** BUILD SUCCEEDED **`.
 - `git diff --check` → **PASS**, no output (checked at commit time before staging, and confirmed no whitespace errors were introduced).
@@ -62,7 +62,7 @@ Not run in this task (genuinely unavailable, not skipped by choice):
 
 ## Dirty files
 
-None. `git status --short --branch` is clean at HEAD `1be261e`.
+None. `git status --short --branch` is clean at HEAD `37db11d`.
 
 ## Concerns and blockers
 
