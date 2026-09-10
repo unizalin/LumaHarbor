@@ -4,12 +4,12 @@ Follows `docs/coordination/HANDOFF_TEMPLATE.md`.
 
 ## Status
 
-`DONE`
+`DONE_WITH_CONCERNS`
 
 ## Git state
 
 - Source branch: `claude/professional-editing-completion`
-- Full HEAD commit SHA at handoff time: `29ae0ea` (`docs: record P0/P1 curation sidecar v3 completion and handoff`), which adds this file plus `docs/coordination/CURRENT.md` and `docs/coordination/DECISIONS.md` (D-006), immediately after `d7bc821ecb05c6381248605494185d9d6cabe644`.
+- Full HEAD commit SHA at handoff time: `d45d59cc7a818b4f82fb5b3bbf0437e01207becc` (`fix: finish failed scans with a cancelled result`), after the Codex review fixes and Gemini spec documentation.
 - Base branch: `main`.
 - Ahead/behind: this branch was not compared against `main`'s current tip during this task; only local commit history on this branch was inspected. No fetch or rebase was performed.
 - Upstream: not checked/changed this session.
@@ -29,9 +29,13 @@ Commits, in order, starting from `4cd43e5` (`docs: define professional editing c
 8. `ca836b1` — `feat: make PhotoLibraryService curation mutations sidecar-first` — adds `curation(for:)`/`setRating(_:for:)`/`setFlag(_:for:)`/`setKeywords(_:for:)`; also fixes a latent bug where `saveAdjustments` would have silently reset curation to neutral on every adjustment save.
 9. `1af8e84` — `fix: route Mac rating/flag/keyword edits through the sidecar-first API` — `LibraryViewModel`'s three curation setters now call `PhotoLibraryService`, not `PhotoIndexStore` directly.
 10. `d7bc821` — `fix: route iPad rating/flag/keyword edits through the sidecar-first API` — same fix in `PadBatchAdjustmentCoordinator`.
-11. (this commit) — `docs/coordination/DECISIONS.md` (D-006), `docs/coordination/CURRENT.md`, this handoff file.
+11. `29ae0ea` — `docs: record P0/P1 curation sidecar v3 completion and handoff` — records the implementation handoff and D-006 in the coordination docs.
+12. `7d926f7` — `docs: record the actual final HEAD SHA in the P0/P1 handoff` — pins the handoff to the implementation commit that was available at that point.
+13. `ac0f94c` — `fix: protect portable curation sidecars during migration` — Codex review fixes for fail-closed sidecar reads, curation invariants, newer-schema protection, unknown top-level field preservation, and related regression tests.
+14. `6388044` — `docs: add Gemini project spec reading protocol` — adds `GEMINI.md`, the Gemini reading protocol, and the `AGENTS.md` canonical-artifact link.
+15. `d45d59c` — `fix: finish failed scans with a cancelled result` — preserves the scan event terminal-result contract when the curation snapshot cannot be read.
 
-No file outside `Sources/PhotoLibraryCore/*`, `Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`, `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadBatchAdjustmentCoordinator.swift`, `Tests/*`, `docs/coordination/*`, and the one new plan document was modified. In particular `Sources/RawProcessingCore/Model/AdvancedToneCurve.swift`, `Sources/AdjustmentUI/CurveAdjustmentPanel.swift`, and `Sources/AdjustmentUI/HistogramPanel.swift` (the just-merged P0 curve/histogram baseline) are untouched — verified with `git diff --stat 4cd43e5 HEAD -- <those three paths>` producing no output.
+No product file outside `Sources/PhotoLibraryCore/*`, `Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`, `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadBatchAdjustmentCoordinator.swift`, and `Tests/*` was modified. Coordination and documentation changes additionally include `docs/coordination/*`, the Gemini reading artifacts in `GEMINI.md` and `docs/superpowers/specs/*`, and the canonical-artifact link in `AGENTS.md`. In particular `Sources/RawProcessingCore/Model/AdvancedToneCurve.swift`, `Sources/AdjustmentUI/CurveAdjustmentPanel.swift`, and `Sources/AdjustmentUI/HistogramPanel.swift` (the just-merged P0 curve/histogram baseline) are untouched — verified with `git diff --stat 4cd43e5 HEAD -- <those three paths>` producing no output.
 
 ### Behavior changes
 
@@ -42,12 +46,16 @@ No file outside `Sources/PhotoLibraryCore/*`, `Sources/LumaHarborApp/ViewModels/
 - A virtual copy still always starts with neutral curation (rating 0, no flag, no keywords), even if the original it was copied from is rated/flagged, and this survives a rescan.
 - `saveAdjustments` no longer silently resets a photo's curation to neutral when saving an adjustment (a latent bug found and fixed during this task, not present in any shipped behavior since curation only existed in SQLite before now, but would have broken the very first time `saveAdjustments` ran after this task's sidecar field was added, had it not been caught).
 - Mac (`LibraryViewModel`) and iPad (`PadBatchAdjustmentCoordinator`) both now call `PhotoLibraryService.setRating/setFlag/setKeywords` instead of `PhotoIndexStore.setRating/setFlag/setKeywords` directly.
+- Sidecar read or write failures are no longer treated as an empty curation state; newer schema files are left untouched, corrupt files are quarantined before replacement, and unknown top-level JSON keys survive a read-modify-write cycle.
+- `PhotoCuration` decoding and keyword mutation enforce the same rating range, normalized uniqueness, and stable ordering as the initializer.
+- A scan that cannot read its curation snapshot emits `.failed(.indexUnavailable(...))` and a terminal `.finished` with `wasCancelled == true`, so consumers do not wait forever or treat an incomplete scan as success.
 
 ## Verification
 
-All commands below were actually run in this worktree during this task, most recently against HEAD `d7bc821`:
+All commands below were actually run in this worktree during this task, most recently against HEAD `d45d59c`:
 
-- `swift test` (full suite) → **PASS**. 1966 executed, 9 skipped, 0 failures. (Skips are the same 9 pre-existing fixture-dependent skips as before this task; no new skip was introduced.)
+- `swift test` (full suite) → **PASS**. 1973 executed, 9 skipped, 0 failures. (Skips are the same 9 pre-existing fixture-dependent skips as before this task; no new skip was introduced.)
+- `swift test --filter 'MultiSourceFailureRecoveryTests|PhotoLibraryServiceCurationTests|SidecarRepositoryTests|PhotoCurationTests'` → **PASS**, 51 executed, 0 failures.
 - `swift build -Xswiftc -strict-concurrency=complete` → **PASS**, exit 0.
 - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **PASS**, `** BUILD SUCCEEDED **`.
 - `git diff --check 4cd43e5 HEAD` → **PASS**, no output.
@@ -62,11 +70,11 @@ Not run in this task (genuinely unavailable, not skipped by choice):
 
 ## Dirty files
 
-None. `git status --short` shows a clean worktree once this handoff commit lands (verify with `git status --short --branch` after committing).
+None after the coordination update commits land. Verify with `git status --short --branch`; no Claude or user changes may be staged by this handoff.
 
 ## Concerns and blockers
 
-- **Unknown top-level JSON key preservation**: `PhotoSidecar`'s custom `Codable` only reads keys it knows about. If a future requirement needs literal preservation of unrelated/future top-level JSON keys through a read-modify-write cycle (e.g. a newer build's field surviving being opened by this build and saved again), that needs a raw-JSON merge strategy this task did not implement. Not currently required by any P0/P1 acceptance criterion, but flagged here as a known limitation rather than silently assumed solved.
+- **Automated test environment**: the full suite is now green at 1973/9/0, but real private RAW/APFS/exFAT MVP fixtures and physical-device UI gates were not run in this P0/P1 review. Keep those gates `NOT RUN`, not `PASS`, until a separate acceptance session provides the fixtures and devices.
 - **`snapshots` deferred to P6**: recorded as `docs/coordination/DECISIONS.md` D-006. The next agent working on P6 (Snapshot/Soft Proof) must read that decision before bumping `PhotoSidecar.currentSchemaVersion` again.
 - **No real-device gate exercised this task**: see "Not run" above. Low risk given the change surface, but should not be conflated with "fully verified" for any future release-readiness claim.
 
