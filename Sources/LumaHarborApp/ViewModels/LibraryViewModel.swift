@@ -477,11 +477,10 @@ public final class LibraryViewModel: ObservableObject {
     // MARK: - Curation metadata
 
     func setRatingForSelectedPhoto(_ rating: Int) {
-        guard let photoID = selectedPhotoID, let services else { return }
+        guard let photoID = selectedPhotoID, let services, let photo = photo(for: photoID) else { return }
         Task { [weak self] in
             do {
-                let indexStore = await services.libraryService.indexStore
-                try indexStore.setRating(rating, for: photoID)
+                try await services.libraryService.setRating(rating, for: photo)
                 await self?.reloadPhotos()
             } catch {
                 self?.alert = UserAlert(title: L10n.t("Couldn't save rating"), error: error)
@@ -490,11 +489,10 @@ public final class LibraryViewModel: ObservableObject {
     }
 
     func setFlagForSelectedPhoto(_ flag: PhotoFlag) {
-        guard let photoID = selectedPhotoID, let services else { return }
+        guard let photoID = selectedPhotoID, let services, let photo = photo(for: photoID) else { return }
         Task { [weak self] in
             do {
-                let indexStore = await services.libraryService.indexStore
-                try indexStore.setFlag(flag, for: photoID)
+                try await services.libraryService.setFlag(flag, for: photo)
                 await self?.reloadPhotos()
             } catch {
                 self?.alert = UserAlert(title: L10n.t("Couldn't save flag"), error: error)
@@ -503,11 +501,10 @@ public final class LibraryViewModel: ObservableObject {
     }
 
     func setKeywordsForPhoto(_ photoID: PhotoID, inputs: [String]) {
-        guard let services else { return }
+        guard let services, let photo = photo(for: photoID) else { return }
         Task { [weak self] in
             do {
-                let indexStore = await services.libraryService.indexStore
-                try indexStore.setKeywords(inputs, for: photoID)
+                try await services.libraryService.setKeywords(inputs, for: photo)
                 await self?.reloadPhotos()
             } catch {
                 self?.alert = UserAlert(title: L10n.t("Couldn't save keywords"), error: error)
