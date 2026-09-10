@@ -50,20 +50,20 @@ final class EightLanguageLocalizationGateTests: XCTestCase {
     /// against how Adobe's own localized Lightroom/Photoshop UIs render
     /// each in the corresponding language.
     static let intentionalEnglishMatchAllowlist: [String: Set<String>] = [
-        "zh-Hant": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "TIFF"],
-        "ja": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "OK", "PNG", "TIFF"],
-        "ko": ["DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "TIFF"],
-        "zh-Hans": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "TIFF"],
+        "zh-Hant": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
+        "ja": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "OK", "PNG", "RGB", "TIFF"],
+        "ko": ["DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
+        "zh-Hans": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
         "de": [
             "1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "Detail", "EXIF", "Format", "HEIC", "ISO", "JPEG",
-            "Magenta", "Name", "OK", "Offline", "Orange", "Original", "PNG", "Radius", "System", "TIFF", "Vignette",
+            "Magenta", "Name", "OK", "Offline", "Orange", "Original", "PNG", "Radius", "RGB", "System", "TIFF", "Vignette",
         ],
         "fr": [
             "1 photo", "DPI", "Dimensions", "EXIF", "Format", "Grain", "HEIC", "ISO", "JPEG", "Luminance", "Magenta",
             "Mode", "OK", "Orange", "Orientation", "Original", "PNG", "Photo", "Saturation", "Sources", "TIFF",
             "Vibrance", "photos",
         ],
-        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Color", "EXIF", "HEIC", "ISO", "JPEG", "Magenta", "Original", "PNG", "TIFF"],
+        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Color", "EXIF", "HEIC", "ISO", "JPEG", "Magenta", "Original", "PNG", "RGB", "TIFF"],
     ]
 
     /// SwiftPM's resource processor lowercases `.lproj` directory names

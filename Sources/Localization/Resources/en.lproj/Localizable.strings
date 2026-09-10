@@ -21,6 +21,11 @@
 "Amount" = "Amount";
 "Basic" = "Basic";
 "Curve" = "Curve";
+"Tone curve" = "Tone curve";
+"Drag control point" = "Drag control point";
+"RGB" = "RGB";
+"Shadows clipped" = "Shadows clipped";
+"Highlights clipped" = "Highlights clipped";
 "Detail" = "Detail";
 "Effects" = "Effects";
 "Feather" = "Feather";

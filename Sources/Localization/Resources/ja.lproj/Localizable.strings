@@ -21,6 +21,11 @@
 "Amount" = "量";
 "Basic" = "基本";
 "Curve" = "カーブ";
+"Tone curve" = "トーンカーブ";
+"Drag control point" = "コントロールポイントをドラッグ";
+"RGB" = "RGB";
+"Shadows clipped" = "シャドウのクリップ";
+"Highlights clipped" = "ハイライトのクリップ";
 "Detail" = "ディテール";
 "Effects" = "エフェクト";
 "Feather" = "フェザー";

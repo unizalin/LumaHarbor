@@ -43,11 +43,10 @@ struct PadInspectorHost: View {
                         .padding()
                 }
             case .info:
-                unavailablePlaceholder(
-                    domain: L10n.t("Info"),
-                    symbol: "info.circle",
-                    note: L10n.t("EXIF metadata and histogram are not yet wired.")
-                )
+                ScrollView {
+                    HistogramPanel(histogram: editor.histogram)
+                        .padding()
+                }
             }
         }
     }

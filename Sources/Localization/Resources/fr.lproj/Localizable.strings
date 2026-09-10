@@ -21,6 +21,11 @@
 "Amount" = "Quantité";
 "Basic" = "Basique";
 "Curve" = "Courbe";
+"Tone curve" = "Courbe des tons";
+"Drag control point" = "Faites glisser le point de contrôle";
+"RGB" = "RVB";
+"Shadows clipped" = "Ombres écrêtées";
+"Highlights clipped" = "Hautes lumières écrêtées";
 "Detail" = "Détail";
 "Effects" = "Effets";
 "Feather" = "Plume";

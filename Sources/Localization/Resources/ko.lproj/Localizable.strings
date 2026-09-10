@@ -21,6 +21,11 @@
 "Amount" = "양";
 "Basic" = "기본";
 "Curve" = "커브";
+"Tone curve" = "톤 커브";
+"Drag control point" = "조절점을 드래그하세요";
+"RGB" = "RGB";
+"Shadows clipped" = "섀도 클리핑";
+"Highlights clipped" = "하이라이트 클리핑";
 "Detail" = "디테일";
 "Effects" = "효과";
 "Feather" = "페더";

@@ -21,6 +21,11 @@
 "Amount" = "Menge";
 "Basic" = "Grundlegend";
 "Curve" = "Kurve";
+"Tone curve" = "Tonwertkurve";
+"Drag control point" = "Kontrollpunkt ziehen";
+"RGB" = "RGB";
+"Shadows clipped" = "Tiefen beschnitten";
+"Highlights clipped" = "Lichter beschnitten";
 "Detail" = "Detail";
 "Effects" = "Effekte";
 "Feather" = "Weichzeichnung";
