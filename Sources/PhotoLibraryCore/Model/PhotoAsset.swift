@@ -48,6 +48,12 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
     public var rating: Int
     public var flag: PhotoFlag
     public var keywords: [PhotoKeyword]
+    /// `true` when this row's rating/flag/keywords were carried forward from
+    /// a legacy sidecar or SQLite-only value that a migration write attempt
+    /// could not yet persist to a schema-v3 sidecar (offline, read-only, or
+    /// out of space). Purely observational and rebuildable: the next scan
+    /// re-derives this from scratch, never from the flag's own prior value.
+    public var curationMigrationPending: Bool
 
     public init(
         id: PhotoID,
@@ -64,7 +70,8 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         variantName: String? = nil,
         rating: Int = 0,
         flag: PhotoFlag = .none,
-        keywords: [PhotoKeyword] = []
+        keywords: [PhotoKeyword] = [],
+        curationMigrationPending: Bool = false
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -81,6 +88,7 @@ public struct PhotoAsset: Identifiable, Equatable, Sendable {
         self.rating = min(max(rating, 0), 5)
         self.flag = flag
         self.keywords = keywords
+        self.curationMigrationPending = curationMigrationPending
     }
 
     /// `true` for a virtual copy (`variantOf != nil`), `false` for an

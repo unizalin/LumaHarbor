@@ -19,8 +19,8 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(PhotoIndexStore.schemaVersion, 4)
-        XCTAssertEqual(try readSchemaVersion(at: url), 4)
+        XCTAssertEqual(PhotoIndexStore.schemaVersion, 5)
+        XCTAssertEqual(try readSchemaVersion(at: url), 5)
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
         XCTAssertTrue(try columnExists("photo", "rating", at: url))
@@ -65,7 +65,7 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(try readSchemaVersion(at: url), 4)
+        XCTAssertEqual(try readSchemaVersion(at: url), 5)
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_name", at: url))
         XCTAssertTrue(try columnExists("photo", "rating", at: url))
@@ -173,7 +173,7 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         let store = try PhotoIndexStore(databaseURL: url)
         defer { store.close() }
 
-        XCTAssertEqual(try readSchemaVersion(at: url), 4)
+        XCTAssertEqual(try readSchemaVersion(at: url), 5)
         XCTAssertTrue(try columnExists("photo", "filename_normalized", at: url))
         XCTAssertTrue(try columnExists("library", "source_kind", at: url))
         XCTAssertTrue(try columnExists("photo", "variant_of", at: url))
@@ -181,6 +181,36 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
         XCTAssertTrue(try tableExists("photo_keyword", at: url))
         XCTAssertTrue(try columnExists("photo", "rating", at: url))
         XCTAssertTrue(try columnExists("photo", "flag", at: url))
+        XCTAssertTrue(try columnExists("photo", "curation_migration_pending", at: url))
+    }
+
+    /// Spec gap G4/G7: schema v5 only adds the pending-migration column; a
+    /// v4 database (every released version's own real shape) must pick up
+    /// only that one new column.
+    func testOpeningV4DatabaseMigratesAtomicallyToV5() throws {
+        let url = temporaryDirectory.appendingPathComponent("library.sqlite")
+        try makeSchemaV4Database(at: url, photoCount: 2)
+
+        let store = try PhotoIndexStore(databaseURL: url)
+        defer { store.close() }
+
+        XCTAssertEqual(PhotoIndexStore.schemaVersion, 5)
+        XCTAssertEqual(try readSchemaVersion(at: url), 5)
+        XCTAssertTrue(try columnExists("photo", "curation_migration_pending", at: url))
+        XCTAssertEqual(try store.photoCount(inLibrary: fixtureLibraryID), 2)
+    }
+
+    func testV5MigrationFailureRollsBack() throws {
+        let url = temporaryDirectory.appendingPathComponent("library.sqlite")
+        try makeSchemaV4Database(at: url, photoCount: 1)
+
+        XCTAssertThrowsError(try PhotoIndexStore(
+            databaseURL: url,
+            migrationHook: { throw TestError.injected }
+        ))
+
+        XCTAssertEqual(try readSchemaVersion(at: url), 4)
+        XCTAssertFalse(try columnExists("photo", "curation_migration_pending", at: url))
     }
 
     // MARK: - Fixture helpers
@@ -276,6 +306,35 @@ final class PhotoIndexMigrationTests: TemporaryDirectoryTestCase {
                 WHERE last_edit_at IS NOT NULL;
             """)
         try db.run("UPDATE schema_info SET value = '2' WHERE key = 'schemaVersion';")
+    }
+
+    /// Builds a database matching the pre-Task-4 (this plan) schema exactly
+    /// -- v2 shape plus every v2 -> v4 `ALTER TABLE`, stamped
+    /// `schemaVersion = 4` -- the real shape every released version up to
+    /// this one produces.
+    private func makeSchemaV4Database(at url: URL, photoCount: Int) throws {
+        try makeSchemaV2Database(at: url, photoCount: photoCount)
+        let db = try SQLiteDatabase(url: url)
+        defer { db.close() }
+        try db.execute("""
+            ALTER TABLE photo ADD COLUMN variant_of TEXT;
+            ALTER TABLE photo ADD COLUMN variant_name TEXT;
+            ALTER TABLE photo ADD COLUMN format_normalized TEXT NOT NULL DEFAULT '';
+            ALTER TABLE photo ADD COLUMN rating INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE photo ADD COLUMN flag TEXT NOT NULL DEFAULT 'none';
+
+            CREATE TABLE photo_keyword (
+                photo_id       TEXT NOT NULL,
+                normalized     TEXT NOT NULL,
+                display_value  TEXT NOT NULL,
+                PRIMARY KEY (photo_id, normalized),
+                FOREIGN KEY (photo_id) REFERENCES photo(photo_id) ON DELETE CASCADE
+            );
+            CREATE INDEX photo_rating_flag ON photo (library_id, rating, flag);
+            CREATE INDEX photo_format ON photo (library_id, format_normalized);
+            CREATE INDEX photo_keyword_normalized ON photo_keyword (normalized, photo_id);
+            """)
+        try db.run("UPDATE schema_info SET value = '4' WHERE key = 'schemaVersion';")
     }
 
     private func seedV1Photo(at url: URL, libraryID: LibraryID, relativePath: String) throws {

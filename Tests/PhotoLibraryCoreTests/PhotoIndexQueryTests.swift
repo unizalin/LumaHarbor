@@ -1001,6 +1001,75 @@ final class PhotoIndexQueryTests: TemporaryDirectoryTestCase {
         XCTAssertNil(loaded.lastEditAt)
     }
 
+    // MARK: - Curation snapshot and migration-pending flag
+
+    func testCurationSnapshotReturnsOnlyRowsThatHaveNonDefaultData() throws {
+        let library = try makeLibrary()
+        let rated = PhotoAsset.stub(libraryID: library.id, relativePath: "Rated.ARW", fingerprint: .stub("rated"))
+        let untouched = PhotoAsset.stub(libraryID: library.id, relativePath: "Untouched.ARW", fingerprint: .stub("untouched"))
+        try store.upsert(photos: [rated, untouched])
+        try store.setRating(4, for: rated.id)
+
+        let snapshot = try store.curationSnapshot(inLibrary: library.id)
+
+        XCTAssertEqual(snapshot[rated.id]?.rating, 4)
+        XCTAssertEqual(snapshot[PhotoID()], nil)
+    }
+
+    func testCurationSnapshotIncludesFlagAndKeywords() throws {
+        let library = try makeLibrary()
+        let photo = PhotoAsset.stub(libraryID: library.id, relativePath: "Tagged.ARW", fingerprint: .stub("tagged"))
+        try store.upsert(photo: photo)
+        try store.setFlag(.pick, for: photo.id)
+        try store.setKeywords(["Dog", "Beach"], for: photo.id)
+
+        let snapshot = try store.curationSnapshot(inLibrary: library.id)
+
+        XCTAssertEqual(snapshot[photo.id]?.flag, .pick)
+        XCTAssertEqual(Set(snapshot[photo.id]?.keywords.map(\.displayValue) ?? []), ["Dog", "Beach"])
+    }
+
+    func testCurationSnapshotOnlyIncludesTheGivenLibrary() throws {
+        let libraryA = try makeLibrary(name: "A")
+        let libraryB = try makeLibrary(name: "B")
+        let photoA = PhotoAsset.stub(libraryID: libraryA.id, relativePath: "A.ARW", fingerprint: .stub("a"))
+        let photoB = PhotoAsset.stub(libraryID: libraryB.id, relativePath: "B.ARW", fingerprint: .stub("b"))
+        try store.upsert(photos: [photoA, photoB])
+        try store.setRating(3, for: photoA.id)
+        try store.setRating(5, for: photoB.id)
+
+        let snapshot = try store.curationSnapshot(inLibrary: libraryA.id)
+
+        XCTAssertEqual(snapshot[photoA.id]?.rating, 3)
+        XCTAssertNil(snapshot[photoB.id])
+    }
+
+    func testSetCurationMigrationPendingRoundTrips() throws {
+        let library = try makeLibrary()
+        let photo = PhotoAsset.stub(libraryID: library.id, relativePath: "Pending.ARW", fingerprint: .stub("pending"))
+        try store.upsert(photo: photo)
+        XCTAssertEqual(try store.photo(id: photo.id)?.curationMigrationPending, false)
+
+        try store.setCurationMigrationPending(true, for: photo.id)
+        XCTAssertEqual(try store.photo(id: photo.id)?.curationMigrationPending, true)
+
+        try store.setCurationMigrationPending(false, for: photo.id)
+        XCTAssertEqual(try store.photo(id: photo.id)?.curationMigrationPending, false)
+    }
+
+    func testRescanDoesNotClearCurationMigrationPendingByItself() throws {
+        // Mirrors the existing rating/flag ON CONFLICT exclusion: only an
+        // explicit call may change this flag, never a plain rescan upsert.
+        let library = try makeLibrary()
+        let photo = PhotoAsset.stub(libraryID: library.id, relativePath: "Rescan.ARW", fingerprint: .stub("rescan"))
+        try store.upsert(photo: photo)
+        try store.setCurationMigrationPending(true, for: photo.id)
+
+        try store.upsert(photo: photo)
+
+        XCTAssertEqual(try store.photo(id: photo.id)?.curationMigrationPending, true)
+    }
+
     // MARK: - Fixtures
 
     @discardableResult
