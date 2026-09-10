@@ -612,3 +612,14 @@
 "Collision" = "Existing file";
 "Leave blank to keep the full resolution." = "Leave blank to keep the full resolution.";
 "Leave blank to use the encoder default." = "Leave blank to use the encoder default.";
+
+"Search Adjustments" = "Search Adjustments";
+"Clear Search" = "Clear Search";
+"No matching tools" = "No matching tools";
+"Add to Favorites" = "Add to Favorites";
+"Remove from Favorites" = "Remove from Favorites";
+"Pin Section" = "Pin Section";
+"Unpin Section" = "Unpin Section";
+"Reset Adjust" = "Reset Adjust";
+"Reset Geometry" = "Reset Geometry";
+"Reset Local Adjustments" = "Reset Local Adjustments";

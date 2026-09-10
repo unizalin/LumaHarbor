@@ -612,3 +612,14 @@
 "Collision" = "同名文件";
 "Leave blank to keep the full resolution." = "留空以保留完整分辨率。";
 "Leave blank to use the encoder default." = "留空以使用编码器默认值。";
+
+"Search Adjustments" = "搜索调整工具";
+"Clear Search" = "清除搜索";
+"No matching tools" = "没有匹配的工具";
+"Add to Favorites" = "添加收藏";
+"Remove from Favorites" = "移除收藏";
+"Pin Section" = "固定区块";
+"Unpin Section" = "取消固定";
+"Reset Adjust" = "重置调整";
+"Reset Geometry" = "重置几何";
+"Reset Local Adjustments" = "重置局部调整";

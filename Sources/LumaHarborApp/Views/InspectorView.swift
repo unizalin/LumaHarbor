@@ -10,6 +10,7 @@ struct InspectorView: View {
     @EnvironmentObject private var model: LibraryViewModel
     @State private var selectedTab: InspectorTab = .adjustments
     @State private var expandedGroups: Set<InspectorGroup> = [.basic, .color]
+    @StateObject private var navigation = InspectorNavigationModel()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,41 +42,131 @@ struct InspectorView: View {
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .onChange(of: model.editor.toolMode) { _, newValue in
+            navigation.follow(toolMode: newValue)
+        }
+        .onChange(of: navigation.activeSectionID) { _, newValue in
+            selectedTab = .adjustments
+            expandedGroups.insert(macGroup(for: newValue))
+        }
+    }
+
+    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md` §5): Mac keeps
+    /// its existing seven `DisclosureGroup`s (unchanged headers/panels, so the
+    /// pre-existing `InspectorAdjustmentGroupsContractTests` literal-text
+    /// contract still holds) but every group's field vocabulary, search
+    /// hit-testing, favorite state, and reset behavior now come from the
+    /// shared `InspectorCatalog` -- a `.whiteBalance`/`.hsl` catalog hit still
+    /// maps onto the single `.color` `DisclosureGroup`, since Mac visually
+    /// keeps White Balance and HSL together (unchanged from before P2).
+    private func macGroup(for sectionID: InspectorSectionID) -> InspectorGroup {
+        switch sectionID {
+        case .basic: return .basic
+        case .whiteBalance, .hsl: return .color
+        case .curve: return .curve
+        case .detail: return .detail
+        case .effects: return .effects
+        case .geometry: return .geometry
+        case .local: return .local
+        }
     }
 
     private var adjustmentContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                HistogramPanel(histogram: model.editor.histogram)
-                inspectorGroup(.basic, title: L10n.t("Basic")) {
-                    BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
-                }
-                inspectorGroup(.color, title: L10n.t("Color")) {
-                    HStack {
-                        Text(L10n.t("White Balance")).font(.headline)
-                        Spacer()
-                        WhiteBalanceEyedropperButton(editor: model.editor)
+                searchField
+                if !navigation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    searchResultsList
+                } else {
+                    HistogramPanel(histogram: model.editor.histogram)
+                    inspectorGroup(.basic, sectionID: .basic, title: L10n.t("Basic")) {
+                        BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
                     }
-                    BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.whiteBalanceKinds)
-                    ColorAdjustmentPanel(editor: model.editor)
-                }
-                inspectorGroup(.curve, title: L10n.t("Curve")) {
-                    CurveAdjustmentPanel(editor: model.editor)
-                }
-                inspectorGroup(.detail, title: L10n.t("Detail")) {
-                    DetailAdjustmentPanel(editor: model.editor)
-                }
-                inspectorGroup(.effects, title: L10n.t("Effects")) {
-                    EffectsAdjustmentPanel(editor: model.editor)
-                }
-                inspectorGroup(.geometry, title: L10n.t("Geometry")) {
-                    GeometryAdjustmentPanel(editor: model.editor)
-                }
-                inspectorGroup(.local, title: L10n.t("Local Adjustments")) {
-                    LocalAdjustmentsPanel(editor: model.editor)
+                    inspectorGroup(.color, sectionID: .whiteBalance, title: L10n.t("Color")) {
+                        HStack {
+                            Text(L10n.t("White Balance")).font(.headline)
+                            Spacer()
+                            WhiteBalanceEyedropperButton(editor: model.editor)
+                        }
+                        BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.whiteBalanceKinds)
+                        ColorAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.curve, sectionID: .curve, title: L10n.t("Curve")) {
+                        CurveAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.detail, sectionID: .detail, title: L10n.t("Detail")) {
+                        DetailAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.effects, sectionID: .effects, title: L10n.t("Effects")) {
+                        EffectsAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.geometry, sectionID: .geometry, title: L10n.t("Geometry")) {
+                        GeometryAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.local, sectionID: .local, title: L10n.t("Local Adjustments")) {
+                        LocalAdjustmentsPanel(editor: model.editor)
+                    }
                 }
             }
             .padding(14)
+        }
+    }
+
+    /// P2: the search field lives at the top of the Adjustments tab (not the
+    /// shared header) since it only makes sense to search tools while that
+    /// tab is showing -- Presets and Metadata already have their own
+    /// search/browse affordances.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(L10n.t("Search Adjustments"), text: $navigation.searchQuery)
+                .textFieldStyle(.plain)
+            if !navigation.searchQuery.isEmpty {
+                Button {
+                    navigation.clearSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.t("Clear Search")))
+            }
+        }
+        .padding(6)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .accessibilityLabel(Text(L10n.t("Search Adjustments")))
+    }
+
+    private var searchResultsList: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let results = navigation.searchResults
+            if results.isEmpty {
+                Text(L10n.t("No matching tools"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(results) { section in
+                    Button {
+                        navigation.select(section.id)
+                        navigation.clearSearch()
+                    } label: {
+                        HStack {
+                            Image(systemName: section.symbol)
+                            Text(L10n.t(section.titleKey))
+                            Spacer()
+                            if navigation.isFavorite(section.id) {
+                                Image(systemName: "star.fill")
+                                    .foregroundStyle(.yellow)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
+                }
+            }
         }
     }
 
@@ -95,6 +186,7 @@ struct InspectorView: View {
     @ViewBuilder
     private func inspectorGroup<Content: View>(
         _ group: InspectorGroup,
+        sectionID: InspectorSectionID,
         title: String,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
@@ -115,8 +207,45 @@ struct InspectorView: View {
             }
             .padding(.top, 8)
         } label: {
-            Text(title).font(.headline)
+            HStack {
+                Text(title).font(.headline)
+                Spacer()
+                sectionResetButton(sectionID)
+                favoriteButton(sectionID)
+            }
         }
+    }
+
+    /// P2: per-section favorite toggle, stored device-local via
+    /// `InspectorNavigationModel`/`InspectorFavoritesModel`.
+    private func favoriteButton(_ sectionID: InspectorSectionID) -> some View {
+        let isFavorite = navigation.isFavorite(sectionID)
+        return Button {
+            navigation.toggleFavorite(sectionID)
+        } label: {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .foregroundStyle(isFavorite ? .yellow : .secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(isFavorite ? L10n.t("Remove from Favorites") : L10n.t("Add to Favorites")))
+    }
+
+    /// P2: resets only this section's own fields (`InspectorCatalog
+    /// .resetting(_:in:)`), disabled once already neutral -- same
+    /// disabled-when-nothing-to-reset convention every other panel's own
+    /// Reset button already follows.
+    private func sectionResetButton(_ sectionID: InspectorSectionID) -> some View {
+        let isNeutral = InspectorCatalog.isNeutral(sectionID, in: model.editor.adjustments)
+        return Button {
+            model.editor.updateAdjustments { adjustments in
+                adjustments = InspectorCatalog.resetting(sectionID, in: adjustments)
+            }
+        } label: {
+            Image(systemName: "arrow.counterclockwise")
+        }
+        .buttonStyle(.plain)
+        .disabled(isNeutral)
+        .accessibilityLabel(Text(L10n.t("Reset")))
     }
 
     private var header: some View {
@@ -124,6 +253,7 @@ struct InspectorView: View {
             Text(L10n.t("Adjustments"))
                 .font(.headline)
             Spacer()
+            pinButton
             adjustmentActionsMenu
             Button(L10n.t("Reset All")) {
                 model.editor.resetAll()
@@ -133,6 +263,21 @@ struct InspectorView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    /// P2: pinning suspends Smart Follow (`InspectorNavigationModel.follow`)
+    /// so the user can keep working in one section while trying different
+    /// canvas tools without the Inspector jumping away underneath them.
+    private var pinButton: some View {
+        Button {
+            navigation.togglePin()
+        } label: {
+            Image(systemName: navigation.isPinned ? "pin.fill" : "pin")
+        }
+        .controlSize(.small)
+        .disabled(selectedTab != .adjustments)
+        .accessibilityLabel(Text(navigation.isPinned ? L10n.t("Unpin Section") : L10n.t("Pin Section")))
+        .accessibilityAddTraits(navigation.isPinned ? .isSelected : [])
     }
 
     /// Phase 2.2 (spec §6.2): "Copy Adjustments" / "Paste Adjustments" /
@@ -156,11 +301,28 @@ struct InspectorView: View {
                 Task { await model.syncAdjustmentsToSelectedPhotos() }
             }
             .disabled(model.adjustmentClipboard == nil || model.selectedPhotoIDs.count <= 1)
+            Divider()
+            domainResetButton(.adjust, title: L10n.t("Reset Adjust"))
+            domainResetButton(.geometry, title: L10n.t("Reset Geometry"))
+            domainResetButton(.local, title: L10n.t("Reset Local Adjustments"))
         } label: {
             Label(L10n.t("Adjustments Actions"), systemImage: "doc.on.doc")
         }
         .controlSize(.small)
         .disabled(selectedTab != .adjustments)
+    }
+
+    /// P2: domain-wide reset (design spec §7.1 "domain reset"), distinct from
+    /// both a single section's reset and "Reset All" -- resets every section
+    /// in `domain` (`InspectorCatalog.resetting(domain:in:)`) and leaves the
+    /// other two domains alone.
+    private func domainResetButton(_ domain: PadInspectorDomain, title: String) -> some View {
+        Button(title) {
+            model.editor.updateAdjustments { adjustments in
+                adjustments = InspectorCatalog.resetting(domain: domain, in: adjustments)
+            }
+        }
+        .disabled(model.editor.photo == nil || InspectorCatalog.isNeutral(domain: domain, in: model.editor.adjustments))
     }
 }
 
@@ -184,11 +346,13 @@ private enum InspectorGroup: Hashable {
     case basic, color, curve, detail, effects, geometry, local
 }
 
+/// P2 (`2026-09-10-shared-professional-inspector-catalog.md`): both arrays are
+/// derived from `InspectorCatalog`, the single declaration point shared with
+/// iPad's `PadAdjustSubmodeKinds` -- neither platform hand-duplicates this
+/// vocabulary anymore.
 private enum MacBasicAdjustmentPanel {
-    static let toneKinds: [AdjustmentKind] = [
-        .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .vibrance, .saturation
-    ]
-    static let whiteBalanceKinds: [AdjustmentKind] = [.temperature, .tint]
+    static var toneKinds: [AdjustmentKind] { InspectorCatalog.section(.basic).adjustmentKinds }
+    static var whiteBalanceKinds: [AdjustmentKind] { InspectorCatalog.section(.whiteBalance).adjustmentKinds }
 }
 
 private struct SaveStatePanel: View {

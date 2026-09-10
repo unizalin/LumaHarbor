@@ -612,3 +612,14 @@
 "Collision" = "Fichier existant";
 "Leave blank to keep the full resolution." = "Laissez vide pour conserver la résolution complète.";
 "Leave blank to use the encoder default." = "Laissez vide pour utiliser la valeur par défaut de l’encodeur.";
+
+"Search Adjustments" = "Rechercher des réglages";
+"Clear Search" = "Effacer la recherche";
+"No matching tools" = "Aucun outil correspondant";
+"Add to Favorites" = "Ajouter aux favoris";
+"Remove from Favorites" = "Retirer des favoris";
+"Pin Section" = "Épingler la section";
+"Unpin Section" = "Désépingler";
+"Reset Adjust" = "Réinitialiser les réglages";
+"Reset Geometry" = "Réinitialiser la géométrie";
+"Reset Local Adjustments" = "Réinitialiser les retouches locales";

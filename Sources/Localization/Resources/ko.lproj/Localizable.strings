@@ -612,3 +612,14 @@
 "Collision" = "같은 이름의 파일";
 "Leave blank to keep the full resolution." = "전체 해상도를 유지하려면 비워 두세요.";
 "Leave blank to use the encoder default." = "인코더 기본값을 사용하려면 비워 두세요.";
+
+"Search Adjustments" = "조정 항목 검색";
+"Clear Search" = "검색 지우기";
+"No matching tools" = "일치하는 도구 없음";
+"Add to Favorites" = "즐겨찾기에 추가";
+"Remove from Favorites" = "즐겨찾기에서 제거";
+"Pin Section" = "섹션 고정";
+"Unpin Section" = "고정 해제";
+"Reset Adjust" = "조정 초기화";
+"Reset Geometry" = "기하 초기화";
+"Reset Local Adjustments" = "부분 조정 초기화";

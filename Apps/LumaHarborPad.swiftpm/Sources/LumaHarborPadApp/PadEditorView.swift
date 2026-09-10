@@ -54,6 +54,14 @@ struct PadEditorView: View {
     /// Never holds a second copy of `PhotoAdjustments` or touches undo/redo.
     @StateObject private var inspector = PadInspectorCoordinator()
 
+    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md`): the same
+    /// shared state machine Mac's `InspectorView` attaches -- search,
+    /// favorites, pin, smart follow. `body`'s `.onChange` handlers below keep
+    /// `inspector`'s domain/submode in sync whenever this model's
+    /// `activeSectionID` moves, whether from an explicit tap (search result,
+    /// favorite) or from Smart Follow reacting to `editor.toolMode`.
+    @StateObject private var inspectorNavigation = InspectorNavigationModel()
+
     /// Whether the bottom drawer sheet is currently presented — a real,
     /// toggleable binding driven by `PadBottomDrawerPolicy`, never a
     /// `.sheet(isPresented: .constant(true))`. See `updateDrawerPresentation`.
@@ -252,6 +260,25 @@ struct PadEditorView: View {
             workspaceState = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(
                 workspaceState, previousDocumentID: oldValue, currentDocumentID: newValue
             )
+        }
+        .onChange(of: editor.toolMode) { _, newValue in
+            inspectorNavigation.follow(toolMode: newValue)
+        }
+        .onChange(of: inspectorNavigation.activeSectionID) { _, newValue in
+            applyInspectorNavigation(newValue)
+        }
+    }
+
+    /// Bridges a shared-catalog section (search tap, favorite tap, or Smart
+    /// Follow) onto `inspector`'s domain/submode -- the one place iPad
+    /// translates `InspectorSectionID` into `PadInspectorDomain`/
+    /// `PadAdjustSubmode`, so search/favorites/smart-follow never need their
+    /// own copy of that mapping.
+    private func applyInspectorNavigation(_ sectionID: InspectorSectionID) {
+        let section = InspectorCatalog.section(sectionID)
+        inspector.selectDomain(section.domain)
+        if let submode = section.submode {
+            inspector.selectAdjustSubmode(submode)
         }
     }
 
@@ -711,6 +738,7 @@ struct PadEditorView: View {
             Divider()
             PadInspectorHost(
                 inspector: inspector,
+                navigation: inspectorNavigation,
                 editor: editor,
                 presetLibrary: presetLibrary,
                 library: library,
@@ -734,6 +762,7 @@ struct PadEditorView: View {
             Divider()
             PadInspectorHost(
                 inspector: inspector,
+                navigation: inspectorNavigation,
                 editor: editor,
                 presetLibrary: presetLibrary,
                 library: library,
@@ -756,6 +785,7 @@ struct PadEditorView: View {
             Divider()
             PadInspectorHost(
                 inspector: inspector,
+                navigation: inspectorNavigation,
                 editor: editor,
                 presetLibrary: presetLibrary,
                 library: library,
@@ -977,6 +1007,7 @@ private struct PadToolRail: View {
 /// presentations where the vertical `PadToolRail` is absent.
 private struct PadInspectorHost: View {
     @ObservedObject var inspector: PadInspectorCoordinator
+    @ObservedObject var navigation: InspectorNavigationModel
     @ObservedObject var editor: EditorSession
     @ObservedObject var presetLibrary: PadPresetLibrary
     @ObservedObject var library: PadLibraryModel
@@ -989,24 +1020,149 @@ private struct PadInspectorHost: View {
                 compactDomainBar
                 Divider()
             }
-            switch inspector.activeDomain {
-            case .adjust:
-                adjustPanel
-            case .preset:
-                PadPresetPanel(editor: editor, presetLibrary: presetLibrary)
-            case .geometry:
-                ScrollView {
-                    GeometryAdjustmentPanel(editor: editor)
-                        .padding()
+            catalogToolbar
+            Divider()
+            if !navigation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                searchResultsList
+            } else {
+                switch inspector.activeDomain {
+                case .adjust:
+                    adjustPanel
+                case .preset:
+                    PadPresetPanel(editor: editor, presetLibrary: presetLibrary)
+                case .geometry:
+                    ScrollView {
+                        GeometryAdjustmentPanel(editor: editor)
+                            .padding()
+                    }
+                case .local:
+                    ScrollView {
+                        LocalAdjustmentsPanel(editor: editor)
+                            .padding()
+                    }
+                case .info:
+                    infoPanel
                 }
-            case .local:
-                ScrollView {
-                    LocalAdjustmentsPanel(editor: editor)
-                        .padding()
-                }
-            case .info:
-                infoPanel
             }
+        }
+    }
+
+    // MARK: - Shared catalog toolbar (search, favorite, pin, reset)
+
+    /// P2: the same search/favorite/pin/reset affordances Mac's
+    /// `InspectorView` exposes, all driven by the shared `InspectorCatalog`/
+    /// `InspectorNavigationModel` -- no iPad-only reimplementation.
+    /// `currentSectionID`/`currentResetDomain` are `nil` for the Preset and
+    /// Info domains, which are not part of the field catalog: favorite/reset
+    /// simply hide rather than show a control with nothing to act on.
+    private var catalogToolbar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(L10n.t("Search Adjustments"), text: $navigation.searchQuery)
+                .textFieldStyle(.plain)
+            if !navigation.searchQuery.isEmpty {
+                Button {
+                    navigation.clearSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel(Text(L10n.t("Clear Search")))
+            }
+            Spacer(minLength: 4)
+            if let sectionID = currentSectionID {
+                Button {
+                    navigation.toggleFavorite(sectionID)
+                } label: {
+                    Image(systemName: navigation.isFavorite(sectionID) ? "star.fill" : "star")
+                        .foregroundStyle(navigation.isFavorite(sectionID) ? .yellow : .secondary)
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel(Text(navigation.isFavorite(sectionID) ? L10n.t("Remove from Favorites") : L10n.t("Add to Favorites")))
+            }
+            Button {
+                navigation.togglePin()
+            } label: {
+                Image(systemName: navigation.isPinned ? "pin.fill" : "pin")
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(Text(navigation.isPinned ? L10n.t("Unpin Section") : L10n.t("Pin Section")))
+            .accessibilityAddTraits(navigation.isPinned ? .isSelected : [])
+            if let domain = currentResetDomain {
+                Button {
+                    editor.updateAdjustments { adjustments in
+                        adjustments = InspectorCatalog.resetting(domain: domain, in: adjustments)
+                    }
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .disabled(editor.photo == nil || InspectorCatalog.isNeutral(domain: domain, in: editor.adjustments))
+                .accessibilityLabel(Text(L10n.t("Reset")))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
+    /// A representative catalog section for the currently active
+    /// domain/submode, used only for the favorite star (reset uses the whole
+    /// domain, not one section). `nil` for Preset/Info, which the shared
+    /// catalog does not cover.
+    private var currentSectionID: InspectorSectionID? {
+        switch inspector.activeDomain {
+        case .adjust:
+            switch inspector.adjustSubmode {
+            case .light: return .basic
+            case .color: return .whiteBalance
+            case .detail: return .detail
+            }
+        case .geometry: return .geometry
+        case .local: return .local
+        case .preset, .info: return nil
+        }
+    }
+
+    private var currentResetDomain: PadInspectorDomain? {
+        switch inspector.activeDomain {
+        case .adjust, .geometry, .local: return inspector.activeDomain
+        case .preset, .info: return nil
+        }
+    }
+
+    private var searchResultsList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                let results = navigation.searchResults
+                if results.isEmpty {
+                    Text(L10n.t("No matching tools"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding()
+                } else {
+                    ForEach(results) { section in
+                        Button {
+                            navigation.select(section.id)
+                            navigation.clearSearch()
+                        } label: {
+                            HStack {
+                                Image(systemName: section.symbol)
+                                Text(L10n.t(section.titleKey))
+                                Spacer()
+                                if navigation.isFavorite(section.id) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundStyle(.yellow)
+                                }
+                            }
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding()
         }
     }
 
@@ -1054,10 +1210,6 @@ private struct PadInspectorHost: View {
 
     // MARK: Adjust domain
 
-    private static let lightKinds: [AdjustmentKind] = [
-        .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
-    ]
-
     @ViewBuilder
     private var adjustPanel: some View {
         adjustSubmodePicker
@@ -1085,13 +1237,22 @@ private struct PadInspectorHost: View {
         .accessibilityLabel(Text(L10n.t("Adjust submode")))
     }
 
+    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md` §2): field
+    /// vocabulary for every submode comes from `InspectorCatalog`, the same
+    /// declaration point Mac's `InspectorView` reads. The `.color` case now
+    /// also mounts the White Balance panel -- previously
+    /// `PadAdjustSubmodeKinds.color` declared `basic.temperature`/
+    /// `basic.tint` in its vocabulary but no panel ever rendered them; this
+    /// closes that gap and brings iPad to parity with Mac's `.color`
+    /// `DisclosureGroup` (White Balance + HSL together).
     @ViewBuilder
     private var adjustContent: some View {
         switch inspector.adjustSubmode {
         case .light:
-            BasicAdjustmentPanel(editor: editor, kinds: Self.lightKinds)
+            BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.basic).adjustmentKinds)
             CurveAdjustmentPanel(editor: editor)
         case .color:
+            BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)
             ColorAdjustmentPanel(editor: editor)
         case .detail:
             DetailAdjustmentPanel(editor: editor)
