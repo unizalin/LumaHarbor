@@ -37,30 +37,87 @@ final class CurationDurabilityTests: TemporaryDirectoryTestCase {
         return try XCTUnwrap(result)
     }
 
-    private func makeLibraryWithOnePhoto() async throws -> (service: PhotoLibraryService, libraryID: LibraryID, photoID: PhotoID) {
+    private func makeLibraryWithOnePhoto() async throws -> (service: PhotoLibraryService, libraryID: LibraryID, photoID: PhotoID, root: URL) {
         let service = try makeService()
-        let root = try makeSubdirectory("Photos")
-        try writeFile(Data(repeating: 0x30, count: 64), at: root.appendingPathComponent("DSC0001.ARW"))
-        let library = try await addLibrary(service, at: root)
+        let photosRoot = try makeSubdirectory("Photos")
+        try writeFile(Data(repeating: 0x30, count: 64), at: photosRoot.appendingPathComponent("DSC0001.ARW"))
+        let library = try await addLibrary(service, at: photosRoot)
         try await runScan(service, libraryID: library.id)
         let seeded = try await service.photos(inLibrary: library.id)
         let photo = try XCTUnwrap(seeded.first)
-        return (service, library.id, photo.id)
+        return (service, library.id, photo.id, photosRoot)
     }
 
-    func testTodayIndexRebuildLosesRatingFlagAndKeywords() async throws {
-        let (service, libraryID, photoID) = try await makeLibraryWithOnePhoto()
+    /// Task 5 (P1): flips the Task 0 (P0) baseline. Rating/flag/keywords set
+    /// through the legacy SQLite-only API (what `LibraryViewModel` called
+    /// directly before Task 6 of this plan) must now migrate onto a schema
+    /// v3 sidecar on the very next scan, and therefore survive a full index
+    /// rebuild -- unlike the pre-Task-5 gap this same test used to document.
+    func testIndexRebuildRestoresRatingFlagAndKeywordsFromSidecar() async throws {
+        let (service, libraryID, photoID, root) = try await makeLibraryWithOnePhoto()
         let indexStore = await service.indexStore
         try indexStore.setRating(5, for: photoID)
         try indexStore.setFlag(.pick, for: photoID)
         try indexStore.setKeywords(["Sunset"], for: photoID)
 
+        // The migration itself happens on a scan, before any reset.
+        try await runScan(service, libraryID: libraryID)
+        let sidecarAfterMigration = try FileSidecarRepository(libraryRootURL: root).loadSidecar(for: photoID)
+        XCTAssertEqual(sidecarAfterMigration?.schemaVersion, PhotoSidecar.currentSchemaVersion)
+        XCTAssertEqual(sidecarAfterMigration?.curation.rating, 5)
+
         try await service.resetRebuildableLocalData()
         try await runScan(service, libraryID: libraryID)
 
         let photo = try await service.indexStore.photo(id: photoID)
-        XCTAssertEqual(photo?.rating, 0, "documents today's known gap: SQLite-only curation does not survive a rebuild")
-        XCTAssertEqual(photo?.flag, PhotoFlag.none)
-        XCTAssertEqual(photo?.keywords, [])
+        XCTAssertEqual(photo?.rating, 5)
+        XCTAssertEqual(photo?.flag, PhotoFlag.pick)
+        XCTAssertEqual(photo?.keywords.map(\.displayValue), ["Sunset"])
+        XCTAssertEqual(photo?.curationMigrationPending, false)
+    }
+
+    func testLegacySQLiteOnlyCurationMigratesOnNextScanWithoutARebuild() async throws {
+        let (service, libraryID, photoID, root) = try await makeLibraryWithOnePhoto()
+        let indexStore = await service.indexStore
+        try indexStore.setRating(4, for: photoID)
+
+        try await runScan(service, libraryID: libraryID)
+
+        let photo = try await service.indexStore.photo(id: photoID)
+        XCTAssertEqual(photo?.rating, 4)
+        XCTAssertEqual(photo?.curationMigrationPending, false)
+        let sidecar = try FileSidecarRepository(libraryRootURL: root).loadSidecar(for: photoID)
+        XCTAssertEqual(sidecar?.schemaVersion, PhotoSidecar.currentSchemaVersion)
+        XCTAssertEqual(sidecar?.curation.rating, 4)
+    }
+
+    func testReadOnlySourceKeepsSQLiteValuesAndMarksPendingThenRetriesAfterReconnect() async throws {
+        guard canSimulateReadOnlyDirectory else {
+            throw XCTSkip("Running as root; read-only simulation is meaningless.")
+        }
+        let (service, libraryID, photoID, root) = try await makeLibraryWithOnePhoto()
+        let indexStore = await service.indexStore
+        try indexStore.setRating(3, for: photoID)
+
+        try setPosixPermissions(0o555, at: root)
+        try await runScan(service, libraryID: libraryID)
+
+        var photo = try await service.indexStore.photo(id: photoID)
+        XCTAssertEqual(photo?.rating, 3, "old SQLite value must never be lost while the sidecar can't be written")
+        XCTAssertEqual(photo?.curationMigrationPending, true)
+        XCTAssertNil(
+            try? FileSidecarRepository(libraryRootURL: root).loadSidecar(for: photoID),
+            "a read-only source must not end up with a half-written sidecar"
+        )
+
+        try setPosixPermissions(0o755, at: root)
+        try await runScan(service, libraryID: libraryID)
+
+        photo = try await service.indexStore.photo(id: photoID)
+        XCTAssertEqual(photo?.rating, 3)
+        XCTAssertEqual(photo?.curationMigrationPending, false)
+        let sidecar = try FileSidecarRepository(libraryRootURL: root).loadSidecar(for: photoID)
+        XCTAssertEqual(sidecar?.schemaVersion, PhotoSidecar.currentSchemaVersion)
+        XCTAssertEqual(sidecar?.curation.rating, 3)
     }
 }
