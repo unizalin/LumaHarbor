@@ -1,8 +1,30 @@
 # Current Coordination State
 
-Updated: 2026-09-09
+Updated: 2026-09-10
 
-Updated by: Codex（Mac Build 2 可攜式資源與隱私修正）
+Updated by: Claude（P0 基準保護測試 + P1 Curation Sidecar v3 與 Migration）
+
+## P0／P1：Curation Sidecar v3 與 Migration（2026-09-10, Claude）
+
+- **狀態**：`P0 BASELINE PROTECTION COMPLETE / P1 IMPLEMENTATION COMPLETE`。本輪依使用者指示，針對 `docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` 實作 P0（基準保護測試）與 P1（Sidecar v3、curation migration、SQLite projection、resumable migration、index rebuild recovery、相容性測試）。P2 以後（Shared Inspector Catalog、per-channel curves、Lens/Color/Mask、Snapshot、Cross-device final verification）完全未觸碰。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `4cd43e5`（`docs: define professional editing completion spec`，其父提交 `1fb3641` 即 spec 記載的驗證基準 `claude/ipad-curve-inspector-polish`）；本輪結束 HEAD 為 `d7bc821ecb05c6381248605494185d9d6cabe644`。工作目錄除本次 `docs/coordination/DECISIONS.md`／`docs/coordination/CURRENT.md` 更新外乾淨。
+- **實作計畫**：新增 `docs/superpowers/plans/2026-09-10-curation-sidecar-v3-and-migration.md`，補齊 spec 的品質閘門缺口（精確 migration 狀態機、資料衝突規則、fixture、API、測試、evidence 格式、rollback、逐檔順序）。
+- **P0（Task 0）**：新增 `Tests/PhotoLibraryCoreTests/SidecarSchemaCompatibilityTests.swift`（v1／v2 sidecar JSON 手工 fixture 解碼契約）與 `Tests/PhotoLibraryCoreTests/CurationDurabilityTests.swift`（先釘住「今天 rebuild 會遺失 SQLite-only curation」的已知缺口，作為 P1 的保護基準，P1 完成後在同一檔案內明確翻轉斷言，而非默默改寫）。
+- **P1 核心模型**：新增 `Sources/PhotoLibraryCore/Model/PhotoCuration.swift`（rating／flag／keywords，keywords 依 normalized 去重並排序）；`Sources/PhotoLibraryCore/Sidecar/PhotoSidecar.swift` 升級 `currentSchemaVersion = 3`，新增 `curation` 欄位與自訂 `Codable`（缺欄位解碼為 `.neutral`，v1/v2 相容不變）。
+- **P1 Migration 狀態機**：新增 `Sources/PhotoLibraryCore/Service/CurationMigration.swift`，純函式 `CurationMigration.decide(...)` 涵蓋五種情境（v3 sidecar 永遠優先／legacy sidecar 無需 migrate／legacy sidecar 需從 SQLite migrate／無 sidecar 無需建立／無 sidecar 需從 SQLite 建立），完全無 I/O，可獨立單元測試。
+- **P1 SQLite 投影**：`Sources/PhotoLibraryCore/Index/PhotoIndexStore.swift` schema 升至 v5，新增 `curation_migration_pending` 欄位（純觀察性、可重建，`ON CONFLICT` 排除同 rating/flag 慣例）、`curationSnapshot(inLibrary:)` 一次性批次查詢與 `setCurationMigrationPending(_:for:)`；`PhotoAsset` 新增 `curationMigrationPending`。
+- **P1 Scan Hydration**：`PhotoLibraryService.performScan` 以新的 `hydrateCurationAndEditState` 取代舊有 `editState`，套用 migration 決策；成功則寫入新 v3 sidecar 並清除 pending，失敗（離線／唯讀／空間不足）則保留舊 SQLite 值並標記 pending，下次掃描自動重試（無需額外重試佇列）。新增 `projectCuration(of:)`，在 `index.upsert(photos:)` 成功「之後」才明確投影 rating／flag／keywords（`photo_keyword` 有 FK 約束，過早呼叫會靜默失敗——本輪過程中實際踩到並修正）。Virtual copy 延續 rating 0／flag none／keywords 空的規則。
+- **P1 Sidecar-first Mutation API**：`PhotoLibraryService` 新增 `curation(for:)`／`setRating(_:for:)`／`setFlag(_:for:)`／`setKeywords(_:for:)`，sidecar 優先寫入、SQLite best-effort 投影，與既有 `saveAdjustments` 同一套容錯模式。同時修正 `saveAdjustments` 原本會把既有 curation 靜默重設為 neutral 的潛在 bug（未帶入 `existing?.curation`）。
+- **UI 接線修正**：`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift` 與 `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadBatchAdjustmentCoordinator.swift` 原本都直接呼叫 `indexStore.setRating／setFlag／setKeywords`，繞過 sidecar；本輪改為呼叫 `PhotoLibraryService` 的 sidecar-first API，兩平台皆有 source-contract 測試防止回歸。
+- **測試**：新增 `Tests/PhotoLibraryCoreTests/PhotoCurationTests.swift`（8）、`CurationMigrationDecisionTests.swift`（8）、`PhotoLibraryServiceCurationTests.swift`（9）；擴充 `SidecarRepositoryTests.swift`、`SidecarSchemaCompatibilityTests.swift`、`PhotoIndexMigrationTests.swift`、`PhotoIndexQueryTests.swift`、`CurationDurabilityTests.swift`、`VirtualCopyServiceTests.swift`、`Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift`、`Tests/AdjustmentUITests/PadBatchContractTests.swift`。
+- **驗證**：完整 `swift test` → **1966 executed、9 skipped、0 failures**（起始基準為 1955 executed，本輪淨新增測試與既有 skip 數一致，無回歸）；`swift build -Xswiftc -strict-concurrency=complete` → **PASS**；`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**；`git diff --check 4cd43e5 HEAD` → **PASS**（無輸出）；changed-production-file 對 `TBD|TODO|FIXME|fatalError|try!` 掃描 → **PASS**（無命中）；privacy scan 對本輪變更檔案掃描 `/Users/`／`/Volumes/`／`DEVELOPMENT_TEAM`／密鑰標頭 → **PASS**（僅命中既有測試慣用的合成 fixture 路徑 `/Volumes/SSD`、`/Volumes/Cardinality`，均非真實私人路徑，且非本輪新增內容，plan 文件內的命中是掃描指令本身的文字）。
+- **確認未觸碰**：`git diff --stat 4cd43e5 HEAD -- Sources/RawProcessingCore/Model/AdvancedToneCurve.swift Sources/AdjustmentUI/CurveAdjustmentPanel.swift Sources/AdjustmentUI/HistogramPanel.swift` 為空，確認剛合併的 P0 曲線／histogram 基準完全未被本輪改動。
+- **已知限制／未解決 gap**：
+  - `PhotoSidecar` 目前沒有保留「未知頂層 JSON 欄位」的機制（keyed container 只讀取已知 key）——若未來需要逐位元保留第三方或未來版本新增的未知欄位，需要另外設計 raw-JSON merge 策略，本輪未實作，也未偽稱已解決（見 plan 的 Final Review Gate 第 1 點）。
+  - Snapshot／`EditSnapshot`（spec §6.1 提到與 curation 綁在同一次 schema bump）刻意延後到 P6，已記錄於 `docs/coordination/DECISIONS.md` D-006；P6 開始前必須先讀該決策。
+  - M 系列 iPad／Apple silicon Mac 的人工實機驗收本輪 **NOT RUN**——本輪修改集中在 `PhotoLibraryCore`／`PhotoLibraryService`／兩平台的 curation 呼叫點，沒有變更任何需要新硬體驗收的渲染或裝置專屬邏輯；仍建議在下一次涉及使用者可見流程的變更後安排實機驗收，本輪不宣稱已完成。
+  - 未執行 `Scripts/run-mvp-acceptance.zsh`（需要私人 RAW／APFS／exFAT fixture，本輪未匯出）；記為 **NOT RUN**，非 FAIL。
+- **Next action**：P2（Shared Professional Inspector Catalog，`docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` §16 第 2 項）為下一個依賴單位；開始前必須先讀本次的 handoff（`docs/coordination/2026-09-10-p0-p1-curation-sidecar-v3-handoff.md`）與本節。不得跳過 P2／P3 直接做 P4／P5。
 
 ## 可推版本摘要（2026-09-09）
 

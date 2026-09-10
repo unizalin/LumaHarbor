@@ -36,3 +36,10 @@ This file is append-only. When a decision is replaced, retain the original entry
 - Decision: Credentials, chat state, private fixture paths, private absolute paths, tool caches, and local Xcode signing changes are not committed as shared coordination data.
 - Reason: The agents need shared project facts, not shared identity or machine-private state.
 - Impact: Handoffs use repository-relative paths and redact private filesystem details.
+
+## D-006 — Sidecar schema v3 ships without `snapshots`
+
+- Date: 2026-09-10
+- Decision: `PhotoSidecar.currentSchemaVersion = 3` adds `curation` only. The approved professional editing completion spec's §6.1 bundles `curation` and `snapshots` into one version bump; `docs/superpowers/plans/2026-09-10-curation-sidecar-v3-and-migration.md` implements P1 only (curation) and defers `EditSnapshot`/`snapshots` to P6, where it will ship as its own schema version.
+- Reason: The task authorizing that plan explicitly excludes P2 and later phases, including P6 (Snapshot). Defining `EditSnapshot` now, only to satisfy a version-number bundling in the spec text, would be scope creep with no test coverage or consumer.
+- Impact: A future P6 plan bumps `PhotoSidecar.currentSchemaVersion` again (to 4) when it adds `snapshots`; that plan must re-verify v1/v2/v3 sidecars all still decode.
