@@ -88,6 +88,34 @@ final class VirtualCopyServiceTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(originalAdjustmentsAfterCopyEdit.exposure, 1.5, "editing the copy must never change the original's own adjustments")
     }
 
+    /// Spec §6.1 rule 7: a virtual copy always starts with neutral curation,
+    /// even when the original it was duplicated from is rated/flagged.
+    func testVirtualCopyStartsWithNeutralCurationEvenWhenTheOriginalIsCurated() async throws {
+        let service = try makeService()
+        let root = try makeSubdirectory("Photos")
+        try writeFile(Data(repeating: 0x30, count: 64), at: root.appendingPathComponent("DSC0001.ARW"))
+        let library = try await addLibrary(service, at: root)
+        try await runScan(service, libraryID: library.id)
+        let seededPhotos = try await service.photos(inLibrary: library.id)
+        let original = try XCTUnwrap(seededPhotos.first)
+        let indexStore = await service.indexStore
+        try indexStore.setRating(5, for: original.id)
+        try indexStore.setFlag(.pick, for: original.id)
+
+        let copy = try await service.createVirtualCopy(of: original)
+
+        XCTAssertEqual(copy.rating, 0)
+        XCTAssertEqual(copy.flag, .none)
+        XCTAssertEqual(copy.keywords, [])
+
+        // And it survives a rescan without picking up the original's curation.
+        try await runScan(service, libraryID: library.id)
+        let afterRescan = try await service.photos(inLibrary: library.id)
+        let reloadedCopy = try XCTUnwrap(afterRescan.first { $0.id == copy.id })
+        XCTAssertEqual(reloadedCopy.rating, 0)
+        XCTAssertEqual(reloadedCopy.flag, .none)
+    }
+
     func testACopyOfACopyPointsDirectlyAtThatCopyNotAtSomeRootOriginal() async throws {
         let service = try makeService()
         let root = try makeSubdirectory("Photos")
