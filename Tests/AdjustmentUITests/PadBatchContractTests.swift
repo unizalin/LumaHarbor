@@ -62,6 +62,20 @@ final class PadBatchContractTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("updatePhotoCuration"))
     }
 
+    /// Curation sidecar v3 plan Task 7: the iPad coordinator's own curation
+    /// setters must go through `PhotoLibraryService`'s sidecar-first
+    /// mutation API (spec §6.1 rule 1), same as the Mac view model, not
+    /// straight to `PhotoIndexStore`.
+    func testBatchCoordinatorCurationSettersGoThroughLibraryServiceNotIndexStoreDirectly() throws {
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadBatchAdjustmentCoordinator.swift")
+        XCTAssertFalse(source.contains("indexStore.setRating"))
+        XCTAssertFalse(source.contains("indexStore.setFlag"))
+        XCTAssertFalse(source.contains("indexStore.setKeywords"))
+        XCTAssertTrue(source.contains("libraryService.setRating"))
+        XCTAssertTrue(source.contains("libraryService.setFlag"))
+        XCTAssertTrue(source.contains("libraryService.setKeywords"))
+    }
+
     func testLibrarySelectionBarExposesBatchCurationActions() throws {
         let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadLibraryGrid.swift")
         XCTAssertTrue(source.contains("applyRatingToSelected"))

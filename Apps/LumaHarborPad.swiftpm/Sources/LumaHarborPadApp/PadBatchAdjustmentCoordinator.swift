@@ -90,13 +90,15 @@ final class PadBatchAdjustmentCoordinator: ObservableObject {
         return transaction
     }
 
-    /// Persists curation fields through `PhotoIndexStore`, the same
-    /// authoritative path used by the Mac library model. These methods do
-    /// not touch RAW files or adjustment sidecars.
+    /// Persists curation fields sidecar-first through `PhotoLibraryService`
+    /// (spec §6.1 rule 1: the sidecar, not `PhotoIndexStore`, is
+    /// authoritative). These methods do not touch RAW files.
     func setRating(_ rating: Int, for photoID: PhotoID) async -> Bool {
+        guard let asset = await MainActor.run(body: { library.photos.first(where: { $0.id == photoID }) }) else {
+            return false
+        }
         do {
-            let indexStore = await libraryService.indexStore
-            try indexStore.setRating(rating, for: photoID)
+            try await libraryService.setRating(rating, for: asset)
             library.updatePhotoCuration(photoID: photoID, rating: rating)
             return true
         } catch {
@@ -105,9 +107,11 @@ final class PadBatchAdjustmentCoordinator: ObservableObject {
     }
 
     func setFlag(_ flag: PhotoFlag, for photoID: PhotoID) async -> Bool {
+        guard let asset = await MainActor.run(body: { library.photos.first(where: { $0.id == photoID }) }) else {
+            return false
+        }
         do {
-            let indexStore = await libraryService.indexStore
-            try indexStore.setFlag(flag, for: photoID)
+            try await libraryService.setFlag(flag, for: asset)
             library.updatePhotoCuration(photoID: photoID, flag: flag)
             return true
         } catch {
@@ -116,9 +120,11 @@ final class PadBatchAdjustmentCoordinator: ObservableObject {
     }
 
     func setKeywords(_ inputs: [String], for photoID: PhotoID) async -> Bool {
+        guard let asset = await MainActor.run(body: { library.photos.first(where: { $0.id == photoID }) }) else {
+            return false
+        }
         do {
-            let indexStore = await libraryService.indexStore
-            try indexStore.setKeywords(inputs, for: photoID)
+            try await libraryService.setKeywords(inputs, for: asset)
             let keywords = inputs.compactMap(PhotoKeyword.make(from:))
             var seen = Set<String>()
             let unique = keywords.filter { seen.insert($0.normalized).inserted }
