@@ -74,6 +74,19 @@ final class PadInspectorCoordinatorTests: XCTestCase {
                        "temperature belongs to color, not light")
     }
 
+    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md` §2): moved
+    /// from the Color submode to Light, matching Mac's `InspectorView` (its
+    /// `.basic` DisclosureGroup already includes vibrance/saturation). Before
+    /// this move, iPad's Color submode declared these two fields in its
+    /// vocabulary but `PadInspectorHost.adjustContent` never actually
+    /// rendered a control for them -- a real declared/rendered mismatch this
+    /// unification fixes.
+    func testLightContainsVibranceAndSaturation() {
+        let light = Set(PadAdjustSubmodeKinds.light)
+        XCTAssertTrue(light.contains("vibrance"))
+        XCTAssertTrue(light.contains("saturation"))
+    }
+
     // MARK: - PadAdjustSubmodeKinds — Color
 
     func testColorContainsWhiteBalanceFields() {
@@ -82,10 +95,12 @@ final class PadInspectorCoordinatorTests: XCTestCase {
         XCTAssertTrue(color.contains("basic.tint"))
     }
 
-    func testColorContainsVibranceAndSaturation() {
+    func testColorDoesNotContainVibranceOrSaturation() {
         let color = Set(PadAdjustSubmodeKinds.color)
-        XCTAssertTrue(color.contains("basic.vibrance"))
-        XCTAssertTrue(color.contains("basic.saturation"))
+        XCTAssertFalse(color.contains("basic.vibrance"), "vibrance moved to Light, matching Mac's Basic group")
+        XCTAssertFalse(color.contains("vibrance"), "vibrance moved to Light, matching Mac's Basic group")
+        XCTAssertFalse(color.contains("basic.saturation"))
+        XCTAssertFalse(color.contains("saturation"))
     }
 
     func testColorContainsHSLFields() {

@@ -22,6 +22,13 @@ public enum PadAdjustSubmode: String, CaseIterable, Equatable, Sendable {
 
 /// Stable string field identifiers for each Adjust submode panel.
 ///
+/// P2 (`2026-09-10-shared-professional-inspector-catalog.md`): every array
+/// below is derived from `InspectorCatalog`, the single declaration point
+/// shared with Mac's `InspectorView` — this type is no longer where the
+/// vocabulary is *declared*, only where iPad's three-submode grouping of
+/// catalog sections is read from. Adding a field means editing
+/// `InspectorCatalog.allSections`, not this file.
+///
 /// Keys mirror `AdjustmentFieldID.rawValue` (PresetCore) and `AdjustmentKind.rawValue`
 /// (RawProcessingCore) where applicable, so callers can bridge to either type
 /// without creating a hard compile-time dependency on those modules here.
@@ -29,32 +36,19 @@ public enum PadAdjustSubmode: String, CaseIterable, Equatable, Sendable {
 /// A key must not appear in more than one submode — this is a UI vocabulary
 /// contract enforced by `PadInspectorCoordinatorTests`.
 public enum PadAdjustSubmodeKinds {
-    /// Tone sliders plus the parametric curve panel.
-    public static let light: [String] = [
-        "exposure", "contrast", "highlights", "shadows", "whites", "blacks",
-        "advancedToneCurve",
-    ]
+    /// Tone sliders (including vibrance/saturation, matching Mac's Basic
+    /// group) plus the parametric curve panel.
+    public static var light: [String] {
+        InspectorCatalog.sections(in: .light).flatMap(\.fieldIDs)
+    }
 
-    /// White-balance sliders, per-channel HSL, and vibrance/saturation.
-    public static let color: [String] = [
-        "basic.temperature", "basic.tint",
-        "basic.vibrance", "basic.saturation",
-        "hsl.red.hue", "hsl.red.saturation", "hsl.red.luminance",
-        "hsl.orange.hue", "hsl.orange.saturation", "hsl.orange.luminance",
-        "hsl.yellow.hue", "hsl.yellow.saturation", "hsl.yellow.luminance",
-        "hsl.green.hue", "hsl.green.saturation", "hsl.green.luminance",
-        "hsl.aqua.hue", "hsl.aqua.saturation", "hsl.aqua.luminance",
-        "hsl.blue.hue", "hsl.blue.saturation", "hsl.blue.luminance",
-        "hsl.purple.hue", "hsl.purple.saturation", "hsl.purple.luminance",
-        "hsl.magenta.hue", "hsl.magenta.saturation", "hsl.magenta.luminance",
-    ]
+    /// White-balance sliders and per-channel HSL.
+    public static var color: [String] {
+        InspectorCatalog.sections(in: .color).flatMap(\.fieldIDs)
+    }
 
     /// Sharpening, noise reduction, vignette, and grain controls.
-    public static let detail: [String] = [
-        "sharpening.amount", "sharpening.radius", "sharpening.detail", "sharpening.masking",
-        "noiseReduction.luminanceAmount", "noiseReduction.luminanceDetail",
-        "noiseReduction.colorAmount", "noiseReduction.colorDetail",
-        "vignette.amount", "vignette.midpoint", "vignette.roundness", "vignette.feather",
-        "grain.amount", "grain.size", "grain.roughness",
-    ]
+    public static var detail: [String] {
+        InspectorCatalog.sections(in: .detail).flatMap(\.fieldIDs)
+    }
 }

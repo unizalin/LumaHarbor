@@ -612,3 +612,14 @@
 "Collision" = "同名ファイル";
 "Leave blank to keep the full resolution." = "完全な解像度を維持するには空欄にします。";
 "Leave blank to use the encoder default." = "エンコーダーのデフォルトを使用するには空欄にします。";
+
+"Search Adjustments" = "調整項目を検索";
+"Clear Search" = "検索をクリア";
+"No matching tools" = "一致するツールがありません";
+"Add to Favorites" = "お気に入りに追加";
+"Remove from Favorites" = "お気に入りから削除";
+"Pin Section" = "セクションを固定";
+"Unpin Section" = "固定を解除";
+"Reset Adjust" = "調整をリセット";
+"Reset Geometry" = "ジオメトリをリセット";
+"Reset Local Adjustments" = "部分調整をリセット";

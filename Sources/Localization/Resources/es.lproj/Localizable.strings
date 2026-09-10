@@ -612,3 +612,14 @@
 "Collision" = "Archivo existente";
 "Leave blank to keep the full resolution." = "Déjalo vacío para conservar la resolución completa.";
 "Leave blank to use the encoder default." = "Déjalo vacío para usar el valor predeterminado del codificador.";
+
+"Search Adjustments" = "Buscar ajustes";
+"Clear Search" = "Borrar búsqueda";
+"No matching tools" = "No hay herramientas coincidentes";
+"Add to Favorites" = "Añadir a favoritos";
+"Remove from Favorites" = "Quitar de favoritos";
+"Pin Section" = "Fijar sección";
+"Unpin Section" = "Dejar de fijar";
+"Reset Adjust" = "Restablecer ajustes";
+"Reset Geometry" = "Restablecer geometría";
+"Reset Local Adjustments" = "Restablecer ajustes locales";

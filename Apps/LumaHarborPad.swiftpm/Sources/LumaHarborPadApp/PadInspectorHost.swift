@@ -95,10 +95,6 @@ struct PadInspectorHost: View {
 
     // MARK: - Adjust domain
 
-    private static let lightKinds: [AdjustmentKind] = [
-        .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
-    ]
-
     @ViewBuilder
     private var adjustPanel: some View {
         adjustSubmodePicker
@@ -126,13 +122,18 @@ struct PadInspectorHost: View {
         .accessibilityLabel(Text(L10n.t("Adjust submode")))
     }
 
+    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md`): field
+    /// vocabulary comes from the shared `InspectorCatalog`, matching the
+    /// inlined `PadInspectorHost` in `PadEditorView.swift` and Mac's
+    /// `InspectorView`.
     @ViewBuilder
     private var adjustContent: some View {
         switch inspector.adjustSubmode {
         case .light:
-            BasicAdjustmentPanel(editor: editor, kinds: Self.lightKinds)
+            BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.basic).adjustmentKinds)
             CurveAdjustmentPanel(editor: editor)
         case .color:
+            BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)
             ColorAdjustmentPanel(editor: editor)
         case .detail:
             DetailAdjustmentPanel(editor: editor)
