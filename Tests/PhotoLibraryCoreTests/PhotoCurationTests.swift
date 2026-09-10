@@ -53,6 +53,27 @@ final class PhotoCurationTests: XCTestCase {
         XCTAssertEqual(decoded, curation)
     }
 
+    func testDecodingEnforcesRatingAndKeywordInvariants() throws {
+        let json = """
+        {
+          "rating": 9,
+          "flag": "pick",
+          "keywords": [
+            { "normalized": "sunset", "displayValue": "Sunset" },
+            { "normalized": "beach", "displayValue": "Beach" },
+            { "normalized": "sunset", "displayValue": "SUNSET" }
+          ]
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(PhotoCuration.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.rating, 5)
+        XCTAssertEqual(decoded.flag, .pick)
+        XCTAssertEqual(decoded.keywords.map(\.normalized), ["beach", "sunset"])
+        XCTAssertEqual(decoded.keywords.last?.displayValue, "Sunset")
+    }
+
     func testCodableUsesPlainFieldNames() throws {
         let curation = PhotoCuration(rating: 2, flag: .pick, keywords: [])
         let data = try JSONEncoder().encode(curation)

@@ -2039,7 +2039,22 @@ public actor PhotoLibraryService {
         repository: FileSidecarRepository,
         decoder: DecoderDescriptor
     ) {
-        let existingSidecar = try? repository.loadSidecar(for: asset.id)
+        let existingSidecar: PhotoSidecar?
+        do {
+            existingSidecar = try repository.loadSidecar(for: asset.id)
+        } catch {
+            // A newer-schema sidecar must remain byte-for-byte untouched, and
+            // a corrupt/unavailable one must not be treated as absent. Keep the
+            // last known projection visible and mark it for a later retry.
+            let fallback = existingSQLiteCuration ?? .neutral
+            asset.hasEdits = false
+            asset.lastEditAt = nil
+            asset.rating = fallback.rating
+            asset.flag = fallback.flag
+            asset.keywords = fallback.keywords
+            asset.curationMigrationPending = true
+            return
+        }
         let hasEdits = existingSidecar.map { !$0.adjustments.isNeutral } ?? false
         asset.hasEdits = hasEdits
         asset.lastEditAt = hasEdits ? existingSidecar?.modifiedAt : nil
@@ -2196,10 +2211,10 @@ public actor PhotoLibraryService {
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
 
         do {
-            // `try?` flattens, so this is a single-level optional: nil means
-            // "no sidecar yet" or "unreadable", and either way we write a fresh
-            // one rather than inheriting a bogus creation date.
-            let existing = try? repository.loadSidecar(for: photo.id)
+            // Only a confirmed missing sidecar may start from neutral. Read
+            // errors, corruption, and newer schemas must propagate so this
+            // older build cannot replace edits it does not understand.
+            let existing = try repository.loadSidecar(for: photo.id)
             let now = Date()
             let sidecar = PhotoSidecar(
                 photoID: photo.id,
@@ -2273,7 +2288,7 @@ public actor PhotoLibraryService {
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
 
         do {
-            let existing = try? repository.loadSidecar(for: photo.id)
+            let existing = try repository.loadSidecar(for: photo.id)
             var curation = existing?.curation ?? .neutral
             transform(&curation)
             let now = Date()
@@ -2315,7 +2330,9 @@ public actor PhotoLibraryService {
             }
             keywords.append(keyword)
         }
-        try mutateCuration(for: photo) { $0.keywords = keywords }
+        try mutateCuration(for: photo) {
+            $0 = PhotoCuration(rating: $0.rating, flag: $0.flag, keywords: keywords)
+        }
     }
 
     // MARK: - Virtual copies

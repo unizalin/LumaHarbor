@@ -20,6 +20,19 @@ public struct PhotoCuration: Codable, Equatable, Sendable {
             .sorted { $0.normalized < $1.normalized }
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case rating, flag, keywords
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            rating: try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0,
+            flag: try container.decodeIfPresent(PhotoFlag.self, forKey: .flag) ?? .none,
+            keywords: try container.decodeIfPresent([PhotoKeyword].self, forKey: .keywords) ?? []
+        )
+    }
+
     public static let neutral = PhotoCuration()
 
     public var isNeutral: Bool { self == .neutral }
