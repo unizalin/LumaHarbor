@@ -2207,6 +2207,10 @@ public actor PhotoLibraryService {
                 sourceFingerprint: photo.fingerprint,
                 decoder: DecoderDescriptor(decoder.identifier),
                 adjustments: adjustments,
+                // Preserve whatever curation already exists (spec §6.1): an
+                // adjustment save is unrelated to rating/flag/keywords, and
+                // must never silently reset them to neutral.
+                curation: existing?.curation ?? .neutral,
                 createdAt: existing?.createdAt ?? now,
                 modifiedAt: now,
                 variantOf: photo.variantOf ?? existing?.variantOf
@@ -2226,6 +2230,92 @@ public actor PhotoLibraryService {
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
         }
+    }
+
+    // MARK: - Curation
+
+    /// Reads a photo's curation from its sidecar -- never from SQLite, which
+    /// is only a rebuildable projection (spec §6.1 rule 1).
+    public func curation(for photo: PhotoAsset) throws -> PhotoCuration {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+        do {
+            return try repository.loadSidecar(for: photo.id)?.curation ?? .neutral
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    /// Sidecar-first curation mutation shared by `setRating`/`setFlag`/
+    /// `setKeywords` (spec §6.1 rule 5): load the existing sidecar (or start
+    /// from neutral), apply `transform`, write atomically, then best-effort
+    /// project the result into SQLite -- exactly the same tolerance
+    /// `saveAdjustments`'s own `index.setEditState` call already has. A
+    /// curation-only mutation never touches `adjustments`/`modifiedAt`'s own
+    /// "last edit" meaning used elsewhere (see `PhotoAsset.lastEditAt`).
+    private func mutateCuration(
+        for photo: PhotoAsset,
+        transform: (inout PhotoCuration) -> Void
+    ) throws {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+
+        do {
+            let existing = try? repository.loadSidecar(for: photo.id)
+            var curation = existing?.curation ?? .neutral
+            transform(&curation)
+            let now = Date()
+            let sidecar = PhotoSidecar(
+                photoID: photo.id,
+                sourceRelativePath: photo.relativePath,
+                sourceFingerprint: photo.fingerprint,
+                decoder: DecoderDescriptor(decoder.identifier),
+                adjustments: existing?.adjustments ?? .neutral,
+                curation: curation,
+                createdAt: existing?.createdAt ?? now,
+                modifiedAt: existing?.modifiedAt ?? now,
+                variantOf: photo.variantOf ?? existing?.variantOf
+            )
+            try repository.write(sidecar: sidecar)
+            try? index.setRating(curation.rating, for: photo.id)
+            try? index.setFlag(curation.flag, for: photo.id)
+            try? index.setKeywords(curation.keywords.map(\.displayValue), for: photo.id)
+            try? index.setCurationMigrationPending(false, for: photo.id)
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    public func setRating(_ rating: Int, for photo: PhotoAsset) throws {
+        guard (0...5).contains(rating) else { throw LibraryQueryError.invalidRating(rating) }
+        try mutateCuration(for: photo) { $0.rating = rating }
+    }
+
+    public func setFlag(_ flag: PhotoFlag, for photo: PhotoAsset) throws {
+        try mutateCuration(for: photo) { $0.flag = flag }
+    }
+
+    public func setKeywords(_ inputs: [String], for photo: PhotoAsset) throws {
+        var keywords: [PhotoKeyword] = []
+        for input in inputs {
+            guard let keyword = PhotoKeyword.make(from: input) else {
+                throw LibraryQueryError.invalidKeyword
+            }
+            keywords.append(keyword)
+        }
+        try mutateCuration(for: photo) { $0.keywords = keywords }
     }
 
     // MARK: - Virtual copies
