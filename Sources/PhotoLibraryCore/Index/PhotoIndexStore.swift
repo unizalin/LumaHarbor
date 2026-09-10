@@ -11,7 +11,7 @@ import RawProcessingCore
 /// synchronous SQLite call, and making callers `await` each row would push
 /// suspension points into the middle of scan batches for no benefit.
 public final class PhotoIndexStore: @unchecked Sendable {
-    public static let schemaVersion = 4
+    public static let schemaVersion = 5
 
     private let database: SQLiteDatabase
     /// Recursive because `transaction` re-enters through `upsertPhoto`.
@@ -213,6 +213,16 @@ public final class PhotoIndexStore: @unchecked Sendable {
                         """)
                 }
 
+                if version < 5 {
+                    // Curation sidecar v3 migration (professional editing
+                    // completion spec §6.1): purely observational, never
+                    // authoritative -- see `PhotoAsset.curationMigrationPending`.
+                    try addColumnIfNeeded(
+                        "curation_migration_pending", to: "photo",
+                        definition: "INTEGER NOT NULL DEFAULT 0"
+                    )
+                }
+
                 try migrationHook()
 
                 try database.run(
@@ -271,7 +281,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
         "capture_date", "camera_make", "camera_model", "lens_model",
         "pixel_width", "pixel_height", "iso_speed", "shutter_speed", "aperture", "orientation",
         "status", "failure_reason", "has_edits", "last_seen_at", "last_edit_at",
-        "variant_of", "variant_name", "format_normalized", "rating", "flag"
+        "variant_of", "variant_name", "format_normalized", "rating", "flag",
+        "curation_migration_pending"
     ]
     private static let photoColumns = photoColumnList.joined(separator: ", ")
     private static let qualifiedPhotoColumns = photoColumnList.map { "p.\($0)" }.joined(separator: ", ")
@@ -474,12 +485,17 @@ public final class PhotoIndexStore: @unchecked Sendable {
         try withLock { try upsertPhoto(photo) }
     }
 
+    /// `rating`/`flag`/`curation_migration_pending` are intentionally absent
+    /// from the `ON CONFLICT` `SET` list below, same as `rating`/`flag`
+    /// already were before this column existed: a plain rescan upsert must
+    /// never clobber curation state that only `setRating`/`setFlag`/
+    /// `setKeywords`/`setCurationMigrationPending` are allowed to change.
     private func upsertPhoto(_ photo: PhotoAsset) throws {
         try database.run("""
             INSERT INTO photo (
                 \(Self.photoColumns), filename_normalized, relative_directory
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(photo_id) DO UPDATE SET
                 library_id          = excluded.library_id,
                 relative_path       = excluded.relative_path,
@@ -531,6 +547,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 .text(Self.formatComponent(of: photo.relativePath)),
                 .integer(Int64(photo.rating)),
                 .text(photo.flag.rawValue),
+                .integer(photo.curationMigrationPending ? 1 : 0),
                 .text(Self.normalizeForSearch(Self.filenameComponent(of: photo.relativePath))),
                 .text(Self.directoryComponent(of: photo.relativePath))
             ])
@@ -675,6 +692,49 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 "SELECT normalized, display_value FROM photo_keyword WHERE photo_id = ? ORDER BY normalized;",
                 [.text(photoID.description)]
             ) { PhotoKeyword(normalized: $0.string(0), displayValue: $0.string(1)) }
+        }
+    }
+
+    /// One bulk read of every photo's current rating/flag/keywords in
+    /// `libraryID`, used once per scan (not per file) so
+    /// `CurationMigration.decide` has "the current SQLite row" to compare a
+    /// sidecar against without a per-file query (spec gap G1/G4).
+    public func curationSnapshot(inLibrary libraryID: LibraryID) throws -> [PhotoID: PhotoCuration] {
+        try withLock {
+            let ratingsAndFlags = try database.query(
+                "SELECT photo_id, rating, flag FROM photo WHERE library_id = ?;",
+                [.text(libraryID.description)]
+            ) { (id: $0.string(0), rating: Int($0.int(1)), flag: PhotoFlag(rawValue: $0.string(2)) ?? .none) }
+
+            let keywordRows = try database.query("""
+                SELECT k.photo_id, k.normalized, k.display_value
+                FROM photo_keyword k
+                JOIN photo p ON p.photo_id = k.photo_id
+                WHERE p.library_id = ?;
+                """, [.text(libraryID.description)]
+            ) { (id: $0.string(0), keyword: PhotoKeyword(normalized: $0.string(1), displayValue: $0.string(2))) }
+            var keywordsByID: [String: [PhotoKeyword]] = [:]
+            for row in keywordRows { keywordsByID[row.id, default: []].append(row.keyword) }
+
+            var result: [PhotoID: PhotoCuration] = [:]
+            for row in ratingsAndFlags {
+                guard let id = PhotoID(uuidString: row.id) else { continue }
+                result[id] = PhotoCuration(rating: row.rating, flag: row.flag, keywords: keywordsByID[row.id] ?? [])
+            }
+            return result
+        }
+    }
+
+    /// Purely observational (spec gap G4): never treated as authoritative,
+    /// only reported. Only `PhotoLibraryService`'s migration hydration is
+    /// expected to call this; a plain rescan upsert never touches it (see
+    /// `upsertPhoto`'s own doc comment).
+    public func setCurationMigrationPending(_ pending: Bool, for photoID: PhotoID) throws {
+        try withLock {
+            try database.run(
+                "UPDATE photo SET curation_migration_pending = ? WHERE photo_id = ?;",
+                [.integer(pending ? 1 : 0), .text(photoID.description)]
+            )
         }
     }
 
@@ -1092,7 +1152,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
             variantOf: row.optionalString(20).flatMap(PhotoID.init(uuidString:)),
             variantName: row.optionalString(21),
             rating: Int(row.int(23)),
-            flag: PhotoFlag(rawValue: row.string(24)) ?? .none
+            flag: PhotoFlag(rawValue: row.string(24)) ?? .none,
+            curationMigrationPending: row.bool(25)
         )
     }
 }
