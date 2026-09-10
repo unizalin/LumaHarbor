@@ -105,6 +105,62 @@ extension FileFingerprint {
     }
 }
 
+/// Hand-built legacy sidecar JSON, kept as literal strings (not round-tripped
+/// through the current encoder) so a compatibility test proves the on-disk
+/// *file format* a past build actually wrote, independent of whatever the
+/// current `PhotoSidecar` Swift type happens to look like.
+enum LegacySidecarFixture {
+    /// Schema v1: no `variantOf`, no `curation`.
+    static func schemaV1JSON(photoID: PhotoID) -> Data {
+        """
+        {
+          "schemaVersion": 1,
+          "photoID": "\(photoID.rawValue.uuidString)",
+          "sourceRelativePath": "Trip/DSC0001.ARW",
+          "sourceFingerprint": {"fileSize": 25000000, "edgeDigest": "abc"},
+          "decoder": {"kind": "coreImage", "version": "system-default"},
+          "adjustments": {"exposure": 1.5},
+          "createdAt": "2024-01-01T00:00:00Z",
+          "modifiedAt": "2024-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+    }
+
+    /// Schema v2: adds `variantOf`, still no `curation`.
+    static func schemaV2JSON(photoID: PhotoID, variantOf: PhotoID) -> Data {
+        """
+        {
+          "schemaVersion": 2,
+          "photoID": "\(photoID.rawValue.uuidString)",
+          "sourceRelativePath": "Trip/DSC0002.ARW",
+          "sourceFingerprint": {"fileSize": 25000000, "edgeDigest": "def"},
+          "decoder": {"kind": "coreImage", "version": "system-default"},
+          "adjustments": {"exposure": -0.5},
+          "createdAt": "2024-01-01T00:00:00Z",
+          "modifiedAt": "2024-01-01T00:00:00Z",
+          "variantOf": "\(variantOf.rawValue.uuidString)"
+        }
+        """.data(using: .utf8)!
+    }
+
+    /// A sidecar written by a hypothetical future build, for testing the
+    /// "reject, don't overwrite" contract.
+    static func newerSchemaJSON(photoID: PhotoID, schemaVersion: Int) -> Data {
+        """
+        {
+          "schemaVersion": \(schemaVersion),
+          "photoID": "\(photoID.rawValue.uuidString)",
+          "sourceRelativePath": "Trip/DSC0003.ARW",
+          "sourceFingerprint": {"fileSize": 25000000, "edgeDigest": "ghi"},
+          "decoder": {"kind": "coreImage", "version": "system-default"},
+          "adjustments": {},
+          "createdAt": "2024-01-01T00:00:00Z",
+          "modifiedAt": "2024-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+    }
+}
+
 extension PhotoAsset {
     static func stub(
         id: PhotoID = PhotoID(),
