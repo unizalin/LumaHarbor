@@ -408,6 +408,27 @@ final class EditorWorkflowUXContractTests: XCTestCase {
         )
     }
 
+    /// Curation sidecar v3 plan Task 7: rating/flag/keyword edits must go
+    /// through `PhotoLibraryService`'s sidecar-first mutation API, not
+    /// straight to `PhotoIndexStore`, which is only a rebuildable
+    /// projection (spec §6.1 rule 1). This is a source-contract test, not
+    /// only a behavioral one, so a future regression that reintroduces a
+    /// direct `indexStore.set*` call fails immediately even if some other
+    /// path happens to still pass the sidecar-first integration tests.
+    func testLibraryViewModelCurationMutationsGoThroughLibraryServiceNotIndexStoreDirectly() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift")
+
+        for name in ["setRatingForSelectedPhoto", "setFlagForSelectedPhoto", "setKeywordsForPhoto"] {
+            let body = try Self.extractFunction(named: name, from: source)
+            XCTAssertFalse(body.contains("indexStore.setRating"), "\(name) must not call indexStore.setRating directly")
+            XCTAssertFalse(body.contains("indexStore.setFlag"), "\(name) must not call indexStore.setFlag directly")
+            XCTAssertFalse(body.contains("indexStore.setKeywords"), "\(name) must not call indexStore.setKeywords directly")
+        }
+        XCTAssertTrue(try Self.extractFunction(named: "setRatingForSelectedPhoto", from: source).contains("libraryService.setRating"))
+        XCTAssertTrue(try Self.extractFunction(named: "setFlagForSelectedPhoto", from: source).contains("libraryService.setFlag"))
+        XCTAssertTrue(try Self.extractFunction(named: "setKeywordsForPhoto", from: source).contains("libraryService.setKeywords"))
+    }
+
     func testWorkspaceLayoutStateItselfNeverReferencesThePhotoSidecarOrAdjustmentTypes() throws {
         let source = try Self.loadSource("Sources/LumaHarborApp/Models/WorkspaceLayoutState.swift")
 
@@ -445,5 +466,31 @@ final class EditorWorkflowUXContractTests: XCTestCase {
             index = source.index(after: index)
         }
         throw XCTSkip("unbalanced braces while extracting property \(name)")
+    }
+
+    /// Same brace-matching approach as `extractProperty(named:from:)`, but
+    /// for a `func <name>(...) { ... }` declaration instead of a property.
+    private static func extractFunction(named name: String, from source: String) throws -> String {
+        guard let declRange = source.range(of: "func \(name)(") else {
+            throw XCTSkip("no function named \(name) found")
+        }
+        guard let openBraceIndex = source[declRange.upperBound...].firstIndex(of: "{") else {
+            throw XCTSkip("no opening brace found for function \(name)")
+        }
+        var depth = 0
+        var index = openBraceIndex
+        while index < source.endIndex {
+            let character = source[index]
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(source[openBraceIndex...index])
+                }
+            }
+            index = source.index(after: index)
+        }
+        throw XCTSkip("unbalanced braces while extracting function \(name)")
     }
 }
