@@ -279,11 +279,14 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     public func write(sidecar: PhotoSidecar) throws {
         try requireWritable()
         do {
+            let data = try encodedSidecarPreservingUnknownTopLevelFields(sidecar)
             try AtomicFileWriter.write(
-                SidecarCoding.encode(sidecar),
+                data,
                 to: sidecarURL(for: sidecar.photoID),
                 fileManager: fileManager
             )
+        } catch let error as SidecarError {
+            throw error
         } catch let error as AtomicWriteError {
             throw SidecarError.write(error)
         }
@@ -322,6 +325,51 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     }
 
     // MARK: - Private
+
+    private func encodedSidecarPreservingUnknownTopLevelFields(
+        _ sidecar: PhotoSidecar
+    ) throws -> Data {
+        let encoded = try SidecarCoding.encode(sidecar)
+        let url = sidecarURL(for: sidecar.photoID)
+        guard fileManager.fileExists(atPath: url.path) else { return encoded }
+
+        // Validate the existing file through the same compatibility gate used
+        // by every reader. This blocks replacing a newer schema and
+        // quarantines corruption before any write can occur.
+        guard try loadSidecar(for: sidecar.photoID) != nil else { return encoded }
+
+        let existingData: Data
+        do {
+            existingData = try Data(contentsOf: url)
+        } catch {
+            throw SidecarError.libraryUnavailable(path: libraryRootURL.path)
+        }
+
+        guard var existingObject = try JSONSerialization.jsonObject(with: existingData) as? [String: Any],
+              let encodedObject = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            throw SidecarError.corruptSidecar(
+                photoID: sidecar.photoID,
+                quarantinedAt: nil,
+                reason: "The sidecar root is not a JSON object."
+            )
+        }
+
+        // Remove every field owned by this version first so an optional field
+        // that is intentionally omitted (for example `variantOf == nil`) does
+        // not survive from the old JSON. All other top-level keys are opaque
+        // portable data and remain untouched.
+        let knownKeys = [
+            "schemaVersion", "photoID", "sourceRelativePath", "sourceFingerprint",
+            "decoder", "adjustments", "curation", "createdAt", "modifiedAt", "variantOf"
+        ]
+        for key in knownKeys { existingObject.removeValue(forKey: key) }
+        for (key, value) in encodedObject { existingObject[key] = value }
+
+        return try JSONSerialization.data(
+            withJSONObject: existingObject,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
+    }
 
     private func requireWritable() throws {
         guard isAvailable else {

@@ -125,10 +125,10 @@ final class PadBatchAdjustmentCoordinator: ObservableObject {
         }
         do {
             try await libraryService.setKeywords(inputs, for: asset)
-            let keywords = inputs.compactMap(PhotoKeyword.make(from:))
-            var seen = Set<String>()
-            let unique = keywords.filter { seen.insert($0.normalized).inserted }
-            library.updatePhotoCuration(photoID: photoID, keywords: unique)
+            let keywords = PhotoCuration(
+                keywords: inputs.compactMap(PhotoKeyword.make(from:))
+            ).keywords
+            library.updatePhotoCuration(photoID: photoID, keywords: keywords)
             return true
         } catch {
             return false

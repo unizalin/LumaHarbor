@@ -109,6 +109,18 @@ final class PhotoLibraryServiceCurationTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(projected?.keywords.map(\.displayValue), ["Sunset"])
     }
 
+    func testSetKeywordsDeduplicatesAndSortsThePersistedCuration() async throws {
+        let (service, root, photo) = try await makeLibraryWithOnePhoto()
+
+        try await service.setKeywords(["Sunset", "Beach", "sunset"], for: photo)
+
+        let sidecar = try FileSidecarRepository(libraryRootURL: root).loadSidecar(for: photo.id)
+        XCTAssertEqual(sidecar?.curation.keywords.map(\.normalized), ["beach", "sunset"])
+        XCTAssertEqual(sidecar?.curation.keywords.last?.displayValue, "Sunset")
+        let projected = try await service.indexStore.photo(id: photo.id)
+        XCTAssertEqual(projected?.keywords.map(\.normalized), ["beach", "sunset"])
+    }
+
     func testCurationForPhotoReadsSidecarNotSQLite() async throws {
         let (service, _, photo) = try await makeLibraryWithOnePhoto()
         // Write a mismatched value directly through the SQLite-only API,
@@ -143,6 +155,90 @@ final class PhotoLibraryServiceCurationTests: TemporaryDirectoryTestCase {
         let sidecar = try FileSidecarRepository(libraryRootURL: root).loadSidecar(for: photo.id)
         XCTAssertEqual(sidecar?.curation.rating, 4, "an adjustment save must never silently reset curation to neutral")
         XCTAssertEqual(sidecar?.adjustments.exposure, 1.0)
+    }
+
+    func testSavingAdjustmentsRejectsNewerSchemaSidecarWithoutOverwriting() async throws {
+        let (service, root, photo) = try await makeLibraryWithOnePhoto()
+        let repository = FileSidecarRepository(libraryRootURL: root)
+        var newerSidecar = PhotoSidecar(
+            photoID: photo.id,
+            sourceRelativePath: photo.relativePath,
+            sourceFingerprint: photo.fingerprint,
+            adjustments: PhotoAdjustments(exposure: 1.0),
+            curation: PhotoCuration(rating: 4)
+        )
+        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
+        try repository.write(sidecar: newerSidecar)
+        let sidecarURL = repository.sidecarURL(for: photo.id)
+        let bytesBeforeSave = try Data(contentsOf: sidecarURL)
+
+        do {
+            try await service.saveAdjustments(PhotoAdjustments(exposure: 2.0), for: photo)
+            XCTFail("a newer-schema sidecar must reject adjustment writes")
+        } catch let error as LibraryError {
+            guard case .sidecar(.unsupportedSchemaVersion(let found, let supported)) = error else {
+                return XCTFail("expected unsupported schema, got \(error)")
+            }
+            XCTAssertEqual(found, PhotoSidecar.currentSchemaVersion + 1)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: sidecarURL), bytesBeforeSave)
+    }
+
+    func testCurationMutationRejectsNewerSchemaSidecarWithoutOverwriting() async throws {
+        let (service, root, photo) = try await makeLibraryWithOnePhoto()
+        let repository = FileSidecarRepository(libraryRootURL: root)
+        var newerSidecar = PhotoSidecar(
+            photoID: photo.id,
+            sourceRelativePath: photo.relativePath,
+            sourceFingerprint: photo.fingerprint,
+            adjustments: PhotoAdjustments(exposure: 1.0),
+            curation: PhotoCuration(rating: 2)
+        )
+        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
+        try repository.write(sidecar: newerSidecar)
+        let sidecarURL = repository.sidecarURL(for: photo.id)
+        let bytesBeforeSave = try Data(contentsOf: sidecarURL)
+
+        do {
+            try await service.setRating(5, for: photo)
+            XCTFail("a newer-schema sidecar must reject curation writes")
+        } catch let error as LibraryError {
+            guard case .sidecar(.unsupportedSchemaVersion(let found, let supported)) = error else {
+                return XCTFail("expected unsupported schema, got \(error)")
+            }
+            XCTAssertEqual(found, PhotoSidecar.currentSchemaVersion + 1)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: sidecarURL), bytesBeforeSave)
+    }
+
+    func testRescanDoesNotOverwriteNewerSchemaSidecar() async throws {
+        let (service, root, photo) = try await makeLibraryWithOnePhoto()
+        let indexStore = await service.indexStore
+        try indexStore.setRating(5, for: photo.id)
+
+        let repository = FileSidecarRepository(libraryRootURL: root)
+        var newerSidecar = PhotoSidecar(
+            photoID: photo.id,
+            sourceRelativePath: photo.relativePath,
+            sourceFingerprint: photo.fingerprint,
+            adjustments: PhotoAdjustments(exposure: 1.0),
+            curation: PhotoCuration(rating: 2)
+        )
+        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
+        try repository.write(sidecar: newerSidecar)
+        let sidecarURL = repository.sidecarURL(for: photo.id)
+        let bytesBeforeScan = try Data(contentsOf: sidecarURL)
+
+        try await runScan(service, libraryID: photo.libraryID)
+
+        XCTAssertEqual(try Data(contentsOf: sidecarURL), bytesBeforeScan)
+        let projected = try await service.indexStore.photo(id: photo.id)
+        XCTAssertEqual(projected?.rating, 5, "the last known SQLite value must be preserved")
+        XCTAssertEqual(projected?.curationMigrationPending, true)
     }
 
     func testSetRatingThrowsForAPhotoWhoseLibraryIsNotRegistered() async throws {
