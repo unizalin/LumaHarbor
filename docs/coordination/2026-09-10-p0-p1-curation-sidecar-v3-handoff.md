@@ -9,7 +9,7 @@ Follows `docs/coordination/HANDOFF_TEMPLATE.md`.
 ## Git state
 
 - Source branch: `claude/professional-editing-completion`
-- Full HEAD commit SHA at handoff time: will be the commit that adds this file plus `docs/coordination/CURRENT.md` and `docs/coordination/DECISIONS.md` (D-006), immediately after `d7bc821ecb05c6381248605494185d9d6cabe644`.
+- Full HEAD commit SHA at handoff time: `29ae0ea` (`docs: record P0/P1 curation sidecar v3 completion and handoff`), which adds this file plus `docs/coordination/CURRENT.md` and `docs/coordination/DECISIONS.md` (D-006), immediately after `d7bc821ecb05c6381248605494185d9d6cabe644`.
 - Base branch: `main`.
 - Ahead/behind: this branch was not compared against `main`'s current tip during this task; only local commit history on this branch was inspected. No fetch or rebase was performed.
 - Upstream: not checked/changed this session.
