@@ -17,7 +17,7 @@
 
 ## Mac 發行產物
 
-- 來源提交：`8dfeb0f`。
+- 歷史清理後的來源提交：`be5a838`。
 - `Scripts/package-mac-release.sh release`：PASS；產生 Apple Silicon `arm64`、macOS 14 以上的 ad-hoc Alpha 版本。
 - `dist/LumaHarbor-0.1.0-2.zip`：2,402,115 bytes；ZIP 完整性測試 PASS，無 `._*` AppleDouble 項目。
 - SHA-256：`76d5732298a5d719d44600e80d1fa1ad0d643059fbfb6f20a25b606b36834982`；checksum 只包含檔名，不包含建置目錄。
