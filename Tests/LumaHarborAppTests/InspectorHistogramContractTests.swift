@@ -27,13 +27,18 @@ final class InspectorHistogramContractTests: XCTestCase {
 
     func testInspectorViewRendersAHistogramSectionFromTheSessionsHistogram() throws {
         let source = try Self.loadSource("InspectorView.swift")
+        let sharedPanel = try String(
+            contentsOf: Self.repositoryRootURL
+                .appendingPathComponent("Sources/AdjustmentUI/HistogramPanel.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(
-            source.contains("model.editor.histogram") || source.contains("editor.histogram"),
+            source.contains("HistogramPanel(histogram: model.editor.histogram)"),
             "InspectorView must render EditorSession.histogram, not a separately re-derived value"
         )
         XCTAssertTrue(
-            source.contains("L10n.t(\"Histogram\")"),
+            sharedPanel.contains("L10n.t(\"Histogram\")"),
             "the histogram section must have a visible, localized header"
         )
     }
@@ -42,7 +47,11 @@ final class InspectorHistogramContractTests: XCTestCase {
     /// fallback copy" -- there must be visible text for the no-histogram
     /// case, not just a blank area.
     func testInspectorViewShowsALocalizedFallbackWhenNoHistogramIsAvailable() throws {
-        let source = try Self.loadSource("InspectorView.swift")
+        let source = try String(
+            contentsOf: Self.repositoryRootURL
+                .appendingPathComponent("Sources/AdjustmentUI/HistogramPanel.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(
             source.contains("if let histogram") || source.contains("if let"),

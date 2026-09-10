@@ -1159,45 +1159,7 @@ private struct PadHistogramBlock: View {
     let histogram: HistogramData?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.t("Histogram"))
-                .font(.subheadline.weight(.semibold))
-            if let histogram {
-                Canvas { context, size in
-                    Self.draw(histogram.red,   color: .red,   in: context, size: size)
-                    Self.draw(histogram.green, color: .green, in: context, size: size)
-                    Self.draw(histogram.blue,  color: .blue,  in: context, size: size)
-                }
-                .frame(height: 80)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityLabel(Text(L10n.t("RGB histogram")))
-                .accessibilityHidden(false)
-            } else {
-                Text(L10n.t("Histogram not yet available."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
-            }
-        }
-    }
-
-    private static func draw(
-        _ bins: [Int], color: Color, in context: GraphicsContext, size: CGSize
-    ) {
-        guard !bins.isEmpty else { return }
-        let peak = bins.max() ?? 1
-        guard peak > 0 else { return }
-        let binWidth = size.width / CGFloat(bins.count)
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: size.height))
-        for (i, count) in bins.enumerated() {
-            let x = CGFloat(i) * binWidth
-            let y = size.height * (1 - CGFloat(count) / CGFloat(peak))
-            path.addLine(to: CGPoint(x: x, y: y))
-        }
-        path.addLine(to: CGPoint(x: size.width, y: size.height))
-        path.closeSubpath()
-        context.fill(path, with: .color(color.opacity(0.5)))
+        HistogramPanel(histogram: histogram)
     }
 }
 

@@ -21,6 +21,11 @@
 "Amount" = "數量";
 "Basic" = "基本";
 "Curve" = "曲線";
+"Tone curve" = "色調曲線";
+"Drag control point" = "拖曳控制點";
+"RGB" = "RGB";
+"Shadows clipped" = "陰影裁切";
+"Highlights clipped" = "亮部裁切";
 "Detail" = "細節";
 "Effects" = "效果";
 "Feather" = "羽化";
