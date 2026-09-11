@@ -351,6 +351,34 @@ struct PadEditorView: View {
                 Label(L10n.t("Hold Before"), systemImage: "eye")
             }
             .disabled(editor.compareMode != .single || !editor.canCompareWithOriginal)
+
+            if !editor.snapshots.isEmpty {
+                Divider()
+                Menu(L10n.t("Compare with Snapshot")) {
+                    ForEach(editor.snapshots) { snap in
+                        Button {
+                            if editor.comparisonSnapshot?.id == snap.id {
+                                editor.comparisonSnapshot = nil
+                            } else {
+                                editor.comparisonSnapshot = snap
+                            }
+                        } label: {
+                            HStack {
+                                Text(snap.name)
+                                if editor.comparisonSnapshot?.id == snap.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                    if editor.comparisonSnapshot != nil {
+                        Divider()
+                        Button(L10n.t("Exit Compare")) {
+                            editor.comparisonSnapshot = nil
+                        }
+                    }
+                }
+            }
         } label: {
             Image(systemName: "rectangle.on.rectangle")
         }
@@ -1280,6 +1308,8 @@ private struct PadInspectorHost: View {
                         photo: curationPhoto,
                         batchCoordinator: batchCoordinator
                     )
+                    Divider()
+                    SnapshotsPanel(editor: editor)
                 } else {
                     Text(L10n.t("Photo not yet loaded."))
                         .font(.caption)

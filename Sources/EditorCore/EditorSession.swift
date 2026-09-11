@@ -107,6 +107,16 @@ public final class EditorSession: ObservableObject {
     /// photo just left behind.
     @Published public var selectedLocalAdjustmentID: UUID?
 
+    /// Snapshots saved on this photo (spec §6.6).
+    @Published public private(set) var snapshots: [EditSnapshot] = []
+
+    /// Professional preview overlays and soft-proofing options (spec §7.4).
+    @Published public var previewOptions: ProfessionalPreviewOptions = .standard
+
+    /// Transient snapshot reference used for A/B comparison.
+    /// Toggling comparison changes session state only; never mutates adjustments or writes sidecar.
+    @Published public var comparisonSnapshot: EditSnapshot?
+
     /// Longest edge the preview should cover, in backing-store pixels.
     @Published public var previewPixelDimension = 1_600
 
@@ -246,6 +256,9 @@ public final class EditorSession: ObservableObject {
     /// this, re-editing an existing crop had no correct frame to reference
     /// at all.
     public var displayedAdjustments: PhotoAdjustments {
+        if let comparisonSnapshot {
+            return comparisonSnapshot.adjustments
+        }
         var adjustments = previewedEyedropperAdjustments ?? previewedPresetAdjustments ?? history.current
         if toolMode == .crop {
             adjustments.geometry.crop = nil
@@ -286,7 +299,8 @@ public final class EditorSession: ObservableObject {
         photo: PhotoAsset,
         sourceURL: URL,
         adjustments: PhotoAdjustments,
-        isReadOnly: Bool
+        isReadOnly: Bool,
+        snapshots: [EditSnapshot] = []
     ) {
         cancelPendingWork()
 
@@ -295,6 +309,9 @@ public final class EditorSession: ObservableObject {
         self.history = EditHistory(initial: adjustments)
         self.lastSavedAdjustments = adjustments
         self.isReadOnlyLibrary = isReadOnly
+        self.snapshots = snapshots
+        self.previewOptions = .standard
+        self.comparisonSnapshot = nil
         self.previewImage = nil
         self.decodeFailed = false
         self.histogram = nil
@@ -335,6 +352,9 @@ public final class EditorSession: ObservableObject {
         originalImage = nil
         compareMode = .single
         wipePosition = 0.5
+        snapshots = []
+        previewOptions = .standard
+        comparisonSnapshot = nil
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
         whiteBalanceBaseline = nil
@@ -585,6 +605,92 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    // MARK: - Snapshots & Professional Preview
+
+    /// Captures the current adjustments as a new snapshot (spec §6.6).
+    public func createSnapshot(name: String) {
+        guard let photo else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let snapshotName = trimmed.isEmpty ? "\(L10n.t("Snapshot")) \(snapshots.count + 1)" : trimmed
+        let snapshot = EditSnapshot(name: snapshotName, adjustments: history.current)
+        snapshots.append(snapshot)
+        persistSnapshots(for: photo)
+    }
+
+    /// Renames an existing snapshot by ID.
+    public func renameSnapshot(id: UUID, newName: String) {
+        guard let photo, let index = snapshots.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        snapshots[index].name = trimmed
+        persistSnapshots(for: photo)
+    }
+
+    /// Duplicates an existing snapshot.
+    public func duplicateSnapshot(id: UUID) {
+        guard let photo, let snapshot = snapshots.first(where: { $0.id == id }) else { return }
+        let copy = EditSnapshot(
+            name: "\(snapshot.name) \(L10n.t("Copy"))",
+            adjustments: snapshot.adjustments
+        )
+        snapshots.append(copy)
+        persistSnapshots(for: photo)
+    }
+
+    /// Deletes a snapshot by ID.
+    public func deleteSnapshot(id: UUID) {
+        guard let photo, let index = snapshots.firstIndex(where: { $0.id == id }) else { return }
+        snapshots.remove(at: index)
+        if comparisonSnapshot?.id == id {
+            comparisonSnapshot = nil
+            requestInteractivePreview()
+        }
+        persistSnapshots(for: photo)
+    }
+
+    /// Restores adjustments from a snapshot in a single compound undo transaction (spec §6.6).
+    public func restoreSnapshot(id: UUID) {
+        guard let snapshot = snapshots.first(where: { $0.id == id }) else { return }
+        updateAdjustments { adjustments in
+            adjustments = snapshot.adjustments
+        }
+    }
+
+    /// Updates preview options (highlight/shadow clipping, gamut warning, soft proof).
+    /// Purely preview state; never saved to sidecar or export.
+    public func setPreviewOptions(_ options: ProfessionalPreviewOptions) {
+        previewOptions = options
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// Sets or clears the comparison snapshot for A/B preview.
+    /// Purely session state; never mutates adjustments or saves to sidecar.
+    public func setComparisonSnapshot(_ snapshot: EditSnapshot?) {
+        comparisonSnapshot = snapshot
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// Toggles A/B compare against the first snapshot or clears comparison.
+    public func toggleABCompare() {
+        if comparisonSnapshot != nil {
+            comparisonSnapshot = nil
+        } else if let first = snapshots.first {
+            comparisonSnapshot = first
+        }
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    private func persistSnapshots(for photo: PhotoAsset) {
+        guard let save = services?.saveSnapshots else { return }
+        let currentSnapshots = self.snapshots
+        Task {
+            try? await save(currentSnapshots, photo)
+        }
+    }
+
     /// Safe, fixed, localizable text per diagnostic code -- never the
     /// diagnostic's own `detail` (spec §11: user-facing text must not carry
     /// unvetted internal detail). `nil` when there's nothing worth telling
@@ -719,7 +825,8 @@ public final class EditorSession: ObservableObject {
             url: sourceURL,
             adjustments: displayedAdjustments,
             targetPixelDimension: previewPixelDimension,
-            quality: quality
+            quality: quality,
+            previewOptions: previewOptions
         )
         Task {
             let token = await services.previewScheduler.submit(request)

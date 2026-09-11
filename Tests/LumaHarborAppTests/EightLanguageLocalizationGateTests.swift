@@ -50,21 +50,21 @@ final class EightLanguageLocalizationGateTests: XCTestCase {
     /// against how Adobe's own localized Lightroom/Photoshop UIs render
     /// each in the corresponding language.
     static let intentionalEnglishMatchAllowlist: [String: Set<String>] = [
-        "zh-Hant": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
-        "ja": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "OK", "PNG", "RGB", "TIFF"],
-        "ko": ["DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
-        "zh-Hans": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
+        "zh-Hant": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "Adobe RGB", "Display P3", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF", "sRGB"],
+        "ja": ["1 GB", "10 GB", "16-bit", "2 GB", "5 GB", "512 MB", "8-bit", "Adobe RGB", "Display P3", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "OK", "PNG", "RGB", "TIFF", "sRGB"],
+        "ko": ["Adobe RGB", "Display P3", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF", "sRGB"],
+        "zh-Hans": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Adobe RGB", "Display P3", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF", "sRGB"],
         "de": [
-            "1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "Detail", "EXIF", "Format", "HEIC", "Horizontal", "ISO", "JPEG",
+            "1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Adobe RGB", "Display P3", "DPI", "Detail", "EXIF", "Format", "HEIC", "Horizontal", "ISO", "JPEG",
             "Magenta", "Name", "OK", "Offline", "Orange", "Original", "PNG", "Radius", "RGB", "Standard", "System",
-            "TIFF", "Vignette",
+            "TIFF", "Vignette", "sRGB",
         ],
         "fr": [
-            "1 photo", "DPI", "Dimensions", "EXIF", "Format", "Grain", "HEIC", "Horizontal", "ISO", "JPEG", "Luminance", "Magenta",
+            "1 photo", "Adobe RGB", "Display P3", "DPI", "Dimensions", "EXIF", "Format", "Grain", "HEIC", "Horizontal", "ISO", "JPEG", "Luminance", "Magenta",
             "Mode", "OK", "Orange", "Orientation", "Original", "Perspective", "PNG", "Photo", "Portrait", "Saturation", "Sources",
-            "Standard", "Texture", "TIFF", "Vertical", "Vibrance", "photos",
+            "Standard", "Texture", "TIFF", "Vertical", "Vibrance", "photos", "sRGB",
         ],
-        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Color", "EXIF", "HEIC", "Horizontal", "ISO", "JPEG", "Magenta", "Manual", "Original", "PNG", "RGB", "TIFF", "Vertical"],
+        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Adobe RGB", "Color", "Display P3", "EXIF", "HEIC", "Horizontal", "ISO", "JPEG", "Magenta", "Manual", "Original", "PNG", "RGB", "TIFF", "Vertical", "sRGB"],
     ]
 
     /// SwiftPM's resource processor lowercases `.lproj` directory names
@@ -260,6 +260,27 @@ final class EightLanguageLocalizationGateTests: XCTestCase {
                 let value = table[key]
                 XCTAssertNotNil(value, "\(code) is missing Phase 5 key \"\(key)\"")
                 XCTAssertFalse(value?.isEmpty ?? true, "\(code) has an empty value for Phase 5 key \"\(key)\"")
+            }
+        }
+    }
+
+    func testPhase6StringsAreTranslatedInEveryRequiredLanguage() throws {
+        let keys = [
+            "Professional Preview", "Gamut Warning", "Soft Proof", "Profile",
+            "Simulate Paper & Ink", "Snapshots", "Create Snapshot", "New snapshot name",
+            "Create", "Compare (A/B)", "Comparing with: %@", "Exit Compare",
+            "Restore Snapshot", "Duplicate", "Rename Snapshot",
+            "No snapshots saved yet", "Save snapshots to preserve and compare different editing states.",
+            "Are you sure you want to delete snapshot \"%@\"? This action cannot be undone.",
+            "Compare with Snapshot", "sRGB", "Display P3", "Adobe RGB",
+        ]
+
+        for code in Self.requiredLanguageCodes {
+            let table = try Self.stringsDictionary(for: code)
+            for key in keys {
+                let value = table[key]
+                XCTAssertNotNil(value, "\(code) is missing Phase 6 key \"\(key)\"")
+                XCTAssertFalse(value?.isEmpty ?? true, "\(code) has an empty value for Phase 6 key \"\(key)\"")
             }
         }
     }

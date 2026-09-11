@@ -672,3 +672,26 @@
 "Vertical" = "Vertikal";
 "Horizontal" = "Horizontal";
 "Reset Perspective" = "Perspektive zurücksetzen";
+/* P6: Snapshots, Soft Proof, Professional Preview */
+"Professional Preview" = "Professionelle Vorschau";
+"Gamut Warning" = "Farbumfang-Warnung";
+"Soft Proof" = "Softproof";
+"Profile" = "Profil";
+"Simulate Paper & Ink" = "Papier und Druckfarbe simulieren";
+"Snapshots" = "Schnappschüsse";
+"Create Snapshot" = "Schnappschuss erstellen";
+"New snapshot name" = "Neuer Schnappschussname";
+"Create" = "Erstellen";
+"Compare (A/B)" = "Vergleichen (A/B)";
+"Comparing with: %@" = "Vergleich mit: %@";
+"Exit Compare" = "Vergleich beenden";
+"Restore Snapshot" = "Schnappschuss wiederherstellen";
+"Duplicate" = "Duplizieren";
+"Rename Snapshot" = "Schnappschuss umbenennen";
+"No snapshots saved yet" = "Noch keine Schnappschüsse gespeichert";
+"Save snapshots to preserve and compare different editing states." = "Speichern Sie Schnappschüsse, um verschiedene Bearbeitungszustände festzuhalten und zu vergleichen.";
+"Are you sure you want to delete snapshot \"%@\"? This action cannot be undone." = "Möchten Sie den Schnappschuss „%@“ wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.";
+"Compare with Snapshot" = "Mit Schnappschuss vergleichen";
+"sRGB" = "sRGB";
+"Display P3" = "Display P3";
+"Adobe RGB" = "Adobe RGB";

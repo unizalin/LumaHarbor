@@ -672,3 +672,26 @@
 "Vertical" = "垂直方向";
 "Horizontal" = "水平方向";
 "Reset Perspective" = "遠近感をリセット";
+/* P6: Snapshots, Soft Proof, Professional Preview */
+"Professional Preview" = "プロフェッショナルプレビュー";
+"Gamut Warning" = "色域外警告";
+"Soft Proof" = "校正設定（ソフトプルーフ）";
+"Profile" = "プロファイル";
+"Simulate Paper & Ink" = "紙とインクを用紙シミュレート";
+"Snapshots" = "スナップショット";
+"Create Snapshot" = "スナップショットを作成";
+"New snapshot name" = "新しいスナップショット名";
+"Create" = "作成";
+"Compare (A/B)" = "比較 (A/B)";
+"Comparing with: %@" = "%@ と比較中";
+"Exit Compare" = "比較を終了";
+"Restore Snapshot" = "スナップショットを復元";
+"Duplicate" = "複製";
+"Rename Snapshot" = "スナップショット名を変更";
+"No snapshots saved yet" = "スナップショットはまだ保存されていません";
+"Save snapshots to preserve and compare different editing states." = "スナップショットを保存して、さまざまな編集状態を保持・比較できます。";
+"Are you sure you want to delete snapshot \"%@\"? This action cannot be undone." = "スナップショット「%@」を削除してもよろしいですか？この操作は取り消せません。";
+"Compare with Snapshot" = "スナップショットと比較";
+"sRGB" = "sRGB";
+"Display P3" = "Display P3";
+"Adobe RGB" = "Adobe RGB";

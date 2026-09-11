@@ -672,3 +672,26 @@
 "Vertical" = "수직";
 "Horizontal" = "수평";
 "Reset Perspective" = "원근감 재설정";
+/* P6: Snapshots, Soft Proof, Professional Preview */
+"Professional Preview" = "전문가용 미리보기";
+"Gamut Warning" = "색역 경고";
+"Soft Proof" = "소프트 교정";
+"Profile" = "프로필";
+"Simulate Paper & Ink" = "용지 및 잉크 시뮬레이션";
+"Snapshots" = "스냅샷";
+"Create Snapshot" = "스냅샷 생성";
+"New snapshot name" = "새 스냅샷 이름";
+"Create" = "생성";
+"Compare (A/B)" = "비교 (A/B)";
+"Comparing with: %@" = "%@와(과) 비교 중";
+"Exit Compare" = "비교 종료";
+"Restore Snapshot" = "스냅샷 복원";
+"Duplicate" = "복제";
+"Rename Snapshot" = "스냅샷 이름 변경";
+"No snapshots saved yet" = "저장된 스냅샷이 없습니다";
+"Save snapshots to preserve and compare different editing states." = "스냅샷을 저장하여 다양한 편집 상태를 보존하고 비교하세요.";
+"Are you sure you want to delete snapshot \"%@\"? This action cannot be undone." = "스냅샷 \"%@\"을(를) 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.";
+"Compare with Snapshot" = "스냅샷과 비교";
+"sRGB" = "sRGB";
+"Display P3" = "Display P3";
+"Adobe RGB" = "Adobe RGB";

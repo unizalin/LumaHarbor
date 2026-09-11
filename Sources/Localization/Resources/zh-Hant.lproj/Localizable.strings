@@ -672,3 +672,26 @@
 "Vertical" = "垂直";
 "Horizontal" = "水平";
 "Reset Perspective" = "重設透視";
+/* P6: Snapshots, Soft Proof, Professional Preview */
+"Professional Preview" = "專業預覽";
+"Gamut Warning" = "色域警告";
+"Soft Proof" = "軟體打樣";
+"Profile" = "描述檔";
+"Simulate Paper & Ink" = "模擬紙張與墨水";
+"Snapshots" = "快照";
+"Create Snapshot" = "建立快照";
+"New snapshot name" = "新快照名稱";
+"Create" = "建立";
+"Compare (A/B)" = "比較 (A/B)";
+"Comparing with: %@" = "正在比較：%@";
+"Exit Compare" = "結束比較";
+"Restore Snapshot" = "還原快照";
+"Duplicate" = "複製";
+"Rename Snapshot" = "重新命名快照";
+"No snapshots saved yet" = "尚未儲存快照";
+"Save snapshots to preserve and compare different editing states." = "儲存快照以保留並比較不同的編輯狀態。";
+"Are you sure you want to delete snapshot \"%@\"? This action cannot be undone." = "確定要刪除快照「%@」嗎？此動作無法復原。";
+"Compare with Snapshot" = "與快照比較";
+"sRGB" = "sRGB";
+"Display P3" = "Display P3";
+"Adobe RGB" = "Adobe RGB";

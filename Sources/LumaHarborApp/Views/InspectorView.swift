@@ -36,6 +36,11 @@ struct InspectorView: View {
                     adjustmentContent
                 case .presets:
                     PresetBrowserView()
+                case .snapshots:
+                    ScrollView {
+                        SnapshotsPanel(editor: model.editor)
+                            .padding(12)
+                    }
                 case .metadata:
                     metadataContent
                 }
@@ -338,6 +343,7 @@ struct InspectorView: View {
 private enum InspectorTab: String, CaseIterable, Identifiable {
     case adjustments
     case presets
+    case snapshots
     case metadata
 
     var id: String { rawValue }
@@ -346,6 +352,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
         switch self {
         case .adjustments: return L10n.t("Adjustments")
         case .presets: return L10n.t("Presets")
+        case .snapshots: return L10n.t("Snapshots")
         case .metadata: return L10n.t("Metadata")
         }
     }
