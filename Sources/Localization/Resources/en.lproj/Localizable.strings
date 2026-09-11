@@ -672,3 +672,26 @@
 "Vertical" = "Vertical";
 "Horizontal" = "Horizontal";
 "Reset Perspective" = "Reset Perspective";
+/* P6: Snapshots, Soft Proof, Professional Preview */
+"Professional Preview" = "Professional Preview";
+"Gamut Warning" = "Gamut Warning";
+"Soft Proof" = "Soft Proof";
+"Profile" = "Profile";
+"Simulate Paper & Ink" = "Simulate Paper & Ink";
+"Snapshots" = "Snapshots";
+"Create Snapshot" = "Create Snapshot";
+"New snapshot name" = "New snapshot name";
+"Create" = "Create";
+"Compare (A/B)" = "Compare (A/B)";
+"Comparing with: %@" = "Comparing with: %@";
+"Exit Compare" = "Exit Compare";
+"Restore Snapshot" = "Restore Snapshot";
+"Duplicate" = "Duplicate";
+"Rename Snapshot" = "Rename Snapshot";
+"No snapshots saved yet" = "No snapshots saved yet";
+"Save snapshots to preserve and compare different editing states." = "Save snapshots to preserve and compare different editing states.";
+"Are you sure you want to delete snapshot \"%@\"? This action cannot be undone." = "Are you sure you want to delete snapshot \"%@\"? This action cannot be undone.";
+"Compare with Snapshot" = "Compare with Snapshot";
+"sRGB" = "sRGB";
+"Display P3" = "Display P3";
+"Adobe RGB" = "Adobe RGB";

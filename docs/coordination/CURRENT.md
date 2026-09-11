@@ -2,7 +2,20 @@
 
 Updated: 2026-09-11
 
-Updated by: Gemini（P5 Advanced Masks, AI Repair, and Perspective）
+Updated by: Gemini（P6 Snapshots, Soft Proof, and Professional Preview）
+
+## P6：Snapshots、Soft Proof、Professional Preview（2026-09-11, Gemini）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-10-snapshots-soft-proof-and-professional-preview.md` 實作：
+  - 核心模型：`EditSnapshot`、`PhotoSidecar` 升級為 schema v4（落實 `DECISIONS.md` D-006），向下相容 v1/v2/v3。`PhotoLibraryService` 提供快照 CRUD 與 Sidecar-first 持久化。
+  - 渲染層：`ProfessionalPreviewOptions`、`ProfessionalPreviewRenderer`、Metal kernel `professionalPreviewOverlay`。支援高光裁切標記（純紅）、陰影死黑標記（純藍）、色域超出警示（純黃）以及 sRGB / Display P3 / Adobe RGB 色彩空間軟體打樣模擬。預覽選項與匯出管線隔離，不影響匯出品質。
+  - 編輯會話：`EditorSession` 實作快照 CRUD、單一 Compound Undo 交易復原、以及 A/B 比較隔離（不修改歷史與 sidecar）。
+  - UI 與雙平台整合：新增 `SnapshotsPanel`。Mac 端於 `InspectorView` 新增 `.snapshots` tab；iPad 端於 Info domain 面板掛載 `SnapshotsPanel`，並於頂部 Toolbar 的 `compareMenu` 整合快照 A/B 比較切換。
+  - 本地化：8 國語言（`en`, `zh-Hant`, `zh-Hans`, `ja`, `ko`, `de`, `fr`, `es`）完整補齊 22 個新鍵值，`EightLanguageLocalizationGateTests` 10/10 通過。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `3905ec7`（P5 commit）。
+- **驗證**：`swift test` 全套 **PASS**（2184 tests、9 skipped、0 failures，28.636s）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`git diff --check` **PASS**。隱私掃描 **PASS**。
+- **交接文件**：`docs/coordination/2026-09-11-p6-snapshots-soft-proof-handoff.md`。
+- **下一步**：P7「跨裝置驗收與發布準備（Cross-device final verification & release preparation）」。
 
 ## P5：Advanced Masks、AI Repair、Perspective（2026-09-11, Gemini）
 

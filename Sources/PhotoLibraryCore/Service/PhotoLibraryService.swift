@@ -2245,6 +2245,7 @@ public actor PhotoLibraryService {
                 // adjustment save is unrelated to rating/flag/keywords, and
                 // must never silently reset them to neutral.
                 curation: existing?.curation ?? .neutral,
+                snapshots: existing?.snapshots ?? [],
                 createdAt: existing?.createdAt ?? now,
                 modifiedAt: now,
                 variantOf: photo.variantOf ?? existing?.variantOf
@@ -2318,6 +2319,7 @@ public actor PhotoLibraryService {
                 decoder: DecoderDescriptor(decoder.identifier),
                 adjustments: existing?.adjustments ?? .neutral,
                 curation: curation,
+                snapshots: existing?.snapshots ?? [],
                 createdAt: existing?.createdAt ?? now,
                 modifiedAt: existing?.modifiedAt ?? now,
                 variantOf: photo.variantOf ?? existing?.variantOf
@@ -2327,6 +2329,57 @@ public actor PhotoLibraryService {
             try? index.setFlag(curation.flag, for: photo.id)
             try? index.setKeywords(curation.keywords.map(\.displayValue), for: photo.id)
             try? index.setCurationMigrationPending(false, for: photo.id)
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    // MARK: - Snapshots
+
+    /// Reads a photo's snapshots from its sidecar (spec §6.6).
+    public func snapshots(for photo: PhotoAsset) throws -> [EditSnapshot] {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+        do {
+            return try repository.loadSidecar(for: photo.id)?.snapshots ?? []
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    /// Persists snapshots to the sidecar while preserving existing adjustments and curation.
+    public func saveSnapshots(_ snapshots: [EditSnapshot], for photo: PhotoAsset) throws {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+
+        do {
+            let existing = try repository.loadSidecar(for: photo.id)
+            let now = Date()
+            let sidecar = PhotoSidecar(
+                photoID: photo.id,
+                sourceRelativePath: photo.relativePath,
+                sourceFingerprint: photo.fingerprint,
+                decoder: DecoderDescriptor(decoder.identifier),
+                adjustments: existing?.adjustments ?? .neutral,
+                curation: existing?.curation ?? .neutral,
+                snapshots: snapshots,
+                createdAt: existing?.createdAt ?? now,
+                modifiedAt: existing?.modifiedAt ?? now,
+                variantOf: photo.variantOf ?? existing?.variantOf
+            )
+            try repository.write(sidecar: sidecar)
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
         }

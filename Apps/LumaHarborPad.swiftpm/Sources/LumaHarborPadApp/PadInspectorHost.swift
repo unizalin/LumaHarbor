@@ -44,8 +44,12 @@ struct PadInspectorHost: View {
                 }
             case .info:
                 ScrollView {
-                    HistogramPanel(histogram: editor.histogram)
-                        .padding()
+                    VStack(alignment: .leading, spacing: 16) {
+                        HistogramPanel(histogram: editor.histogram)
+                        Divider()
+                        SnapshotsPanel(editor: editor)
+                    }
+                    .padding()
                 }
             }
         }

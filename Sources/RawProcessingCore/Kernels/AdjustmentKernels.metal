@@ -233,5 +233,24 @@ float4 monochromeMixer(
     return float4(gray, gray, gray, pixel.a);
 }
 
+/// Professional preview overlay for highlight clipping (red), shadow clipping (blue), and gamut warning (yellow).
+float4 professionalPreviewOverlay(
+    sample_t pixel,
+    float showHighlightClipping,
+    float showShadowClipping,
+    float showGamutWarning
+) {
+    if (showHighlightClipping > 0.5 && (pixel.r >= 0.99 || pixel.g >= 0.99 || pixel.b >= 0.99)) {
+        return float4(1.0, 0.0, 0.0, pixel.a);
+    }
+    if (showShadowClipping > 0.5 && (pixel.r <= 0.01 && pixel.g <= 0.01 && pixel.b <= 0.01)) {
+        return float4(0.0, 0.2, 1.0, pixel.a);
+    }
+    if (showGamutWarning > 0.5 && (pixel.r > 1.0 || pixel.g > 1.0 || pixel.b > 1.0 || pixel.r < 0.0 || pixel.g < 0.0 || pixel.b < 0.0)) {
+        return float4(1.0, 1.0, 0.0, pixel.a);
+    }
+    return pixel;
+}
+
 } // namespace coreimage
 } // extern "C"

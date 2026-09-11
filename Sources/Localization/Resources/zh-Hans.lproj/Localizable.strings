@@ -672,3 +672,26 @@
 "Vertical" = "垂直";
 "Horizontal" = "水平";
 "Reset Perspective" = "重置透视";
+/* P6: Snapshots, Soft Proof, Professional Preview */
+"Professional Preview" = "专业预览";
+"Gamut Warning" = "色域警告";
+"Soft Proof" = "软打样";
+"Profile" = "配置文件";
+"Simulate Paper & Ink" = "模拟纸张与油墨";
+"Snapshots" = "快照";
+"Create Snapshot" = "创建快照";
+"New snapshot name" = "新快照名称";
+"Create" = "创建";
+"Compare (A/B)" = "比较 (A/B)";
+"Comparing with: %@" = "正在比较：%@";
+"Exit Compare" = "退出比较";
+"Restore Snapshot" = "恢复快照";
+"Duplicate" = "复制";
+"Rename Snapshot" = "重命名快照";
+"No snapshots saved yet" = "尚未保存快照";
+"Save snapshots to preserve and compare different editing states." = "保存快照以保留并比较不同的编辑状态。";
+"Are you sure you want to delete snapshot \"%@\"? This action cannot be undone." = "确定要删除快照“%@”吗？此操作无法撤销。";
+"Compare with Snapshot" = "与快照比较";
+"sRGB" = "sRGB";
+"Display P3" = "Display P3";
+"Adobe RGB" = "Adobe RGB";

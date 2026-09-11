@@ -27,6 +27,8 @@ public struct EditorDependencies: Sendable {
     /// Fires with `history.current` the instant `EditorSession.endAdjustmentGesture()`
     /// is called -- the counterpart to `onBeginAdjustmentGesture` above.
     public let onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)?
+    public let loadSnapshots: (@Sendable (PhotoAsset) async throws -> [EditSnapshot])?
+    public let saveSnapshots: (@Sendable ([EditSnapshot], PhotoAsset) async throws -> Void)?
 
     public init(
         previewScheduler: PreviewScheduler,
@@ -37,7 +39,9 @@ public struct EditorDependencies: Sendable {
             (try? await runOffActor(priority: .utility) { HistogramComputer.histogram(for: image) }) ?? nil
         },
         onBeginAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil,
-        onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil
+        onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil,
+        loadSnapshots: (@Sendable (PhotoAsset) async throws -> [EditSnapshot])? = nil,
+        saveSnapshots: (@Sendable ([EditSnapshot], PhotoAsset) async throws -> Void)? = nil
     ) {
         self.previewScheduler = previewScheduler
         self.previewRenderer = previewRenderer
@@ -46,6 +50,8 @@ public struct EditorDependencies: Sendable {
         self.computeHistogram = computeHistogram
         self.onBeginAdjustmentGesture = onBeginAdjustmentGesture
         self.onEndAdjustmentGesture = onEndAdjustmentGesture
+        self.loadSnapshots = loadSnapshots
+        self.saveSnapshots = saveSnapshots
     }
 
     /// A copy with just the two batch-gesture hooks replaced -- the seam a
@@ -64,7 +70,9 @@ public struct EditorDependencies: Sendable {
             saveAdjustments: saveAdjustments,
             computeHistogram: computeHistogram,
             onBeginAdjustmentGesture: onBegin,
-            onEndAdjustmentGesture: onEnd
+            onEndAdjustmentGesture: onEnd,
+            loadSnapshots: loadSnapshots,
+            saveSnapshots: saveSnapshots
         )
     }
 }

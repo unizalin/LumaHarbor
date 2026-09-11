@@ -71,7 +71,7 @@ let package = Package(
         ),
         .target(
             name: "AdjustmentUI",
-            dependencies: ["EditorCore", "RawProcessingCore", "Localization"]
+            dependencies: ["EditorCore", "PhotoLibraryCore", "RawProcessingCore", "Localization"]
         ),
 
         // SwiftUI + AppKit layer. Never touches CIRAWFilter directly.

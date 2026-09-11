@@ -46,19 +46,22 @@ public struct PreviewRequest: Sendable {
     /// Longest edge, in pixels, the preview should cover.
     public var targetPixelDimension: Int
     public var quality: PreviewQuality
+    public var previewOptions: ProfessionalPreviewOptions
 
     public init(
         subject: PreviewSubject,
         url: URL,
         adjustments: PhotoAdjustments,
         targetPixelDimension: Int,
-        quality: PreviewQuality
+        quality: PreviewQuality,
+        previewOptions: ProfessionalPreviewOptions = .standard
     ) {
         self.subject = subject
         self.url = url
         self.adjustments = adjustments
         self.targetPixelDimension = targetPixelDimension
         self.quality = quality
+        self.previewOptions = previewOptions
     }
 
     public var decodeQuality: DecodeQuality {

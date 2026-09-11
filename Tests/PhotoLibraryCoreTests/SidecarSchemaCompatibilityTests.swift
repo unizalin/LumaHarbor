@@ -18,6 +18,7 @@ final class SidecarSchemaCompatibilityTests: XCTestCase {
         XCTAssertEqual(sidecar.adjustments.exposure, 1.5)
         XCTAssertEqual(sidecar.sourceRelativePath, "Trip/DSC0001.ARW")
         XCTAssertEqual(sidecar.curation, .neutral, "a v1 sidecar has no curation field; it must decode as neutral, not fail")
+        XCTAssertTrue(sidecar.snapshots.isEmpty, "a v1 sidecar has no snapshots field; it must decode as empty array")
     }
 
     func testSchemaV2JSONDecodesWithVariantOf() throws {
@@ -31,6 +32,20 @@ final class SidecarSchemaCompatibilityTests: XCTestCase {
         XCTAssertEqual(sidecar.variantOf, original)
         XCTAssertEqual(sidecar.adjustments.exposure, -0.5)
         XCTAssertEqual(sidecar.curation, .neutral, "a v2 sidecar has no curation field; it must decode as neutral, not fail")
+        XCTAssertTrue(sidecar.snapshots.isEmpty, "a v2 sidecar has no snapshots field; it must decode as empty array")
+    }
+
+    func testSchemaV3JSONDecodesWithCurationAndEmptySnapshots() throws {
+        let id = PhotoID()
+        let sidecar = try SidecarCoding.decode(
+            PhotoSidecar.self,
+            from: LegacySidecarFixture.schemaV3JSON(photoID: id)
+        )
+        XCTAssertEqual(sidecar.schemaVersion, 3)
+        XCTAssertEqual(sidecar.curation.rating, 4)
+        XCTAssertEqual(sidecar.curation.flag, .pick)
+        XCTAssertEqual(sidecar.curation.keywords.map(\.normalized), ["nature"])
+        XCTAssertTrue(sidecar.snapshots.isEmpty, "a v3 sidecar has no snapshots field; it must decode as empty array")
     }
 
     func testSidecarFromNewerSchemaIsRejectedByTheRepositoryNotByBareDecoding() throws {

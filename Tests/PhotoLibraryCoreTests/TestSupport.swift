@@ -143,6 +143,23 @@ enum LegacySidecarFixture {
         """.data(using: .utf8)!
     }
 
+    /// Schema v3: adds `curation`, no `snapshots`.
+    static func schemaV3JSON(photoID: PhotoID) -> Data {
+        """
+        {
+          "schemaVersion": 3,
+          "photoID": "\(photoID.rawValue.uuidString)",
+          "sourceRelativePath": "Trip/DSC0003.ARW",
+          "sourceFingerprint": {"fileSize": 25000000, "edgeDigest": "ghi"},
+          "decoder": {"kind": "coreImage", "version": "system-default"},
+          "adjustments": {"exposure": 0.5},
+          "curation": {"rating": 4, "flag": "pick", "keywords": [{"normalized": "nature", "displayValue": "Nature"}]},
+          "createdAt": "2024-01-01T00:00:00Z",
+          "modifiedAt": "2024-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+    }
+
     /// A sidecar written by a hypothetical future build, for testing the
     /// "reject, don't overwrite" contract.
     static func newerSchemaJSON(photoID: PhotoID, schemaVersion: Int) -> Data {
