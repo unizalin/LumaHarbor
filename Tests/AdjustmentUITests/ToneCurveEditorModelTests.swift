@@ -33,4 +33,23 @@ final class ToneCurveEditorModelTests: XCTestCase {
 
         XCTAssertEqual(index, 2)
     }
+
+    // MARK: - Per-channel (P3)
+
+    func testPointsForChannelReturnsOnlyThatChannelsCurve() {
+        let curve = AdvancedToneCurve.neutral.settingPoints(
+            [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 0.5, y: 0.2), ToneCurvePoint(x: 1, y: 1)],
+            for: .red
+        )
+        XCTAssertEqual(ToneCurveEditorModel.points(for: curve, channel: .red).count, 3)
+        // An identity channel with no user-added points still needs 5 draggable
+        // handles, same as the whole-curve identity case.
+        XCTAssertEqual(ToneCurveEditorModel.points(for: curve, channel: .green), ToneCurveMapping.identity)
+        XCTAssertEqual(ToneCurveEditorModel.points(for: curve, channel: .composite), ToneCurveMapping.identity)
+    }
+
+    func testPointsForChannelDefaultsToComposite() {
+        // Existing call sites (predating per-channel curves) omit `channel`.
+        XCTAssertEqual(ToneCurveEditorModel.points(for: .neutral), ToneCurveEditorModel.points(for: .neutral, channel: .composite))
+    }
 }

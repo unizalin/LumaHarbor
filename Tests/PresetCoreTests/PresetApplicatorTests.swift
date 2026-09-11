@@ -82,6 +82,21 @@ final class PresetApplicatorTests: XCTestCase {
         XCTAssertEqual(result.adjustments.exposure, 0)
     }
 
+    func testApplyingAPatchCarriesAllFourToneCurveChannelsAsOneUnit() throws {
+        // The whole-value `.advancedToneCurve` leaf must not lose the three
+        // per-channel arrays when it travels through a preset apply/batch
+        // sync cycle (P3, design spec §11.2 item 8).
+        let curve = AdvancedToneCurve(
+            points: [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 1)],
+            redPoints: [ToneCurvePoint(x: 0.1, y: 0.2)],
+            greenPoints: [ToneCurvePoint(x: 0.3, y: 0.4)],
+            bluePoints: [ToneCurvePoint(x: 0.5, y: 0.6)]
+        )
+        let patch = AdjustmentPatch(advancedToneCurve: curve)
+        let result = applicator.apply(patch, to: .neutral, mode: .replace, context: .none)
+        XCTAssertEqual(result.adjustments.advancedToneCurve, curve)
+    }
+
     func testAbsentAdvancedToneCurveLeavesCurrentCurveUntouchedUnderMerge() throws {
         var current = PhotoAdjustments.neutral
         current.advancedToneCurve = AdvancedToneCurve(points: [ToneCurvePoint(x: 0.1, y: 0.2)])

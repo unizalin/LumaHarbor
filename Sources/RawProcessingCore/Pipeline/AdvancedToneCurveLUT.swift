@@ -41,6 +41,37 @@ public enum AdvancedToneCurveLUT {
         return enforceMonotonicNonDecreasing(table)
     }
 
+    /// Composes a per-channel curve after the composite curve (spec §8 step
+    /// 4: composite is applied first, then the channel curve), producing one
+    /// combined table. Sampling the already-built discrete tables (rather
+    /// than composing the two continuous curves directly) keeps this a thin
+    /// wrapper around `build`, at the cost of one extra rounding step per
+    /// sample -- well within the pipeline's `0.5/255` average / `2/255` p99
+    /// accuracy budget (spec §11.4 item 24).
+    ///
+    /// Composing two non-decreasing tables always yields a non-decreasing
+    /// table, so no extra monotonic enforcement is needed here.
+    public static func buildCombined(
+        compositePoints: [ToneCurvePoint],
+        channelPoints: [ToneCurvePoint],
+        resolution: Int = 256
+    ) -> [Float] {
+        let compositeTable = build(from: compositePoints, resolution: resolution)
+        // An identity channel leaves the composite result untouched -- return
+        // it directly rather than round-tripping every sample through an
+        // index lookup, which would otherwise quantise an exact composite
+        // value to the nearest 1/(resolution-1) step for no reason.
+        guard !channelPoints.isEmpty else { return compositeTable }
+        let channelTable = build(from: channelPoints, resolution: resolution)
+        guard resolution > 1 else { return compositeTable }
+        let lastIndex = Float(resolution - 1)
+        return compositeTable.map { value in
+            let index = Int((value * lastIndex).rounded())
+            let clampedIndex = Swift.min(Swift.max(index, 0), resolution - 1)
+            return channelTable[clampedIndex]
+        }
+    }
+
     private static func interpolate(_ x: Double, in points: [ToneCurvePoint]) -> Double {
         if x <= points.first!.x { return points.first!.y }
         if x >= points.last!.x { return points.last!.y }
