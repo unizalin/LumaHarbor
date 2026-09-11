@@ -229,6 +229,24 @@ public struct GrainPatch: Codable, Equatable, Sendable {
     func canonicalized() -> GrainPatch? { isEmpty ? nil : self }
 }
 
+/// P4: granular, unlike the other four new P4 groups, because Texture,
+/// Clarity and Dehaze each have a native XMP scalar mapping (design spec §7).
+public struct PresencePatch: Codable, Equatable, Sendable {
+    public var texture: Double?
+    public var clarity: Double?
+    public var dehaze: Double?
+
+    public init(texture: Double? = nil, clarity: Double? = nil, dehaze: Double? = nil) {
+        self.texture = texture
+        self.clarity = clarity
+        self.dehaze = dehaze
+    }
+
+    public var isEmpty: Bool { texture == nil && clarity == nil && dehaze == nil }
+
+    func canonicalized() -> PresencePatch? { isEmpty ? nil : self }
+}
+
 /// A partial, mergeable set of `PhotoAdjustments` leaves (spec §5.2).
 ///
 /// Every nested patch canonicalizes an all-nil value to `nil` on init and on
@@ -249,6 +267,12 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
     public var noiseReduction: NoiseReductionPatch? { didSet { noiseReduction = noiseReduction?.canonicalized() } }
     public var vignette: VignettePatch? { didSet { vignette = vignette?.canonicalized() } }
     public var grain: GrainPatch? { didSet { grain = grain?.canonicalized() } }
+    public var presence: PresencePatch? { didSet { presence = presence?.canonicalized() } }
+    /// Whole-value leaves, same convention as `advancedToneCurve` above.
+    public var colorGrading: ColorGradingAdjustments?
+    public var monochrome: MonochromeAdjustments?
+    public var renderingProfile: RenderingProfileSelection?
+    public var lensCorrection: LensCorrectionAdjustments?
 
     public init(
         basic: BasicAdjustmentPatch? = nil,
@@ -258,7 +282,12 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         sharpening: SharpeningPatch? = nil,
         noiseReduction: NoiseReductionPatch? = nil,
         vignette: VignettePatch? = nil,
-        grain: GrainPatch? = nil
+        grain: GrainPatch? = nil,
+        presence: PresencePatch? = nil,
+        colorGrading: ColorGradingAdjustments? = nil,
+        monochrome: MonochromeAdjustments? = nil,
+        renderingProfile: RenderingProfileSelection? = nil,
+        lensCorrection: LensCorrectionAdjustments? = nil
     ) {
         self.basic = basic?.canonicalized()
         self.advancedToneCurve = advancedToneCurve
@@ -268,16 +297,30 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         self.noiseReduction = noiseReduction?.canonicalized()
         self.vignette = vignette?.canonicalized()
         self.grain = grain?.canonicalized()
+        self.presence = presence?.canonicalized()
+        self.colorGrading = colorGrading
+        self.monochrome = monochrome
+        self.renderingProfile = renderingProfile
+        self.lensCorrection = lensCorrection
     }
 
     public var isEmpty: Bool {
         basic == nil && advancedToneCurve == nil && hsl == nil && splitToning == nil
             && sharpening == nil && noiseReduction == nil && vignette == nil && grain == nil
+            && presence == nil && colorGrading == nil && monochrome == nil
+            && renderingProfile == nil && lensCorrection == nil
     }
 
     /// Whether `field` has an explicit value in this patch.
     public func contains(_ field: AdjustmentFieldID) -> Bool {
-        scalarValue(for: field) != nil || (field == .advancedToneCurve && advancedToneCurve != nil)
+        switch field {
+        case .advancedToneCurve: return advancedToneCurve != nil
+        case .colorGrading: return colorGrading != nil
+        case .monochrome: return monochrome != nil
+        case .renderingProfile: return renderingProfile != nil
+        case .lensCorrection: return lensCorrection != nil
+        default: return scalarValue(for: field) != nil
+        }
     }
 
     /// The explicit value for a scalar leaf, or `nil` if `field` is a
@@ -339,11 +382,16 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         case .grainAmount: return grain?.amount
         case .grainSize: return grain?.size
         case .grainRoughness: return grain?.roughness
+        case .presenceTexture: return presence?.texture
+        case .presenceClarity: return presence?.clarity
+        case .presenceDehaze: return presence?.dehaze
+        case .colorGrading, .monochrome, .renderingProfile, .lensCorrection: return nil
         }
     }
 
     private enum CodingKeys: String, CodingKey {
         case basic, advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
+        case presence, colorGrading, monochrome, renderingProfile, lensCorrection
     }
 
     public init(from decoder: Decoder) throws {
@@ -356,7 +404,12 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
             sharpening: try container.decodeIfPresent(SharpeningPatch.self, forKey: .sharpening),
             noiseReduction: try container.decodeIfPresent(NoiseReductionPatch.self, forKey: .noiseReduction),
             vignette: try container.decodeIfPresent(VignettePatch.self, forKey: .vignette),
-            grain: try container.decodeIfPresent(GrainPatch.self, forKey: .grain)
+            grain: try container.decodeIfPresent(GrainPatch.self, forKey: .grain),
+            presence: try container.decodeIfPresent(PresencePatch.self, forKey: .presence),
+            colorGrading: try container.decodeIfPresent(ColorGradingAdjustments.self, forKey: .colorGrading),
+            monochrome: try container.decodeIfPresent(MonochromeAdjustments.self, forKey: .monochrome),
+            renderingProfile: try container.decodeIfPresent(RenderingProfileSelection.self, forKey: .renderingProfile),
+            lensCorrection: try container.decodeIfPresent(LensCorrectionAdjustments.self, forKey: .lensCorrection)
         )
     }
 
@@ -370,5 +423,10 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         try container.encodeIfPresent(noiseReduction, forKey: .noiseReduction)
         try container.encodeIfPresent(vignette, forKey: .vignette)
         try container.encodeIfPresent(grain, forKey: .grain)
+        try container.encodeIfPresent(presence, forKey: .presence)
+        try container.encodeIfPresent(colorGrading, forKey: .colorGrading)
+        try container.encodeIfPresent(monochrome, forKey: .monochrome)
+        try container.encodeIfPresent(renderingProfile, forKey: .renderingProfile)
+        try container.encodeIfPresent(lensCorrection, forKey: .lensCorrection)
     }
 }

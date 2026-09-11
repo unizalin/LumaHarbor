@@ -624,3 +624,29 @@
 "Reset Adjust" = "調整をリセット";
 "Reset Geometry" = "ジオメトリをリセット";
 "Reset Local Adjustments" = "部分調整をリセット";
+
+/* P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction */
+"Texture" = "テクスチャ";
+"Clarity" = "明瞭度";
+"Dehaze" = "かすみの除去";
+"Presence" = "質感";
+"Color Grading" = "カラーグレーディング";
+"Midtones" = "中間調";
+"Global" = "全体";
+"Balance" = "バランス";
+"Blending" = "ブレンド";
+"Black & White" = "白黒";
+"Lens Correction" = "レンズ補正";
+"Off" = "オフ";
+"Automatic" = "自動";
+"Manual" = "手動";
+"Bundled Profile" = "内蔵プロファイル";
+"Distortion" = "歪み補正";
+"Vignetting" = "周辺光量補正";
+"Chromatic Aberration" = "色収差";
+"Rendering Profile" = "レンダリングプロファイル";
+"Standard" = "標準";
+"Vivid" = "ビビッド";
+"Flat" = "フラット";
+"Portrait" = "ポートレート";
+"No Matching Profile" = "一致するプロファイルがありません";

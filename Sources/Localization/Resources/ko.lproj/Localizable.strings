@@ -624,3 +624,29 @@
 "Reset Adjust" = "조정 초기화";
 "Reset Geometry" = "기하 초기화";
 "Reset Local Adjustments" = "부분 조정 초기화";
+
+/* P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction */
+"Texture" = "텍스처";
+"Clarity" = "선명도";
+"Dehaze" = "안개 제거";
+"Presence" = "입체감";
+"Color Grading" = "컬러 그레이딩";
+"Midtones" = "중간톤";
+"Global" = "전체";
+"Balance" = "균형";
+"Blending" = "혼합";
+"Black & White" = "흑백";
+"Lens Correction" = "렌즈 교정";
+"Off" = "끄기";
+"Automatic" = "자동";
+"Manual" = "수동";
+"Bundled Profile" = "번들 프로필";
+"Distortion" = "왜곡 보정";
+"Vignetting" = "비네팅 보정";
+"Chromatic Aberration" = "색수차";
+"Rendering Profile" = "렌더링 프로필";
+"Standard" = "표준";
+"Vivid" = "선명하게";
+"Flat" = "플랫";
+"Portrait" = "인물";
+"No Matching Profile" = "일치하는 프로필 없음";

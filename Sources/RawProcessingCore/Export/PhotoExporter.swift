@@ -260,7 +260,8 @@ public actor PhotoExporter {
         let decodeRequest = RawDecodeRequest(
             url: request.sourceURL,
             quality: .full,
-            whiteBalance: parameters.whiteBalance
+            whiteBalance: parameters.whiteBalance,
+            lensCorrection: request.adjustments.lensCorrection
         )
         let decoder = self.decoder
         let pipeline = self.pipeline

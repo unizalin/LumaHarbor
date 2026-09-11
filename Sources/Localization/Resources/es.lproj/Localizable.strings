@@ -624,3 +624,29 @@
 "Reset Adjust" = "Restablecer ajustes";
 "Reset Geometry" = "Restablecer geometría";
 "Reset Local Adjustments" = "Restablecer ajustes locales";
+
+/* P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction */
+"Texture" = "Textura";
+"Clarity" = "Claridad";
+"Dehaze" = "Reducir neblina";
+"Presence" = "Presencia";
+"Color Grading" = "Gradación de color";
+"Midtones" = "Tonos medios";
+"Global" = "General";
+"Balance" = "Equilibrio";
+"Blending" = "Mezcla";
+"Black & White" = "Blanco y negro";
+"Lens Correction" = "Corrección de objetivo";
+"Off" = "Desactivado";
+"Automatic" = "Automático";
+"Manual" = "Manual";
+"Bundled Profile" = "Perfil incluido";
+"Distortion" = "Distorsión";
+"Vignetting" = "Viñeteado";
+"Chromatic Aberration" = "Aberración cromática";
+"Rendering Profile" = "Perfil de renderizado";
+"Standard" = "Estándar";
+"Vivid" = "Vívido";
+"Flat" = "Plano";
+"Portrait" = "Retrato";
+"No Matching Profile" = "Sin perfil coincidente";

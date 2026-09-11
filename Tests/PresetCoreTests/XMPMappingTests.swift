@@ -58,6 +58,11 @@ final class XMPMappingTests: XCTestCase {
         MappingCase(.cameraRaw("Whites2012"), .basicWhites, .approximate, importText: "+10", expectedValue: 10, expectedExportText: "10"),
         MappingCase(.cameraRaw("Blacks2012"), .basicBlacks, .approximate, importText: "-10", expectedValue: -10, expectedExportText: "-10"),
 
+        // MARK: Presence -- approximate (P4)
+        MappingCase(.cameraRaw("Texture"), .presenceTexture, .approximate, importText: "+20", expectedValue: 20, expectedExportText: "20"),
+        MappingCase(.cameraRaw("Clarity2012"), .presenceClarity, .approximate, importText: "-15", expectedValue: -15, expectedExportText: "-15"),
+        MappingCase(.cameraRaw("Dehaze"), .presenceDehaze, .approximate, importText: "+30", expectedValue: 30, expectedExportText: "30"),
+
         // MARK: HSL -- native, all eight bands
         MappingCase(.cameraRaw("HueAdjustmentRed"), .hslRedHue, .native, importText: "-20", expectedValue: -20, expectedExportText: "-20"),
         MappingCase(.cameraRaw("SaturationAdjustmentRed"), .hslRedSaturation, .native, importText: "+15", expectedValue: 15, expectedExportText: "15"),

@@ -95,6 +95,16 @@ final class AdjustmentPatchTests: XCTestCase {
         case .grainAmount: patch.grain = GrainPatch(amount: value)
         case .grainSize: patch.grain = GrainPatch(size: value)
         case .grainRoughness: patch.grain = GrainPatch(roughness: value)
+        case .presenceTexture: patch.presence = PresencePatch(texture: value)
+        case .presenceClarity: patch.presence = PresencePatch(clarity: value)
+        case .presenceDehaze: patch.presence = PresencePatch(dehaze: value)
+        case .colorGrading:
+            var grading = ColorGradingAdjustments.neutral
+            grading.shadows.saturation = value
+            patch.colorGrading = grading
+        case .monochrome: patch.monochrome = MonochromeAdjustments(isEnabled: true, red: value)
+        case .renderingProfile: patch.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: value)
+        case .lensCorrection: patch.lensCorrection = LensCorrectionAdjustments(mode: .manual, distortionAmount: value)
         }
         return patch
     }

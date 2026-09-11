@@ -93,6 +93,40 @@ public struct GeometryAdjustmentPanel: View {
                 }
             }
 
+            DisclosureGroup(L10n.t("Lens Correction")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker(L10n.t("Lens Correction"), selection: lensCorrectionModeBinding) {
+                        Text(L10n.t("Off")).tag(LensCorrectionMode.off)
+                        Text(L10n.t("Automatic")).tag(LensCorrectionMode.automatic)
+                        Text(L10n.t("Manual")).tag(LensCorrectionMode.manual)
+                        Text(L10n.t("Bundled Profile")).tag(LensCorrectionMode.bundledProfile)
+                    }
+                    .pickerStyle(.menu)
+
+                    if editor.adjustments.lensCorrection.mode == .manual
+                        || editor.adjustments.lensCorrection.mode == .bundledProfile {
+                        AdjustmentSliderRow(
+                            label: L10n.t("Distortion"), value: editor.adjustments.lensCorrection.distortionAmount,
+                            range: -100...100, fractionDigits: 0,
+                            onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.distortionAmount = newValue } },
+                            onReset: { editor.updateAdjustments { $0.lensCorrection.distortionAmount = 0 } }
+                        )
+                        AdjustmentSliderRow(
+                            label: L10n.t("Vignetting"), value: editor.adjustments.lensCorrection.vignettingAmount,
+                            range: -100...100, fractionDigits: 0,
+                            onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.vignettingAmount = newValue } },
+                            onReset: { editor.updateAdjustments { $0.lensCorrection.vignettingAmount = 0 } }
+                        )
+                        AdjustmentSliderRow(
+                            label: L10n.t("Chromatic Aberration"), value: editor.adjustments.lensCorrection.tcaAmount,
+                            range: -100...100, fractionDigits: 0,
+                            onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.tcaAmount = newValue } },
+                            onReset: { editor.updateAdjustments { $0.lensCorrection.tcaAmount = 0 } }
+                        )
+                    }
+                }
+            }
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(L10n.t("Geometry adjustments are non-destructive."))
                 Text(L10n.t("Your RAW original was not changed."))
@@ -101,11 +135,21 @@ public struct GeometryAdjustmentPanel: View {
             .foregroundStyle(.secondary)
 
             Button(L10n.t("Reset")) {
-                editor.updateAdjustments { $0.geometry = .neutral }
+                editor.updateAdjustments {
+                    $0.geometry = .neutral
+                    $0.lensCorrection = .neutral
+                }
             }
             .controlSize(.small)
-            .disabled(editor.adjustments.geometry.isIdentity)
+            .disabled(editor.adjustments.geometry.isIdentity && editor.adjustments.lensCorrection.isIdentity)
         }
+    }
+
+    private var lensCorrectionModeBinding: Binding<LensCorrectionMode> {
+        Binding(
+            get: { editor.adjustments.lensCorrection.mode },
+            set: { newValue in editor.updateAdjustments { $0.lensCorrection.mode = newValue } }
+        )
     }
 
     private var aspectRatioBinding: Binding<CropAspectRatio> {

@@ -177,12 +177,33 @@ final class PresetApplicatorTests: XCTestCase {
             let patch = AdjustmentPatchTests.makePatch(settingOnly: field, to: value)
             let result = applicator.apply(patch, to: .neutral, mode: .merge, context: .none)
 
-            if field == .advancedToneCurve {
+            switch field {
+            case .advancedToneCurve:
                 XCTAssertEqual(
                     result.adjustments.advancedToneCurve, patch.advancedToneCurve,
                     "\(field) was set in the patch but never reached PresetApplicator's output"
                 )
-            } else {
+            case .colorGrading:
+                XCTAssertEqual(
+                    result.adjustments.colorGrading, patch.colorGrading,
+                    "\(field) was set in the patch but never reached PresetApplicator's output"
+                )
+            case .monochrome:
+                XCTAssertEqual(
+                    result.adjustments.monochrome, patch.monochrome,
+                    "\(field) was set in the patch but never reached PresetApplicator's output"
+                )
+            case .renderingProfile:
+                XCTAssertEqual(
+                    result.adjustments.renderingProfile, patch.renderingProfile,
+                    "\(field) was set in the patch but never reached PresetApplicator's output"
+                )
+            case .lensCorrection:
+                XCTAssertEqual(
+                    result.adjustments.lensCorrection, patch.lensCorrection,
+                    "\(field) was set in the patch but never reached PresetApplicator's output"
+                )
+            default:
                 XCTAssertEqual(
                     result.adjustments.scalarValue(for: field), value,
                     "\(field) was set in the patch but never reached PresetApplicator's output"

@@ -69,4 +69,18 @@ public enum AdjustmentFieldID: String, CaseIterable, Codable, Hashable, Sendable
     case grainAmount = "grain.amount"
     case grainSize = "grain.size"
     case grainRoughness = "grain.roughness"
+
+    // P4: presence is granular (native XMP scalar mapping, see
+    // XMPMappingRegistry); the other four groups are single whole-value
+    // leaves (design spec §7's revised decision -- no per-user-facing-slider
+    // XMP mapping exists for them, so granular field IDs would add
+    // switch-case surface with no corresponding native mapping to justify it).
+    case presenceTexture = "presence.texture"
+    case presenceClarity = "presence.clarity"
+    case presenceDehaze = "presence.dehaze"
+
+    case colorGrading
+    case monochrome
+    case renderingProfile
+    case lensCorrection
 }

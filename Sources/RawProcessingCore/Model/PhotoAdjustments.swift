@@ -28,6 +28,11 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     /// 4.2/4.4 wire up rendering. Order is significant and must survive a
     /// round trip, unlike every other field here which is a single value.
     public var localAdjustments: [LocalAdjustment]
+    public var presence: PresenceAdjustments
+    public var colorGrading: ColorGradingAdjustments
+    public var monochrome: MonochromeAdjustments
+    public var renderingProfile: RenderingProfileSelection
+    public var lensCorrection: LensCorrectionAdjustments
 
     public init(
         exposure: Double = 0,
@@ -48,7 +53,12 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         vignette: Vignette = .neutral,
         grain: Grain = .neutral,
         geometry: GeometryAdjustments = .neutral,
-        localAdjustments: [LocalAdjustment] = []
+        localAdjustments: [LocalAdjustment] = [],
+        presence: PresenceAdjustments = .neutral,
+        colorGrading: ColorGradingAdjustments = .neutral,
+        monochrome: MonochromeAdjustments = .neutral,
+        renderingProfile: RenderingProfileSelection = .neutral,
+        lensCorrection: LensCorrectionAdjustments = .neutral
     ) {
         self.exposure = AdjustmentCatalog.definition(for: .exposure).clamp(exposure)
         self.temperature = AdjustmentCatalog.definition(for: .temperature).clamp(temperature)
@@ -69,6 +79,11 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.grain = grain
         self.geometry = geometry
         self.localAdjustments = localAdjustments
+        self.presence = presence
+        self.colorGrading = colorGrading
+        self.monochrome = monochrome
+        self.renderingProfile = renderingProfile
+        self.lensCorrection = lensCorrection
     }
 
     /// All sliders at their documented default — the "no edit applied" state.
@@ -128,7 +143,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
             vibrance: vibrance, saturation: saturation,
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
-            grain: grain, geometry: geometry, localAdjustments: localAdjustments
+            grain: grain, geometry: geometry, localAdjustments: localAdjustments,
+            presence: presence, colorGrading: colorGrading, monochrome: monochrome,
+            renderingProfile: renderingProfile, lensCorrection: lensCorrection
         )
     }
 
@@ -147,6 +164,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         case advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
         case geometry
         case localAdjustments
+        case presence, colorGrading, monochrome, renderingProfile, lensCorrection
     }
 
     /// Missing keys fall back to the catalogue default and out-of-range values
@@ -183,6 +201,12 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         // all — the same absent-key-means-empty convention `geometry`
         // itself used when it was the newly added field in Phase 2.
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustment].self, forKey: .localAdjustments) ?? []
+        // A sidecar written before P4 has none of these five keys.
+        self.presence = try container.decodeIfPresent(PresenceAdjustments.self, forKey: .presence) ?? .neutral
+        self.colorGrading = try container.decodeIfPresent(ColorGradingAdjustments.self, forKey: .colorGrading) ?? .neutral
+        self.monochrome = try container.decodeIfPresent(MonochromeAdjustments.self, forKey: .monochrome) ?? .neutral
+        self.renderingProfile = try container.decodeIfPresent(RenderingProfileSelection.self, forKey: .renderingProfile) ?? .neutral
+        self.lensCorrection = try container.decodeIfPresent(LensCorrectionAdjustments.self, forKey: .lensCorrection) ?? .neutral
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -208,5 +232,10 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(grain, forKey: .grain)
         try container.encode(geometry, forKey: .geometry)
         try container.encode(localAdjustments, forKey: .localAdjustments)
+        try container.encode(presence, forKey: .presence)
+        try container.encode(colorGrading, forKey: .colorGrading)
+        try container.encode(monochrome, forKey: .monochrome)
+        try container.encode(renderingProfile, forKey: .renderingProfile)
+        try container.encode(lensCorrection, forKey: .lensCorrection)
     }
 }

@@ -11,7 +11,7 @@ final class InspectorCatalogTests: XCTestCase {
 
     // MARK: - Section inventory
 
-    func testAllEightSectionsExist() {
+    func testAllTenSectionsExist() {
         let ids = Set(InspectorCatalog.allSections.map(\.id))
         XCTAssertEqual(ids, Set(InspectorSectionID.allCases))
         XCTAssertEqual(InspectorCatalog.allSections.count, InspectorSectionID.allCases.count,
@@ -38,9 +38,9 @@ final class InspectorCatalogTests: XCTestCase {
 
     // MARK: - Domain/submode grouping (design spec §2 table)
 
-    func testAdjustDomainContainsSixFieldSections() {
+    func testAdjustDomainContainsEightFieldSections() {
         let ids = Set(InspectorCatalog.sections(in: .adjust).map(\.id))
-        XCTAssertEqual(ids, [.basic, .whiteBalance, .hsl, .curve, .detail, .effects])
+        XCTAssertEqual(ids, [.basic, .whiteBalance, .hsl, .curve, .presence, .colorGrading, .detail, .effects])
     }
 
     func testGeometryDomainContainsOnlyGeometrySection() {
@@ -51,12 +51,12 @@ final class InspectorCatalogTests: XCTestCase {
         XCTAssertEqual(InspectorCatalog.sections(in: .local).map(\.id), [.local])
     }
 
-    func testLightSubmodeIsBasicAndCurve() {
-        XCTAssertEqual(Set(InspectorCatalog.sections(in: .light).map(\.id)), [.basic, .curve])
+    func testLightSubmodeIsBasicCurveAndPresence() {
+        XCTAssertEqual(Set(InspectorCatalog.sections(in: .light).map(\.id)), [.basic, .curve, .presence])
     }
 
-    func testColorSubmodeIsWhiteBalanceAndHSL() {
-        XCTAssertEqual(Set(InspectorCatalog.sections(in: .color).map(\.id)), [.whiteBalance, .hsl])
+    func testColorSubmodeIsWhiteBalanceHSLAndColorGrading() {
+        XCTAssertEqual(Set(InspectorCatalog.sections(in: .color).map(\.id)), [.whiteBalance, .hsl, .colorGrading])
     }
 
     func testDetailSubmodeIsDetailAndEffects() {
@@ -85,6 +85,17 @@ final class InspectorCatalogTests: XCTestCase {
 
     func testCurveSectionCoversAdvancedToneCurve() {
         XCTAssertEqual(InspectorCatalog.section(.curve).fieldIDs, ["advancedToneCurve"])
+    }
+
+    func testPresenceSectionCoversTextureClarityAndDehaze() {
+        XCTAssertEqual(
+            Set(InspectorCatalog.section(.presence).fieldIDs),
+            ["presence.texture", "presence.clarity", "presence.dehaze"]
+        )
+    }
+
+    func testColorGradingSectionCoversTheWholeValueLeaf() {
+        XCTAssertEqual(InspectorCatalog.section(.colorGrading).fieldIDs, ["colorGrading"])
     }
 
     // MARK: - adjustmentKinds bridge (Mac/iPad shared BasicAdjustmentPanel kinds)
@@ -142,6 +153,39 @@ final class InspectorCatalogTests: XCTestCase {
         XCTAssertEqual(reset.exposure, 1.0)
     }
 
+    func testResettingGeometryAlsoClearsLensCorrection() {
+        // Lens Correction is mounted inside the Geometry UI group (P4 spec
+        // §9), so its shared "Reset Geometry" affordance must clear both.
+        var adjustments = PhotoAdjustments()
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .manual, distortionAmount: 20)
+
+        let reset = InspectorCatalog.resetting(.geometry, in: adjustments)
+
+        XCTAssertEqual(reset.lensCorrection, .neutral)
+    }
+
+    func testResettingPresenceOnlyTouchesPresence() {
+        var adjustments = PhotoAdjustments()
+        adjustments.exposure = 1.0
+        adjustments.presence = PresenceAdjustments(texture: 30, clarity: -10, dehaze: 20)
+
+        let reset = InspectorCatalog.resetting(.presence, in: adjustments)
+
+        XCTAssertEqual(reset.presence, .neutral)
+        XCTAssertEqual(reset.exposure, 1.0)
+    }
+
+    func testResettingColorGradingOnlyTouchesColorGrading() {
+        var adjustments = PhotoAdjustments()
+        adjustments.exposure = 1.0
+        adjustments.colorGrading.shadows = ColorGradeBand(hue: 220, saturation: 20, luminance: -5)
+
+        let reset = InspectorCatalog.resetting(.colorGrading, in: adjustments)
+
+        XCTAssertEqual(reset.colorGrading, .neutral)
+        XCTAssertEqual(reset.exposure, 1.0)
+    }
+
     func testResettingLocalOnlyTouchesLocalAdjustments() {
         var adjustments = PhotoAdjustments()
         adjustments.exposure = 1.0
@@ -153,12 +197,14 @@ final class InspectorCatalogTests: XCTestCase {
         XCTAssertEqual(reset.exposure, 1.0)
     }
 
-    func testResettingAdjustDomainClearsAllSixFieldSectionsButNotGeometryOrLocal() {
+    func testResettingAdjustDomainClearsAllEightFieldSectionsButNotGeometryOrLocal() {
         var adjustments = PhotoAdjustments()
         adjustments.exposure = 1.0
         adjustments.temperature = 4000
         adjustments.hsl.red.hue = 30
         adjustments.advancedToneCurve = AdvancedToneCurve(points: [ToneCurvePoint(x: 0.2, y: 0.4)])
+        adjustments.presence = PresenceAdjustments(texture: 30)
+        adjustments.colorGrading.shadows.saturation = 20
         adjustments.sharpening.amount = 50
         adjustments.vignette.amount = 20
         adjustments.geometry.straightenDegrees = 5
@@ -170,6 +216,8 @@ final class InspectorCatalogTests: XCTestCase {
         XCTAssertEqual(reset.temperature, PhotoAdjustments().temperature)
         XCTAssertEqual(reset.hsl, .neutral)
         XCTAssertEqual(reset.advancedToneCurve, .neutral)
+        XCTAssertEqual(reset.presence, .neutral)
+        XCTAssertEqual(reset.colorGrading, .neutral)
         XCTAssertEqual(reset.sharpening, .neutral)
         XCTAssertEqual(reset.vignette, .neutral)
         XCTAssertEqual(reset.geometry.straightenDegrees, 5, "geometry domain must be untouched by an adjust-domain reset")

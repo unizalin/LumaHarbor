@@ -624,3 +624,29 @@
 "Reset Adjust" = "重置调整";
 "Reset Geometry" = "重置几何";
 "Reset Local Adjustments" = "重置局部调整";
+
+/* P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction */
+"Texture" = "纹理";
+"Clarity" = "清晰度";
+"Dehaze" = "去朦胧";
+"Presence" = "质感";
+"Color Grading" = "色彩分级";
+"Midtones" = "中间调";
+"Global" = "全局";
+"Balance" = "平衡";
+"Blending" = "混合";
+"Black & White" = "黑白";
+"Lens Correction" = "镜头校正";
+"Off" = "关闭";
+"Automatic" = "自动";
+"Manual" = "手动";
+"Bundled Profile" = "内置配置文件";
+"Distortion" = "变形校正";
+"Vignetting" = "晕影校正";
+"Chromatic Aberration" = "色差";
+"Rendering Profile" = "渲染配置文件";
+"Standard" = "标准";
+"Vivid" = "鲜艳";
+"Flat" = "平淡";
+"Portrait" = "人像";
+"No Matching Profile" = "没有匹配的配置文件";

@@ -57,7 +57,8 @@ final class PhotoAdjustmentsTests: XCTestCase {
                 "exposure", "temperature", "tint", "contrast", "highlights",
                 "shadows", "whites", "blacks", "vibrance", "saturation",
                 "advancedToneCurve", "hsl", "splitToning", "sharpening",
-                "noiseReduction", "vignette", "grain", "geometry", "localAdjustments"
+                "noiseReduction", "vignette", "grain", "geometry", "localAdjustments",
+                "presence", "colorGrading", "monochrome", "renderingProfile", "lensCorrection"
             ]
         )
     }
@@ -108,6 +109,46 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(adjustments.vignette, .neutral)
         XCTAssertEqual(adjustments.grain, .neutral)
         XCTAssertEqual(adjustments.geometry, .neutral)
+    }
+
+    // MARK: - P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction
+
+    func testP4FieldsDefaultToNeutral() {
+        let adjustments = PhotoAdjustments.neutral
+        XCTAssertEqual(adjustments.presence, .neutral)
+        XCTAssertEqual(adjustments.colorGrading, .neutral)
+        XCTAssertEqual(adjustments.monochrome, .neutral)
+        XCTAssertEqual(adjustments.renderingProfile, .neutral)
+        XCTAssertEqual(adjustments.lensCorrection, .neutral)
+    }
+
+    func testOldSidecarWithoutP4KeysDecodesToNeutralExpansions() throws {
+        // Exactly what every real sidecar on disk looks like before P4.
+        let json = Data(#"""
+        {"exposure": 1.0, "temperature": 0, "tint": 0, "contrast": 0, "highlights": 0,
+         "shadows": 0, "whites": 0, "blacks": 0, "vibrance": 0, "saturation": 0,
+         "advancedToneCurve": {}, "hsl": {}, "splitToning": {},
+         "sharpening": {}, "noiseReduction": {}, "vignette": {}, "grain": {}, "geometry": {}}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.exposure, 1.0)
+        XCTAssertEqual(decoded.presence, .neutral)
+        XCTAssertEqual(decoded.colorGrading, .neutral)
+        XCTAssertEqual(decoded.monochrome, .neutral)
+        XCTAssertEqual(decoded.renderingProfile, .neutral)
+        XCTAssertEqual(decoded.lensCorrection, .neutral)
+    }
+
+    func testRoundTripsP4FieldsThroughJSON() throws {
+        var original = PhotoAdjustments.neutral
+        original.presence = PresenceAdjustments(texture: 30, clarity: -10, dehaze: 40)
+        original.colorGrading.shadows = ColorGradeBand(hue: 220, saturation: 20, luminance: -5)
+        original.monochrome = MonochromeAdjustments(isEnabled: true, red: 30)
+        original.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: 80)
+        original.lensCorrection = LensCorrectionAdjustments(mode: .manual, distortionAmount: 20)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
+        XCTAssertEqual(decoded, original)
     }
 
     func testOldSidecarWithoutNewFieldsDecodesToNeutralExpansions() throws {

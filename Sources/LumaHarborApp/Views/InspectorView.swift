@@ -64,6 +64,8 @@ struct InspectorView: View {
         case .basic: return .basic
         case .whiteBalance, .hsl: return .color
         case .curve: return .curve
+        case .presence: return .presence
+        case .colorGrading: return .colorGrading
         case .detail: return .detail
         case .effects: return .effects
         case .geometry: return .geometry
@@ -80,6 +82,7 @@ struct InspectorView: View {
                 } else {
                     HistogramPanel(histogram: model.editor.histogram)
                     inspectorGroup(.basic, sectionID: .basic, title: L10n.t("Basic")) {
+                        RenderingProfilePanel(editor: model.editor)
                         BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
                     }
                     inspectorGroup(.color, sectionID: .whiteBalance, title: L10n.t("Color")) {
@@ -93,6 +96,12 @@ struct InspectorView: View {
                     }
                     inspectorGroup(.curve, sectionID: .curve, title: L10n.t("Curve")) {
                         CurveAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.presence, sectionID: .presence, title: L10n.t("Presence")) {
+                        PresenceAdjustmentPanel(editor: model.editor)
+                    }
+                    inspectorGroup(.colorGrading, sectionID: .colorGrading, title: L10n.t("Color Grading")) {
+                        ColorGradingAdjustmentPanel(editor: model.editor)
                     }
                     inspectorGroup(.detail, sectionID: .detail, title: L10n.t("Detail")) {
                         DetailAdjustmentPanel(editor: model.editor)
@@ -343,7 +352,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
 }
 
 private enum InspectorGroup: Hashable {
-    case basic, color, curve, detail, effects, geometry, local
+    case basic, color, curve, presence, colorGrading, detail, effects, geometry, local
 }
 
 /// P2 (`2026-09-10-shared-professional-inspector-catalog.md`): both arrays are
