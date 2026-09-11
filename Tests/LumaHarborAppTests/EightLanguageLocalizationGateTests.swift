@@ -55,16 +55,16 @@ final class EightLanguageLocalizationGateTests: XCTestCase {
         "ko": ["DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
         "zh-Hans": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "EXIF", "HEIC", "ISO", "JPEG", "PNG", "RGB", "TIFF"],
         "de": [
-            "1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "Detail", "EXIF", "Format", "HEIC", "ISO", "JPEG",
+            "1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "DPI", "Detail", "EXIF", "Format", "HEIC", "Horizontal", "ISO", "JPEG",
             "Magenta", "Name", "OK", "Offline", "Orange", "Original", "PNG", "Radius", "RGB", "Standard", "System",
             "TIFF", "Vignette",
         ],
         "fr": [
-            "1 photo", "DPI", "Dimensions", "EXIF", "Format", "Grain", "HEIC", "ISO", "JPEG", "Luminance", "Magenta",
-            "Mode", "OK", "Orange", "Orientation", "Original", "PNG", "Photo", "Portrait", "Saturation", "Sources",
-            "Standard", "Texture", "TIFF", "Vibrance", "photos",
+            "1 photo", "DPI", "Dimensions", "EXIF", "Format", "Grain", "HEIC", "Horizontal", "ISO", "JPEG", "Luminance", "Magenta",
+            "Mode", "OK", "Orange", "Orientation", "Original", "Perspective", "PNG", "Photo", "Portrait", "Saturation", "Sources",
+            "Standard", "Texture", "TIFF", "Vertical", "Vibrance", "photos",
         ],
-        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Color", "EXIF", "HEIC", "ISO", "JPEG", "Magenta", "Manual", "Original", "PNG", "RGB", "TIFF"],
+        "es": ["1 GB", "10 GB", "2 GB", "5 GB", "512 MB", "Color", "EXIF", "HEIC", "Horizontal", "ISO", "JPEG", "Magenta", "Manual", "Original", "PNG", "RGB", "TIFF", "Vertical"],
     ]
 
     /// SwiftPM's resource processor lowercases `.lproj` directory names

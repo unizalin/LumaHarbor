@@ -2,7 +2,21 @@
 
 Updated: 2026-09-11
 
-Updated by: Claude（P3 Per-channel Tone Curves）
+Updated by: Gemini（P5 Advanced Masks, AI Repair, and Perspective）
+
+## P5：Advanced Masks、AI Repair、Perspective（2026-09-11, Gemini）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-10-advanced-masks-ai-repair-and-perspective.md` 實作進階遮罩（Radial、Brush、Luminance Range、Color Range、Subject、Background）、Apple Vision 裝置端前景辨識與確定性 fallback、AI Repair／去紅眼修復演算法、四角透視校正（Perspective Corner Pins）與 Mac/iPad UI 自適應面板。修正 P4 留下的 iPad Inspector 面板未掛載缺口（掛載 Rendering Profile、Presence 與 Color Grading）。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `4cdf40f`。
+- **核心模型**：`LocalAdjustment` 支援新遮罩類型、名稱、反轉與不透明度；`LocalAdjustmentGeometry` 支援筆觸、範圍遮罩、Vision 中繼資料與紅眼瞳孔半徑；`GeometryAdjustments` 支援 `cornerPins` 與四角透視重設。
+- **渲染與 AI**：`LocalAdjustmentRenderer` 支援遮罩反轉與不透明度乘法合成；`GeometryRenderer` 實作 `CIPerspectiveCorrection`；`VisionSegmentationService` 實作離線 Vision 分割與本機 fallback。
+- **驗證**：`swift test` 全套 **PASS**（2165 tests、9 skipped、0 failures）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`git diff --check` **PASS**。隱私掃描 **PASS**。
+- **交接文件**：`docs/coordination/2026-09-11-p5-advanced-masks-ai-repair-perspective-handoff.md`。
+- **下一步**：P6「Snapshot 與專業預覽（Snapshots, Soft Proof, and Professional Preview）」。
+
+## P4：Lens, Presence, Color Grading, Black & White, Rendering Profile（2026-09-10, Claude）
+
+- **狀態**：`DONE_WITH_CONCERNS`。實作鏡頭校正、Presence、Color Grading、Black & White、Rendering Profile、Preset/XMP 與 Mac UI。驗證通過 2150 tests。交接文件：`docs/coordination/2026-09-10-p4-lens-presence-color-grading-handoff.md`。
 
 ## P3：Per-channel Tone Curves（2026-09-11, Claude）
 

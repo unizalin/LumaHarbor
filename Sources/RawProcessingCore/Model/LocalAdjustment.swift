@@ -16,6 +16,9 @@ public struct LocalAdjustment: Codable, Equatable, Hashable, Sendable, Identifia
     public var id: UUID
     public var kind: LocalAdjustmentKind
     public var isEnabled: Bool
+    public var name: String
+    public var opacity: Double
+    public var isInverted: Bool
     public var geometry: LocalAdjustmentGeometry
     public var adjustments: LocalAdjustmentPatch
 
@@ -23,37 +26,56 @@ public struct LocalAdjustment: Codable, Equatable, Hashable, Sendable, Identifia
         id: UUID = UUID(),
         kind: LocalAdjustmentKind,
         isEnabled: Bool = true,
+        name: String = "",
+        opacity: Double = 100,
+        isInverted: Bool = false,
         geometry: LocalAdjustmentGeometry = .neutral,
         adjustments: LocalAdjustmentPatch = LocalAdjustmentPatch()
     ) {
         self.id = id
         self.kind = kind
         self.isEnabled = isEnabled
+        self.name = name
+        self.opacity = Swift.min(Swift.max(opacity, 0), 100)
+        self.isInverted = isInverted
         self.geometry = geometry
         self.adjustments = adjustments
+    }
+
+    /// Backwards-compatible initializer matching the 5-argument signature
+    public init(
+        id: UUID = UUID(),
+        kind: LocalAdjustmentKind,
+        isEnabled: Bool = true,
+        geometry: LocalAdjustmentGeometry = .neutral,
+        adjustments: LocalAdjustmentPatch = LocalAdjustmentPatch()
+    ) {
+        self.init(
+            id: id,
+            kind: kind,
+            isEnabled: isEnabled,
+            name: "",
+            opacity: 100,
+            isInverted: false,
+            geometry: geometry,
+            adjustments: adjustments
+        )
     }
 
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, isEnabled, geometry, adjustments
+        case id, kind, isEnabled, name, opacity, isInverted, geometry, adjustments
     }
 
-    /// `id` and `kind` are the two keys this type does *not* degrade on:
-    /// every other field in this codebase's sidecar types falls back to a
-    /// default when absent because that default is a faithful stand-in for
-    /// "not set yet". There is no faithful stand-in for "which edit is
-    /// this" or "which point does undo/hit-testing think this is" — a
-    /// missing `id` would silently detach this entry from anything that
-    /// already referenced it, and a missing `kind` would have to guess
-    /// between two edits with very different render behavior. Both throw,
-    /// same as any other structurally corrupt sidecar field this codebase
-    /// doesn't have a safe default for.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(UUID.self, forKey: .id)
         self.kind = try container.decode(LocalAdjustmentKind.self, forKey: .kind)
         self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.opacity = try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 100
+        self.isInverted = try container.decodeIfPresent(Bool.self, forKey: .isInverted) ?? false
         self.geometry = try container.decodeIfPresent(LocalAdjustmentGeometry.self, forKey: .geometry) ?? .neutral
         self.adjustments = try container.decodeIfPresent(LocalAdjustmentPatch.self, forKey: .adjustments) ?? LocalAdjustmentPatch()
     }
@@ -63,6 +85,15 @@ public struct LocalAdjustment: Codable, Equatable, Hashable, Sendable, Identifia
         try container.encode(id, forKey: .id)
         try container.encode(kind, forKey: .kind)
         try container.encode(isEnabled, forKey: .isEnabled)
+        if !name.isEmpty {
+            try container.encode(name, forKey: .name)
+        }
+        if opacity != 100 {
+            try container.encode(opacity, forKey: .opacity)
+        }
+        if isInverted {
+            try container.encode(isInverted, forKey: .isInverted)
+        }
         try container.encode(geometry, forKey: .geometry)
         try container.encode(adjustments, forKey: .adjustments)
     }
@@ -70,6 +101,12 @@ public struct LocalAdjustment: Codable, Equatable, Hashable, Sendable, Identifia
 
 public enum LocalAdjustmentKind: String, Codable, Equatable, Hashable, Sendable {
     case linearGradient
+    case radialGradient
+    case brush
+    case luminanceRange
+    case colorRange
+    case subject
+    case background
     case spotHeal
 }
 
@@ -111,60 +148,87 @@ extension Array where Element == LocalAdjustment {
     }
 }
 
-/// Spot heal's two sampling modes (design spec §6.7).
+/// Spot heal's sampling modes (design spec §6.7).
 public enum SpotHealMode: String, Codable, Equatable, Hashable, Sendable {
     /// Auto-sampled surrounding texture — no source point needed.
     case heal
     /// Sampled from an explicit source point the user placed.
     case clone
+    /// Red-eye removal mode.
+    case redEye
 }
 
-/// Parametric (never bitmap — spec §6.6: "不使用不可 diff 的遮罩點陣圖")
-/// geometry for one local adjustment. A single flat struct rather than a
-/// per-kind enum, matching `GeometryAdjustments`'s own established
-/// convention in this codebase: fields that don't apply to the current
-/// `LocalAdjustment.kind` just stay at their default rather than the type
-/// system encoding two mutually exclusive shapes.
+public struct BrushPoint: Codable, Equatable, Hashable, Sendable {
+    public var x: Double { didSet { x = Swift.min(Swift.max(x.isFinite ? x : 0, 0), 1) } }
+    public var y: Double { didSet { y = Swift.min(Swift.max(y.isFinite ? y : 0, 0), 1) } }
+    public var pressure: Double? { didSet { pressure = pressure.map { Swift.min(Swift.max($0.isFinite ? $0 : 1, 0), 1) } } }
+
+    public init(x: Double, y: Double, pressure: Double? = nil) {
+        self.x = Swift.min(Swift.max(x.isFinite ? x : 0, 0), 1)
+        self.y = Swift.min(Swift.max(y.isFinite ? y : 0, 0), 1)
+        self.pressure = pressure.map { Swift.min(Swift.max($0.isFinite ? $0 : 1, 0), 1) }
+    }
+}
+
+public struct BrushStroke: Codable, Equatable, Hashable, Sendable, Identifiable {
+    public var id: UUID
+    public var points: [BrushPoint]
+    public var radius: Double { didSet { radius = Swift.min(Swift.max(radius.isFinite ? radius : 0.05, 0.001), 1) } }
+    public var feather: Double { didSet { feather = Swift.min(Swift.max(feather.isFinite ? feather : 50, 0), 100) } }
+
+    public init(
+        id: UUID = UUID(),
+        points: [BrushPoint] = [],
+        radius: Double = 0.05,
+        feather: Double = 50
+    ) {
+        self.id = id
+        self.points = points
+        self.radius = Swift.min(Swift.max(radius.isFinite ? radius : 0.05, 0.001), 1)
+        self.feather = Swift.min(Swift.max(feather.isFinite ? feather : 50, 0), 100)
+    }
+}
+
+/// Parametric geometry for one local adjustment.
 public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
-    /// Normalized `[0, 1]` source-image coordinates, origin top-left (same
-    /// convention as `NormalizedCropRect`). Linear gradient: the gradient's
-    /// pivot point. Spot heal: the target point being retouched.
-    ///
-    /// Every field below carries its own `didSet` clamp -- not just
-    /// validation inside `init` -- because Task 4.3's UI mutates an
-    /// existing value's fields directly (`adjustments.localAdjustments[i]
-    /// .geometry.x = newX`, the same idiom `GeometryAdjustments
-    /// .rotationDegrees` already established its own `didSet` for), and
-    /// `didSet` does not fire during a type's own initializer, so `init`
-    /// clamps explicitly too, matching `Vignette`'s and `GeometryAdjustments`'s
-    /// own existing convention exactly.
     public var x: Double { didSet { x = Self.clampToUnit(x) } }
     public var y: Double { didSet { y = Self.clampToUnit(y) } }
-    /// Linear gradient only: direction of the transition, degrees (0 =
-    /// left-to-right, 90 = top-to-bottom, increasing clockwise). Not an
-    /// angle Task 4.1 validates against a range — any finite value is a
-    /// legal direction, it just normalizes to something a compass makes
-    /// sense of at render time (Task 4.2). Still guarded against non-finite
-    /// input the same way every other field here is.
     public var angleDegrees: Double { didSet { angleDegrees = angleDegrees.isFinite ? angleDegrees : 0 } }
-    /// Linear gradient only: how far the transition band extends from the
-    /// pivot before reaching full effect, normalized to `[0, 1]`.
-    /// Meaningless for `.spotHeal`.
     public var range: Double { didSet { range = Self.clampToUnit(range) } }
-    /// Spot heal, clone mode only: the point sampled from. `nil` in heal
-    /// mode (the algorithm chooses its own source) or before the user has
-    /// placed one. Meaningless for `.linearGradient`.
     public var sourceX: Double? { didSet { sourceX = sourceX.map(Self.clampToUnit) } }
     public var sourceY: Double? { didSet { sourceY = sourceY.map(Self.clampToUnit) } }
-    /// Spot heal only: brush radius, normalized to `[0, 1]`. Meaningless
-    /// for `.linearGradient`.
     public var radius: Double { didSet { radius = Self.clampToUnit(radius) } }
-    /// Shared: edge softness. `0` = hard edge, `100` = maximally soft.
-    /// Applies to the gradient's own transition and the heal brush's edge.
     public var feather: Double { didSet { feather = Self.clamp(feather, to: Self.featherRange) } }
-    /// Spot heal only: which of the two sampling modes this point uses.
-    /// Meaningless for `.linearGradient`.
     public var healMode: SpotHealMode
+
+    // P5 Advanced Masks additions:
+    public var radialRadiusY: Double? { didSet { radialRadiusY = radialRadiusY.map(Self.clampToUnit) } }
+    public var brushStrokes: [BrushStroke]
+    public var luminanceMin: Double? { didSet { luminanceMin = luminanceMin.map(Self.clampToUnit) } }
+    public var luminanceMax: Double? { didSet { luminanceMax = luminanceMax.map(Self.clampToUnit) } }
+    public var colorTargetHue: Double? {
+        didSet {
+            colorTargetHue = colorTargetHue.map { hue in
+                guard hue.isFinite else { return 0 }
+                let rem = hue.truncatingRemainder(dividingBy: 360)
+                return rem < 0 ? rem + 360 : rem
+            }
+        }
+    }
+    public var colorHueTolerance: Double? {
+        didSet {
+            colorHueTolerance = colorHueTolerance.map { tol in
+                guard tol.isFinite else { return 30 }
+                return Swift.min(Swift.max(tol, 0), 180)
+            }
+        }
+    }
+    public var maskRelativePath: String?
+    public var sourceFingerprint: String?
+    public var maskDigest: String?
+    public var visionRevision: Int?
+    public var reconstructionNeeded: Bool
+    public var redEyePupilRadius: Double? { didSet { redEyePupilRadius = redEyePupilRadius.map(Self.clampToUnit) } }
 
     public static let unitRange: ClosedRange<Double> = 0...1
     public static let featherRange: ClosedRange<Double> = 0...100
@@ -178,7 +242,19 @@ public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
         sourceY: Double? = nil,
         radius: Double = 0.05,
         feather: Double = 50,
-        healMode: SpotHealMode = .heal
+        healMode: SpotHealMode = .heal,
+        radialRadiusY: Double? = nil,
+        brushStrokes: [BrushStroke] = [],
+        luminanceMin: Double? = nil,
+        luminanceMax: Double? = nil,
+        colorTargetHue: Double? = nil,
+        colorHueTolerance: Double? = nil,
+        maskRelativePath: String? = nil,
+        sourceFingerprint: String? = nil,
+        maskDigest: String? = nil,
+        visionRevision: Int? = nil,
+        reconstructionNeeded: Bool = false,
+        redEyePupilRadius: Double? = nil
     ) {
         self.x = Self.clampToUnit(x)
         self.y = Self.clampToUnit(y)
@@ -189,14 +265,27 @@ public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
         self.radius = Self.clampToUnit(radius)
         self.feather = Self.clamp(feather, to: Self.featherRange)
         self.healMode = healMode
+        self.radialRadiusY = radialRadiusY.map(Self.clampToUnit)
+        self.brushStrokes = brushStrokes
+        self.luminanceMin = luminanceMin.map(Self.clampToUnit)
+        self.luminanceMax = luminanceMax.map(Self.clampToUnit)
+        self.colorTargetHue = colorTargetHue.map { hue in
+            guard hue.isFinite else { return 0 }
+            let rem = hue.truncatingRemainder(dividingBy: 360)
+            return rem < 0 ? rem + 360 : rem
+        }
+        self.colorHueTolerance = colorHueTolerance.map { tol in
+            guard tol.isFinite else { return 30 }
+            return Swift.min(Swift.max(tol, 0), 180)
+        }
+        self.maskRelativePath = maskRelativePath
+        self.sourceFingerprint = sourceFingerprint
+        self.maskDigest = maskDigest
+        self.visionRevision = visionRevision
+        self.reconstructionNeeded = reconstructionNeeded
+        self.redEyePupilRadius = redEyePupilRadius.map(Self.clampToUnit)
     }
 
-    /// The gradient/heal point centered on the photo with no source point
-    /// placed yet — the "just added, not dragged anywhere" state. There is
-    /// no sidecar written before this struct existed, so unlike
-    /// `GeometryAdjustments.neutral` this isn't standing in for a
-    /// pre-existing on-disk shape; it just needs to be a valid, harmless
-    /// starting point.
     public static let neutral = LocalAdjustmentGeometry()
 
     private static func clampToUnit(_ value: Double) -> Double {
@@ -212,12 +301,12 @@ public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case x, y, angleDegrees, range, sourceX, sourceY, radius, feather, healMode
+        case radialRadiusY, brushStrokes, luminanceMin, luminanceMax
+        case colorTargetHue, colorHueTolerance
+        case maskRelativePath, sourceFingerprint, maskDigest, visionRevision, reconstructionNeeded
+        case redEyePupilRadius
     }
 
-    /// Every key optional on decode, matching `GeometryAdjustments`'s own
-    /// convention — a future field this struct doesn't know about yet, or
-    /// one a hand edit dropped, degrades to the neutral default rather than
-    /// failing the whole sidecar.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
@@ -229,7 +318,19 @@ public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
             sourceY: try container.decodeIfPresent(Double.self, forKey: .sourceY),
             radius: try container.decodeIfPresent(Double.self, forKey: .radius) ?? 0.05,
             feather: try container.decodeIfPresent(Double.self, forKey: .feather) ?? 50,
-            healMode: try container.decodeIfPresent(SpotHealMode.self, forKey: .healMode) ?? .heal
+            healMode: try container.decodeIfPresent(SpotHealMode.self, forKey: .healMode) ?? .heal,
+            radialRadiusY: try container.decodeIfPresent(Double.self, forKey: .radialRadiusY),
+            brushStrokes: try container.decodeIfPresent([BrushStroke].self, forKey: .brushStrokes) ?? [],
+            luminanceMin: try container.decodeIfPresent(Double.self, forKey: .luminanceMin),
+            luminanceMax: try container.decodeIfPresent(Double.self, forKey: .luminanceMax),
+            colorTargetHue: try container.decodeIfPresent(Double.self, forKey: .colorTargetHue),
+            colorHueTolerance: try container.decodeIfPresent(Double.self, forKey: .colorHueTolerance),
+            maskRelativePath: try container.decodeIfPresent(String.self, forKey: .maskRelativePath),
+            sourceFingerprint: try container.decodeIfPresent(String.self, forKey: .sourceFingerprint),
+            maskDigest: try container.decodeIfPresent(String.self, forKey: .maskDigest),
+            visionRevision: try container.decodeIfPresent(Int.self, forKey: .visionRevision),
+            reconstructionNeeded: try container.decodeIfPresent(Bool.self, forKey: .reconstructionNeeded) ?? false,
+            redEyePupilRadius: try container.decodeIfPresent(Double.self, forKey: .redEyePupilRadius)
         )
     }
 
@@ -239,14 +340,27 @@ public struct LocalAdjustmentGeometry: Codable, Equatable, Hashable, Sendable {
         try container.encode(y, forKey: .y)
         try container.encode(angleDegrees, forKey: .angleDegrees)
         try container.encode(range, forKey: .range)
-        // `nil` means "no source point yet" — omitted, not encoded as
-        // `null`, matching `GeometryAdjustments.crop`'s own convention for
-        // an absent optional leaf.
         try container.encodeIfPresent(sourceX, forKey: .sourceX)
         try container.encodeIfPresent(sourceY, forKey: .sourceY)
         try container.encode(radius, forKey: .radius)
         try container.encode(feather, forKey: .feather)
         try container.encode(healMode, forKey: .healMode)
+        try container.encodeIfPresent(radialRadiusY, forKey: .radialRadiusY)
+        if !brushStrokes.isEmpty {
+            try container.encode(brushStrokes, forKey: .brushStrokes)
+        }
+        try container.encodeIfPresent(luminanceMin, forKey: .luminanceMin)
+        try container.encodeIfPresent(luminanceMax, forKey: .luminanceMax)
+        try container.encodeIfPresent(colorTargetHue, forKey: .colorTargetHue)
+        try container.encodeIfPresent(colorHueTolerance, forKey: .colorHueTolerance)
+        try container.encodeIfPresent(maskRelativePath, forKey: .maskRelativePath)
+        try container.encodeIfPresent(sourceFingerprint, forKey: .sourceFingerprint)
+        try container.encodeIfPresent(maskDigest, forKey: .maskDigest)
+        try container.encodeIfPresent(visionRevision, forKey: .visionRevision)
+        if reconstructionNeeded {
+            try container.encode(reconstructionNeeded, forKey: .reconstructionNeeded)
+        }
+        try container.encodeIfPresent(redEyePupilRadius, forKey: .redEyePupilRadius)
     }
 }
 

@@ -650,3 +650,25 @@
 "Flat" = "フラット";
 "Portrait" = "ポートレート";
 "No Matching Profile" = "一致するプロファイルがありません";
+
+/* P5: Advanced Masks, AI Repair, Perspective */
+"Linear Gradient" = "線形グラデーション";
+"Radial Gradient" = "円形グラデーション";
+"Brush" = "ブラシ";
+"Luminance Range" = "輝度範囲";
+"Color Range" = "カラー範囲";
+"Subject" = "被写体";
+"Background" = "背景";
+"Add Mask" = "マスクを追加";
+"Edit Masks" = "マスクを編集";
+"No masks yet." = "マスクはまだありません。";
+"Duplicate Mask" = "マスクを複製";
+"Delete Mask" = "マスクを削除";
+"Invert Mask" = "マスクを反転";
+"Opacity" = "不透明度";
+"Red-Eye" = "赤目補正";
+"Pupil Radius" = "瞳孔の半径";
+"Perspective" = "遠近感";
+"Vertical" = "垂直方向";
+"Horizontal" = "水平方向";
+"Reset Perspective" = "遠近感をリセット";

@@ -650,3 +650,25 @@
 "Flat" = "Plat";
 "Portrait" = "Portrait";
 "No Matching Profile" = "Aucun profil correspondant";
+
+/* P5: Advanced Masks, AI Repair, Perspective */
+"Linear Gradient" = "Dégradé linéaire";
+"Radial Gradient" = "Dégradé radial";
+"Brush" = "Pinceau";
+"Luminance Range" = "Plage de luminance";
+"Color Range" = "Plage de couleurs";
+"Subject" = "Sujet";
+"Background" = "Arrière-plan";
+"Add Mask" = "Ajouter un masque";
+"Edit Masks" = "Modifier les masques";
+"No masks yet." = "Aucun masque pour le moment.";
+"Duplicate Mask" = "Dupliquer le masque";
+"Delete Mask" = "Supprimer le masque";
+"Invert Mask" = "Inverser le masque";
+"Opacity" = "Opacité";
+"Red-Eye" = "Yeux rouges";
+"Pupil Radius" = "Rayon de la pupille";
+"Perspective" = "Perspective";
+"Vertical" = "Vertical";
+"Horizontal" = "Horizontal";
+"Reset Perspective" = "Réinitialiser la perspective";

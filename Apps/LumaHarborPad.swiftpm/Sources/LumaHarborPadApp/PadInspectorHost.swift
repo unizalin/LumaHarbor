@@ -130,11 +130,14 @@ struct PadInspectorHost: View {
     private var adjustContent: some View {
         switch inspector.adjustSubmode {
         case .light:
+            RenderingProfilePanel(editor: editor)
             BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.basic).adjustmentKinds)
+            PresenceAdjustmentPanel(editor: editor)
             CurveAdjustmentPanel(editor: editor)
         case .color:
             BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)
             ColorAdjustmentPanel(editor: editor)
+            ColorGradingAdjustmentPanel(editor: editor)
         case .detail:
             DetailAdjustmentPanel(editor: editor)
             EffectsAdjustmentPanel(editor: editor)
