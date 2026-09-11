@@ -1,8 +1,21 @@
 # Current Coordination State
 
-Updated: 2026-09-10
+Updated: 2026-09-11
 
-Updated by: Claude（P2 Shared Professional Inspector Catalog）
+Updated by: Claude（P3 Per-channel Tone Curves）
+
+## P3：Per-channel Tone Curves（2026-09-11, Claude）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-10-per-channel-tone-curves.md` 實作真正獨立的 Composite／Red／Green／Blue 曲線（model、RGBA LUT／Metal kernel、pipeline、XMP、Preset schema v2、Mac/iPad 共用 UI）。P4 以後（Lens/Presence/Color Grading、Mask/AI/Repair、Snapshot/Soft Proof、Cross-device final verification）完全未觸碰。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 P2 完成時的 `acb30d43d75393c77e99c94ef12c1f6c38c95531`；本階段實作提交為 `75c1887`（"feat: add per-channel tone curves (P3)"），本次交接文件與本檔更新緊接其後。工作目錄應保持乾淨。此階段曾在前一個 session 因 token 上限中斷過一次，已於同一 branch 用同一組未提交變更接續完成，過渡用的 `docs/coordination/2026-09-10-p3-token-checkpoint.md` 已在完成後刪除，內容併入下方交接文件。
+- **先寫 spec/plan**：新增 `docs/superpowers/specs/2026-09-10-per-channel-tone-curves.md` 與 `docs/superpowers/plans/2026-09-10-per-channel-tone-curves.md`，先於程式碼撰寫完成。
+- **真正的四曲線**：`AdvancedToneCurve`（`Sources/RawProcessingCore/Model/AdvancedToneCurve.swift`）新增 `redPoints/greenPoints/bluePoints`，各自獨立 sanitise／identity；新增 `ToneCurveChannel` enum 與 `points(for:)/isIdentity(for:)/settingPoints(_:for:)/resetting(_:)`。舊 JSON 缺新 key 時三條 channel 解碼為 identity（v1/v2 sidecar 與 preset 相容）。
+- **RGBA LUT／單一 kernel pass**：`AdvancedToneCurveLUT.buildCombined(compositePoints:channelPoints:)` 合成 Composite∘Channel；`AdjustmentPipeline.applyAdvancedToneCurve` 打包三張合成表進一張 RGBA8 `CIImage`；`AdjustmentKernels.metal` 的 `advancedToneCurve` 三次取樣分別讀 `.r/.g/.b`（原本三次都讀 `.r`，是本階段修正的真實 bug）。
+- **XMP／Preset**：新增 `crs:ToneCurvePV2012Red/Green/Blue` 匯入／匯出（`XMPImportExport.swift`），單一 channel 解析失敗不影響其他三條；匯出時 Composite 一律寫入（相容既有行為），Red/Green/Blue 只在非 identity 時才寫入。`PresetDocument.currentSchemaVersion` 由 1 升為 2，v1 preset 仍可驗證與匯入。
+- **UI**：`CurveAdjustmentPanel` 改用 `RawProcessingCore.ToneCurveChannel`（`.rgb` 更名 `.composite`，沿用既有 "RGB" 標籤字串)；單一 "Reset" 拆成 "Reset Channel"（僅重設當前 channel）與 "Reset All"（重設整條曲線），皆走既有 `updateAdjustments` 單筆 undo 路徑。新增 8 語 `"Reset Channel"` key（"Reset All" 先前已存在於全部 8 語）。
+- **驗證**：`swift test` 全套 **PASS**（2068 executed、9 skipped、0 failures，較 P2 基準 2039 淨增 29 — 略低於本階段 spec 自訂的 +32 目標，判斷為已涵蓋所有真實缺口、不為湊數新增低價值測試，詳見交接文件）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **PASS**（`** BUILD SUCCEEDED **`）。`git diff --check` **PASS**。隱私掃描（私人路徑／Team ID／UUID／私鑰）**PASS**，無命中。`Scripts/run-mvp-acceptance.zsh` 與真機人工驗收仍為 **NOT RUN**（沿用歷次 phase 的既有缺口，非本階段造成）。
+- **交接文件**：`docs/coordination/2026-09-10-p3-per-channel-tone-curves-handoff.md`。
+- **下一步**：P4「Lens + Presence + Color Grading」，先寫 `docs/superpowers/specs/2026-09-10-lens-presence-and-color-grading.md` 與對應 plan，再依 TDD 實作。
 
 ## P2：Shared Professional Inspector Catalog（2026-09-10, Claude）
 
