@@ -3,21 +3,12 @@ import Localization
 import RawProcessingCore
 import SwiftUI
 
-/// The channel selector is a presentation control for the shared advanced
-/// tone curve. The current sidecar format stores one composite curve, so every
-/// channel uses the same persisted points while retaining familiar RGB editing
-/// affordances for the iPad and Mac surfaces.
-public enum ToneCurveChannel: String, CaseIterable, Identifiable, Sendable {
-    case rgb
-    case red
-    case green
-    case blue
-
+extension ToneCurveChannel: Identifiable {
     public var id: Self { self }
 
     var localizationKey: String {
         switch self {
-        case .rgb: return "RGB"
+        case .composite: return "RGB"
         case .red: return "Red"
         case .green: return "Green"
         case .blue: return "Blue"
@@ -27,11 +18,14 @@ public enum ToneCurveChannel: String, CaseIterable, Identifiable, Sendable {
 
 /// Pure geometry and clamping helpers for the draggable tone curve.
 public enum ToneCurveEditorModel {
-    public static func points(for curve: AdvancedToneCurve) -> [ToneCurvePoint] {
-        guard !curve.isIdentity, curve.points.count >= 2 else {
+    /// `channel` defaults to `.composite` for callers that predate
+    /// per-channel curves (P3).
+    public static func points(for curve: AdvancedToneCurve, channel: ToneCurveChannel = .composite) -> [ToneCurvePoint] {
+        let channelPoints = curve.points(for: channel)
+        guard !channelPoints.isEmpty, channelPoints.count >= 2 else {
             return ToneCurveMapping.identity
         }
-        return curve.points
+        return channelPoints
     }
 
     public static func movingPoint(
@@ -83,7 +77,7 @@ public enum ToneCurveEditorModel {
 
 public struct CurveAdjustmentPanel: View {
     @ObservedObject private var editor: EditorSession
-    @State private var selectedChannel: ToneCurveChannel = .rgb
+    @State private var selectedChannel: ToneCurveChannel = .composite
 
     public init(editor: EditorSession) {
         self.editor = editor
@@ -95,7 +89,12 @@ public struct CurveAdjustmentPanel: View {
                 Label(L10n.t("Tone curve"), systemImage: "chart.xyaxis.line")
                     .font(.headline)
                 Spacer()
-                Button(L10n.t("Reset")) {
+                Button(L10n.t("Reset Channel")) {
+                    editor.updateAdjustments { $0.advancedToneCurve = $0.advancedToneCurve.resetting(selectedChannel) }
+                }
+                .controlSize(.small)
+                .disabled(editor.adjustments.advancedToneCurve.isIdentity(for: selectedChannel))
+                Button(L10n.t("Reset All")) {
                     editor.updateAdjustments { $0.advancedToneCurve = .neutral }
                 }
                 .controlSize(.small)
@@ -111,10 +110,12 @@ public struct CurveAdjustmentPanel: View {
             .accessibilityLabel(Text(L10n.t("Tone curve")))
 
             ToneCurveGraph(
-                points: ToneCurveEditorModel.points(for: editor.adjustments.advancedToneCurve),
+                points: ToneCurveEditorModel.points(for: editor.adjustments.advancedToneCurve, channel: selectedChannel),
                 channel: selectedChannel,
                 onChange: { points in
-                    editor.updateAdjustments { $0.advancedToneCurve = AdvancedToneCurve(points: points) }
+                    editor.updateAdjustments {
+                        $0.advancedToneCurve = $0.advancedToneCurve.settingPoints(points, for: selectedChannel)
+                    }
                 },
                 onGesture: { isEditing in
                     if isEditing {
@@ -141,10 +142,10 @@ public struct CurveAdjustmentPanel: View {
 
     private var statusText: String {
         let curve = editor.adjustments.advancedToneCurve
-        if curve.isIdentity {
+        if curve.isIdentity(for: selectedChannel) {
             return L10n.t("No curve applied")
         }
-        return String(format: L10n.t("%d control points"), curve.points.count)
+        return String(format: L10n.t("%d control points"), curve.points(for: selectedChannel).count)
     }
 }
 
@@ -212,7 +213,7 @@ private struct ToneCurveGraph: View {
 
     private var channelColor: Color {
         switch channel {
-        case .rgb: return .accentColor
+        case .composite: return .accentColor
         case .red: return .red
         case .green: return .green
         case .blue: return .blue

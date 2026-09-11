@@ -97,13 +97,17 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
     /// The curve panel has no fixed slider set (`AdvancedToneCurve.points`
     /// is an arbitrary-length array -- see that type's own doc comment), so
     /// its reset affordance is a plain, visible Reset button rather than a
-    /// per-row gesture. It must still be disabled once the curve is already
-    /// neutral, matching `InspectorView`'s existing top-level "Reset All"
-    /// button's own disabled-when-nothing-to-reset behavior.
-    func testCurvePanelHasAVisibleResetButtonDisabledWhenAlreadyNeutral() throws {
+    /// per-row gesture. P3 (per-channel curves) splits this into two
+    /// buttons -- "Reset Channel" (only the selected Composite/R/G/B curve)
+    /// and "Reset All" (every channel) -- each independently disabled once
+    /// its own scope is already neutral, matching `InspectorView`'s existing
+    /// top-level "Reset All" button's own disabled-when-nothing-to-reset
+    /// behavior.
+    func testCurvePanelHasVisibleResetButtonsDisabledWhenAlreadyNeutral() throws {
         let source = try Self.loadSource("CurveAdjustmentPanel.swift")
 
-        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset\")"))
+        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset Channel\")"))
+        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset All\")"))
         XCTAssertTrue(source.contains(".disabled("))
         XCTAssertTrue(source.contains("isIdentity"))
         XCTAssertTrue(source.contains("editor.updateAdjustments"))

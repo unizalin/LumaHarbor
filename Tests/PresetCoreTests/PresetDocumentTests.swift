@@ -21,6 +21,29 @@ final class PresetDocumentTests: XCTestCase {
         )
     }
 
+    // MARK: - Schema version (P3: per-channel tone curves bump v1 -> v2)
+
+    func testCurrentSchemaVersionIsTwo() {
+        XCTAssertEqual(PresetDocument.currentSchemaVersion, 2)
+    }
+
+    func testNewlyCreatedDocumentDefaultsToCurrentSchemaVersion() {
+        let document = makeDocument()
+        XCTAssertEqual(document.schemaVersion, 2)
+    }
+
+    func testLegacySchemaVersionOneDocumentStillValidates() throws {
+        // A v1 preset (no per-channel curve keys ever existed in its JSON)
+        // must keep validating after the v2 bump -- `AdvancedToneCurve`
+        // itself, not `PresetDocument.validated()`, is what makes the
+        // missing `redPoints`/`greenPoints`/`bluePoints` keys degrade to
+        // identity (spec §11.1 item 2).
+        let document = makeDocument(schemaVersion: 1)
+        let validated = try document.validated()
+        XCTAssertEqual(validated.schemaVersion, 1)
+        XCTAssertTrue(validated.patch.advancedToneCurve?.isIdentity(for: .red) ?? true)
+    }
+
     func testValidatedTrimsNameWhitespace() throws {
         let document = makeDocument(name: "  Moody Film  ")
         let validated = try document.validated()

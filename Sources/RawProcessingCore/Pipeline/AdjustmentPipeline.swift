@@ -288,12 +288,24 @@ public struct AdjustmentPipeline: Sendable {
         return try? CIKernel(functionName: "advancedToneCurve", fromMetalLibraryData: library)
     }()
 
+    /// Builds one RGBA 1D LUT texture packing all three composed channel
+    /// tables (Composite∘Red in R, Composite∘Green in G, Composite∘Blue in
+    /// B), so a single kernel pass can map R/G/B independently while still
+    /// reading only one resource (P3, design spec §6.2/§8 step 4).
     private static func applyAdvancedToneCurve(_ curve: AdvancedToneCurve, to image: CIImage) -> CIImage {
         guard let kernel = advancedToneCurveKernel else { return image }
-        let table = AdvancedToneCurveLUT.build(from: curve.points, resolution: 256)
-        guard let lutImage = Self.makeLUTImage(table) else { return image }
+        let redTable = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: curve.points, channelPoints: curve.redPoints, resolution: 256
+        )
+        let greenTable = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: curve.points, channelPoints: curve.greenPoints, resolution: 256
+        )
+        let blueTable = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: curve.points, channelPoints: curve.bluePoints, resolution: 256
+        )
+        guard let lutImage = Self.makeLUTImage(red: redTable, green: greenTable, blue: blueTable) else { return image }
         let extent = image.extent
-        let arguments: [Any] = [image, lutImage, Double(table.count)]
+        let arguments: [Any] = [image, lutImage, Double(redTable.count)]
         // Input 0 is the source image, which is read 1:1, so its region of
         // interest is the destination rect. Input 1 is the 256x1 LUT, which
         // every destination pixel may read anywhere in -- returning the
@@ -308,22 +320,27 @@ public struct AdjustmentPipeline: Sendable {
         ) ?? image
     }
 
-    /// Packs a 1D `[Float]` table into a 1-row-high `CIImage` the kernel can
-    /// sample, one red-channel texel per LUT entry.
-    private static func makeLUTImage(_ table: [Float]) -> CIImage? {
+    /// Packs three 1D `[Float]` tables into one 1-row-high RGBA8 `CIImage`
+    /// the kernel can sample -- red table in the R component, green table in
+    /// G, blue table in B. Alpha is fixed at opaque; it carries no data.
+    private static func makeLUTImage(red: [Float], green: [Float], blue: [Float]) -> CIImage? {
+        let count = red.count
+        guard count == green.count, count == blue.count else { return nil }
         var pixelData = [UInt8]()
-        pixelData.reserveCapacity(table.count * 4)
-        for value in table {
-            let byte = UInt8(max(0, min(255, value * 255)))
-            pixelData.append(contentsOf: [byte, byte, byte, 255])
+        pixelData.reserveCapacity(count * 4)
+        for i in 0..<count {
+            let r = UInt8(max(0, min(255, red[i] * 255)))
+            let g = UInt8(max(0, min(255, green[i] * 255)))
+            let b = UInt8(max(0, min(255, blue[i] * 255)))
+            pixelData.append(contentsOf: [r, g, b, 255])
         }
         return pixelData.withUnsafeBytes { buffer -> CIImage? in
             guard let baseAddress = buffer.baseAddress else { return nil }
             let data = Data(bytes: baseAddress, count: pixelData.count)
             return CIImage(
                 bitmapData: data,
-                bytesPerRow: table.count * 4,
-                size: CGSize(width: table.count, height: 1),
+                bytesPerRow: count * 4,
+                size: CGSize(width: count, height: 1),
                 format: .RGBA8,
                 colorSpace: nil
             )

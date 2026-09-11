@@ -23,7 +23,8 @@ final class CurveHistogramContractTests: XCTestCase {
         XCTAssertTrue(source.contains("DragGesture(minimumDistance: 0)"))
         XCTAssertTrue(source.contains("editor.beginAdjustmentGesture()"))
         XCTAssertTrue(source.contains("editor.endAdjustmentGesture()"))
-        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset\")"))
+        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset Channel\")"))
+        XCTAssertTrue(source.contains("Button(L10n.t(\"Reset All\")"))
     }
 
     func testPadInfoDomainUsesTheSharedHistogramInsteadOfAPlaceholder() throws {

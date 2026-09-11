@@ -46,8 +46,12 @@ namespace {
 extern "C" {
 namespace coreimage {
 
-/// Per-pixel 1D LUT lookup, run once per RGB channel with the same table
-/// (spec §4.3: colour is not touched, only tone).
+/// Per-pixel 1D LUT lookup. `lut` packs three independently-composed tables
+/// into one RGBA8 texture (R = Composite∘Red, G = Composite∘Green,
+/// B = Composite∘Blue -- see `AdvancedToneCurveLUT.buildCombined` and
+/// `AdjustmentPipeline.applyAdvancedToneCurve`), so one kernel pass samples
+/// the same texture three times, once per channel, each reading a different
+/// component (P3: per-channel curves, design spec §6.2/§8 step 4).
 float4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
     float4 pixel = image.sample(image.coord());
     float lastIndex = lutWidth - 1.0;
@@ -62,8 +66,8 @@ float4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
     float gIn = clamp(pixel.g, 0.0, 1.0);
     float bIn = clamp(pixel.b, 0.0, 1.0);
     float r = lut.sample(lut.transform(float2(rIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.r - rIn);
-    float g = lut.sample(lut.transform(float2(gIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.g - gIn);
-    float b = lut.sample(lut.transform(float2(bIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.b - bIn);
+    float g = lut.sample(lut.transform(float2(gIn * lastIndex + 0.5, lutSize.y * 0.5))).g + (pixel.g - gIn);
+    float b = lut.sample(lut.transform(float2(bIn * lastIndex + 0.5, lutSize.y * 0.5))).b + (pixel.b - bIn);
     return float4(r, g, b, pixel.a);
 }
 

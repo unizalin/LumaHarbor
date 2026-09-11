@@ -482,6 +482,61 @@ final class AdjustmentPipelineTests: XCTestCase {
         }
     }
 
+    func testRedChannelCurveOnlyChangesTheRedChannel() throws {
+        // P3: an independent Red curve must leave Green/Blue untouched, even
+        // though the RGBA LUT texture packs all three channel tables into one
+        // resource and one kernel pass reads it three times.
+        let side = 512
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = AdvancedToneCurve(redPoints: [
+            ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.5)
+        ])
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertFalse(output === source)
+
+        for probe in [CGPoint(x: 4, y: 4), CGPoint(x: 400, y: 400)] {
+            let base = try pixel(at: probe, in: source)
+            let edited = try pixel(at: probe, in: output)
+            XCTAssertLessThan(edited.red, base.red, "Red channel curve should darken red at \(probe)")
+            XCTAssertEqual(edited.green, base.green, accuracy: 1, "Green must be untouched by a Red-only curve")
+            XCTAssertEqual(edited.blue, base.blue, accuracy: 1, "Blue must be untouched by a Red-only curve")
+        }
+    }
+
+    func testCompositeAndBlueChannelCurvesComposeInFixedOrder() throws {
+        // Composite is applied first, then the per-channel curve (design
+        // spec §8 step 4). A Composite curve that darkens everything, plus a
+        // Blue curve that darkens further, must darken blue more than red.
+        let side = 512
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = AdvancedToneCurve(
+            points: [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.7)],
+            bluePoints: [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.5)]
+        )
+        let output = pipeline.apply(adjustments, to: source)
+
+        for probe in [CGPoint(x: 4, y: 4), CGPoint(x: 400, y: 400)] {
+            let base = try pixel(at: probe, in: source)
+            let edited = try pixel(at: probe, in: output)
+            XCTAssertLessThan(edited.red, base.red, "Composite curve should darken red at \(probe)")
+            XCTAssertLessThan(edited.blue, edited.red, "Blue channel curve composed after Composite should darken blue further at \(probe)")
+        }
+    }
+
+    func testAllFourIdentityChannelsSkipTheCurveKernelEntirely() {
+        // The `isAdvancedToneCurveIdentity` gate must still see an all-empty
+        // `AdvancedToneCurve` as identity after adding three new arrays.
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = AdvancedToneCurve.neutral
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertTrue(output === source, "An all-identity curve must not add a filter to the chain")
+    }
+
     // MARK: - HSL
 
     func testReducingRedSaturationDesaturatesARedPatch() throws {

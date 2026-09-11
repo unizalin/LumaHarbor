@@ -143,6 +143,39 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(decoded.geometry, .neutral)
     }
 
+    // MARK: - Per-channel tone curves (P3)
+
+    func testRoundTripsAllFourToneCurveChannelsThroughJSON() throws {
+        var original = PhotoAdjustments.neutral
+        original.advancedToneCurve = AdvancedToneCurve(
+            points: [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 1)],
+            redPoints: [ToneCurvePoint(x: 0, y: 0.1), ToneCurvePoint(x: 1, y: 0.9)],
+            greenPoints: [ToneCurvePoint(x: 0, y: 0.2), ToneCurvePoint(x: 1, y: 0.8)],
+            bluePoints: [ToneCurvePoint(x: 0, y: 0.3), ToneCurvePoint(x: 1, y: 0.7)]
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
+        XCTAssertEqual(decoded, original)
+        XCTAssertFalse(decoded.isNeutral)
+    }
+
+    func testP2EraSidecarWithOnlyCompositeCurveKeyDecodesOtherChannelsAsIdentity() throws {
+        // Exactly what every real sidecar written before P3 looks like: the
+        // nested "advancedToneCurve" object only ever had a "points" key.
+        let json = Data(#"""
+        {"exposure": 0.5, "temperature": 0, "tint": 0, "contrast": 0, "highlights": 0,
+         "shadows": 0, "whites": 0, "blacks": 0, "vibrance": 0, "saturation": 0,
+         "advancedToneCurve": {"points": [{"x": 0, "y": 0}, {"x": 1, "y": 0.8}]},
+         "hsl": {}, "splitToning": {}, "sharpening": {}, "noiseReduction": {},
+         "vignette": {}, "grain": {}, "geometry": {}}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.advancedToneCurve.points, [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.8)])
+        XCTAssertTrue(decoded.advancedToneCurve.isIdentity(for: .red))
+        XCTAssertTrue(decoded.advancedToneCurve.isIdentity(for: .green))
+        XCTAssertTrue(decoded.advancedToneCurve.isIdentity(for: .blue))
+    }
+
     func testRoundTripsNewFieldsThroughJSON() throws {
         var original = PhotoAdjustments.neutral
         original.sharpening = Sharpening(amount: 40)

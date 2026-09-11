@@ -98,10 +98,13 @@ public struct XMPImporter: Sendable {
                 continue
             }
 
-            if id == .cameraRaw("ToneCurvePV2012") {
+            if let channel = Self.toneCurveChannel(for: id) {
                 do {
-                    builder.advancedToneCurve = try Self.importToneCurve(value)
-                    nativeFields.append(.advancedToneCurve)
+                    let points = try Self.importToneCurvePoints(value)
+                    builder.advancedToneCurve = (builder.advancedToneCurve ?? .neutral).settingPoints(points, for: channel)
+                    if !nativeFields.contains(.advancedToneCurve) {
+                        nativeFields.append(.advancedToneCurve)
+                    }
                     mappedProperties.insert(id)
                 } catch {
                     diagnostics.append(XMPDiagnostic(severity: .warning, code: "malformedToneCurve", propertyID: id))
@@ -189,10 +192,22 @@ public struct XMPImporter: Sendable {
         }
     }
 
-    /// `crs:ToneCurvePV2012` is an `rdf:Seq` of `"x, y"` text pairs on a
-    /// 0...255 scale (Adobe/exiv2 reference); LumaHarbor's curve is
-    /// normalised to 0...1.
-    static func importToneCurve(_ value: XMPValue) throws -> AdvancedToneCurve {
+    /// Maps each of the four `crs:ToneCurvePV2012*` properties (spec §6.2) to
+    /// its `ToneCurveChannel`. `nil` for any other property.
+    static func toneCurveChannel(for id: XMPPropertyID) -> ToneCurveChannel? {
+        switch id {
+        case .cameraRaw("ToneCurvePV2012"): return .composite
+        case .cameraRaw("ToneCurvePV2012Red"): return .red
+        case .cameraRaw("ToneCurvePV2012Green"): return .green
+        case .cameraRaw("ToneCurvePV2012Blue"): return .blue
+        default: return nil
+        }
+    }
+
+    /// `crs:ToneCurvePV2012` (and its Red/Green/Blue siblings, P3) are each an
+    /// `rdf:Seq` of `"x, y"` text pairs on a 0...255 scale (Adobe/exiv2
+    /// reference); LumaHarbor's curve is normalised to 0...1.
+    static func importToneCurvePoints(_ value: XMPValue) throws -> [ToneCurvePoint] {
         guard case .array(_, let values) = value else {
             throw PresetError.malformedXML("expected an rdf:Seq for ToneCurvePV2012")
         }
@@ -210,13 +225,19 @@ public struct XMPImporter: Sendable {
             }
             points.append(ToneCurvePoint(x: x / 255, y: y / 255))
         }
-        return AdvancedToneCurve(points: points)
+        return points
     }
 
-    /// Inverse of `importToneCurve`, rounding back to integers the way Adobe
-    /// itself writes them.
-    static func exportToneCurve(_ curve: AdvancedToneCurve) -> XMPValue {
-        let items: [XMPValue] = curve.points.map { point in
+    /// Composite-only convenience wrapper kept for its existing callers
+    /// (`XMPMappingTests`'s error-message test predates per-channel curves).
+    static func importToneCurve(_ value: XMPValue) throws -> AdvancedToneCurve {
+        AdvancedToneCurve(points: try importToneCurvePoints(value))
+    }
+
+    /// Inverse of `importToneCurvePoints`, rounding back to integers the way
+    /// Adobe itself writes them.
+    static func exportToneCurvePoints(_ points: [ToneCurvePoint]) -> XMPValue {
+        let items: [XMPValue] = points.map { point in
             let x = Int((point.x * 255).rounded())
             let y = Int((point.y * 255).rounded())
             return .text("\(x), \(y)")
@@ -354,7 +375,20 @@ public struct XMPExporter: Sendable {
         exportWhiteBalance(preset: preset, context: context, into: &document, diagnostics: &diagnostics)
 
         if let curve = preset.patch.advancedToneCurve {
-            document.properties[.cameraRaw("ToneCurvePV2012")] = XMPImporter.exportToneCurve(curve)
+            // Composite always exports, even when empty, matching this
+            // property's pre-P3 behaviour exactly. Red/Green/Blue only
+            // export when non-identity, so a composite-only preset doesn't
+            // gain three new empty properties it never had.
+            document.properties[.cameraRaw("ToneCurvePV2012")] = XMPImporter.exportToneCurvePoints(curve.points)
+            if !curve.isIdentity(for: .red) {
+                document.properties[.cameraRaw("ToneCurvePV2012Red")] = XMPImporter.exportToneCurvePoints(curve.redPoints)
+            }
+            if !curve.isIdentity(for: .green) {
+                document.properties[.cameraRaw("ToneCurvePV2012Green")] = XMPImporter.exportToneCurvePoints(curve.greenPoints)
+            }
+            if !curve.isIdentity(for: .blue) {
+                document.properties[.cameraRaw("ToneCurvePV2012Blue")] = XMPImporter.exportToneCurvePoints(curve.bluePoints)
+            }
         }
 
         let data = try codec.serialize(document)

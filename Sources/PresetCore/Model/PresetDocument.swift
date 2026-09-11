@@ -42,7 +42,12 @@ public enum PresetSource: Codable, Equatable, Sendable {
 /// LumaHarbor's native preset document (spec §5.1). File extension `.lhpreset`,
 /// UTF-8 JSON. UUID is identity; `name` is display-only.
 public struct PresetDocument: Codable, Equatable, Sendable, Identifiable {
-    public static let currentSchemaVersion = 1
+    /// P3 (per-channel tone curves, `docs/superpowers/specs/2026-09-10-per-channel-tone-curves.md`
+    /// §4.2) bumps this from 1 to 2. A v1 preset still validates and imports
+    /// unchanged -- `AdvancedToneCurve`'s own `Codable` conformance is what
+    /// degrades missing `redPoints`/`greenPoints`/`bluePoints` keys to
+    /// identity, not this version number.
+    public static let currentSchemaVersion = 2
     /// Maximum encoded size for one native preset file.
     public static let maximumEncodedBytes = PresetFileLimits.maximumNativePresetBytes
     /// Display name after `.trimmingCharacters(in: .whitespacesAndNewlines)`
