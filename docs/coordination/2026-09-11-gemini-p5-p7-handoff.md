@@ -2,7 +2,7 @@
 
 ## 開始位置
 
-- Worktree：`<USER_HOME>/Documents/ChatGPT/LumaHarbor/.worktrees/claude-professional-editing-completion`
+- Worktree：`<WORKTREE_PATH>`
 - Branch：`claude/professional-editing-completion`
 - HEAD：`6e98ecc`（P4 已完成且通過驗證）
 - 目前工作樹應保持乾淨；不要重設、覆蓋或刪除既有提交。

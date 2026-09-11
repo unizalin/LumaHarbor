@@ -9,7 +9,7 @@
 
 ## 1. 目前 Git 狀態
 
-- **Worktree 路徑**：`<USER_HOME>/Documents/ChatGPT/LumaHarbor/.worktrees/claude-professional-editing-completion`
+- **Worktree 路徑**：`<WORKTREE_PATH>`
 - **當前分支**：`claude/professional-editing-completion`
 - **當前 HEAD SHA**：`3ccf3e5d8c0ed5131fa46e824e7fdfcfb8b00130` (`3ccf3e5`)
 - **起始基準 (Base)**：`4cdf40f`（P4 完成後之基準）
