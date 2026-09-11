@@ -14,7 +14,7 @@ Updated by: Gemini（P7 Cross-Device Verification and Release Preparation）
   - 發布準備約束：遵照指示與 spec 要求，在實體硬體與外接磁碟設備人工檢核核准前，嚴禁封裝對外發布 ZIP 檔案。
 - **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `28dac70`（P6 commit）。
 - **驗證**：`swift test` 全套 **PASS**（2193 tests、9 skipped、0 failures，28.550s）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`swift run LumaHarborDiagnosticsCLI` **PASS**。`git diff --check` **PASS**。隱私掃描 **PASS**（無個人路徑、Team ID、UDID 或私鑰洩漏）。
-- **交接文件**：`docs/coordination/2026-09-11-p7-cross-device-verification-and-release-prep-handoff.md`。
+- **交接文件**：`docs/coordination/2026-09-11-p7-cross-device-verification-and-release-prep-handoff.md`、`docs/coordination/2026-09-11-gemini-to-codex-handoff.md`。
 - **下一步**：P0~P7 全階段實作完工；等待使用者進行實體硬體與外接磁碟之人工視覺驗收。
 
 ## P6：Snapshots、Soft Proof、Professional Preview（2026-09-11, Gemini）
