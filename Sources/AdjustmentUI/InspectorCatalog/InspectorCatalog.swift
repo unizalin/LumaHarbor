@@ -53,6 +53,24 @@ public enum InspectorCatalog {
             searchTokens: ["curve", "tone curve", "points", "rgb curve"]
         ),
         InspectorSectionDescriptor(
+            id: .presence,
+            domain: .adjust,
+            submode: .light,
+            titleKey: "Presence",
+            symbol: "circle.hexagongrid",
+            fieldIDs: ["presence.texture", "presence.clarity", "presence.dehaze"],
+            searchTokens: ["texture", "clarity", "dehaze", "presence", "haze"]
+        ),
+        InspectorSectionDescriptor(
+            id: .colorGrading,
+            domain: .adjust,
+            submode: .color,
+            titleKey: "Color Grading",
+            symbol: "circle.hexagonpath",
+            fieldIDs: ["colorGrading"],
+            searchTokens: ["color grading", "shadows", "midtones", "highlights", "grade", "wheel", "split toning"]
+        ),
+        InspectorSectionDescriptor(
             id: .detail,
             domain: .adjust,
             submode: .detail,
@@ -80,7 +98,8 @@ public enum InspectorCatalog {
             titleKey: "Geometry",
             symbol: "crop.rotate",
             fieldIDs: [],
-            searchTokens: ["crop", "rotate", "flip", "straighten", "geometry", "perspective", "aspect ratio"]
+            searchTokens: ["crop", "rotate", "flip", "straighten", "geometry", "perspective", "aspect ratio",
+                           "lens correction", "distortion", "vignetting", "chromatic aberration"]
         ),
         InspectorSectionDescriptor(
             id: .local,
@@ -156,6 +175,10 @@ public enum InspectorCatalog {
             copy.hsl = .neutral
         case .curve:
             copy.advancedToneCurve = .neutral
+        case .presence:
+            copy.presence = .neutral
+        case .colorGrading:
+            copy.colorGrading = .neutral
         case .detail:
             copy.sharpening = .neutral
             copy.noiseReduction = .neutral
@@ -164,6 +187,7 @@ public enum InspectorCatalog {
             copy.grain = .neutral
         case .geometry:
             copy.geometry = .neutral
+            copy.lensCorrection = .neutral
         case .local:
             copy.localAdjustments = []
         }

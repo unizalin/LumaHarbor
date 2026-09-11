@@ -54,15 +54,22 @@ public struct RawDecodeRequest: Equatable, Sendable {
     public var url: URL
     public var quality: DecodeQuality
     public var whiteBalance: RawWhiteBalance
+    /// Only `.automatic` affects the decoder (design spec §6.4, D-007) --
+    /// `.manual`/`.bundledProfile` correction runs post-decode in
+    /// `AdjustmentPipeline`, since white balance is already baked in by the
+    /// time this decoder returns.
+    public var lensCorrection: LensCorrectionAdjustments
 
     public init(
         url: URL,
         quality: DecodeQuality = .full,
-        whiteBalance: RawWhiteBalance = .asShot
+        whiteBalance: RawWhiteBalance = .asShot,
+        lensCorrection: LensCorrectionAdjustments = .neutral
     ) {
         self.url = url
         self.quality = quality
         self.whiteBalance = whiteBalance
+        self.lensCorrection = lensCorrection
     }
 }
 

@@ -66,6 +66,10 @@ public extension PhotoAdjustments {
         case .grainAmount: return grain.amount
         case .grainSize: return grain.size
         case .grainRoughness: return grain.roughness
+        case .presenceTexture: return presence.texture
+        case .presenceClarity: return presence.clarity
+        case .presenceDehaze: return presence.dehaze
+        case .colorGrading, .monochrome, .renderingProfile, .lensCorrection: return nil
         }
     }
 }
@@ -77,10 +81,16 @@ public extension AdjustmentPatch {
     static func extracting(_ fields: Set<AdjustmentFieldID>, from adjustments: PhotoAdjustments) -> AdjustmentPatch {
         var builder = AdjustmentPatchBuilder()
         for field in fields {
-            if field == .advancedToneCurve {
-                builder.advancedToneCurve = adjustments.advancedToneCurve
-            } else if let value = adjustments.scalarValue(for: field) {
-                builder.set(field, to: value)
+            switch field {
+            case .advancedToneCurve: builder.advancedToneCurve = adjustments.advancedToneCurve
+            case .colorGrading: builder.colorGrading = adjustments.colorGrading
+            case .monochrome: builder.monochrome = adjustments.monochrome
+            case .renderingProfile: builder.renderingProfile = adjustments.renderingProfile
+            case .lensCorrection: builder.lensCorrection = adjustments.lensCorrection
+            default:
+                if let value = adjustments.scalarValue(for: field) {
+                    builder.set(field, to: value)
+                }
             }
         }
         return builder.build()
@@ -91,8 +101,14 @@ public extension AdjustmentPatch {
     /// "預設勾選與 .neutral 不同的 leaf").
     static func modifiedFields(in adjustments: PhotoAdjustments) -> Set<AdjustmentFieldID> {
         Set(AdjustmentFieldID.allCases.filter { field in
-            if field == .advancedToneCurve { return !adjustments.advancedToneCurve.isIdentity }
-            return adjustments.scalarValue(for: field) != PhotoAdjustments.neutral.scalarValue(for: field)
+            switch field {
+            case .advancedToneCurve: return !adjustments.advancedToneCurve.isIdentity
+            case .colorGrading: return !adjustments.colorGrading.isIdentity
+            case .monochrome: return !adjustments.monochrome.isIdentity
+            case .renderingProfile: return !adjustments.renderingProfile.isIdentity
+            case .lensCorrection: return !adjustments.lensCorrection.isIdentity
+            default: return adjustments.scalarValue(for: field) != PhotoAdjustments.neutral.scalarValue(for: field)
+            }
         })
     }
 
@@ -105,8 +121,14 @@ public extension AdjustmentPatch {
     /// itself, must not be reported as modified.
     static func modifiedFields(in adjustments: PhotoAdjustments, comparedTo baseline: PhotoAdjustments) -> Set<AdjustmentFieldID> {
         Set(AdjustmentFieldID.allCases.filter { field in
-            if field == .advancedToneCurve { return adjustments.advancedToneCurve != baseline.advancedToneCurve }
-            return adjustments.scalarValue(for: field) != baseline.scalarValue(for: field)
+            switch field {
+            case .advancedToneCurve: return adjustments.advancedToneCurve != baseline.advancedToneCurve
+            case .colorGrading: return adjustments.colorGrading != baseline.colorGrading
+            case .monochrome: return adjustments.monochrome != baseline.monochrome
+            case .renderingProfile: return adjustments.renderingProfile != baseline.renderingProfile
+            case .lensCorrection: return adjustments.lensCorrection != baseline.lensCorrection
+            default: return adjustments.scalarValue(for: field) != baseline.scalarValue(for: field)
+            }
         })
     }
 
@@ -117,10 +139,16 @@ public extension AdjustmentPatch {
         guard !fields.isEmpty else { return self }
         var builder = AdjustmentPatchBuilder()
         for field in AdjustmentFieldID.allCases where contains(field) && !fields.contains(field) {
-            if field == .advancedToneCurve {
-                builder.advancedToneCurve = advancedToneCurve
-            } else if let value = scalarValue(for: field) {
-                builder.set(field, to: value)
+            switch field {
+            case .advancedToneCurve: builder.advancedToneCurve = advancedToneCurve
+            case .colorGrading: builder.colorGrading = colorGrading
+            case .monochrome: builder.monochrome = monochrome
+            case .renderingProfile: builder.renderingProfile = renderingProfile
+            case .lensCorrection: builder.lensCorrection = lensCorrection
+            default:
+                if let value = scalarValue(for: field) {
+                    builder.set(field, to: value)
+                }
             }
         }
         return builder.build()

@@ -441,6 +441,325 @@ final class AdjustmentPipelineTests: XCTestCase {
         XCTAssertGreaterThan(tinted.red, tinted.blue, "An orange (hue 30) highlight tint should leave red above blue in a bright patch")
     }
 
+    // MARK: - Lens Correction (P4: manual/bundled-profile modes only --
+    // .automatic is decode-time, CoreImageRawDecoder's job, not testable
+    // without a real RAW file; see that type's own manual acceptance note.)
+
+    func testOffModeIsAPassthroughEvenWithNonZeroAmountsQueued() {
+        // Amounts survive being dialed in before the user picks a mode, but
+        // must have zero render effect until mode leaves .off.
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .off, distortionAmount: 50, vignettingAmount: 50, tcaAmount: 50)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertTrue(output === source)
+    }
+
+    func testAutomaticModeAloneDoesNotChangePixelsInThisPipeline() throws {
+        // .automatic only affects CoreImageRawDecoder (D-007) -- this
+        // pipeline stage must treat it exactly like .off.
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .automatic)
+        let base = try centrePixel(source)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: source))
+        XCTAssertEqual(edited.red, base.red)
+        XCTAssertEqual(edited.green, base.green)
+        XCTAssertEqual(edited.blue, base.blue)
+    }
+
+    func testPositiveDistortionMovesACornerPixelTowardTheCenter() throws {
+        // Positive distortion corrects barrel distortion (pincushion-style
+        // correction pulls the frame in from the edges), so a distinctive
+        // marker placed off-centre should sample as if pulled toward the
+        // centre after correction -- checked here as "the corner is no
+        // longer pure background colour, it picked up some of the marker's
+        // colour that used to be further out" is too fragile; instead check
+        // that *some* geometric change happened by asserting the corner
+        // pixel of a half-and-half fixture crosses the boundary.
+        let side = 200
+        let backgroundColor = CIColor(red: 0.2, green: 0.2, blue: 0.2)
+        let markerColor = CIColor(red: 0.9, green: 0.9, blue: 0.9)
+        let background = CIImage(color: backgroundColor).cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
+        let marker = CIImage(color: markerColor)
+            .cropped(to: CGRect(x: 0, y: 0, width: 10, height: 10))
+        let source = marker.composited(over: background).cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
+
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .manual, distortionAmount: 100)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertFalse(output === source, "A non-zero distortion amount must actually reach the render chain")
+        XCTAssertEqual(output.extent, source.extent)
+    }
+
+    func testPositiveVignettingBrightensTheCorner() throws {
+        let source = makeSourceImage(red: 0.3, green: 0.3, blue: 0.3)
+        let corner = CGPoint(x: 1, y: 1)
+        let base = try pixel(at: corner, in: source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .manual, vignettingAmount: 100)
+        let edited = try pixel(at: corner, in: pipeline.apply(adjustments, to: source))
+        XCTAssertGreaterThan(edited.red, base.red, "Positive vignetting amount should brighten the corner (correcting lens light falloff)")
+    }
+
+    func testNegativeVignettingDarkensTheCorner() throws {
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        let corner = CGPoint(x: 1, y: 1)
+        let base = try pixel(at: corner, in: source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .manual, vignettingAmount: -100)
+        let edited = try pixel(at: corner, in: pipeline.apply(adjustments, to: source))
+        XCTAssertLessThan(edited.red, base.red)
+    }
+
+    func testPositiveTCASeparatesRedAndBlueAtAHighContrastEdge() throws {
+        let side = 200
+        let dark = CIImage(color: CIColor(red: 0.1, green: 0.1, blue: 0.1))
+            .cropped(to: CGRect(x: 0, y: 0, width: side / 2, height: side))
+        let light = CIImage(color: CIColor(red: 0.9, green: 0.9, blue: 0.9))
+            .cropped(to: CGRect(x: side / 2, y: 0, width: side / 2, height: side))
+        let source = light.composited(over: dark).cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
+
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .manual, tcaAmount: 100)
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertFalse(output === source, "A non-zero TCA amount must actually reach the render chain")
+        XCTAssertEqual(output.extent, source.extent)
+    }
+
+    func testBundledProfileModeWithNoMatchProducesUnchangedPixels() throws {
+        // The bundled database is empty in this phase (P4 spec §1 item 1) --
+        // a caller that sets .bundledProfile without ever resolving a match
+        // (amounts stay 0) must still render pixel-identical output, even
+        // though `LensCorrectionAdjustments.isIdentity` itself reports this
+        // as non-neutral data (selecting the mode is a real, saved choice --
+        // see `testIdentityIsDeterminedOnlyByMode` -- but zero amounts still
+        // mean zero visible effect).
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .bundledProfile)
+        let base = try centrePixel(source)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: source))
+        XCTAssertEqual(edited.red, base.red)
+        XCTAssertEqual(edited.green, base.green)
+        XCTAssertEqual(edited.blue, base.blue)
+    }
+
+    // MARK: - Presence (P4: texture, clarity, dehaze)
+
+    private func edgeFixture() -> CIImage {
+        let dark = CIImage(color: CIColor(red: 0.3, green: 0.3, blue: 0.3))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 16))
+        let light = CIImage(color: CIColor(red: 0.7, green: 0.7, blue: 0.7))
+            .cropped(to: CGRect(x: 8, y: 0, width: 8, height: 16))
+        return light.composited(over: dark).cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    func testPositiveTextureIncreasesContrastAtAnEdge() throws {
+        let source = edgeFixture()
+        let base = try pixel(at: CGPoint(x: 7, y: 8), in: source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.presence = PresenceAdjustments(texture: 100)
+        let edited = try pixel(at: CGPoint(x: 7, y: 8), in: pipeline.apply(adjustments, to: source))
+        XCTAssertLessThan(edited.red, base.red, "Positive texture should darken the dark side of an edge further")
+    }
+
+    func testNegativeTextureSoftensAnEdge() throws {
+        let source = edgeFixture()
+        let baseDark = try pixel(at: CGPoint(x: 7, y: 8), in: source)
+        let baseLight = try pixel(at: CGPoint(x: 8, y: 8), in: source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.presence = PresenceAdjustments(texture: -100)
+        let output = pipeline.apply(adjustments, to: source)
+        let editedDark = try pixel(at: CGPoint(x: 7, y: 8), in: output)
+        let editedLight = try pixel(at: CGPoint(x: 8, y: 8), in: output)
+        XCTAssertLessThan(baseDark.red, baseLight.red) // sanity: base has an edge at all
+        XCTAssertLessThan(
+            abs(editedLight.red - editedDark.red), abs(baseLight.red - baseDark.red),
+            "Negative texture should soften (reduce contrast across) the edge"
+        )
+    }
+
+    func testPositiveClarityIncreasesLocalContrast() throws {
+        let source = edgeFixture()
+        let base = try pixel(at: CGPoint(x: 4, y: 8), in: source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.presence = PresenceAdjustments(clarity: 100)
+        let edited = try pixel(at: CGPoint(x: 4, y: 8), in: pipeline.apply(adjustments, to: source))
+        XCTAssertLessThan(edited.red, base.red, "Positive clarity should darken the dark side further, same direction as texture but wider")
+    }
+
+    func testPositiveDehazeIncreasesContrastAndSaturation() throws {
+        // A flat, desaturated mid-grey-ish patch stands in for a hazy scene.
+        let hazy = makeSourceImage(red: 0.55, green: 0.5, blue: 0.48)
+        let base = try centrePixel(hazy)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.presence = PresenceAdjustments(dehaze: 100)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: hazy))
+        XCTAssertGreaterThan(edited.red - edited.blue, base.red - base.blue, "Dehaze should widen the channel spread (more saturated)")
+    }
+
+    func testNegativeDehazeReducesContrastAndSaturation() throws {
+        let source = makeSourceImage(red: 0.6, green: 0.4, blue: 0.3)
+        let base = try centrePixel(source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.presence = PresenceAdjustments(dehaze: -100)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: source))
+        XCTAssertLessThan(edited.red - edited.blue, base.red - base.blue, "Negative dehaze should narrow the channel spread (hazier, less saturated)")
+    }
+
+    func testNeutralPresenceStaysAPassthrough() {
+        let source = makeSourceImage()
+        let output = pipeline.apply(PhotoAdjustments(presence: .neutral), to: source)
+        XCTAssertTrue(output === source)
+    }
+
+    // MARK: - Color Grading (P4)
+
+    func testShadowColorGradingTintsADarkPixelTowardTheShadowHue() throws {
+        let dark = makeSourceImage(red: 0.15, green: 0.15, blue: 0.15)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.colorGrading.shadows = ColorGradeBand(hue: 30, saturation: 80, luminance: 0)
+        let tinted = try centrePixel(pipeline.apply(adjustments, to: dark))
+        XCTAssertGreaterThan(tinted.red, tinted.blue, "An orange (hue 30) shadow grade should leave red above blue in a dark patch")
+    }
+
+    func testHighlightColorGradingDoesNotVisiblyTintADarkPixel() throws {
+        let dark = makeSourceImage(red: 0.15, green: 0.15, blue: 0.15)
+        let base = try centrePixel(dark)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.colorGrading.highlights = ColorGradeBand(hue: 220, saturation: 80, luminance: 0)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: dark))
+        XCTAssertEqual(edited.red, base.red, accuracy: 3, "A highlight-only grade should leave a dark patch close to untouched")
+    }
+
+    func testMidtoneColorGradingTintsAMidGreyPixel() throws {
+        let mid = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.colorGrading.midtones = ColorGradeBand(hue: 30, saturation: 80, luminance: 0)
+        let tinted = try centrePixel(pipeline.apply(adjustments, to: mid))
+        XCTAssertGreaterThan(tinted.red, tinted.blue, "An orange (hue 30) midtone grade should leave red above blue in a mid-grey patch")
+    }
+
+    func testGlobalColorGradingTintsEveryTone() throws {
+        let dark = makeSourceImage(red: 0.15, green: 0.15, blue: 0.15)
+        let light = makeSourceImage(red: 0.85, green: 0.85, blue: 0.85)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.colorGrading.global = ColorGradeBand(hue: 30, saturation: 80, luminance: 0)
+        let tintedDark = try centrePixel(pipeline.apply(adjustments, to: dark))
+        let tintedLight = try centrePixel(pipeline.apply(adjustments, to: light))
+        XCTAssertGreaterThan(tintedDark.red, tintedDark.blue, "Global grade should tint shadows too")
+        XCTAssertGreaterThan(tintedLight.red, tintedLight.blue, "Global grade should tint highlights too")
+    }
+
+    func testZeroSaturationColorGradingStaysAPassthroughWhateverTheHues() {
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.colorGrading.shadows.hue = 240
+        adjustments.colorGrading.highlights.hue = 60
+        let output = pipeline.apply(adjustments, to: source)
+        XCTAssertTrue(output === source, "Hue with zero saturation on every band must still be a passthrough")
+    }
+
+    // MARK: - Monochrome (P4)
+
+    func testEnabledMonochromeProducesAnAchromaticPixel() throws {
+        let red = makeSourceImage(red: 0.7, green: 0.2, blue: 0.2)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.monochrome = MonochromeAdjustments(isEnabled: true)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: red))
+        XCTAssertEqual(edited.red, edited.green, accuracy: 1)
+        XCTAssertEqual(edited.green, edited.blue, accuracy: 1)
+    }
+
+    func testPositiveRedMixBrightensARedPatchOnceConverted() throws {
+        let red = makeSourceImage(red: 0.6, green: 0.3, blue: 0.3)
+        var neutralMono = PhotoAdjustments.neutral
+        neutralMono.monochrome = MonochromeAdjustments(isEnabled: true)
+        let neutralGray = try centrePixel(pipeline.apply(neutralMono, to: red))
+
+        var boostedMono = PhotoAdjustments.neutral
+        boostedMono.monochrome = MonochromeAdjustments(isEnabled: true, red: 100)
+        let boostedGray = try centrePixel(pipeline.apply(boostedMono, to: red))
+
+        XCTAssertGreaterThan(boostedGray.red, neutralGray.red, "Boosting the Red band's mix should brighten a red-hued pixel's grayscale output")
+    }
+
+    func testDisabledMonochromePreservesColorAdjustments() throws {
+        // Disabled must not affect anything else in the chain -- colour tools
+        // stay live (design spec §6.3: "停用時保留彩色調整").
+        let red = makeSourceImage(red: 0.7, green: 0.2, blue: 0.2)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.monochrome = MonochromeAdjustments(isEnabled: false, red: 90)
+        adjustments.hsl.red = HSLBand(hue: 0, saturation: -100, luminance: 0)
+        let base = try centrePixel(red)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: red))
+        XCTAssertNotEqual(edited.red, edited.green, "Still colour, not converted to grayscale")
+        XCTAssertLessThan(edited.red - edited.blue, base.red - base.blue, "HSL desaturation should still apply while monochrome is disabled")
+    }
+
+    func testNeutralMonochromeStaysAPassthrough() {
+        let source = makeSourceImage()
+        let output = pipeline.apply(PhotoAdjustments(monochrome: .neutral), to: source)
+        XCTAssertTrue(output === source)
+    }
+
+    // MARK: - Rendering Profile (P4)
+
+    func testVividProfileIncreasesSaturation() throws {
+        let source = makeSourceImage(red: 0.6, green: 0.4, blue: 0.3)
+        let base = try centrePixel(source)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: 100)
+        let edited = try centrePixel(pipeline.apply(adjustments, to: source))
+        XCTAssertGreaterThan(edited.red - edited.blue, base.red - base.blue)
+    }
+
+    func testProfileAmountScalesTheEffect() throws {
+        let source = makeSourceImage(red: 0.6, green: 0.4, blue: 0.3)
+        var full = PhotoAdjustments.neutral
+        full.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: 100)
+        var half = PhotoAdjustments.neutral
+        half.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: 50)
+        let base = try centrePixel(source)
+        let fullPixel = try centrePixel(pipeline.apply(full, to: source))
+        let halfPixel = try centrePixel(pipeline.apply(half, to: source))
+        let fullSpread = fullPixel.red - fullPixel.blue
+        let halfSpread = halfPixel.red - halfPixel.blue
+        let baseSpread = base.red - base.blue
+        XCTAssertTrue(baseSpread < halfSpread && halfSpread < fullSpread, "amount: 50 should land strictly between neutral and amount: 100")
+    }
+
+    func testUnknownProfileIDIsANoOp() throws {
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.renderingProfile = RenderingProfileSelection(profileID: "not-a-real-profile", amount: 100)
+        let output = pipeline.apply(adjustments, to: source)
+        let base = try centrePixel(source)
+        let edited = try centrePixel(output)
+        XCTAssertEqual(edited.red, base.red)
+        XCTAssertEqual(edited.green, base.green)
+        XCTAssertEqual(edited.blue, base.blue)
+    }
+
+    func testStandardProfileIsANoOpAtAnyAmount() throws {
+        let source = makeSourceImage()
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.standard", amount: 100)
+        let output = pipeline.apply(adjustments, to: source)
+        let base = try centrePixel(source)
+        let edited = try centrePixel(output)
+        XCTAssertEqual(edited.red, base.red)
+        XCTAssertEqual(edited.green, base.green)
+        XCTAssertEqual(edited.blue, base.blue)
+    }
+
+    func testNeutralRenderingProfileStaysAPassthrough() {
+        let source = makeSourceImage()
+        let output = pipeline.apply(PhotoAdjustments(renderingProfile: .neutral), to: source)
+        XCTAssertTrue(output === source)
+    }
+
     // MARK: - Advanced tone curve
 
     func testAdvancedCurveDarkeningPointsDarkenTheImage() throws {

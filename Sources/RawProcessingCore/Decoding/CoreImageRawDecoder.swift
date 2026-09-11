@@ -69,6 +69,19 @@ public struct CoreImageRawDecoder: RawDecoding {
         filter.scaleFactor = Float(scaleFactor)
         filter.isDraftModeEnabled = request.quality.allowsDraftMode
 
+        // Automatic lens correction only, and only when the vendor actually
+        // supports it (design spec §6.4 item 2) -- .off/.manual/.bundledProfile
+        // explicitly disable it so the decoder's own correction never doubles
+        // up with the post-decode manual/profile pass in AdjustmentPipeline
+        // (§6.4: "不得同時套用").
+        if request.lensCorrection.decoderShouldEnableLensCorrection {
+            if filter.isLensCorrectionSupported {
+                filter.isLensCorrectionEnabled = true
+            }
+        } else {
+            filter.isLensCorrectionEnabled = false
+        }
+
         guard let output = filter.outputImage else {
             throw RawDecodingError.decodeFailed(
                 path: url.path,

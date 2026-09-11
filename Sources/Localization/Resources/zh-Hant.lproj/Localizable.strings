@@ -624,3 +624,29 @@
 "Reset Adjust" = "重設調整";
 "Reset Geometry" = "重設幾何";
 "Reset Local Adjustments" = "重設局部調整";
+
+/* P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction */
+"Texture" = "紋理";
+"Clarity" = "清晰度";
+"Dehaze" = "去朦朧";
+"Presence" = "質感";
+"Color Grading" = "色彩分級";
+"Midtones" = "中間調";
+"Global" = "全域";
+"Balance" = "平衡";
+"Blending" = "混合";
+"Black & White" = "黑白";
+"Lens Correction" = "鏡頭校正";
+"Off" = "關閉";
+"Automatic" = "自動";
+"Manual" = "手動";
+"Bundled Profile" = "內建描述檔";
+"Distortion" = "變形校正";
+"Vignetting" = "暈影校正";
+"Chromatic Aberration" = "色差";
+"Rendering Profile" = "渲染描述檔";
+"Standard" = "標準";
+"Vivid" = "鮮豔";
+"Flat" = "平淡";
+"Portrait" = "人像";
+"No Matching Profile" = "沒有相符描述檔";

@@ -10,6 +10,8 @@ public enum InspectorSectionID: String, CaseIterable, Codable, Sendable, Identif
     case whiteBalance
     case hsl
     case curve
+    case presence
+    case colorGrading
     case detail
     case effects
     case geometry

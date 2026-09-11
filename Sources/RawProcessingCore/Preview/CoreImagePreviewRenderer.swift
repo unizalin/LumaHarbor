@@ -29,7 +29,8 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         let decodeRequest = RawDecodeRequest(
             url: request.url,
             quality: request.decodeQuality,
-            whiteBalance: parameters.whiteBalance
+            whiteBalance: parameters.whiteBalance,
+            lensCorrection: request.adjustments.lensCorrection
         )
 
         // Spec §11: never decode, hash or encode on the main thread.

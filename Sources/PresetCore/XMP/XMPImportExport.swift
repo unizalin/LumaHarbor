@@ -259,6 +259,11 @@ struct AdjustmentPatchBuilder {
     var sharpening = SharpeningPatch()
     var vignette = VignettePatch()
     var grain = GrainPatch()
+    var presence = PresencePatch()
+    var colorGrading: ColorGradingAdjustments?
+    var monochrome: MonochromeAdjustments?
+    var renderingProfile: RenderingProfileSelection?
+    var lensCorrection: LensCorrectionAdjustments?
 
     mutating func set(_ field: AdjustmentFieldID, to value: Double) {
         switch field {
@@ -316,6 +321,11 @@ struct AdjustmentPatchBuilder {
         case .grainAmount: grain.amount = value
         case .grainSize: grain.size = value
         case .grainRoughness: grain.roughness = value
+        case .presenceTexture: presence.texture = value
+        case .presenceClarity: presence.clarity = value
+        case .presenceDehaze: presence.dehaze = value
+        case .colorGrading, .monochrome, .renderingProfile, .lensCorrection:
+            break // whole-value leaves, set directly on the matching stored property
         }
     }
 
@@ -328,7 +338,12 @@ struct AdjustmentPatchBuilder {
             sharpening: sharpening,
             noiseReduction: nil,
             vignette: vignette,
-            grain: grain
+            grain: grain,
+            presence: presence,
+            colorGrading: colorGrading,
+            monochrome: monochrome,
+            renderingProfile: renderingProfile,
+            lensCorrection: lensCorrection
         )
     }
 }

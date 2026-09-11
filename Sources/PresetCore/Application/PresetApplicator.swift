@@ -171,6 +171,28 @@ public struct PresetApplicator: Sendable {
             if let value = grain.roughness { result.grain.roughness = value }
         }
 
+        if let presence = patch.presence {
+            if let value = presence.texture { result.presence.texture = value }
+            if let value = presence.clarity { result.presence.clarity = value }
+            if let value = presence.dehaze { result.presence.dehaze = value }
+        }
+
+        if let colorGrading = patch.colorGrading {
+            result.colorGrading = colorGrading
+        }
+
+        if let monochrome = patch.monochrome {
+            result.monochrome = monochrome
+        }
+
+        if let renderingProfile = patch.renderingProfile {
+            result.renderingProfile = renderingProfile
+        }
+
+        if let lensCorrection = patch.lensCorrection {
+            result.lensCorrection = lensCorrection
+        }
+
         return PresetApplicationResult(adjustments: result, diagnostics: diagnostics)
     }
 

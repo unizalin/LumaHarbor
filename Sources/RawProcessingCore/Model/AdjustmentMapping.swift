@@ -26,6 +26,11 @@ public struct RenderParameters: Equatable, Sendable {
     public let splitToning: SplitToning
     public let advancedToneCurve: AdvancedToneCurve
     public let hsl: HSLAdjustments
+    public let presence: PresenceAdjustments
+    public let colorGrading: ColorGradingAdjustments
+    public let monochrome: MonochromeAdjustments
+    public let renderingProfile: RenderingProfileSelection
+    public let lensCorrection: LensCorrectionAdjustments
 
     public var whiteBalance: RawWhiteBalance {
         RawWhiteBalance(
@@ -47,6 +52,11 @@ public struct RenderParameters: Equatable, Sendable {
     public var isSplitToningIdentity: Bool { splitToning.isIdentity }
     public var isAdvancedToneCurveIdentity: Bool { advancedToneCurve.isIdentity }
     public var isHSLIdentity: Bool { hsl.isIdentity }
+    public var isPresenceIdentity: Bool { presence.isIdentity }
+    public var isColorGradingIdentity: Bool { colorGrading.isIdentity }
+    public var isMonochromeIdentity: Bool { monochrome.isIdentity }
+    public var isRenderingProfileIdentity: Bool { renderingProfile.isIdentity }
+    public var isLensCorrectionIdentity: Bool { lensCorrection.isIdentity }
 }
 
 /// The one place slider units become Core Image units.
@@ -106,7 +116,12 @@ public enum AdjustmentMapping {
             grain: clamped.grain,
             splitToning: clamped.splitToning,
             advancedToneCurve: clamped.advancedToneCurve,
-            hsl: clamped.hsl
+            hsl: clamped.hsl,
+            presence: clamped.presence,
+            colorGrading: clamped.colorGrading,
+            monochrome: clamped.monochrome,
+            renderingProfile: clamped.renderingProfile,
+            lensCorrection: clamped.lensCorrection
         )
     }
 }

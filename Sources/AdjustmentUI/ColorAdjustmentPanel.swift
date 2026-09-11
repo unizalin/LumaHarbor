@@ -23,6 +23,11 @@ public struct ColorAdjustmentPanel: View {
         (\.aqua, "Aqua"), (\.blue, "Blue"), (\.purple, "Purple"), (\.magenta, "Magenta")
     ]
 
+    private static let monochromeBands: [(keyPath: WritableKeyPath<MonochromeAdjustments, Double>, labelKey: String)] = [
+        (\.red, "Red"), (\.orange, "Orange"), (\.yellow, "Yellow"), (\.green, "Green"),
+        (\.aqua, "Aqua"), (\.blue, "Blue"), (\.purple, "Purple"), (\.magenta, "Magenta")
+    ]
+
     public var body: some View {
         ForEach(Array(Self.bands.enumerated()), id: \.offset) { _, band in
             DisclosureGroup(L10n.t(band.labelKey)) {
@@ -31,6 +36,29 @@ public struct ColorAdjustmentPanel: View {
                 bandRow(band.keyPath, fieldKey: "Luminance") { $0.luminance }
             }
         }
+        DisclosureGroup(L10n.t("Black & White")) {
+            Toggle(L10n.t("Black & White"), isOn: monochromeEnabledBinding)
+            if editor.adjustments.monochrome.isEnabled {
+                ForEach(Array(Self.monochromeBands.enumerated()), id: \.offset) { _, band in
+                    AdjustmentSliderRow(
+                        label: L10n.t(band.labelKey),
+                        value: editor.adjustments.monochrome[keyPath: band.keyPath],
+                        range: -100...100, fractionDigits: 0,
+                        onChange: { newValue in
+                            editor.updateAdjustments { $0.monochrome[keyPath: band.keyPath] = newValue }
+                        },
+                        onReset: { editor.updateAdjustments { $0.monochrome[keyPath: band.keyPath] = 0 } }
+                    )
+                }
+            }
+        }
+    }
+
+    private var monochromeEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { editor.adjustments.monochrome.isEnabled },
+            set: { newValue in editor.updateAdjustments { $0.monochrome.isEnabled = newValue } }
+        )
     }
 
     private func bandRow(
