@@ -2,7 +2,27 @@
 
 Updated: 2026-09-11
 
-Updated by: Gemini（P7 Cross-Device Verification and Release Preparation）
+Updated by: Codex（iPad histogram rendering fix）
+
+## iPad／Mac 視覺修整與曲線 UX（2026-09-11, Codex → Claude）
+
+- **狀態**：`IN_PROGRESS / HANDOFF_READY`。已新增 `docs/superpowers/specs/2026-09-11-ipad-mac-visual-polish-and-curve-ux.md`，並以 `docs/coordination/2026-09-11-visual-polish-curve-ux-claude-handoff.md` 交給 Claude 執行。
+- **範圍**：輸入欄位視覺層級、slider row、Composite／Red／Green／Blue 曲線任意控制點（含刪除與 undo 語意）、直方圖抗極端尖峰顯示、iPad 11／13 吋自適應版面、無障礙與真機驗收。
+- **協作約束**：保留 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的使用者本機 signing dirty change；不得修改、stage 或提交。Claude 可關閉不適用的 agent，或自行尋找／啟用 iOS design review／iOS QA agent，但不可與另一 agent 同時編輯同一工作樹。
+- **既有證據**：Codex 變更的 focused tests 16/16、localization gate 43/43、strict build、iPad Simulator build 與 `git diff --check` 均 PASS；完整 `swift test` 唯一失敗仍是本機 signing Team contract mismatch。真機視覺 gate 維持 `NOT RUN`。
+- **下一步**：Claude 依 spec 完成修改與測試，更新本節及交接文件；完成後由 Codex 核對 diff、測試與真機結果，不直接假設已完成。
+
+## iPad／Mac 直方圖與曲線編輯器顯示修整（2026-09-11, Codex）
+
+- **狀態**：`IMPLEMENTED / VERIFIED`。修正共用 `HistogramPanel` 在高反差 RAW 預覽下因線性最大值比例造成細節被壓扁，以及最後色階可能貼齊 `Canvas` 邊界的問題。
+- **實作**：`Sources/AdjustmentUI/HistogramPanel.swift` 使用非負值清理與 `log1p` 對數壓縮計算繪圖高度；繪圖區固定高度（96–132 pt）、左右端點內縮 1 pt，並加入半透明填色與輪廓線，RGB 與 Luminance 模式共用。
+- **輸入欄位**：`AdjustmentValueInput` 改為固定 88 pt 寬的 plain field、等寬數字、材質背景與細邊框；重設按鈕改為一致的圓形 tint 圖示，避免 iPad 寬欄位拉成整條黑框。
+- **曲線互動**：`ToneCurveEditorModel` 保留中性曲線預設 5 個錨點，但新增控制點插入與命中半徑判定；在曲線空白處點擊會新增控制點，仍維持端點與嚴格 x 順序，不允許重複點。
+- **在地化**：既有 `Drag control point` 提示更新為八語對應的「拖曳或點擊新增控制點」，不增加英文 fallback。
+- **測試**：`HistogramPanelTests` 4/4、`ToneCurveEditorModelTests` 8/8、`AdjustmentValueInputTests` 4/4 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **完整套件狀態**：`swift test` 執行 2195、跳過 9、失敗 1；唯一失敗為 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`，因本機 Xcode signing Team 設定與契約預期不同，非本次直方圖修改造成，該本機設定保留未動。
+- **目前工作樹**：除使用者既有的 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 本機簽章變更外，本次 `Sources/AdjustmentUI/HistogramPanel.swift`、`Sources/AdjustmentUI/AdjustmentValueInput.swift`、`Sources/AdjustmentUI/CurveAdjustmentPanel.swift` 與對應測試／本文件皆有未提交變更。
+- **未完成驗收**：實體 iPad 視覺驗收仍需使用已簽署的新建置重新安裝／Run；目前命令列環境沒有可用 signing identity，無法由 Codex 代為安裝真機版本。
 
 ## P7：跨裝置驗收與發布準備（2026-09-11, Gemini）
 
