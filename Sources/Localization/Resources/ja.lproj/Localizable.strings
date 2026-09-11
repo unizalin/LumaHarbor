@@ -22,7 +22,7 @@
 "Basic" = "基本";
 "Curve" = "カーブ";
 "Tone curve" = "トーンカーブ";
-"Drag control point" = "コントロールポイントをドラッグ";
+"Drag control point" = "ドラッグまたはタップしてコントロールポイントを追加";
 "RGB" = "RGB";
 "Shadows clipped" = "シャドウのクリップ";
 "Highlights clipped" = "ハイライトのクリップ";
@@ -38,6 +38,9 @@
 "Roughness" = "粗さ";
 "Roundness" = "丸み";
 "%d control points" = "コントロールポイント %d 個";
+"Delete Control Point" = "コントロールポイントを削除";
+"Add Control Point" = "コントロールポイントを追加";
+"Control point %d of %d" = "コントロールポイント %d／%d";
 "8-bit" = "8-bit";
 "16-bit" = "16-bit";
 "Bit Depth" = "ビット深度";

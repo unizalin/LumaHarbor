@@ -169,6 +169,15 @@ public final class EditorSession: ObservableObject {
     /// hover can never clobber each other's preview state.
     private var previewedEyedropperAdjustments: PhotoAdjustments?
 
+    /// A tone-curve control-point drag/insert/delete applied via
+    /// `previewCurveEdit(_:)`, not yet committed. Same non-committing
+    /// contract as `previewedEyedropperAdjustments` -- `CurveAdjustmentPanel`
+    /// calls this on every drag tick so the render stays live, but only
+    /// `commitCurveEdit()` pushes an Undo entry, so a whole gesture
+    /// (however many ticks it reports) becomes exactly one Undo step
+    /// (visual polish spec §5.1: "拖曳控制點時...形成一筆可復原的 compound undo").
+    private var previewedCurveAdjustments: PhotoAdjustments?
+
     /// What `previewPreset(_:mode:)` reported about the *currently previewed*
     /// preset -- e.g. a contextual leaf skipped for lack of a white-balance
     /// baseline yet. Published (not thrown away like `applying(_:mode:)`
@@ -259,7 +268,7 @@ public final class EditorSession: ObservableObject {
         if let comparisonSnapshot {
             return comparisonSnapshot.adjustments
         }
-        var adjustments = previewedEyedropperAdjustments ?? previewedPresetAdjustments ?? history.current
+        var adjustments = previewedEyedropperAdjustments ?? previewedCurveAdjustments ?? previewedPresetAdjustments ?? history.current
         if toolMode == .crop {
             adjustments.geometry.crop = nil
         }
@@ -324,6 +333,7 @@ public final class EditorSession: ObservableObject {
         self.whiteBalanceBaseline = nil
         self.previewedPresetAdjustments = nil
         self.previewedEyedropperAdjustments = nil
+        self.previewedCurveAdjustments = nil
         self.presetPreviewDiagnostics = []
         self.previewRenderFailureMessage = nil
         self.previewIntentVersion += 1
@@ -360,6 +370,7 @@ public final class EditorSession: ObservableObject {
         whiteBalanceBaseline = nil
         previewedPresetAdjustments = nil
         previewedEyedropperAdjustments = nil
+        previewedCurveAdjustments = nil
         presetPreviewDiagnostics = []
         previewRenderFailureMessage = nil
         previewIntentVersion += 1
@@ -780,6 +791,35 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    /// Live tone-curve preview for a drag/insert/delete gesture on
+    /// `CurveAdjustmentPanel`. Mirrors `previewEyedropper(sample:)`: never
+    /// touches `history` by itself, so `CurveAdjustmentPanel` can call this
+    /// on every drag tick for a live render without filling the Undo stack
+    /// -- only `commitCurveEdit()` does that, once, at the end of the
+    /// gesture.
+    public func previewCurveEdit(_ transform: (inout PhotoAdjustments) -> Void) {
+        guard photo != nil else { return }
+        previewIntentVersion += 1
+        var updated = history.current
+        transform(&updated)
+        previewedCurveAdjustments = updated
+        guard updated != history.current else { return }
+        requestInteractivePreview()
+    }
+
+    /// Commits the current tone-curve preview as one undoable step. A no-op
+    /// if nothing is being previewed, or if the gesture resolved to exactly
+    /// the current curve (`history.record` itself is the no-op guard, same
+    /// as every other edit path in this class).
+    public func commitCurveEdit() {
+        guard let previewed = previewedCurveAdjustments else { return }
+        previewedCurveAdjustments = nil
+        previewIntentVersion += 1
+        previewImageReflectsAPreview = false
+        guard history.record(previewed.clamped()) else { return }
+        didChangeAdjustments()
+    }
+
     private func didChangeAdjustments() {
         refreshUndoState()
         // Interactive first so the slider keeps up (spec §11), then the good one
@@ -818,7 +858,7 @@ public final class EditorSession: ObservableObject {
         // whatever `previewedPresetAdjustments`/`previewedEyedropperAdjustments`/
         // `previewIntentVersion` are *right now* is the truth for this
         // submission).
-        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil
+        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil || previewedCurveAdjustments != nil
         let intentVersion = previewIntentVersion
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),

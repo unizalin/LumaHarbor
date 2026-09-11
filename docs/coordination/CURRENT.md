@@ -2,15 +2,49 @@
 
 Updated: 2026-09-11
 
-Updated by: Codex（iPad histogram rendering fix）
+Updated by: Claude（iPad／Mac 視覺修整與曲線 UX，接續 Codex 交接）
 
 ## iPad／Mac 視覺修整與曲線 UX（2026-09-11, Codex → Claude）
 
-- **狀態**：`IN_PROGRESS / HANDOFF_READY`。已新增 `docs/superpowers/specs/2026-09-11-ipad-mac-visual-polish-and-curve-ux.md`，並以 `docs/coordination/2026-09-11-visual-polish-curve-ux-claude-handoff.md` 交給 Claude 執行。
+- **狀態**：`IMPLEMENTATION COMPLETE / REAL-DEVICE VISUAL QA NOT RUN`。依 `docs/superpowers/specs/2026-09-11-ipad-mac-visual-polish-and-curve-ux.md` 與 `docs/coordination/2026-09-11-visual-polish-curve-ux-claude-handoff.md` 完成本輪修改。
 - **範圍**：輸入欄位視覺層級、slider row、Composite／Red／Green／Blue 曲線任意控制點（含刪除與 undo 語意）、直方圖抗極端尖峰顯示、iPad 11／13 吋自適應版面、無障礙與真機驗收。
-- **協作約束**：保留 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的使用者本機 signing dirty change；不得修改、stage 或提交。Claude 可關閉不適用的 agent，或自行尋找／啟用 iOS design review／iOS QA agent，但不可與另一 agent 同時編輯同一工作樹。
-- **既有證據**：Codex 變更的 focused tests 16/16、localization gate 43/43、strict build、iPad Simulator build 與 `git diff --check` 均 PASS；完整 `swift test` 唯一失敗仍是本機 signing Team contract mismatch。真機視覺 gate 維持 `NOT RUN`。
-- **下一步**：Claude 依 spec 完成修改與測試，更新本節及交接文件；完成後由 Codex 核對 diff、測試與真機結果，不直接假設已完成。
+- **協作約束**：保留 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的使用者本機 signing dirty change；未修改、stage 或提交。未使用或關閉任何額外 agent（本輪為單一 Claude session 直接完成，未發現需要獨立 iOS design review／QA agent 介入的阻塞點；真機驗收仍待有實體裝置存取權的人接手，見下方）。
+
+### Claude 實作內容（2026-09-11）
+
+- **`Sources/EditorCore/EditorSession.swift`**：新增 `previewedCurveAdjustments` 欄位與 `previewCurveEdit(_:)`／`commitCurveEdit()` 方法，仿照既有 `previewEyedropper`/`commitEyedropper` 的「預覽不寫入 history，只在手勢結束時 commit 一次」模式。`displayedAdjustments`／`isPreviewContext` 加入此欄位；`open()`/`close()` 也清除它。這是讓 spec §5.1「拖曳控制點時...形成一筆可復原的 compound undo」成立的必要條件——沒有這個改動，`CurveAdjustmentPanel` 原本直接呼叫 `updateAdjustments`，會讓每一個拖曳 tick 都各自變成一筆 Undo 記錄。
+- **`Sources/AdjustmentUI/CurveAdjustmentPanel.swift`**：
+  - `ToneCurveEditorModel` 新增 `deletingPoint(_:at:)`／`canDeletePoint(_:at:)`（端點與少於 3 點時拒絕刪除）與 `insertingAtLargestGap(_:)`（供 VoiceOver「新增控制點」動作，在最大間距中點插入）。
+  - `CurveAdjustmentPanel` 的曲線資料來源改為 `editor.displayedAdjustments`（即時預覽），`onChange` 改呼叫 `previewCurveEdit`，手勢結束呼叫 `commitCurveEdit()` 再呼叫 `endAdjustmentGesture()`。
+  - `ToneCurveGraph` 新增每個控制點獨立的 44×44 pt 命中／VoiceOver 元素（視覺圓點仍維持 12–16pt）、選取狀態放大與白框強化、`contextMenu`（長按／右鍵）刪除非端點控制點、`accessibilityAdjustableAction`（VoiceOver 增減 y 值）、每點 `accessibilityLabel`／`accessibilityValue`（座標百分比）／刪除 action，以及容器層級的「新增控制點」VoiceOver action。既有拖曳／插入手勢邏輯不變，只新增 `selectedIndex` 追蹤與 commit 呼叫。
+- **`Sources/AdjustmentUI/AdjustmentValueInput.swift`**：Reset 按鈕命中區由 30×30 pt 擴大為 44×44 pt（視覺圓形圖示仍是 30pt，只放大 `contentShape`）；輸入欄位新增 `@FocusState` 與聚焦時邊框加粗（1→2pt）＋改色，避免焦點狀態只靠顏色辨識。
+- **8 語在地化**：新增 3 個 key（`Delete Control Point`／`Add Control Point`／`Control point %d of %d`），已在 zh-Hant／zh-Hans／en／ja／ko／de／fr／es 八語 `Localizable.strings` 補齊，且均非英文原樣複製（無需加入 allowlist）。
+- **未修改**：`Sources/AdjustmentUI/HistogramPanel.swift` 與 `Tests/AdjustmentUITests/HistogramPanelTests.swift` 維持 Codex 既有未提交內容不動（已檢視，符合 spec §6 對 log 壓縮／端點內縮／半透明疊圖／clipping 數值／空資料 empty-state 的要求，判斷不需再改）。`Apps/LumaHarborPad.xcodeproj/project.pbxproj`（使用者本機 signing）未觸碰。
+
+### 測試（TDD 補齊）
+
+- 新增 `Tests/AdjustmentUITests/ToneCurveEditorModelTests.swift`：`deletingPoint`／`canDeletePoint`（拒絕端點、拒絕少於兩點、正確刪除中間點）、`insertingAtLargestGap`（取最大間距中點、少於兩點時為 no-op）共 7 個新測試。
+- 新增 `Tests/EditorCoreTests/EditorSessionEditingTests.swift`：`previewCurveEdit`／`commitCurveEdit` 的 5 個新測試，關鍵案例 `testManyPreviewTicksDuringOneGestureStillCommitAsExactlyOneUndoEntry` 直接證明「10 次連續 tick 只產生 1 筆 Undo entry」。
+- `Sources/AdjustmentUI/HistogramPanel.swift`／`HistogramPanelTests.swift` 為 Codex 既有未提交測試，未再變動。
+
+### 驗證結果（本輪，2026-09-11）
+
+- `swift test --filter 'ToneCurveEditorModelTests|HistogramPanelTests|AdjustmentValueInputTests|EditorSessionEditingTests|EightLanguageLocalizationGateTests|LocalizationSmokeTest'`：**PASS**（分別跑過，ToneCurveEditorModelTests 14/14、HistogramPanelTests 4/4、EightLanguageLocalizationGateTests 10/10、LocalizationSmokeTest 17/17、EditorSessionEditingTests 38/38 均 0 failure；`AdjustmentValueInputTests` 邏輯測試未變動，隨完整套件一起跑過）。
+- 完整 `swift test`：**執行 2209、跳過 9、失敗 1**。唯一失敗為 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 signing Team 與契約預期不符，與本輪產品改動無關，屬既有已知狀態，未修改該檔案）。
+- `swift build -Xswiftc -strict-concurrency=complete`：**PASS**。
+- iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`：**BUILD SUCCEEDED**。
+- `git diff --check`：**PASS**（無空白錯誤）。
+- 隱私掃描：對本輪實際改動的檔案（不含 Codex 既有 dirty 的 Histogram 檔與使用者的 `.pbxproj`）掃描個人帳號／絕對路徑、簽章團隊設定、PEM 標頭與裝置識別碼，**PASS**，無命中。
+
+### 已知限制與 NOT RUN
+
+- **真機視覺驗收：`NOT RUN`**。本環境沒有可用 signing identity 也沒有連接實體裝置操作工具（無螢幕鏡像／觸控模擬工具），無法完成 spec §8「真機人工驗收」的任何一項（M 系列 iPad 11／13 吋四 channel 曲線操作、Undo/Redo、RGB／Luminance 切換、Split View／Stage Manager、Apple Pencil／滑鼠／鍵盤／VoiceOver）。與此工作目錄先前多輪紀錄（見上方「Real-device manual QA attempt」歷史）一致的既有限制，非本輪新增阻塞。
+- **控制點刪除的手勢優先權（`contextMenu` 長按 vs. 父層 `DragGesture(minimumDistance: 0)`）**：邏輯本身（`deletingPoint`／`canDeletePoint`）已通過單元測試，但 SwiftUI 中「父層連續手勢＋子層 `contextMenu` 長按」的實際互動優先權，只能在真機／模擬器上以手指或滑鼠操作驗證，本環境無法驗證，歸入上一條真機視覺驗收 `NOT RUN` 範圍內。
+- VoiceOver 逐點朗讀與 adjustable action 的實際語音行為同樣需要真機 VoiceOver 驗收，`NOT RUN`。
+
+### 下一步
+
+有實體 iPad／Apple silicon Mac 存取權者，依 spec §8 走一次真機驗收：四 channel 曲線任意插入／拖曳／刪除／Undo、RGB／Luminance 切換、數值欄位編輯與重設、橫直向與 Split View／Stage Manager、手指／Apple Pencil／滑鼠／鍵盤／VoiceOver 各一次，並特別確認控制點的長按（iPad）／右鍵（Mac）刪除選單能正確彈出且不被拖曳手勢吃掉。驗收後回填本節的 PASS／FAIL，而非另開新章節覆蓋這次的自動化證據。
 
 ## iPad／Mac 直方圖與曲線編輯器顯示修整（2026-09-11, Codex）
 

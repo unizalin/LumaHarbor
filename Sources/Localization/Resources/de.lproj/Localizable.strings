@@ -22,7 +22,7 @@
 "Basic" = "Grundlegend";
 "Curve" = "Kurve";
 "Tone curve" = "Tonwertkurve";
-"Drag control point" = "Kontrollpunkt ziehen";
+"Drag control point" = "Ziehen oder tippen, um einen Kontrollpunkt hinzuzufügen";
 "RGB" = "RGB";
 "Shadows clipped" = "Tiefen beschnitten";
 "Highlights clipped" = "Lichter beschnitten";
@@ -38,6 +38,9 @@
 "Roughness" = "Rauheit";
 "Roundness" = "Rundheit";
 "%d control points" = "%d Kontrollpunkte";
+"Delete Control Point" = "Kontrollpunkt löschen";
+"Add Control Point" = "Kontrollpunkt hinzufügen";
+"Control point %d of %d" = "Kontrollpunkt %d von %d";
 "8-bit" = "8 Bit";
 "16-bit" = "16 Bit";
 "Bit Depth" = "Bittiefe";

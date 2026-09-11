@@ -13,6 +13,7 @@ public struct AdjustmentValueInput: View {
     private let onReset: () -> Void
     @State private var text: String
     @State private var isEditing = false
+    @FocusState private var isFocused: Bool
 
     public init(
         label: String,
@@ -36,11 +37,28 @@ public struct AdjustmentValueInput: View {
                 if !editing { commit() }
             }, onCommit: commit)
             .multilineTextAlignment(.trailing)
-            .textFieldStyle(.roundedBorder)
-            .frame(minWidth: 64, idealWidth: 72)
+            .textFieldStyle(.plain)
+            .font(.body.monospacedDigit())
+            .padding(.horizontal, 10)
+            .frame(width: 88, height: 36)
+            .background(
+                Color.primary.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    // Focus is shown by a *thicker* ring, not just a color
+                    // change, so it does not depend on color perception
+                    // (spec §4.2: "焦點狀態不可只靠顏色").
+                    .stroke(
+                        isFocused ? Color.accentColor : Color.primary.opacity(0.14),
+                        lineWidth: isFocused ? 2 : 1
+                    )
+            )
             #if os(iOS)
             .keyboardType(.numbersAndPunctuation)
             #endif
+            .focused($isFocused)
             .accessibilityLabel(Text(label))
             .accessibilityValue(Text(text))
 
@@ -49,8 +67,18 @@ public struct AdjustmentValueInput: View {
                 text = PadAdjustmentPolicy.formatted(value, fractionDigits: fractionDigits)
             } label: {
                 Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            // The visible circle stays 30pt, but the tappable/touchable
+            // region is the full 44×44 pt minimum (spec §4.2), so the
+            // reset control is reliably hittable without inflating the
+            // row's visual weight.
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
             .accessibilityLabel(Text("\(label) \(L10n.t("Reset"))"))
         }
         .onChange(of: value) { _, newValue in
