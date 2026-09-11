@@ -76,6 +76,10 @@ public enum GeometryRenderer {
             )
         }
 
+        if let pins = geometry.cornerPins, !pins.isIdentity {
+            working = cornerPinsCorrected(working, pins: pins)
+        }
+
         if let crop = geometry.crop, !crop.isFull {
             working = cropped(working, to: crop)
         }
@@ -193,6 +197,30 @@ public enum GeometryRenderer {
         filter.bottomLeft = CGPoint(x: extent.minX - hInset, y: extent.minY + vInset)
         guard let output = filter.outputImage else { return image }
         return output.cropped(to: extent)
+    }
+
+    private static func cornerPinsCorrected(_ image: CIImage, pins: PerspectiveCornerPins) -> CIImage {
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return image }
+        guard let filter = CIFilter(name: "CIPerspectiveCorrection") else { return image }
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgPoint: imagePoint(for: pins.topLeft, extent: extent)), forKey: "inputTopLeft")
+        filter.setValue(CIVector(cgPoint: imagePoint(for: pins.topRight, extent: extent)), forKey: "inputTopRight")
+        filter.setValue(CIVector(cgPoint: imagePoint(for: pins.bottomRight, extent: extent)), forKey: "inputBottomRight")
+        filter.setValue(CIVector(cgPoint: imagePoint(for: pins.bottomLeft, extent: extent)), forKey: "inputBottomLeft")
+
+        guard let output = filter.outputImage, output.extent.width > 0, output.extent.height > 0 else { return image }
+        let scaleX = extent.width / output.extent.width
+        let scaleY = extent.height / output.extent.height
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        return scaled.cropped(to: extent)
+    }
+
+    private static func imagePoint(for point: NormalizedPoint, extent: CGRect) -> CGPoint {
+        CGPoint(
+            x: extent.minX + CGFloat(point.x) * extent.width,
+            y: extent.minY + CGFloat(1.0 - point.y) * extent.height
+        )
     }
 
     // MARK: - Shared

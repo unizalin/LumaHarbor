@@ -650,3 +650,25 @@
 "Flat" = "플랫";
 "Portrait" = "인물";
 "No Matching Profile" = "일치하는 프로필 없음";
+
+/* P5: Advanced Masks, AI Repair, Perspective */
+"Linear Gradient" = "선형 그라디언트";
+"Radial Gradient" = "방사형 그라디언트";
+"Brush" = "브러시";
+"Luminance Range" = "광도 범위";
+"Color Range" = "색상 범위";
+"Subject" = "피사체";
+"Background" = "배경";
+"Add Mask" = "마스크 추가";
+"Edit Masks" = "마스크 편집";
+"No masks yet." = "마스크가 없습니다.";
+"Duplicate Mask" = "마스크 복제";
+"Delete Mask" = "마스크 삭제";
+"Invert Mask" = "마스크 반전";
+"Opacity" = "불투명도";
+"Red-Eye" = "적목 현상 보정";
+"Pupil Radius" = "동공 반경";
+"Perspective" = "원근감";
+"Vertical" = "수직";
+"Horizontal" = "수평";
+"Reset Perspective" = "원근감 재설정";

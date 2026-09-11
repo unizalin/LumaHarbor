@@ -40,6 +40,9 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
         didSet { perspectiveVertical = Self.clamp(perspectiveVertical, to: Self.perspectiveRange) }
     }
 
+    /// P5: 4-corner perspective correction pins in normalized [0, 1] coordinates.
+    public var cornerPins: PerspectiveCornerPins?
+
     public static let straightenRange: ClosedRange<Double> = -45...45
     public static let perspectiveRange: ClosedRange<Double> = -100...100
 
@@ -51,19 +54,18 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
         flipVertical: Bool = false,
         straightenDegrees: Double = 0,
         perspectiveHorizontal: Double = 0,
-        perspectiveVertical: Double = 0
+        perspectiveVertical: Double = 0,
+        cornerPins: PerspectiveCornerPins? = nil
     ) {
         self.crop = crop
         self.cropAspectRatio = cropAspectRatio
-        // `didSet` does not fire for a value a struct's own initializer
-        // assigns to its own storage, so every clamp is applied explicitly
-        // here too (matches `Vignette`'s existing convention).
         self.rotationDegrees = Self.normalizedQuarterTurn(rotationDegrees)
         self.flipHorizontal = flipHorizontal
         self.flipVertical = flipVertical
         self.straightenDegrees = Self.clamp(straightenDegrees, to: Self.straightenRange)
         self.perspectiveHorizontal = Self.clamp(perspectiveHorizontal, to: Self.perspectiveRange)
         self.perspectiveVertical = Self.clamp(perspectiveVertical, to: Self.perspectiveRange)
+        self.cornerPins = cornerPins
     }
 
     /// No crop, no rotation, no flip, no straighten, no perspective — the
@@ -71,7 +73,16 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
     /// written before this field existed decodes to exactly this value.
     public static let neutral = GeometryAdjustments()
 
-    public var isIdentity: Bool { self == .neutral }
+    public var isIdentity: Bool {
+        crop == nil &&
+        rotationDegrees == 0 &&
+        !flipHorizontal &&
+        !flipVertical &&
+        straightenDegrees == 0 &&
+        perspectiveHorizontal == 0 &&
+        perspectiveVertical == 0 &&
+        (cornerPins == nil || cornerPins?.isIdentity == true)
+    }
 
     // MARK: - Discrete actions
 
@@ -124,6 +135,7 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
         var copy = self
         copy.perspectiveHorizontal = 0
         copy.perspectiveVertical = 0
+        copy.cornerPins = nil
         return copy
     }
 
@@ -149,12 +161,9 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case crop, cropAspectRatio, rotationDegrees, flipHorizontal, flipVertical
         case straightenDegrees, perspectiveHorizontal, perspectiveVertical
+        case cornerPins
     }
 
-    /// Every key is optional on decode. A sidecar written before this struct
-    /// existed has none of them, and must decode to `.neutral` rather than
-    /// throwing — the same convention `PhotoAdjustments.init(from:)` already
-    /// uses for its own later-added fields.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
@@ -165,7 +174,8 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
             flipVertical: try container.decodeIfPresent(Bool.self, forKey: .flipVertical) ?? false,
             straightenDegrees: try container.decodeIfPresent(Double.self, forKey: .straightenDegrees) ?? 0,
             perspectiveHorizontal: try container.decodeIfPresent(Double.self, forKey: .perspectiveHorizontal) ?? 0,
-            perspectiveVertical: try container.decodeIfPresent(Double.self, forKey: .perspectiveVertical) ?? 0
+            perspectiveVertical: try container.decodeIfPresent(Double.self, forKey: .perspectiveVertical) ?? 0,
+            cornerPins: try container.decodeIfPresent(PerspectiveCornerPins.self, forKey: .cornerPins)
         )
     }
 
@@ -179,6 +189,45 @@ public struct GeometryAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(straightenDegrees, forKey: .straightenDegrees)
         try container.encode(perspectiveHorizontal, forKey: .perspectiveHorizontal)
         try container.encode(perspectiveVertical, forKey: .perspectiveVertical)
+        try container.encodeIfPresent(cornerPins, forKey: .cornerPins)
+    }
+}
+
+public struct NormalizedPoint: Codable, Equatable, Hashable, Sendable {
+    public var x: Double { didSet { x = Swift.min(Swift.max(x.isFinite ? x : 0, 0), 1) } }
+    public var y: Double { didSet { y = Swift.min(Swift.max(y.isFinite ? y : 0, 0), 1) } }
+
+    public init(x: Double, y: Double) {
+        self.x = Swift.min(Swift.max(x.isFinite ? x : 0, 0), 1)
+        self.y = Swift.min(Swift.max(y.isFinite ? y : 0, 0), 1)
+    }
+}
+
+public struct PerspectiveCornerPins: Codable, Equatable, Hashable, Sendable {
+    public var topLeft: NormalizedPoint
+    public var topRight: NormalizedPoint
+    public var bottomLeft: NormalizedPoint
+    public var bottomRight: NormalizedPoint
+
+    public init(
+        topLeft: NormalizedPoint = NormalizedPoint(x: 0, y: 0),
+        topRight: NormalizedPoint = NormalizedPoint(x: 1, y: 0),
+        bottomLeft: NormalizedPoint = NormalizedPoint(x: 0, y: 1),
+        bottomRight: NormalizedPoint = NormalizedPoint(x: 1, y: 1)
+    ) {
+        self.topLeft = topLeft
+        self.topRight = topRight
+        self.bottomLeft = bottomLeft
+        self.bottomRight = bottomRight
+    }
+
+    public static let standard = PerspectiveCornerPins()
+
+    public var isIdentity: Bool {
+        topLeft == NormalizedPoint(x: 0, y: 0) &&
+        topRight == NormalizedPoint(x: 1, y: 0) &&
+        bottomLeft == NormalizedPoint(x: 0, y: 1) &&
+        bottomRight == NormalizedPoint(x: 1, y: 1)
     }
 }
 

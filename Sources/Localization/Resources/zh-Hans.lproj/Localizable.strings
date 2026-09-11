@@ -650,3 +650,25 @@
 "Flat" = "平淡";
 "Portrait" = "人像";
 "No Matching Profile" = "没有匹配的配置文件";
+
+/* P5: Advanced Masks, AI Repair, Perspective */
+"Linear Gradient" = "线性渐变";
+"Radial Gradient" = "径向渐变";
+"Brush" = "画笔";
+"Luminance Range" = "亮度范围";
+"Color Range" = "颜色范围";
+"Subject" = "主体";
+"Background" = "背景";
+"Add Mask" = "添加蒙版";
+"Edit Masks" = "编辑蒙版";
+"No masks yet." = "暂无蒙版。";
+"Duplicate Mask" = "复制蒙版";
+"Delete Mask" = "删除蒙版";
+"Invert Mask" = "反相蒙版";
+"Opacity" = "不透明度";
+"Red-Eye" = "红眼消除";
+"Pupil Radius" = "瞳孔半径";
+"Perspective" = "透视";
+"Vertical" = "垂直";
+"Horizontal" = "水平";
+"Reset Perspective" = "重置透视";

@@ -65,6 +65,32 @@ public struct GeometryAdjustmentPanel: View {
                 )
             }
 
+            DisclosureGroup(L10n.t("Perspective")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    AdjustmentSliderRow(
+                        label: L10n.t("Vertical"),
+                        value: editor.adjustments.geometry.perspectiveVertical,
+                        range: GeometryAdjustments.perspectiveRange,
+                        fractionDigits: 0,
+                        onChange: { newValue in editor.updateAdjustments { $0.geometry.perspectiveVertical = newValue } },
+                        onReset: { editor.updateAdjustments { $0.geometry.perspectiveVertical = 0 } }
+                    )
+                    AdjustmentSliderRow(
+                        label: L10n.t("Horizontal"),
+                        value: editor.adjustments.geometry.perspectiveHorizontal,
+                        range: GeometryAdjustments.perspectiveRange,
+                        fractionDigits: 0,
+                        onChange: { newValue in editor.updateAdjustments { $0.geometry.perspectiveHorizontal = newValue } },
+                        onReset: { editor.updateAdjustments { $0.geometry.perspectiveHorizontal = 0 } }
+                    )
+                    Button(L10n.t("Reset Perspective")) {
+                        editor.updateAdjustments { $0.geometry = $0.geometry.resettingPerspective() }
+                    }
+                    .controlSize(.small)
+                    .disabled(editor.adjustments.geometry.perspectiveHorizontal == 0 && editor.adjustments.geometry.perspectiveVertical == 0 && editor.adjustments.geometry.cornerPins == nil)
+                }
+            }
+
             DisclosureGroup(L10n.t("Crop")) {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {

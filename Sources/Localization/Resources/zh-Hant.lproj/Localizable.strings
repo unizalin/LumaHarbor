@@ -650,3 +650,25 @@
 "Flat" = "平淡";
 "Portrait" = "人像";
 "No Matching Profile" = "沒有相符描述檔";
+
+/* P5: Advanced Masks, AI Repair, Perspective */
+"Linear Gradient" = "線性漸層";
+"Radial Gradient" = "放射狀漸層";
+"Brush" = "筆刷";
+"Luminance Range" = "亮度範圍";
+"Color Range" = "顏色範圍";
+"Subject" = "主體";
+"Background" = "背景";
+"Add Mask" = "新增遮罩";
+"Edit Masks" = "編輯遮罩";
+"No masks yet." = "尚無遮罩。";
+"Duplicate Mask" = "重製遮罩";
+"Delete Mask" = "刪除遮罩";
+"Invert Mask" = "反轉遮罩";
+"Opacity" = "不透明度";
+"Red-Eye" = "紅眼消除";
+"Pupil Radius" = "瞳孔半徑";
+"Perspective" = "透視";
+"Vertical" = "垂直";
+"Horizontal" = "水平";
+"Reset Perspective" = "重設透視";

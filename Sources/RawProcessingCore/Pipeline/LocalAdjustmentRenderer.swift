@@ -25,6 +25,18 @@ public enum LocalAdjustmentRenderer {
             switch adjustment.kind {
             case .linearGradient:
                 working = applyLinearGradient(adjustment, to: working)
+            case .radialGradient:
+                working = applyRadialGradient(adjustment, to: working)
+            case .brush:
+                working = applyBrush(adjustment, to: working)
+            case .luminanceRange:
+                working = applyLuminanceRange(adjustment, to: working)
+            case .colorRange:
+                working = applyColorRange(adjustment, to: working)
+            case .subject:
+                working = applySubject(adjustment, to: working)
+            case .background:
+                working = applyBackground(adjustment, to: working)
             case .spotHeal:
                 working = applySpotHeal(adjustment, to: working)
             }
@@ -32,19 +44,76 @@ public enum LocalAdjustmentRenderer {
         return working
     }
 
-    private static func applyLinearGradient(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+    private static func applyMaskedAdjustment(_ adjustment: LocalAdjustment, mask: CIImage, to image: CIImage) -> CIImage {
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return image }
         guard adjustment.adjustments.isEmpty == false else { return image }
 
-        let mask = linearGradientMask(adjustment.geometry, extent: extent)
-        let adjustedImage = LocalAdjustmentPatchRenderer.apply(adjustment.adjustments, to: image)
+        var finalMask = mask.cropped(to: extent)
 
+        // Handle inversion
+        if adjustment.isInverted {
+            let invert = CIFilter.colorInvert()
+            invert.inputImage = finalMask
+            finalMask = invert.outputImage?.cropped(to: extent) ?? finalMask
+        }
+
+        // Handle opacity (0...100)
+        let opacity = Swift.min(Swift.max(adjustment.opacity, 0), 100) / 100.0
+        if opacity < 0.999 {
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = finalMask
+            matrix.rVector = CIVector(x: CGFloat(opacity), y: 0, z: 0, w: 0)
+            matrix.gVector = CIVector(x: 0, y: CGFloat(opacity), z: 0, w: 0)
+            matrix.bVector = CIVector(x: 0, y: 0, z: CGFloat(opacity), w: 0)
+            matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity))
+            finalMask = matrix.outputImage?.cropped(to: extent) ?? finalMask
+        }
+
+        let adjustedImage = LocalAdjustmentPatchRenderer.apply(adjustment.adjustments, to: image)
         let blend = CIFilter.blendWithMask()
         blend.inputImage = adjustedImage
         blend.backgroundImage = image
-        blend.maskImage = mask
+        blend.maskImage = finalMask
         return blend.outputImage?.cropped(to: extent) ?? image
+    }
+
+    private static func applyLinearGradient(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let mask = linearGradientMask(adjustment.geometry, extent: image.extent)
+        return applyMaskedAdjustment(adjustment, mask: mask, to: image)
+    }
+
+    private static func applyRadialGradient(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let mask = radialGradientMask(adjustment.geometry, extent: image.extent)
+        return applyMaskedAdjustment(adjustment, mask: mask, to: image)
+    }
+
+    private static func applyBrush(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let mask = brushMask(adjustment.geometry, extent: image.extent)
+        return applyMaskedAdjustment(adjustment, mask: mask, to: image)
+    }
+
+    private static func applyLuminanceRange(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let mask = luminanceRangeMask(adjustment.geometry, extent: image.extent, sourceImage: image)
+        return applyMaskedAdjustment(adjustment, mask: mask, to: image)
+    }
+
+    private static func applyColorRange(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let mask = colorRangeMask(adjustment.geometry, extent: image.extent, sourceImage: image)
+        return applyMaskedAdjustment(adjustment, mask: mask, to: image)
+    }
+
+    private static func applySubject(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let mask = VisionSegmentationService.generateForegroundMask(for: image)
+        return applyMaskedAdjustment(adjustment, mask: mask, to: image)
+    }
+
+    private static func applyBackground(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let fgMask = VisionSegmentationService.generateForegroundMask(for: image)
+        let invert = CIFilter.colorInvert()
+        invert.inputImage = fgMask
+        let bgMask = invert.outputImage?.cropped(to: image.extent) ?? fgMask
+        return applyMaskedAdjustment(adjustment, mask: bgMask, to: image)
     }
 
     /// Builds a black-to-white `CILinearGradient` mask from
@@ -108,33 +177,158 @@ public enum LocalAdjustmentRenderer {
         )
     }
 
-    // MARK: - Spot heal / clone (Task 4.4)
+    private static func radialGradientMask(_ geometry: LocalAdjustmentGeometry, extent: CGRect) -> CIImage {
+        let center = imagePoint(x: geometry.x, y: geometry.y, extent: extent)
+        let minDim = min(extent.width, extent.height)
+        let radiusX = max(CGFloat(geometry.radius), 0.001) * minDim
+        let radiusY = max(CGFloat(geometry.radialRadiusY ?? geometry.radius), 0.001) * minDim
+        let maxRadius = max(radiusX, radiusY)
 
-    /// A conservative, non-AI patch clone: translates a copy of the whole
-    /// image so the sampled source patch lands on the target point, then
-    /// blends that translated copy over the original through a soft-edged
-    /// circular mask centered on the target. This is deliberately simple --
-    /// no content-aware fill, no seam blending beyond the mask's own
-    /// feather, no texture synthesis. On a patterned or high-contrast
-    /// background it can visibly repeat an edge or a recognizable shape from
-    /// the source; it is honest about that limitation rather than promising
-    /// AI-retouching quality (roadmap Phase 4 goal: "先做...不追求 AI 修圖").
-    /// `.heal` mode's own "auto-sampled surrounding texture" (design spec
-    /// §6.7) is likewise a fixed, deterministic offset -- see
-    /// `autoSourcePoint(for:extent:)` -- not a learned or analyzed choice.
+        let featherFraction = CGFloat(min(max(geometry.feather / 100, 0), 1))
+        let innerRadius = max(maxRadius * (1 - featherFraction), 0)
+
+        guard let filter = CIFilter(name: "CIRadialGradient") else {
+            return CIImage(color: .white).cropped(to: extent)
+        }
+        filter.setValue(CIVector(cgPoint: center), forKey: "inputCenter")
+        filter.setValue(Float(innerRadius), forKey: "inputRadius0")
+        filter.setValue(Float(maxRadius), forKey: "inputRadius1")
+        filter.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor0")
+        filter.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0), forKey: "inputColor1")
+
+        var mask = filter.outputImage ?? CIImage(color: .clear)
+
+        if radiusY > 0 && radiusX > 0 && abs(radiusX - radiusY) > 0.001 {
+            let scaleY = radiusY / radiusX
+            var t = CGAffineTransform(translationX: -center.x, y: -center.y)
+            t = t.concatenating(CGAffineTransform(scaleX: 1.0, y: scaleY))
+            t = t.concatenating(CGAffineTransform(translationX: center.x, y: center.y))
+            mask = mask.transformed(by: t)
+        }
+        return mask.cropped(to: extent)
+    }
+
+    private static func brushMask(_ geometry: LocalAdjustmentGeometry, extent: CGRect) -> CIImage {
+        let strokes = geometry.brushStrokes
+        guard !strokes.isEmpty else {
+            let center = imagePoint(x: geometry.x, y: geometry.y, extent: extent)
+            let radiusPixels = max(CGFloat(geometry.radius), 0.001) * min(extent.width, extent.height)
+            return healMask(center: center, radius: radiusPixels, feather: geometry.feather, extent: extent)
+        }
+
+        var accumulatedMask = CIImage(color: .clear).cropped(to: extent)
+        for stroke in strokes {
+            let radiusPixels = max(CGFloat(stroke.radius), 0.001) * min(extent.width, extent.height)
+            for point in stroke.points {
+                let center = imagePoint(x: point.x, y: point.y, extent: extent)
+                let pressureScale = CGFloat(point.pressure ?? 1.0)
+                let effectiveRadius = max(radiusPixels * pressureScale, 1.0)
+                let dotMask = healMask(center: center, radius: effectiveRadius, feather: stroke.feather, extent: extent)
+                let composite = CIFilter.sourceOverCompositing()
+                composite.inputImage = dotMask
+                composite.backgroundImage = accumulatedMask
+                accumulatedMask = composite.outputImage?.cropped(to: extent) ?? accumulatedMask
+            }
+        }
+        return accumulatedMask
+    }
+
+    private static func luminanceRangeMask(_ geometry: LocalAdjustmentGeometry, extent: CGRect, sourceImage: CIImage) -> CIImage {
+        let minLum = CGFloat(geometry.luminanceMin ?? 0.0)
+        let maxLum = CGFloat(geometry.luminanceMax ?? 1.0)
+        let feather = CGFloat(geometry.feather) / 100.0 * 0.2
+
+        let grayscaleFilter = CIFilter.colorMatrix()
+        grayscaleFilter.inputImage = sourceImage
+        grayscaleFilter.rVector = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        grayscaleFilter.gVector = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        grayscaleFilter.bVector = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        grayscaleFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        guard let gray = grayscaleFilter.outputImage?.cropped(to: extent) else {
+            return CIImage(color: .white).cropped(to: extent)
+        }
+
+        return rangeLUTMask(gray: gray, minVal: minLum, maxVal: maxLum, feather: feather, extent: extent)
+    }
+
+    private static func rangeLUTMask(gray: CIImage, minVal: CGFloat, maxVal: CGFloat, feather: CGFloat, extent: CGRect) -> CIImage {
+        var table = [UInt8](repeating: 0, count: 256)
+        let f = max(feather, 0.001)
+        for i in 0..<256 {
+            let v = CGFloat(i) / 255.0
+            var weight: CGFloat = 0
+            if v >= minVal && v <= maxVal {
+                let distToEdge = min(v - minVal, maxVal - v)
+                weight = min(distToEdge / f, 1.0)
+            } else if v < minVal && minVal - v <= f {
+                weight = max(1.0 - (minVal - v) / f, 0)
+            } else if v > maxVal && v - maxVal <= f {
+                weight = max(1.0 - (v - maxVal) / f, 0)
+            }
+            table[i] = UInt8(round(weight * 255.0))
+        }
+        let data = Data(table)
+        let colorTable = CIFilter.colorMap()
+        colorTable.inputImage = gray
+        let lutImage = CIImage(bitmapData: data, bytesPerRow: 256, size: CGSize(width: 256, height: 1), format: .L8, colorSpace: CGColorSpaceCreateDeviceGray())
+        colorTable.gradientImage = lutImage
+        return colorTable.outputImage?.cropped(to: extent) ?? gray
+    }
+
+    private static func colorRangeMask(_ geometry: LocalAdjustmentGeometry, extent: CGRect, sourceImage: CIImage) -> CIImage {
+        let targetHue = geometry.colorTargetHue ?? 0.0
+        let tolerance = geometry.colorHueTolerance ?? 30.0
+
+        let angleRadians = -CGFloat(targetHue * .pi / 180.0)
+        let hueAdjust = CIFilter.hueAdjust()
+        hueAdjust.inputImage = sourceImage
+        hueAdjust.angle = Float(angleRadians)
+        guard let shifted = hueAdjust.outputImage?.cropped(to: extent) else {
+            return CIImage(color: .white).cropped(to: extent)
+        }
+
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage = shifted
+        matrix.rVector = CIVector(x: 1, y: -0.5, z: -0.5, w: 0)
+        matrix.gVector = CIVector(x: 1, y: -0.5, z: -0.5, w: 0)
+        matrix.bVector = CIVector(x: 1, y: -0.5, z: -0.5, w: 0)
+        matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        guard let redDominance = matrix.outputImage?.cropped(to: extent) else {
+            return CIImage(color: .white).cropped(to: extent)
+        }
+
+        let scale = CGFloat(max(180.0 / max(tolerance, 5.0), 1.0))
+        let scaleFilter = CIFilter.colorMatrix()
+        scaleFilter.inputImage = redDominance
+        scaleFilter.rVector = CIVector(x: scale, y: 0, z: 0, w: 0)
+        scaleFilter.gVector = CIVector(x: 0, y: scale, z: 0, w: 0)
+        scaleFilter.bVector = CIVector(x: 0, y: 0, z: scale, w: 0)
+        scaleFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+
+        let clampFilter = CIFilter.colorClamp()
+        clampFilter.inputImage = scaleFilter.outputImage
+        clampFilter.minComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
+        clampFilter.maxComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
+
+        return clampFilter.outputImage?.cropped(to: extent) ?? redDominance
+    }
+
+    // MARK: - Spot heal / clone / red-eye
+
     private static func applySpotHeal(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return image }
 
         let geometry = adjustment.geometry
+        if geometry.healMode == .redEye {
+            return applyRedEye(adjustment, to: image)
+        }
+
         let target = imagePoint(x: geometry.x, y: geometry.y, extent: extent)
         let source = resolvedSourcePoint(for: geometry, extent: extent)
 
         let dx = target.x - source.x
         let dy = target.y - source.y
-        // Target and source coincide (a fresh point, or the user dragged
-        // them onto each other) -- nothing would move; skip the transform
-        // and mask entirely rather than composite a no-op.
         guard dx != 0 || dy != 0 else { return image }
 
         let translated = image.transformed(by: CGAffineTransform(translationX: dx, y: dy))
@@ -143,6 +337,29 @@ public enum LocalAdjustmentRenderer {
 
         let blend = CIFilter.blendWithMask()
         blend.inputImage = translated
+        blend.backgroundImage = image
+        blend.maskImage = mask
+        return blend.outputImage?.cropped(to: extent) ?? image
+    }
+
+    private static func applyRedEye(_ adjustment: LocalAdjustment, to image: CIImage) -> CIImage {
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return image }
+        let geometry = adjustment.geometry
+        let target = imagePoint(x: geometry.x, y: geometry.y, extent: extent)
+        let pupilRadius = max(CGFloat(geometry.redEyePupilRadius ?? geometry.radius), 0.001) * min(extent.width, extent.height)
+        let mask = healMask(center: target, radius: pupilRadius, feather: geometry.feather, extent: extent)
+
+        let desatRed = CIFilter.colorMatrix()
+        desatRed.inputImage = image
+        desatRed.rVector = CIVector(x: 0.0, y: 0.5, z: 0.5, w: 0)
+        desatRed.gVector = CIVector(x: 0.0, y: 1.0, z: 0.0, w: 0)
+        desatRed.bVector = CIVector(x: 0.0, y: 0.0, z: 1.0, w: 0)
+        desatRed.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1)
+        guard let desaturated = desatRed.outputImage?.cropped(to: extent) else { return image }
+
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = desaturated
         blend.backgroundImage = image
         blend.maskImage = mask
         return blend.outputImage?.cropped(to: extent) ?? image
@@ -169,6 +386,8 @@ public enum LocalAdjustmentRenderer {
             return autoSourcePoint(for: geometry, extent: extent)
         case .heal:
             return autoSourcePoint(for: geometry, extent: extent)
+        case .redEye:
+            return imagePoint(x: geometry.x, y: geometry.y, extent: extent)
         }
     }
 
