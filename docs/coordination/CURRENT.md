@@ -2,7 +2,20 @@
 
 Updated: 2026-09-11
 
-Updated by: Gemini（P6 Snapshots, Soft Proof, and Professional Preview）
+Updated by: Gemini（P7 Cross-Device Verification and Release Preparation）
+
+## P7：跨裝置驗收與發布準備（2026-09-11, Gemini）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-11-cross-device-verification-and-release-preparation.md` 完成驗收與發布準備：
+  - 跨裝置對等性：`CrossDeviceParityVerificationTests` 驗證 Mac 與 iPad 完整掛載 10 個核心面板，兩平台共享相同之 `InspectorCatalog`、Snapshots 工作流、A/B 比較、8 種 Local Adjustment 遮罩型別與 Sidecar v4 格式。
+  - 效能預算：`LibraryPerformanceBudgetTests` 驗證在 10,000 張照片圖庫中，單頁載入與 deep cursor 分頁耗時遠低於 250ms p95 預算；評分、旗標、關鍵字與檔名複合過濾查詢亦穩定在預算內完成。
+  - 唯讀完整性：`RawImmutabilityVerificationTests` 驗證在調光、快照、評分等整個生命週期中，來源 RAW 檔案之 byte-by-byte SHA-256 雜湊完全不變（100% 唯讀保護）；確認 FAT32 / exFAT 跨檔案系統安全命名與非法字元過濾。
+  - 文件更新：`README.md` 繁體中文使用說明完整更新，加入四通道色調曲線、風格渲染檔、鏡頭校正、局部遮罩（含離線 AI 主體辨識）、去紅眼、透視校正、快照管理與軟體打樣之操作指引。
+  - 發布準備約束：遵照指示與 spec 要求，在實體硬體與外接磁碟設備人工檢核核准前，嚴禁封裝對外發布 ZIP 檔案。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `28dac70`（P6 commit）。
+- **驗證**：`swift test` 全套 **PASS**（2193 tests、9 skipped、0 failures，28.550s）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`swift run LumaHarborDiagnosticsCLI` **PASS**。`git diff --check` **PASS**。隱私掃描 **PASS**（無個人路徑、Team ID、UDID 或私鑰洩漏）。
+- **交接文件**：`docs/coordination/2026-09-11-p7-cross-device-verification-and-release-prep-handoff.md`。
+- **下一步**：P0~P7 全階段實作完工；等待使用者進行實體硬體與外接磁碟之人工視覺驗收。
 
 ## P6：Snapshots、Soft Proof、Professional Preview（2026-09-11, Gemini）
 
