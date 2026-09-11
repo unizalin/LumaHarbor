@@ -46,7 +46,9 @@ public struct HistogramPanel: View {
                 Canvas { context, size in
                     draw(histogram, mode: mode, in: &context, size: size)
                 }
-                .frame(minHeight: 96, maxHeight: 132)
+                // Keep the plot area stable in the inspector so a narrow iPad
+                // column cannot collapse the Canvas or clip its final bin.
+                .frame(minHeight: 96, idealHeight: 132, maxHeight: 132)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityLabel(Text(L10n.t("Histogram")))
 
@@ -96,18 +98,39 @@ public struct HistogramPanel: View {
         in context: inout GraphicsContext,
         size: CGSize
     ) {
-        guard let peak = bins.max(), peak > 0, !bins.isEmpty else { return }
-        let stepX = size.width / CGFloat(bins.count)
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: size.height))
-        for (index, count) in bins.enumerated() {
-            let x = CGFloat(index) * stepX
-            let y = size.height * (1 - CGFloat(count) / CGFloat(peak))
-            path.addLine(to: CGPoint(x: x, y: y))
+        guard size.width > 0, size.height > 0 else { return }
+        let heights = HistogramPresentationMetrics.displayHeights(for: bins)
+        guard !heights.isEmpty else { return }
+
+        let inset = min(CGFloat(1), min(size.width, size.height) / 2)
+        let plotWidth = max(size.width - (inset * 2), 0)
+        let plotHeight = max(size.height - (inset * 2), 0)
+        let denominator = CGFloat(max(heights.count - 1, 1))
+        var curve = Path()
+        curve.move(to: CGPoint(x: inset, y: size.height - inset))
+        for (index, height) in heights.enumerated() {
+            let x = inset + plotWidth * CGFloat(index) / denominator
+            let y = inset + plotHeight * (1 - height)
+            curve.addLine(to: CGPoint(x: x, y: y))
         }
-        path.addLine(to: CGPoint(x: size.width, y: size.height))
-        path.closeSubpath()
-        context.fill(path, with: .color(color.opacity(0.42)))
+        curve.addLine(to: CGPoint(x: size.width - inset, y: size.height - inset))
+        curve.closeSubpath()
+
+        // A translucent fill preserves the familiar histogram look while the
+        // contour keeps low-frequency detail visible against a dark canvas.
+        context.fill(curve, with: .color(color.opacity(0.28)))
+
+        var outline = Path()
+        for (index, height) in heights.enumerated() {
+            let x = inset + plotWidth * CGFloat(index) / denominator
+            let y = inset + plotHeight * (1 - height)
+            if index == 0 {
+                outline.move(to: CGPoint(x: x, y: y))
+            } else {
+                outline.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        context.stroke(outline, with: .color(color.opacity(0.82)), lineWidth: 1)
     }
 }
 
@@ -133,5 +156,28 @@ public enum HistogramPresentationMetrics {
             max(histogram.green[histogram.green.count - 1], histogram.blue[histogram.blue.count - 1])
         )
         return (shadows, highlights)
+    }
+
+    /// Returns normalized bar heights suitable for a compact histogram plot.
+    ///
+    /// RAW previews often contain a large clipped shadow/highlight spike. A
+    /// linear `count / max` mapping makes every other tonal region appear flat
+    /// in that case, especially in the narrow iPad inspector. Log compression
+    /// retains ordering and the peak while keeping those regions readable.
+    public static func displayHeights(for bins: [Int]) -> [CGFloat] {
+        guard !bins.isEmpty else { return [] }
+        let sanitized = bins.map { max($0, 0) }
+        guard let peak = sanitized.max(), peak > 0 else {
+            return Array(repeating: 0, count: sanitized.count)
+        }
+
+        let logPeak = log1p(Double(peak))
+        guard logPeak.isFinite, logPeak > 0 else {
+            return Array(repeating: 0, count: sanitized.count)
+        }
+        return sanitized.map { count in
+            let normalized = log1p(Double(count)) / logPeak
+            return CGFloat(min(max(normalized, 0), 1))
+        }
     }
 }

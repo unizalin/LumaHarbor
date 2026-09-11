@@ -27,4 +27,23 @@ final class HistogramPanelTests: XCTestCase {
         XCTAssertEqual(clipping.shadows, 12)
         XCTAssertEqual(clipping.highlights, 9)
     }
+
+    func testDisplayHeightsUseLogCompressionForDominantClippingSpikes() {
+        let heights = HistogramPresentationMetrics.displayHeights(for: [240_446, 16, 1])
+
+        XCTAssertEqual(heights.count, 3)
+        XCTAssertEqual(heights[0], 1, accuracy: 0.0001)
+        XCTAssertGreaterThan(heights[1], 0.2)
+        XCTAssertGreaterThan(heights[2], 0)
+        XCTAssertGreaterThan(heights[1], heights[2])
+    }
+
+    func testDisplayHeightsSanitizeNegativeAndEmptyBins() {
+        XCTAssertEqual(HistogramPresentationMetrics.displayHeights(for: []), [])
+        let heights = HistogramPresentationMetrics.displayHeights(for: [-10, 0, 10])
+        XCTAssertEqual(heights.count, 3)
+        XCTAssertEqual(heights[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(heights[1], 0, accuracy: 0.0001)
+        XCTAssertEqual(heights[2], 1, accuracy: 0.0001)
+    }
 }

@@ -22,7 +22,7 @@
 "Basic" = "기본";
 "Curve" = "커브";
 "Tone curve" = "톤 커브";
-"Drag control point" = "조절점을 드래그하세요";
+"Drag control point" = "드래그하거나 탭하여 조절점 추가";
 "RGB" = "RGB";
 "Shadows clipped" = "섀도 클리핑";
 "Highlights clipped" = "하이라이트 클리핑";
@@ -38,6 +38,9 @@
 "Roughness" = "거칠기";
 "Roundness" = "둥글기";
 "%d control points" = "조절점 %d개";
+"Delete Control Point" = "조절점 삭제";
+"Add Control Point" = "조절점 추가";
+"Control point %d of %d" = "조절점 %d/%d";
 "8-bit" = "8비트";
 "16-bit" = "16비트";
 "Bit Depth" = "비트 심도";

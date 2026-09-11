@@ -22,7 +22,7 @@
 "Basic" = "基本";
 "Curve" = "曲线";
 "Tone curve" = "色调曲线";
-"Drag control point" = "拖动控制点";
+"Drag control point" = "拖动或点按以添加控制点";
 "RGB" = "RGB";
 "Shadows clipped" = "阴影裁切";
 "Highlights clipped" = "高光裁切";
@@ -38,6 +38,9 @@
 "Roughness" = "粗糙度";
 "Roundness" = "圆度";
 "%d control points" = "%d 个控制点";
+"Delete Control Point" = "删除控制点";
+"Add Control Point" = "添加控制点";
+"Control point %d of %d" = "第 %d 个控制点，共 %d 个";
 "8-bit" = "8 位";
 "16-bit" = "16 位";
 "Bit Depth" = "位深度";

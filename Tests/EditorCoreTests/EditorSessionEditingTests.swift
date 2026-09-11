@@ -350,6 +350,61 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
     }
 
+    // MARK: - Tone curve preview/commit (visual polish spec §5.1: one
+    // compound Undo entry per drag/insert/delete gesture)
+
+    func testPreviewCurveEditChangesDisplayedAdjustmentsButNotCommittedAdjustments() {
+        let editor = makeOpenEditor()
+
+        editor.previewCurveEdit { $0.advancedToneCurve = $0.advancedToneCurve.settingPoints([ToneCurvePoint(x: 0.5, y: 0.75)], for: .composite) }
+
+        XCTAssertEqual(editor.displayedAdjustments.advancedToneCurve.points, [ToneCurvePoint(x: 0.5, y: 0.75)])
+        XCTAssertEqual(editor.adjustments, .neutral, "the committed adjustments must be untouched by a preview")
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testManyPreviewTicksDuringOneGestureStillCommitAsExactlyOneUndoEntry() {
+        let editor = makeOpenEditor()
+
+        // A drag reports many ticks -- simulate that directly, the way
+        // `CurveAdjustmentPanel`'s `DragGesture.onChanged` does.
+        for step in 1...10 {
+            let y = Double(step) / 20
+            editor.previewCurveEdit { $0.advancedToneCurve = $0.advancedToneCurve.settingPoints([ToneCurvePoint(x: 0.5, y: y)], for: .composite) }
+        }
+        XCTAssertFalse(editor.canUndo, "no tick before the gesture ends may push an Undo entry")
+
+        editor.commitCurveEdit()
+
+        XCTAssertTrue(editor.canUndo)
+        XCTAssertEqual(editor.adjustments.advancedToneCurve.points, [ToneCurvePoint(x: 0.5, y: 0.5)])
+
+        editor.undo()
+        XCTAssertEqual(editor.adjustments, .neutral, "exactly one Undo entry, regardless of how many ticks the drag reported")
+    }
+
+    func testCommittingWithNoActiveCurvePreviewIsANoOp() {
+        let editor = makeOpenEditor()
+        editor.commitCurveEdit()
+        XCTAssertEqual(editor.adjustments, .neutral)
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testCommittingACurvePreviewThatResolvesToTheCurrentCurveAddsNoHistoryEntry() {
+        let editor = makeOpenEditor()
+        editor.previewCurveEdit { _ in }
+
+        editor.commitCurveEdit()
+
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testPreviewCurveEditDoesNothingWithoutAnOpenPhoto() {
+        let editor = EditorSession()
+        editor.previewCurveEdit { $0.advancedToneCurve = $0.advancedToneCurve.settingPoints([ToneCurvePoint(x: 0.5, y: 0.75)], for: .composite) }
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+    }
+
     // MARK: - Adjustment gesture hooks (Phase 3 Task 3.3: batch sync)
     //
     // `beginAdjustmentGesture()`/`endAdjustmentGesture()` are the seam a
