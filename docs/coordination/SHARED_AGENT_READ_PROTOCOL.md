@@ -54,7 +54,7 @@ git log --oneline -8
 5. `docs/coordination/CURRENT.md`
 6. `docs/coordination/DECISIONS.md`
 
-將第 3.1 節的 Git 快照與 `CURRENT.md` 比對。只要 branch、HEAD、dirty files、worktree owner 或 source-of-truth 不一致，就停止寫入並回報 `NEEDS_CONTEXT`。
+將第 3.1 節的 Git 快照與 `CURRENT.md` 比對。若 branch、dirty files、worktree owner 或 source-of-truth 不一致，就停止寫入並回報 `NEEDS_CONTEXT`。若 HEAD 只是晚於 `CURRENT.md` 所記錄的產品基準，先檢查差異是否只包含 coordination-only 文件；確認沒有產品程式碼、測試或設定變更後，才可繼續。
 
 ### 3.3 規格、計畫與證據
 
