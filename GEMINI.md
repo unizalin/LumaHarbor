@@ -1,5 +1,12 @@
 # Gemini 專案入口
 
-開始任何 LumaHarbor 工作前，先讀取 `AGENTS.md`、`CLAUDE.md`、`docs/coordination/CURRENT.md` 與 `docs/coordination/DECISIONS.md`。
+Gemini 與 Codex、Claude 共用同一套專案規則。開始任何工作前，請依序讀取：
 
-接著依 `docs/superpowers/specs/2026-09-10-gemini-project-spec-reading-protocol.md` 的順序讀取目前總規格、對應 implementation plan、handoff 與驗測報告。預設是唯讀核對，不得自行修改程式碼、建立 Issue 或推送 Git；只有收到明確實作指示後才可轉換角色。
+1. `AGENTS.md`
+2. `CLAUDE.md`（確認只匯入 `AGENTS.md`）
+3. `GEMINI.md`
+4. `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md`
+5. `docs/coordination/CURRENT.md`
+6. `docs/coordination/DECISIONS.md`
+
+現行讀取、核對、隱私、Git 與交接規則唯一以 `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md` 和 `AGENTS.md` 為準。本檔只作為 Gemini 入口，不另行維護第二套規則。

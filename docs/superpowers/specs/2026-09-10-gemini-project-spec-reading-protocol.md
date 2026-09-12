@@ -1,4 +1,6 @@
-# Gemini 專案規格讀取與交接協定
+# Gemini 專案規格讀取與交接協定（歷史相容文件）
+
+> 現行跨代理規則已統一至 `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md`，適用 Codex、Claude 與 Gemini。若本文件與共用協定有差異，以共用協定及 `AGENTS.md` 為準；本文件保留供既有交接連結與歷史紀錄參考。
 
 - 狀態：可直接使用，僅定義讀取、核對與回報流程
 - 日期：2026-09-10
