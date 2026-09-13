@@ -103,6 +103,50 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 1_100.5, height: 700), .trailingDock)
     }
 
+    // MARK: - Responsive trailing-dock sizing
+
+    func testLandscapeDockUsesRemainingWidthWithoutStarvingTheCanvas() {
+        let plan = PadEditorLayoutPolicy.plan(for: CGSize(width: 1_100, height: 700))
+
+        XCTAssertEqual(plan.presentation, .trailingDock)
+        XCTAssertEqual(plan.inspectorWidth ?? .nan, 406, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(plan.inspectorWidth ?? 0, PadEditorLayoutPolicy.minimumInspectorWidth)
+        XCTAssertEqual(
+            (plan.inspectorWidth ?? 0) + PadEditorLayoutPolicy.toolRailWidth + PadEditorLayoutPolicy.minimumCanvasWidth + PadEditorLayoutPolicy.layoutSeparators,
+            1_100,
+            accuracy: 0.01
+        )
+    }
+
+    func testWideLandscapeDockCapsInspectorAndLeavesCanvasRoom() {
+        let plan = PadEditorLayoutPolicy.plan(for: CGSize(width: 1_180, height: 820))
+
+        XCTAssertEqual(plan.presentation, .trailingDock)
+        XCTAssertEqual(plan.inspectorWidth ?? .nan, PadEditorLayoutPolicy.maximumInspectorWidth, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(plan.canvasWidth ?? 0, PadEditorLayoutPolicy.minimumCanvasWidth)
+    }
+
+    func testNarrowLandscapeFallsBackBeforeDockWouldClipCanvas() {
+        let plan = PadEditorLayoutPolicy.plan(for: CGSize(width: 1_099, height: 700))
+
+        XCTAssertEqual(plan.presentation, .bottomDrawer)
+        XCTAssertNil(plan.inspectorWidth)
+        XCTAssertNil(plan.canvasWidth)
+    }
+
+    func testFocusPanelWidthStaysReadableAndCapsOnWideScreens() {
+        XCTAssertEqual(
+            PadEditorLayoutPolicy.floatingPanelWidth(for: CGSize(width: 400, height: 700)),
+            PadEditorLayoutPolicy.minimumInspectorWidth,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            PadEditorLayoutPolicy.floatingPanelWidth(for: CGSize(width: 1_180, height: 820)),
+            PadEditorLayoutPolicy.maximumInspectorWidth,
+            accuracy: 0.01
+        )
+    }
+
     // MARK: - Square
 
     func testSquareBelowTheExpandedWidthThresholdUsesBottomDrawer() {

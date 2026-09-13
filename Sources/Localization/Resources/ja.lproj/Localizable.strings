@@ -674,6 +674,13 @@
 "Perspective" = "遠近感";
 "Vertical" = "垂直方向";
 "Horizontal" = "水平方向";
+"Angle" = "角度";
+"Range" = "範囲";
+"Vertical Radius" = "縦半径";
+"Minimum" = "最小";
+"Maximum" = "最大";
+"Tolerance" = "許容値";
+"Brush uses a circular base until a stroke is drawn." = "ストロークを描くまでは、ブラシは円形の基準を使用します。";
 "Reset Perspective" = "遠近感をリセット";
 /* P6: Snapshots, Soft Proof, Professional Preview */
 "Professional Preview" = "プロフェッショナルプレビュー";

@@ -263,6 +263,33 @@ final class NormalizedCropRectTests: XCTestCase {
         XCTAssertEqual(rect.aspectRatio, 2)
     }
 
+    func testFittingAspectRatioCentersTheLargestMatchingRectInsideTheCurrentCrop() {
+        let rect = NormalizedCropRect(x: 0.1, y: 0.2, width: 0.8, height: 0.5)
+
+        let fitted = rect.fitting(aspectRatio: 1)
+
+        XCTAssertEqual(fitted.width, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(fitted.height, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(fitted.x, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(fitted.y, 0.2, accuracy: 0.0001)
+    }
+
+    func testFittingAspectRatioSupportsWideRatios() {
+        let fitted = NormalizedCropRect.full.fitting(aspectRatio: 2)
+
+        XCTAssertEqual(fitted.width, 1, accuracy: 0.0001)
+        XCTAssertEqual(fitted.height, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(fitted.x, 0, accuracy: 0.0001)
+        XCTAssertEqual(fitted.y, 0.25, accuracy: 0.0001)
+    }
+
+    func testFittingInvalidAspectRatioLeavesTheCropUntouched() {
+        let rect = NormalizedCropRect(x: 0.1, y: 0.2, width: 0.6, height: 0.4)
+
+        XCTAssertEqual(rect.fitting(aspectRatio: 0), rect)
+        XCTAssertEqual(rect.fitting(aspectRatio: .nan), rect)
+    }
+
     func testCodableRoundTrip() throws {
         let original = NormalizedCropRect(x: 0.15, y: 0.25, width: 0.5, height: 0.35)
         let data = try JSONEncoder().encode(original)

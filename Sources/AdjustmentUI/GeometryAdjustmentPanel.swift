@@ -100,10 +100,6 @@ public struct GeometryAdjustmentPanel: View {
                             .frame(maxWidth: .infinity)
                     }
 
-                    // Records the lock the user wants; the overlay
-                    // enforcing it during a drag (rather than only when a
-                    // preset value is picked) is a follow-up, not this
-                    // foundation round's scope.
                     Picker(L10n.t("Aspect Ratio"), selection: aspectRatioBinding) {
                         Text(L10n.t("Freeform")).tag(CropAspectRatio.freeform)
                         Text(L10n.t("Original")).tag(CropAspectRatio.original)
@@ -181,7 +177,31 @@ public struct GeometryAdjustmentPanel: View {
     private var aspectRatioBinding: Binding<CropAspectRatio> {
         Binding(
             get: { editor.adjustments.geometry.cropAspectRatio },
-            set: { newValue in editor.updateAdjustments { $0.geometry.cropAspectRatio = newValue } }
+            set: { newValue in
+                let normalizedRatio = normalizedAspectRatio(for: newValue)
+                editor.updateAdjustments { adjustments in
+                    adjustments.geometry.cropAspectRatio = newValue
+                    guard let normalizedRatio else { return }
+                    let crop = adjustments.geometry.crop ?? .full
+                    adjustments.geometry.crop = crop.fitting(aspectRatio: normalizedRatio)
+                }
+            }
         )
+    }
+
+    private func normalizedAspectRatio(for ratio: CropAspectRatio) -> Double? {
+        switch ratio {
+        case .freeform:
+            return nil
+        case .original:
+            return 1
+        case .square:
+            guard let image = editor.displayedImage, image.width > 0 else { return nil }
+            return Double(image.height) / Double(image.width)
+        case .custom(let width, let height):
+            guard width.isFinite, height.isFinite, width > 0, height > 0,
+                  let image = editor.displayedImage, image.width > 0, image.height > 0 else { return nil }
+            return (width / height) * Double(image.height) / Double(image.width)
+        }
     }
 }

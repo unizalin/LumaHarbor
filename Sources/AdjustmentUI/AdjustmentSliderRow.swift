@@ -25,9 +25,12 @@ struct AdjustmentSliderRow: View {
     var body: some View {
         macOSResetGesture(
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(label)
-                    Spacer()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .layoutPriority(1)
+                    Spacer(minLength: 8)
                     AdjustmentValueInput(
                         label: label,
                         value: .init(get: { value }, set: onChange),
@@ -35,7 +38,9 @@ struct AdjustmentSliderRow: View {
                         fractionDigits: fractionDigits,
                         onReset: onReset
                     )
+                    .layoutPriority(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Slider(value: Binding(get: { value }, set: onChange), in: range, onEditingChanged: onEditingChanged)
                     .accessibilityLabel(Text(label))
                     .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))

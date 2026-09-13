@@ -674,6 +674,13 @@
 "Perspective" = "透视";
 "Vertical" = "垂直";
 "Horizontal" = "水平";
+"Angle" = "角度";
+"Range" = "范围";
+"Vertical Radius" = "垂直半径";
+"Minimum" = "最小值";
+"Maximum" = "最大值";
+"Tolerance" = "容差";
+"Brush uses a circular base until a stroke is drawn." = "绘制画笔笔画前，先使用圆形基底控制。";
 "Reset Perspective" = "重置透视";
 /* P6: Snapshots, Soft Proof, Professional Preview */
 "Professional Preview" = "专业预览";

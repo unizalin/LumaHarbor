@@ -75,10 +75,13 @@ struct PadEditorView: View {
 
     /// The floating panel's own measured size, captured via
     /// `FloatingPanelSizeKey` below. Used only for clamping; defaults to a
-    /// reasonable estimate (matching the panel's fixed 320pt width) so a
-    /// re-clamp before the very first real measurement still behaves
+    /// reasonable estimate so a re-clamp before the very first real
+    /// measurement still behaves
     /// sanely rather than clamping against a degenerate zero-size box.
-    @State private var floatingPanelMeasuredSize = CGSize(width: 320, height: 400)
+    @State private var floatingPanelMeasuredSize = CGSize(
+        width: PadEditorLayoutPolicy.minimumInspectorWidth,
+        height: 400
+    )
     @State private var exportedURL: URL?
     @State private var isExporting = false
     @State private var isPresentingExportOptions = false
@@ -102,7 +105,7 @@ struct PadEditorView: View {
     private static let maximumCanvasScale: CGFloat = 5
     /// How much of the floating panel must stay reachable within the
     /// available area at all times — see `PadFloatingPanelLayout`.
-    private static let floatingPanelMinimumVisibleEdge: CGFloat = 44
+    private static let floatingPanelMinimumVisibleEdge = PadEditorLayoutPolicy.floatingPanelMinimumVisibleEdge
     private static let floatingPanelDefaultOrigin = CGPoint(x: 24, y: 24)
 
     init(
@@ -125,7 +128,11 @@ struct PadEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            workspaceContent
+            // Use the same live size for the layout decision that SwiftUI is
+            // currently proposing. `availableSize` is retained for gesture
+            // callbacks, but it can lag one render behind during rotation or
+            // Split View changes and must not decide whether the dock fits.
+            workspaceContent(for: proxy.size)
                 .sheet(isPresented: $isDrawerPresented) {
                     bottomDrawerPanel
                         .presentationDetents([.height(220), .medium, .large])
@@ -451,12 +458,12 @@ struct PadEditorView: View {
     // MARK: - Layout selection
 
     @ViewBuilder
-    private var workspaceContent: some View {
+    private func workspaceContent(for size: CGSize) -> some View {
         switch workspaceState.workspaceMode {
         case .work:
-            workLayout
+            workLayout(for: size)
         case .focus:
-            focusLayout
+            focusLayout(for: size)
         }
     }
 
@@ -468,9 +475,9 @@ struct PadEditorView: View {
     /// unreliable to close and reopen before). This only decides the
     /// *dock* layout; `.bottomDrawer` just needs the canvas alone.
     @ViewBuilder
-    private var workLayout: some View {
-        let presentation = PadEditorLayoutPolicy.presentation(forWidth: availableSize.width, height: availableSize.height)
-        switch presentation {
+    private func workLayout(for size: CGSize) -> some View {
+        let plan = PadEditorLayoutPolicy.plan(for: size)
+        switch plan.presentation {
         case .trailingDock:
             HStack(spacing: 0) {
                 PadToolRail(selection: Binding(
@@ -478,26 +485,26 @@ struct PadEditorView: View {
                     set: { inspector.selectDomain($0) }
                 ))
                 Divider()
-                canvas
+                canvas(for: size)
                 Divider()
-                trailingDockPanel
+                trailingDockPanel(width: plan.inspectorWidth ?? PadEditorLayoutPolicy.minimumInspectorWidth)
             }
         case .bottomDrawer:
-            canvas
+            canvas(for: size)
         case .floating:
             // `.floating` is the focus-mode presentation and is never
             // produced by `PadEditorLayoutPolicy` while in work mode.
             // Treat it as canvas-only (the bottom drawer sheet, if needed,
             // is still driven by `PadBottomDrawerPolicy` via the shared
             // `.sheet` in `body`).
-            canvas
+            canvas(for: size)
         }
     }
 
-    private var focusLayout: some View {
+    private func focusLayout(for size: CGSize) -> some View {
         ZStack(alignment: .topLeading) {
-            canvas
-            floatingPanel
+            canvas(for: size)
+            floatingPanel(width: PadEditorLayoutPolicy.floatingPanelWidth(for: size))
                 .background(floatingPanelSizeReader)
                 .offset(
                     x: Self.floatingPanelDefaultOrigin.x + workspaceState.floatingPanelOffset.width + floatingPanelDragTranslation.width,
@@ -509,7 +516,7 @@ struct PadEditorView: View {
     // MARK: - Canvas (shared by every layout)
 
     @ViewBuilder
-    private var canvas: some View {
+    private func canvas(for size: CGSize) -> some View {
         ZStack {
             Color.black
             if editor.previewImage != nil || editor.originalImage != nil {
@@ -539,7 +546,7 @@ struct PadEditorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if shouldShowFilmstrip {
+            if shouldShowFilmstrip(forWidth: size.width) {
                 PadEditorFilmstrip(
                     photos: filmstripPhotos,
                     currentPhotoID: editor.photo?.id,
@@ -551,11 +558,11 @@ struct PadEditorView: View {
         }
     }
 
-    private var shouldShowFilmstrip: Bool {
+    private func shouldShowFilmstrip(forWidth width: CGFloat) -> Bool {
         guard workspaceState.workspaceMode == .work,
               sceneWorkspaceState.isFilmstripVisible else { return false }
         return PadWorkspaceLayoutPolicy.layout(
-            forWidth: availableSize.width
+            forWidth: width
         ).showsFilmstrip
     }
 
@@ -583,25 +590,25 @@ struct PadEditorView: View {
 
     @ViewBuilder
     private var comparisonCanvas: some View {
-        switch editor.compareMode {
-        case .single:
-            if let image = editor.displayedImage {
-                canvasImage(image)
-            }
-        case .sideBySide:
-            HStack(spacing: 1) {
-                if let original = editor.originalImage {
-                    canvasImage(original)
-                        .frame(maxWidth: .infinity)
+        GeometryReader { proxy in
+            switch editor.compareMode {
+            case .single:
+                if let image = editor.displayedImage {
+                    canvasImageWithOverlays(image, in: proxy.size)
                 }
-                if let edited = editor.previewImage {
-                    canvasImage(edited)
-                        .frame(maxWidth: .infinity)
+            case .sideBySide:
+                HStack(spacing: 1) {
+                    if let original = editor.originalImage {
+                        canvasImage(original)
+                            .frame(maxWidth: .infinity)
+                    }
+                    if let edited = editor.previewImage {
+                        canvasImage(edited)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-            }
-            .padding()
-        case .verticalWipe:
-            GeometryReader { proxy in
+                .padding()
+            case .verticalWipe:
                 ZStack(alignment: .leading) {
                     if let edited = editor.previewImage {
                         canvasImage(edited)
@@ -623,9 +630,59 @@ struct PadEditorView: View {
                                 }
                         )
                 }
+                .padding()
             }
-            .padding()
         }
+    }
+
+    private func canvasImageWithOverlays(_ image: CGImage, in canvasSize: CGSize) -> some View {
+        let imageFrame = fittedImageFrame(
+            imageSize: CGSize(width: image.width, height: image.height),
+            in: canvasSize,
+            padding: 0
+        )
+
+        return ZStack {
+            canvasImage(image)
+
+            if editor.toolMode == .crop {
+                PadCropOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+
+            if editor.toolMode == .radialGradient {
+                RadialMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+
+            if editor.toolMode == .brush {
+                BrushMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
+    }
+
+    private func fittedImageFrame(imageSize: CGSize, in container: CGSize, padding: CGFloat) -> CGRect {
+        let available = CGSize(
+            width: max(container.width - padding * 2, 0),
+            height: max(container.height - padding * 2, 0)
+        )
+        guard imageSize.width > 0, imageSize.height > 0, available.width > 0, available.height > 0 else {
+            return CGRect(origin: CGPoint(x: padding, y: padding), size: available)
+        }
+
+        let aspect = imageSize.width / imageSize.height
+        let availableAspect = available.width / available.height
+        let fittedSize: CGSize
+        if aspect > availableAspect {
+            fittedSize = CGSize(width: available.width, height: available.width / aspect)
+        } else {
+            fittedSize = CGSize(width: available.height * aspect, height: available.height)
+        }
+        return CGRect(
+            x: padding + (available.width - fittedSize.width) / 2,
+            y: padding + (available.height - fittedSize.height) / 2,
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
     }
 
     private func canvasImage(_ image: CGImage) -> some View {
@@ -756,7 +813,7 @@ struct PadEditorView: View {
 
     // MARK: - Work mode: trailing dock
 
-    private var trailingDockPanel: some View {
+    private func trailingDockPanel(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
                 saveStatusIndicator
@@ -774,7 +831,7 @@ struct PadEditorView: View {
                 showsDomainBar: false
             )
         }
-        .frame(width: 320)
+        .frame(width: width)
         .background(.thickMaterial)
     }
 
@@ -802,7 +859,7 @@ struct PadEditorView: View {
 
     // MARK: - Focus mode: floating panel
 
-    private var floatingPanel: some View {
+    private func floatingPanel(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 floatingPanelHeader
@@ -822,7 +879,7 @@ struct PadEditorView: View {
             )
                 .frame(maxHeight: 420)
         }
-        .frame(width: 320)
+        .frame(width: width)
         .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(radius: 12)
     }
@@ -2203,5 +2260,173 @@ private struct ExportedPhotoFileDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         try FileWrapper(url: fileURL, options: .immediate)
+    }
+}
+
+/// iPad's crop overlay uses the same normalized crop model as the Mac editor.
+/// It is kept in this target because the iPad app intentionally does not
+/// depend on the Mac-only `LumaHarborApp` target.
+private struct PadCropOverlayView: View {
+    @ObservedObject private var editor: EditorSession
+    let imageFrame: CGRect
+
+    @State private var dragBaseCrop: NormalizedCropRect?
+
+    init(editor: EditorSession, imageFrame: CGRect) {
+        self.editor = editor
+        self.imageFrame = imageFrame
+    }
+
+    private var currentAdjustments: PhotoAdjustments {
+        editor.adjustments
+    }
+
+    private var aspectRatio: Double? {
+        switch currentAdjustments.geometry.cropAspectRatio {
+        case .freeform: return nil
+        case .original: return 1
+        case .square: return imageFrame.height / imageFrame.width
+        case .custom(let width, let height):
+            guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+            return (width / height) * imageFrame.height / imageFrame.width
+        }
+    }
+
+    private var crop: NormalizedCropRect {
+        let base = currentAdjustments.geometry.crop ?? .full
+        return aspectRatio.map { base.fitting(aspectRatio: $0) } ?? base
+    }
+
+    private var cropFrame: CGRect {
+        CGRect(
+            x: imageFrame.minX + crop.x * imageFrame.width,
+            y: imageFrame.minY + crop.y * imageFrame.height,
+            width: crop.width * imageFrame.width,
+            height: crop.height * imageFrame.height
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            Path { path in
+                path.addRect(imageFrame)
+                path.addRect(cropFrame)
+            }
+            .fill(Color.black.opacity(0.55), style: FillStyle(eoFill: true))
+            .allowsHitTesting(false)
+
+            Rectangle()
+                .strokeBorder(Color.white, lineWidth: 1.5)
+                .frame(width: cropFrame.width, height: cropFrame.height)
+                .position(x: cropFrame.midX, y: cropFrame.midY)
+                .allowsHitTesting(false)
+
+            Rectangle()
+                .fill(Color.clear)
+                .contentShape(Rectangle())
+                .frame(width: cropFrame.width, height: cropFrame.height)
+                .position(x: cropFrame.midX, y: cropFrame.midY)
+                .gesture(dragGesture(for: .move))
+
+            ForEach(PadCropHandle.corners, id: \.self) { handle in
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 12, height: 12)
+                    .shadow(radius: 1)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+                    .position(handlePosition(handle))
+                    .gesture(dragGesture(for: handle))
+                    .accessibilityLabel(Text(handle.accessibilityLabel))
+            }
+        }
+    }
+
+    private func handlePosition(_ handle: PadCropHandle) -> CGPoint {
+        switch handle {
+        case .topLeft: return CGPoint(x: cropFrame.minX, y: cropFrame.minY)
+        case .topRight: return CGPoint(x: cropFrame.maxX, y: cropFrame.minY)
+        case .bottomLeft: return CGPoint(x: cropFrame.minX, y: cropFrame.maxY)
+        case .bottomRight: return CGPoint(x: cropFrame.maxX, y: cropFrame.maxY)
+        case .move: return CGPoint(x: cropFrame.midX, y: cropFrame.midY)
+        }
+    }
+
+    private func dragGesture(for handle: PadCropHandle) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let base = dragBaseCrop ?? crop
+                if dragBaseCrop == nil { dragBaseCrop = base }
+                let updated = PadCropDragMath.updatedCrop(
+                    base: base,
+                    handle: handle,
+                    translation: value.translation,
+                    imageFrameSize: imageFrame.size,
+                    normalizedAspectRatio: aspectRatio
+                )
+                editor.updateAdjustments { $0.geometry.crop = updated.isFull ? nil : updated }
+            }
+            .onEnded { _ in dragBaseCrop = nil }
+    }
+}
+
+private enum PadCropHandle: Hashable {
+    case topLeft, topRight, bottomLeft, bottomRight, move
+
+    static let corners: [PadCropHandle] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+
+    var accessibilityLabel: String {
+        switch self {
+        case .topLeft: return "Crop top left"
+        case .topRight: return "Crop top right"
+        case .bottomLeft: return "Crop bottom left"
+        case .bottomRight: return "Crop bottom right"
+        case .move: return "Move crop"
+        }
+    }
+}
+
+private enum PadCropDragMath {
+    static func updatedCrop(
+        base: NormalizedCropRect,
+        handle: PadCropHandle,
+        translation: CGSize,
+        imageFrameSize: CGSize,
+        normalizedAspectRatio: Double?
+    ) -> NormalizedCropRect {
+        guard imageFrameSize.width > 0, imageFrameSize.height > 0 else { return base }
+        let dx = Double(translation.width / imageFrameSize.width)
+        let dy = Double(translation.height / imageFrameSize.height)
+        guard let ratio = normalizedAspectRatio, ratio.isFinite, ratio > 0 else {
+            switch handle {
+            case .topLeft: return NormalizedCropRect(x: base.x + dx, y: base.y + dy, width: base.width - dx, height: base.height - dy)
+            case .topRight: return NormalizedCropRect(x: base.x, y: base.y + dy, width: base.width + dx, height: base.height - dy)
+            case .bottomLeft: return NormalizedCropRect(x: base.x + dx, y: base.y, width: base.width - dx, height: base.height + dy)
+            case .bottomRight: return NormalizedCropRect(x: base.x, y: base.y, width: base.width + dx, height: base.height + dy)
+            case .move: return NormalizedCropRect(x: base.x + dx, y: base.y + dy, width: base.width, height: base.height)
+            }
+        }
+        if handle == .move {
+            return NormalizedCropRect(x: base.x + dx, y: base.y + dy, width: base.width, height: base.height)
+        }
+
+        let left = handle == .topLeft || handle == .bottomLeft
+        let top = handle == .topLeft || handle == .topRight
+        let fixedX = left ? base.x + base.width : base.x
+        let fixedY = top ? base.y + base.height : base.y
+        let draggedX = left ? base.x + dx : base.x + base.width + dx
+        let draggedY = top ? base.y + dy : base.y + base.height + dy
+        let requestedWidth = max(abs(draggedX - fixedX), NormalizedCropRect.minimumDimension)
+        let requestedHeight = max(abs(draggedY - fixedY), NormalizedCropRect.minimumDimension)
+        let width = max(requestedWidth, requestedHeight * ratio)
+        let maxWidth = min(left ? fixedX : 1 - fixedX, (top ? fixedY : 1 - fixedY) * ratio)
+        let clampedWidth = min(max(width, NormalizedCropRect.minimumDimension), max(maxWidth, NormalizedCropRect.minimumDimension))
+        let height = clampedWidth / ratio
+        return NormalizedCropRect(
+            x: left ? fixedX - clampedWidth : fixedX,
+            y: top ? fixedY - height : fixedY,
+            width: clampedWidth,
+            height: height
+        )
     }
 }

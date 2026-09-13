@@ -263,6 +263,24 @@ public struct NormalizedCropRect: Codable, Equatable, Hashable, Sendable {
 
     public var aspectRatio: Double { width / height }
 
+    /// Returns the largest rectangle with the requested normalized
+    /// width-to-height ratio that fits inside this crop, centered on the
+    /// current selection. The ratio is normalized to the image frame rather
+    /// than display points, so callers can derive it from a pixel/display
+    /// ratio without losing non-square source proportions.
+    public func fitting(aspectRatio ratio: Double) -> NormalizedCropRect {
+        guard ratio.isFinite, ratio > 0 else { return self }
+
+        let fittedWidth = Swift.min(width, height * ratio)
+        let fittedHeight = fittedWidth / ratio
+        return NormalizedCropRect(
+            x: x + (width - fittedWidth) / 2,
+            y: y + (height - fittedHeight) / 2,
+            width: fittedWidth,
+            height: fittedHeight
+        )
+    }
+
     private static func clamped(x: Double, y: Double, width: Double, height: Double) -> (Double, Double, Double, Double) {
         guard x.isFinite, y.isFinite, width.isFinite, height.isFinite else {
             return (0, 0, 1, 1)

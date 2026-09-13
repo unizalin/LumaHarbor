@@ -28,7 +28,25 @@ struct CropOverlayView: View {
     private static let handleSize: CGFloat = 12
     private static let handleHitAreaSize: CGFloat = 28
 
-    private var currentCrop: NormalizedCropRect { editor.adjustments.geometry.crop ?? .full }
+    private var currentCrop: NormalizedCropRect {
+        let crop = editor.adjustments.geometry.crop ?? .full
+        guard let ratio = normalizedAspectRatio else { return crop }
+        return crop.fitting(aspectRatio: ratio)
+    }
+
+    private var normalizedAspectRatio: Double? {
+        switch editor.adjustments.geometry.cropAspectRatio {
+        case .freeform:
+            return nil
+        case .original:
+            return 1
+        case .square:
+            return imageFrame.height / imageFrame.width
+        case .custom(let width, let height):
+            guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+            return (width / height) * imageFrame.height / imageFrame.width
+        }
+    }
 
     private var cropRectInFrame: CGRect {
         CGRect(
@@ -111,7 +129,8 @@ struct CropOverlayView: View {
                     base: base,
                     handle: handle,
                     translation: value.translation,
-                    imageFrameSize: imageFrame.size
+                    imageFrameSize: imageFrame.size,
+                    normalizedAspectRatio: normalizedAspectRatio
                 )
                 // Writing back to `nil` when the drag lands back on the full
                 // frame keeps `GeometryAdjustments.isIdentity`/`hasEdits`
