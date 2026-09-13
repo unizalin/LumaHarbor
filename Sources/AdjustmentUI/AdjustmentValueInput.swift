@@ -40,7 +40,17 @@ public struct AdjustmentValueInput: View {
             .textFieldStyle(.plain)
             .font(.body.monospacedDigit())
             .padding(.horizontal, 10)
-            .frame(width: 88, height: 36)
+            // Keep the familiar 88pt field when the inspector has room, but
+            // allow it to contract to 64pt in a narrow dock. The reset
+            // affordance remains a separate 44pt hit target.
+            .frame(
+                minWidth: 64,
+                idealWidth: 88,
+                maxWidth: 88,
+                minHeight: 36,
+                idealHeight: 36,
+                maxHeight: 36
+            )
             .background(
                 Color.primary.opacity(0.08),
                 in: RoundedRectangle(cornerRadius: 8, style: .continuous)

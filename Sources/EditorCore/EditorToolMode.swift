@@ -7,12 +7,14 @@ import Foundation
 /// every other case adds a gesture-driven overlay on top of the preview.
 ///
 /// `.crop` (Task 2.3), `.whiteBalance` (the eyedropper, Task 2.4),
-/// `.linearGradient` (Task 4.3) and `.spotHeal` (Task 4.5) are the cases
-/// implemented so far.
+/// `.linearGradient` (Task 4.3), `.radialGradient`, `.brush` and `.spotHeal`
+/// (Task 4.5) are the dedicated local-editing tools.
 public enum EditorToolMode: Equatable, Sendable {
     case adjust
     case crop
     case whiteBalance
     case linearGradient
+    case radialGradient
+    case brush
     case spotHeal
 }

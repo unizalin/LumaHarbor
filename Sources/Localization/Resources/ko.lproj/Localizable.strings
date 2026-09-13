@@ -674,6 +674,13 @@
 "Perspective" = "원근감";
 "Vertical" = "수직";
 "Horizontal" = "수평";
+"Angle" = "각도";
+"Range" = "범위";
+"Vertical Radius" = "세로 반경";
+"Minimum" = "최소";
+"Maximum" = "최대";
+"Tolerance" = "허용 오차";
+"Brush uses a circular base until a stroke is drawn." = "획을 그리기 전까지 브러시는 원형 기준을 사용합니다.";
 "Reset Perspective" = "원근감 재설정";
 /* P6: Snapshots, Soft Proof, Professional Preview */
 "Professional Preview" = "전문가용 미리보기";

@@ -1,4 +1,5 @@
 import EditorCore
+import AdjustmentUI
 import PhotoLibraryCore
 import Localization
 import SwiftUI
@@ -160,6 +161,14 @@ struct EditorView: View {
 
                                 if model.editor.toolMode == .linearGradient {
                                     LinearGradientOverlayView(editor: model.editor, imageFrame: linearGradientImageFrame)
+                                }
+
+                                if model.editor.toolMode == .radialGradient {
+                                    RadialMaskOverlayView(editor: model.editor, imageFrame: imageFrame)
+                                }
+
+                                if model.editor.toolMode == .brush {
+                                    BrushMaskOverlayView(editor: model.editor, imageFrame: imageFrame)
                                 }
 
                                 if model.editor.toolMode == .spotHeal {

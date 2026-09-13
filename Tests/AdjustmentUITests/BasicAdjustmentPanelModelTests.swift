@@ -47,6 +47,16 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
         XCTAssertTrue(panelSource.contains("editor.endAdjustmentGesture()"))
     }
 
+    func testBasicRowsUseAnAdaptiveValueColumn() throws {
+        let panelSource = try panelSource()
+
+        XCTAssertTrue(panelSource.contains("Spacer(minLength: 8)"))
+        XCTAssertTrue(panelSource.contains(".lineLimit(1)"))
+        XCTAssertTrue(panelSource.contains(".minimumScaleFactor(0.8)"))
+        XCTAssertTrue(panelSource.contains(".layoutPriority(1)"))
+        XCTAssertTrue(panelSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+    }
+
     private func panelSource() throws -> String {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

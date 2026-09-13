@@ -4,7 +4,7 @@ import Foundation
 /// Where the ten basic adjustments live relative to the canvas for a
 /// given available size — see `PadEditorLayoutPolicy`.
 public enum PadInspectorPresentation: String, Equatable, Sendable {
-    /// A persistent 320pt panel trailing the canvas, side by side.
+    /// A persistent responsive panel trailing the canvas, side by side.
     case trailingDock
     /// A bottom sheet the user can drag between a collapsed peek, medium,
     /// and large detent, over the canvas.
@@ -178,9 +178,85 @@ public enum PadWorkspaceLayoutPolicy {
 /// device, or simulating rotation. `PadEditorView` is the only thing that
 /// turns this into an actual container.
 public enum PadEditorLayoutPolicy {
+    /// The fixed width occupied by the leading tool rail in work mode.
+    /// This is a control budget, not a device-specific measurement.
+    public static let toolRailWidth: CGFloat = 52
+
+    /// The two separators around the canvas/dock boundary in work mode.
+    public static let layoutSeparators: CGFloat = 2
+
+    /// The smallest canvas width that keeps the image useful while a dock is
+    /// visible. Narrower containers use the bottom drawer instead.
+    public static let minimumCanvasWidth: CGFloat = 640
+
+    /// The smallest inspector width that keeps the search bar, action icons,
+    /// and numeric controls usable without truncation.
+    public static let minimumInspectorWidth: CGFloat = 360
+
+    /// The largest inspector width used by the persistent dock. Extra space
+    /// belongs to the canvas rather than making every control row oversized.
+    public static let maximumInspectorWidth: CGFloat = 440
+
+    /// The focus-mode panel uses the same readable range as the dock, while
+    /// remaining independent from the work-mode canvas budget.
+    public static let floatingPanelMinimumVisibleEdge: CGFloat = 44
+
+    public static func floatingPanelWidth(for size: CGSize) -> CGFloat {
+        let availableWidth = max(0, size.width - (2 * floatingPanelMinimumVisibleEdge))
+        return min(maximumInspectorWidth, max(minimumInspectorWidth, availableWidth))
+    }
+
     /// The width, in points, at or above which the Expanded profile gets a
     /// persistent trailing dock instead of a bottom drawer.
     public static let trailingDockMinimumWidth = PadWorkspaceLayoutPolicy.expandedMinimumWidth
+
+    /// A measured editor layout for one container size. The optional widths
+    /// make the bottom-drawer decision explicit: there is no hidden dock
+    /// width to accidentally apply while the inspector is presented as a
+    /// sheet.
+    public struct LayoutPlan: Equatable, Sendable {
+        public let presentation: PadInspectorPresentation
+        public let inspectorWidth: CGFloat?
+        public let canvasWidth: CGFloat?
+
+        public init(
+            presentation: PadInspectorPresentation,
+            inspectorWidth: CGFloat?,
+            canvasWidth: CGFloat?
+        ) {
+            self.presentation = presentation
+            self.inspectorWidth = inspectorWidth
+            self.canvasWidth = canvasWidth
+        }
+    }
+
+    /// Calculates the complete work-mode geometry from the actual container
+    /// size reported by `GeometryReader`. Keeping this pure makes rotation,
+    /// Split View, Stage Manager and window resizing deterministic and
+    /// directly testable without a live view hierarchy.
+    public static func plan(for size: CGSize) -> LayoutPlan {
+        let presentation = self.presentation(forWidth: size.width, height: size.height)
+        guard presentation == .trailingDock else {
+            return LayoutPlan(presentation: presentation, inspectorWidth: nil, canvasWidth: nil)
+        }
+
+        let inspectorWidth = min(
+            maximumInspectorWidth,
+            max(
+                minimumInspectorWidth,
+                size.width - toolRailWidth - layoutSeparators - minimumCanvasWidth
+            )
+        )
+        let canvasWidth = max(
+            minimumCanvasWidth,
+            size.width - toolRailWidth - layoutSeparators - inspectorWidth
+        )
+        return LayoutPlan(
+            presentation: presentation,
+            inspectorWidth: inspectorWidth,
+            canvasWidth: canvasWidth
+        )
+    }
 
     /// - Parameters:
     ///   - width: The available width, in points, of the space the

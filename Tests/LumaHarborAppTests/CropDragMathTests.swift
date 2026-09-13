@@ -75,6 +75,41 @@ final class CropDragMathTests: XCTestCase {
         XCTAssertEqual(result.height, base.height + 0.1, accuracy: 0.0001)
     }
 
+    func testAspectLockedBottomRightDragKeepsTheTopLeftAnchorAndRatio() {
+        let square = NormalizedCropRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4)
+
+        let result = CropDragMath.updatedCrop(
+            base: square,
+            handle: .bottomRight,
+            translation: CGSize(width: 20, height: -10),
+            imageFrameSize: frame,
+            normalizedAspectRatio: 1
+        )
+
+        XCTAssertEqual(result.x, square.x, accuracy: 0.0001)
+        XCTAssertEqual(result.y, square.y, accuracy: 0.0001)
+        XCTAssertEqual(result.width, result.height, accuracy: 0.0001)
+        XCTAssertGreaterThan(result.width, square.width)
+    }
+
+    func testAspectLockedTopLeftDragNeverLeavesTheImageFrame() {
+        let square = NormalizedCropRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4)
+
+        let result = CropDragMath.updatedCrop(
+            base: square,
+            handle: .topLeft,
+            translation: CGSize(width: -1_000, height: -1_000),
+            imageFrameSize: frame,
+            normalizedAspectRatio: 1
+        )
+
+        XCTAssertGreaterThanOrEqual(result.x, 0)
+        XCTAssertGreaterThanOrEqual(result.y, 0)
+        XCTAssertLessThanOrEqual(result.x + result.width, 1.0001)
+        XCTAssertLessThanOrEqual(result.y + result.height, 1.0001)
+        XCTAssertEqual(result.width, result.height, accuracy: 0.0001)
+    }
+
     func testDraggingACornerPastItsOppositeCornerFloorsAtTheMinimumSizeRatherThanInverting() {
         // Dragging bottomRight's opposite handle (topLeft) far past the
         // fixed bottom-right corner: known, documented limitation -- this

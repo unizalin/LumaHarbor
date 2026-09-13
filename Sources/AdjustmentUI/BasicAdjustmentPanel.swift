@@ -24,9 +24,12 @@ public struct BasicAdjustmentPanel: View {
     private func row(_ definition: AdjustmentDefinition) -> some View {
         macOSResetGesture(
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(definition.kind.displayName)
-                    Spacer()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .layoutPriority(1)
+                    Spacer(minLength: 8)
                     AdjustmentValueInput(
                         label: definition.kind.displayName,
                         value: Binding(
@@ -37,7 +40,9 @@ public struct BasicAdjustmentPanel: View {
                         fractionDigits: definition.fractionDigits,
                         onReset: { editor.resetAdjustment(definition.kind) }
                     )
+                    .layoutPriority(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Slider(
                     value: Binding(
                         get: { editor.adjustments[definition.kind] },

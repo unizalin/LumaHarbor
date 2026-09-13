@@ -30,6 +30,30 @@ public struct LocalAdjustmentsPanel: View {
         editor.adjustments.localAdjustments.filter { $0.kind == .spotHeal }
     }
 
+    private var selectedMaskToolMode: EditorToolMode? {
+        guard let selectedID = editor.selectedLocalAdjustmentID,
+              let selectedMask = masks.first(where: { $0.id == selectedID }) else {
+            return nil
+        }
+        switch selectedMask.kind {
+        case .linearGradient: return .linearGradient
+        case .radialGradient: return .radialGradient
+        case .brush: return .brush
+        case .luminanceRange, .colorRange, .subject, .background, .spotHeal: return nil
+        }
+    }
+
+    // Kept as a named predicate for the linear-gradient affordance and for
+    // source-level UI contracts; radial and brush masks use the same button
+    // through `selectedMaskToolMode` below.
+    private var selectedMaskIsLinear: Bool {
+        selectedMaskToolMode == .linearGradient
+    }
+
+    private var isLinearGradientToolActive: Bool {
+        editor.toolMode == .linearGradient
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -49,11 +73,20 @@ public struct LocalAdjustmentsPanel: View {
                 Spacer()
 
                 Button {
-                    editor.setToolMode(editor.toolMode == .linearGradient ? .adjust : .linearGradient)
+                    if let selectedMaskToolMode,
+                       editor.toolMode == selectedMaskToolMode {
+                        editor.setToolMode(.adjust)
+                    } else if let selectedMaskToolMode {
+                        editor.setToolMode(selectedMaskToolMode)
+                    }
                 } label: {
-                    Text(editor.toolMode == .linearGradient ? L10n.t("Done") : L10n.t("Edit Masks"))
+                    Text(editor.toolMode == selectedMaskToolMode ? L10n.t("Done") : L10n.t("Edit Masks"))
                 }
-                .disabled(editor.photo == nil || masks.isEmpty)
+                .disabled(
+                    editor.photo == nil
+                        || masks.isEmpty
+                        || (!selectedMaskIsLinear && selectedMaskToolMode == nil)
+                )
             }
 
             if masks.isEmpty {
@@ -125,8 +158,10 @@ public struct LocalAdjustmentsPanel: View {
         )
         editor.updateAdjustments { $0.localAdjustments.append(newMask) }
         editor.selectedLocalAdjustmentID = newMask.id
-        if kind == .linearGradient {
-            editor.setToolMode(.linearGradient)
+        if let mode = canvasToolMode(for: kind) {
+            editor.setToolMode(mode)
+        } else if canvasToolMode(for: editor.toolMode) != nil {
+            editor.setToolMode(.adjust)
         }
     }
 
@@ -165,6 +200,10 @@ public struct LocalAdjustmentsPanel: View {
                     editor.selectedLocalAdjustmentID = mask.id
                     if mask.kind == .linearGradient {
                         editor.setToolMode(.linearGradient)
+                    } else if let mode = canvasToolMode(for: mask.kind) {
+                        editor.setToolMode(mode)
+                    } else if canvasToolMode(for: editor.toolMode) != nil {
+                        editor.setToolMode(.adjust)
                     }
                 } label: {
                     Label(
@@ -203,6 +242,9 @@ public struct LocalAdjustmentsPanel: View {
                     editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(mask.id) }
                     if editor.selectedLocalAdjustmentID == mask.id {
                         editor.selectedLocalAdjustmentID = nil
+                        if canvasToolMode(for: editor.toolMode) != nil {
+                            editor.setToolMode(.adjust)
+                        }
                     }
                 } label: {
                     Image(systemName: "trash")
@@ -229,6 +271,8 @@ public struct LocalAdjustmentsPanel: View {
 
                         Spacer()
                     }
+
+                    maskGeometryControls(for: mask)
 
                     AdjustmentSliderRow(
                         label: L10n.t("Opacity"),
@@ -312,6 +356,232 @@ public struct LocalAdjustmentsPanel: View {
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
     }
 
+    @ViewBuilder
+    private func maskGeometryControls(for mask: LocalAdjustment) -> some View {
+        switch mask.kind {
+        case .linearGradient:
+            maskPositionControls(for: mask)
+
+            AdjustmentSliderRow(
+                label: L10n.t("Angle"),
+                value: mask.geometry.angleDegrees,
+                range: -180...180,
+                fractionDigits: 0,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.angleDegrees = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.angleDegrees = LocalAdjustmentGeometry.neutral.angleDegrees }
+                }
+            )
+
+            AdjustmentSliderRow(
+                label: L10n.t("Range"),
+                value: mask.geometry.range,
+                range: 0.01...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.range = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.range = LocalAdjustmentGeometry.neutral.range }
+                }
+            )
+
+            featherControl(for: mask)
+
+        case .radialGradient:
+            maskPositionControls(for: mask)
+
+            AdjustmentSliderRow(
+                label: L10n.t("Radius"),
+                value: mask.geometry.radius,
+                range: 0.01...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.radius = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.radius = LocalAdjustmentGeometry.neutral.radius }
+                }
+            )
+
+            AdjustmentSliderRow(
+                label: L10n.t("Vertical Radius"),
+                value: mask.geometry.radialRadiusY ?? mask.geometry.radius,
+                range: 0.01...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.radialRadiusY = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.radialRadiusY = nil }
+                }
+            )
+
+            featherControl(for: mask)
+
+        case .brush:
+            maskPositionControls(for: mask)
+            AdjustmentSliderRow(
+                label: L10n.t("Size"),
+                value: mask.geometry.radius,
+                range: 0.01...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.radius = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.radius = LocalAdjustmentGeometry.neutral.radius }
+                }
+            )
+            featherControl(for: mask)
+            if mask.geometry.brushStrokes.isEmpty {
+                Text(L10n.t("Brush uses a circular base until a stroke is drawn."))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .luminanceRange:
+            AdjustmentSliderRow(
+                label: L10n.t("Minimum"),
+                value: mask.geometry.luminanceMin ?? 0,
+                range: 0...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { geometry in
+                        let maximum = geometry.luminanceMax ?? 1
+                        geometry.luminanceMin = Swift.min(newValue, maximum)
+                    }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.luminanceMin = nil }
+                }
+            )
+
+            AdjustmentSliderRow(
+                label: L10n.t("Maximum"),
+                value: mask.geometry.luminanceMax ?? 1,
+                range: 0...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { geometry in
+                        let minimum = geometry.luminanceMin ?? 0
+                        geometry.luminanceMax = Swift.max(newValue, minimum)
+                    }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.luminanceMax = nil }
+                }
+            )
+            featherControl(for: mask)
+
+        case .colorRange:
+            AdjustmentSliderRow(
+                label: L10n.t("Hue"),
+                value: mask.geometry.colorTargetHue ?? 0,
+                range: 0...360,
+                fractionDigits: 0,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.colorTargetHue = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.colorTargetHue = nil }
+                }
+            )
+
+            AdjustmentSliderRow(
+                label: L10n.t("Tolerance"),
+                value: mask.geometry.colorHueTolerance ?? 30,
+                range: 0...180,
+                fractionDigits: 0,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.colorHueTolerance = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.colorHueTolerance = nil }
+                }
+            )
+            featherControl(for: mask)
+
+        case .subject, .background:
+            Text(L10n.t("Automatic"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+        case .spotHeal:
+            EmptyView()
+        }
+    }
+
+    private func maskPositionControls(for mask: LocalAdjustment) -> some View {
+        Group {
+            AdjustmentSliderRow(
+                label: L10n.t("Horizontal"),
+                value: mask.geometry.x,
+                range: 0...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.x = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.x = LocalAdjustmentGeometry.neutral.x }
+                }
+            )
+
+            AdjustmentSliderRow(
+                label: L10n.t("Vertical"),
+                value: mask.geometry.y,
+                range: 0...1,
+                fractionDigits: 2,
+                onChange: { newValue in
+                    updateMaskGeometry(mask.id) { $0.y = newValue }
+                },
+                onReset: {
+                    updateMaskGeometry(mask.id) { $0.y = LocalAdjustmentGeometry.neutral.y }
+                }
+            )
+        }
+    }
+
+    private func featherControl(for mask: LocalAdjustment) -> some View {
+        AdjustmentSliderRow(
+            label: L10n.t("Feather"),
+            value: mask.geometry.feather,
+            range: LocalAdjustmentGeometry.featherRange,
+            fractionDigits: 0,
+            onChange: { newValue in
+                updateMaskGeometry(mask.id) { $0.feather = newValue }
+            },
+            onReset: {
+                updateMaskGeometry(mask.id) { $0.feather = LocalAdjustmentGeometry.neutral.feather }
+            }
+        )
+    }
+
+    private func updateMaskGeometry(_ id: UUID, _ change: (inout LocalAdjustmentGeometry) -> Void) {
+        editor.updateAdjustments { adjustments in
+            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == id }) else { return }
+            change(&adjustments.localAdjustments[index].geometry)
+        }
+    }
+
+    private func canvasToolMode(for kind: LocalAdjustmentKind) -> EditorToolMode? {
+        switch kind {
+        case .linearGradient: return .linearGradient
+        case .radialGradient: return .radialGradient
+        case .brush: return .brush
+        case .luminanceRange, .colorRange, .subject, .background, .spotHeal: return nil
+        }
+    }
+
+    private func canvasToolMode(for mode: EditorToolMode) -> EditorToolMode? {
+        switch mode {
+        case .linearGradient, .radialGradient, .brush: return mode
+        case .adjust, .crop, .whiteBalance, .spotHeal: return nil
+        }
+    }
+
     private func spotHealRow(for heal: LocalAdjustment) -> some View {
         let isSelected = editor.selectedLocalAdjustmentID == heal.id
         return VStack(alignment: .leading, spacing: 6) {
@@ -348,6 +618,9 @@ public struct LocalAdjustmentsPanel: View {
                     editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(heal.id) }
                     if editor.selectedLocalAdjustmentID == heal.id {
                         editor.selectedLocalAdjustmentID = nil
+                        if editor.toolMode == .spotHeal {
+                            editor.setToolMode(.adjust)
+                        }
                     }
                 } label: {
                     Label(L10n.t("Delete Spot Heal"), systemImage: "trash")

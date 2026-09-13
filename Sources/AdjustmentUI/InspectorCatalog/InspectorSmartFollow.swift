@@ -19,6 +19,10 @@ public enum InspectorSmartFollow {
             return .whiteBalance
         case .linearGradient:
             return .local
+        case .radialGradient:
+            return .local
+        case .brush:
+            return .local
         case .spotHeal:
             return .local
         }

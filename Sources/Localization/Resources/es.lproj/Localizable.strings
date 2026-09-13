@@ -674,6 +674,13 @@
 "Perspective" = "Perspectiva";
 "Vertical" = "Vertical";
 "Horizontal" = "Horizontal";
+"Angle" = "Ángulo";
+"Range" = "Rango";
+"Vertical Radius" = "Radio vertical";
+"Minimum" = "Mínimo";
+"Maximum" = "Máximo";
+"Tolerance" = "Tolerancia";
+"Brush uses a circular base until a stroke is drawn." = "El pincel usa una base circular hasta que se dibuja un trazo.";
 "Reset Perspective" = "Restablecer perspectiva";
 /* P6: Snapshots, Soft Proof, Professional Preview */
 "Professional Preview" = "Vista previa profesional";
