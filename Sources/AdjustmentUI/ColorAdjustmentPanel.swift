@@ -43,7 +43,7 @@ public struct ColorAdjustmentPanel: View {
                     AdjustmentSliderRow(
                         label: L10n.t(band.labelKey),
                         value: editor.adjustments.monochrome[keyPath: band.keyPath],
-                        range: -100...100, fractionDigits: 0,
+                        range: -100...100, fractionDigits: 1,
                         onChange: { newValue in
                             editor.updateAdjustments { $0.monochrome[keyPath: band.keyPath] = newValue }
                         },
@@ -70,7 +70,7 @@ public struct ColorAdjustmentPanel: View {
             label: L10n.t(fieldKey),
             value: field(editor.adjustments.hsl[keyPath: keyPath]),
             range: -100...100,
-            fractionDigits: 0,
+            fractionDigits: 1,
             onChange: { newValue in
                 editor.updateAdjustments { adjustments in
                     Self.set(fieldKey, on: &adjustments.hsl[keyPath: keyPath], to: newValue)

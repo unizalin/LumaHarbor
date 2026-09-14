@@ -38,6 +38,7 @@ public struct BasicAdjustmentPanel: View {
                         ),
                         range: definition.range,
                         fractionDigits: definition.fractionDigits,
+                        step: definition.step,
                         onReset: { editor.resetAdjustment(definition.kind) }
                     )
                     .layoutPriority(1)
@@ -49,6 +50,7 @@ public struct BasicAdjustmentPanel: View {
                         set: { editor.setAdjustment(definition.kind, to: $0) }
                     ),
                     in: definition.range,
+                    step: definition.step,
                     // Phase 3 Task 3.3: distinct from the value binding's own
                     // `set` above, which fires on every tick during a drag --
                     // this reports only the drag's start/end, which is what

@@ -278,7 +278,7 @@ public struct LocalAdjustmentsPanel: View {
                         label: L10n.t("Opacity"),
                         value: mask.opacity,
                         range: 0...100,
-                        fractionDigits: 0,
+                        fractionDigits: 1,
                         onChange: { newValue in
                             editor.updateAdjustments { adjustments in
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
@@ -297,7 +297,7 @@ public struct LocalAdjustmentsPanel: View {
                         label: L10n.t("Exposure"),
                         value: mask.adjustments.exposure ?? 0,
                         range: -5...5,
-                        fractionDigits: 2,
+                        fractionDigits: 1,
                         onChange: { newValue in
                             editor.updateAdjustments { adjustments in
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
@@ -316,7 +316,7 @@ public struct LocalAdjustmentsPanel: View {
                         label: L10n.t("Contrast"),
                         value: mask.adjustments.contrast ?? 0,
                         range: -100...100,
-                        fractionDigits: 0,
+                        fractionDigits: 1,
                         onChange: { newValue in
                             editor.updateAdjustments { adjustments in
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
@@ -335,7 +335,7 @@ public struct LocalAdjustmentsPanel: View {
                         label: L10n.t("Saturation"),
                         value: mask.adjustments.saturation ?? 0,
                         range: -100...100,
-                        fractionDigits: 0,
+                        fractionDigits: 1,
                         onChange: { newValue in
                             editor.updateAdjustments { adjustments in
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
@@ -366,7 +366,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Angle"),
                 value: mask.geometry.angleDegrees,
                 range: -180...180,
-                fractionDigits: 0,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.angleDegrees = newValue }
                 },
@@ -379,7 +379,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Range"),
                 value: mask.geometry.range,
                 range: 0.01...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.range = newValue }
                 },
@@ -397,7 +397,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Radius"),
                 value: mask.geometry.radius,
                 range: 0.01...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.radius = newValue }
                 },
@@ -410,7 +410,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Vertical Radius"),
                 value: mask.geometry.radialRadiusY ?? mask.geometry.radius,
                 range: 0.01...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.radialRadiusY = newValue }
                 },
@@ -427,7 +427,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Size"),
                 value: mask.geometry.radius,
                 range: 0.01...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.radius = newValue }
                 },
@@ -447,7 +447,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Minimum"),
                 value: mask.geometry.luminanceMin ?? 0,
                 range: 0...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { geometry in
                         let maximum = geometry.luminanceMax ?? 1
@@ -463,7 +463,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Maximum"),
                 value: mask.geometry.luminanceMax ?? 1,
                 range: 0...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { geometry in
                         let minimum = geometry.luminanceMin ?? 0
@@ -481,7 +481,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Hue"),
                 value: mask.geometry.colorTargetHue ?? 0,
                 range: 0...360,
-                fractionDigits: 0,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.colorTargetHue = newValue }
                 },
@@ -494,7 +494,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Tolerance"),
                 value: mask.geometry.colorHueTolerance ?? 30,
                 range: 0...180,
-                fractionDigits: 0,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.colorHueTolerance = newValue }
                 },
@@ -520,7 +520,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Horizontal"),
                 value: mask.geometry.x,
                 range: 0...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.x = newValue }
                 },
@@ -533,7 +533,7 @@ public struct LocalAdjustmentsPanel: View {
                 label: L10n.t("Vertical"),
                 value: mask.geometry.y,
                 range: 0...1,
-                fractionDigits: 2,
+                fractionDigits: 1,
                 onChange: { newValue in
                     updateMaskGeometry(mask.id) { $0.y = newValue }
                 },
@@ -549,7 +549,7 @@ public struct LocalAdjustmentsPanel: View {
             label: L10n.t("Feather"),
             value: mask.geometry.feather,
             range: LocalAdjustmentGeometry.featherRange,
-            fractionDigits: 0,
+            fractionDigits: 1,
             onChange: { newValue in
                 updateMaskGeometry(mask.id) { $0.feather = newValue }
             },
@@ -665,7 +665,7 @@ public struct LocalAdjustmentsPanel: View {
                     label: L10n.t("Radius"),
                     value: heal.geometry.radius,
                     range: 0.01...0.3,
-                    fractionDigits: 2,
+                    fractionDigits: 1,
                     onChange: { newValue in
                         editor.updateAdjustments { adjustments in
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
@@ -684,7 +684,7 @@ public struct LocalAdjustmentsPanel: View {
                     label: L10n.t("Feather"),
                     value: heal.geometry.feather,
                     range: LocalAdjustmentGeometry.featherRange,
-                    fractionDigits: 0,
+                    fractionDigits: 1,
                     onChange: { newValue in
                         editor.updateAdjustments { adjustments in
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
@@ -704,7 +704,7 @@ public struct LocalAdjustmentsPanel: View {
                         label: L10n.t("Pupil Radius"),
                         value: heal.geometry.redEyePupilRadius ?? heal.geometry.radius,
                         range: 0.01...0.3,
-                        fractionDigits: 2,
+                        fractionDigits: 1,
                         onChange: { newValue in
                             editor.updateAdjustments { adjustments in
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }

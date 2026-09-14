@@ -17,7 +17,7 @@ public struct DetailAdjustmentPanel: View {
         DisclosureGroup(L10n.t("Sharpening")) {
             AdjustmentSliderRow(
                 label: L10n.t("Amount"), value: editor.adjustments.sharpening.amount,
-                range: 0...150, fractionDigits: 0,
+                range: 0...150, fractionDigits: 1,
                 onChange: { newValue in editor.updateAdjustments { $0.sharpening.amount = newValue } },
                 onReset: { editor.updateAdjustments { $0.sharpening.amount = Sharpening.neutral.amount } }
             )
@@ -29,13 +29,13 @@ public struct DetailAdjustmentPanel: View {
             )
             AdjustmentSliderRow(
                 label: L10n.t("Detail"), value: editor.adjustments.sharpening.detail,
-                range: 0...100, fractionDigits: 0,
+                range: 0...100, fractionDigits: 1,
                 onChange: { newValue in editor.updateAdjustments { $0.sharpening.detail = newValue } },
                 onReset: { editor.updateAdjustments { $0.sharpening.detail = Sharpening.neutral.detail } }
             )
             AdjustmentSliderRow(
                 label: L10n.t("Masking"), value: editor.adjustments.sharpening.masking,
-                range: 0...100, fractionDigits: 0,
+                range: 0...100, fractionDigits: 1,
                 onChange: { newValue in editor.updateAdjustments { $0.sharpening.masking = newValue } },
                 onReset: { editor.updateAdjustments { $0.sharpening.masking = Sharpening.neutral.masking } }
             )
@@ -44,13 +44,13 @@ public struct DetailAdjustmentPanel: View {
             DisclosureGroup(L10n.t("Luminance")) {
                 AdjustmentSliderRow(
                     label: L10n.t("Amount"), value: editor.adjustments.noiseReduction.luminanceAmount,
-                    range: 0...100, fractionDigits: 0,
+                range: 0...100, fractionDigits: 1,
                     onChange: { newValue in editor.updateAdjustments { $0.noiseReduction.luminanceAmount = newValue } },
                     onReset: { editor.updateAdjustments { $0.noiseReduction.luminanceAmount = NoiseReduction.neutral.luminanceAmount } }
                 )
                 AdjustmentSliderRow(
                     label: L10n.t("Detail"), value: editor.adjustments.noiseReduction.luminanceDetail,
-                    range: 0...100, fractionDigits: 0,
+                range: 0...100, fractionDigits: 1,
                     onChange: { newValue in editor.updateAdjustments { $0.noiseReduction.luminanceDetail = newValue } },
                     onReset: { editor.updateAdjustments { $0.noiseReduction.luminanceDetail = NoiseReduction.neutral.luminanceDetail } }
                 )
@@ -58,13 +58,13 @@ public struct DetailAdjustmentPanel: View {
             DisclosureGroup(L10n.t("Color")) {
                 AdjustmentSliderRow(
                     label: L10n.t("Amount"), value: editor.adjustments.noiseReduction.colorAmount,
-                    range: 0...100, fractionDigits: 0,
+                range: 0...100, fractionDigits: 1,
                     onChange: { newValue in editor.updateAdjustments { $0.noiseReduction.colorAmount = newValue } },
                     onReset: { editor.updateAdjustments { $0.noiseReduction.colorAmount = NoiseReduction.neutral.colorAmount } }
                 )
                 AdjustmentSliderRow(
                     label: L10n.t("Detail"), value: editor.adjustments.noiseReduction.colorDetail,
-                    range: 0...100, fractionDigits: 0,
+                range: 0...100, fractionDigits: 1,
                     onChange: { newValue in editor.updateAdjustments { $0.noiseReduction.colorDetail = newValue } },
                     onReset: { editor.updateAdjustments { $0.noiseReduction.colorDetail = NoiseReduction.neutral.colorDetail } }
                 )

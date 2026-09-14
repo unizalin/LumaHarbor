@@ -358,6 +358,8 @@
 "Reset All" = "全部重設";
 "Reset Channel" = "重設色版";
 "Reset" = "重設";
+"Decrease" = "減少";
+"Increase" = "增加";
 "Retry saving." = "重新嘗試儲存。";
 "Saturation" = "飽和度";
 "Save Adjustments" = "儲存調整";

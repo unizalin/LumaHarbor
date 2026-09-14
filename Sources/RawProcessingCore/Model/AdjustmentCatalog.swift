@@ -51,44 +51,44 @@ public enum AdjustmentCatalog {
         // Exposure is in real EV so the value carries photographic meaning.
         AdjustmentDefinition(
             kind: .exposure, defaultValue: 0, minimumValue: -5, maximumValue: 5,
-            step: 0.01, fractionDigits: 2
+            step: 0.1, fractionDigits: 1
         ),
         // Every other slider is a neutral-at-zero, ±100 percentage-style control.
         AdjustmentDefinition(
             kind: .temperature, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .tint, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .contrast, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .highlights, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .shadows, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .whites, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .blacks, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .vibrance, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         ),
         AdjustmentDefinition(
             kind: .saturation, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         )
     ]
 
@@ -100,7 +100,7 @@ public enum AdjustmentCatalog {
     public static func definition(for kind: AdjustmentKind) -> AdjustmentDefinition {
         byKind[kind] ?? AdjustmentDefinition(
             kind: kind, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 1, fractionDigits: 0
+            step: 0.1, fractionDigits: 1
         )
     }
 

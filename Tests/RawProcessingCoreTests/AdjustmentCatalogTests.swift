@@ -31,6 +31,13 @@ final class AdjustmentCatalogTests: XCTestCase {
         }
     }
 
+    func testInspectorValuesUseOneDecimalAndTenthStep() {
+        for definition in AdjustmentCatalog.ordered {
+            XCTAssertEqual(definition.fractionDigits, 1, "\(definition.kind) should show one decimal")
+            XCTAssertEqual(definition.step, 0.1, "\(definition.kind) should support tenth-step nudges")
+        }
+    }
+
     func testExposureIsExpressedInStops() {
         let exposure = AdjustmentCatalog.definition(for: .exposure)
         XCTAssertEqual(exposure.minimumValue, -5)

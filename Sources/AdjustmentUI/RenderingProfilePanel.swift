@@ -33,7 +33,7 @@ public struct RenderingProfilePanel: View {
             if editor.adjustments.renderingProfile.profileID != nil {
                 AdjustmentSliderRow(
                     label: L10n.t("Amount"), value: editor.adjustments.renderingProfile.amount,
-                    range: 0...100, fractionDigits: 0,
+                    range: 0...100, fractionDigits: 1,
                     onChange: { newValue in editor.updateAdjustments { $0.renderingProfile.amount = newValue } },
                     onReset: { editor.updateAdjustments { $0.renderingProfile.amount = 100 } }
                 )

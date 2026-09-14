@@ -358,6 +358,8 @@
 "Reset All" = "Alles zurücksetzen";
 "Reset Channel" = "Kanal zurücksetzen";
 "Reset" = "Zurücksetzen";
+"Decrease" = "Verringern";
+"Increase" = "Erhöhen";
 "Retry saving." = "Speichern erneut versuchen.";
 "Saturation" = "Sättigung";
 "Save Adjustments" = "Anpassungen speichern";

@@ -358,6 +358,8 @@
 "Reset All" = "모두 재설정";
 "Reset Channel" = "채널 재설정";
 "Reset" = "재설정";
+"Decrease" = "감소";
+"Increase" = "증가";
 "Retry saving." = "저장을 다시 시도하세요.";
 "Saturation" = "채도";
 "Save Adjustments" = "조정 저장";

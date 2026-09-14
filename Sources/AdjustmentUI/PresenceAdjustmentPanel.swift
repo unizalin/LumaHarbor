@@ -15,19 +15,19 @@ public struct PresenceAdjustmentPanel: View {
     public var body: some View {
         AdjustmentSliderRow(
             label: L10n.t("Texture"), value: editor.adjustments.presence.texture,
-            range: -100...100, fractionDigits: 0,
+            range: -100...100, fractionDigits: 1,
             onChange: { newValue in editor.updateAdjustments { $0.presence.texture = newValue } },
             onReset: { editor.updateAdjustments { $0.presence.texture = PresenceAdjustments.neutral.texture } }
         )
         AdjustmentSliderRow(
             label: L10n.t("Clarity"), value: editor.adjustments.presence.clarity,
-            range: -100...100, fractionDigits: 0,
+            range: -100...100, fractionDigits: 1,
             onChange: { newValue in editor.updateAdjustments { $0.presence.clarity = newValue } },
             onReset: { editor.updateAdjustments { $0.presence.clarity = PresenceAdjustments.neutral.clarity } }
         )
         AdjustmentSliderRow(
             label: L10n.t("Dehaze"), value: editor.adjustments.presence.dehaze,
-            range: -100...100, fractionDigits: 0,
+            range: -100...100, fractionDigits: 1,
             onChange: { newValue in editor.updateAdjustments { $0.presence.dehaze = newValue } },
             onReset: { editor.updateAdjustments { $0.presence.dehaze = PresenceAdjustments.neutral.dehaze } }
         )

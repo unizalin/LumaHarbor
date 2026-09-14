@@ -71,7 +71,7 @@ public struct GeometryAdjustmentPanel: View {
                         label: L10n.t("Vertical"),
                         value: editor.adjustments.geometry.perspectiveVertical,
                         range: GeometryAdjustments.perspectiveRange,
-                        fractionDigits: 0,
+                        fractionDigits: 1,
                         onChange: { newValue in editor.updateAdjustments { $0.geometry.perspectiveVertical = newValue } },
                         onReset: { editor.updateAdjustments { $0.geometry.perspectiveVertical = 0 } }
                     )
@@ -79,7 +79,7 @@ public struct GeometryAdjustmentPanel: View {
                         label: L10n.t("Horizontal"),
                         value: editor.adjustments.geometry.perspectiveHorizontal,
                         range: GeometryAdjustments.perspectiveRange,
-                        fractionDigits: 0,
+                        fractionDigits: 1,
                         onChange: { newValue in editor.updateAdjustments { $0.geometry.perspectiveHorizontal = newValue } },
                         onReset: { editor.updateAdjustments { $0.geometry.perspectiveHorizontal = 0 } }
                     )
@@ -129,19 +129,19 @@ public struct GeometryAdjustmentPanel: View {
                         || editor.adjustments.lensCorrection.mode == .bundledProfile {
                         AdjustmentSliderRow(
                             label: L10n.t("Distortion"), value: editor.adjustments.lensCorrection.distortionAmount,
-                            range: -100...100, fractionDigits: 0,
+                            range: -100...100, fractionDigits: 1,
                             onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.distortionAmount = newValue } },
                             onReset: { editor.updateAdjustments { $0.lensCorrection.distortionAmount = 0 } }
                         )
                         AdjustmentSliderRow(
                             label: L10n.t("Vignetting"), value: editor.adjustments.lensCorrection.vignettingAmount,
-                            range: -100...100, fractionDigits: 0,
+                            range: -100...100, fractionDigits: 1,
                             onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.vignettingAmount = newValue } },
                             onReset: { editor.updateAdjustments { $0.lensCorrection.vignettingAmount = 0 } }
                         )
                         AdjustmentSliderRow(
                             label: L10n.t("Chromatic Aberration"), value: editor.adjustments.lensCorrection.tcaAmount,
-                            range: -100...100, fractionDigits: 0,
+                            range: -100...100, fractionDigits: 1,
                             onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.tcaAmount = newValue } },
                             onReset: { editor.updateAdjustments { $0.lensCorrection.tcaAmount = 0 } }
                         )

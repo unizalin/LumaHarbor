@@ -12,6 +12,9 @@ struct AdjustmentSliderRow: View {
     let value: Double
     let range: ClosedRange<Double>
     let fractionDigits: Int
+    /// Fine-grained nudge and slider increment. All inspector controls use a
+    /// tenth-step so the displayed one-decimal value is also the edit value.
+    var step: Double = 0.1
     let onChange: (Double) -> Void
     let onReset: () -> Void
     /// Reports drag start (`true`) / drag end (`false`) -- distinct from
@@ -36,12 +39,18 @@ struct AdjustmentSliderRow: View {
                         value: .init(get: { value }, set: onChange),
                         range: range,
                         fractionDigits: fractionDigits,
+                        step: step,
                         onReset: onReset
                     )
                     .layoutPriority(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Slider(value: Binding(get: { value }, set: onChange), in: range, onEditingChanged: onEditingChanged)
+                Slider(
+                    value: Binding(get: { value }, set: onChange),
+                    in: range,
+                    step: step,
+                    onEditingChanged: onEditingChanged
+                )
                     .accessibilityLabel(Text(label))
                     .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))
             }

@@ -24,4 +24,19 @@ final class AdjustmentValueInputTests: XCTestCase {
         XCTAssertEqual(PadAdjustmentPolicy.formatted(1.2, fractionDigits: 2), "1.20")
         XCTAssertEqual(PadAdjustmentPolicy.formatted(-0.25, fractionDigits: 1), "-0.2")
     }
+
+    func testAdjustedNudgeUsesDisplayPrecisionAndClampsToRange() {
+        XCTAssertEqual(
+            PadAdjustmentPolicy.adjusted(1.2, by: 0.1, range: -5...5, fractionDigits: 1),
+            1.3
+        )
+        XCTAssertEqual(
+            PadAdjustmentPolicy.adjusted(5, by: 0.1, range: -5...5, fractionDigits: 1),
+            5
+        )
+        XCTAssertEqual(
+            PadAdjustmentPolicy.adjusted(0.05, by: -0.1, range: -5...5, fractionDigits: 1),
+            -0.1
+        )
+    }
 }

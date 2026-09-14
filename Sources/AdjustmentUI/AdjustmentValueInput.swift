@@ -9,6 +9,7 @@ public struct AdjustmentValueInput: View {
     @Binding private var value: Double
     private let range: ClosedRange<Double>
     private let fractionDigits: Int
+    private let step: Double
     private let label: String
     private let onReset: () -> Void
     @State private var text: String
@@ -20,18 +21,26 @@ public struct AdjustmentValueInput: View {
         value: Binding<Double>,
         range: ClosedRange<Double>,
         fractionDigits: Int,
+        step: Double = 0.1,
         onReset: @escaping () -> Void
     ) {
         self.label = label
         self._value = value
         self.range = range
         self.fractionDigits = fractionDigits
+        self.step = step.isFinite && step > 0 ? step : 0.1
         self.onReset = onReset
         self._text = State(initialValue: PadAdjustmentPolicy.formatted(value.wrappedValue, fractionDigits: fractionDigits))
     }
 
     public var body: some View {
         HStack(spacing: 6) {
+            stepButton(
+                systemName: "minus",
+                accessibilityKey: "Decrease",
+                action: { adjust(by: -step) }
+            )
+
             TextField(label, text: $text, onEditingChanged: { editing in
                 isEditing = editing
                 if !editing { commit() }
@@ -40,13 +49,12 @@ public struct AdjustmentValueInput: View {
             .textFieldStyle(.plain)
             .font(.body.monospacedDigit())
             .padding(.horizontal, 10)
-            // Keep the familiar 88pt field when the inspector has room, but
-            // allow it to contract to 64pt in a narrow dock. The reset
-            // affordance remains a separate 44pt hit target.
+            // Keep the field compact enough for the two nudge controls while
+            // allowing it to contract further in a narrow inspector dock.
             .frame(
-                minWidth: 64,
-                idealWidth: 88,
-                maxWidth: 88,
+                minWidth: 56,
+                idealWidth: 72,
+                maxWidth: 72,
                 minHeight: 36,
                 idealHeight: 36,
                 maxHeight: 36
@@ -71,6 +79,12 @@ public struct AdjustmentValueInput: View {
             .focused($isFocused)
             .accessibilityLabel(Text(label))
             .accessibilityValue(Text(text))
+
+            stepButton(
+                systemName: "plus",
+                accessibilityKey: "Increase",
+                action: { adjust(by: step) }
+            )
 
             Button {
                 onReset()
@@ -104,5 +118,39 @@ public struct AdjustmentValueInput: View {
         }
         value = parsed
         text = PadAdjustmentPolicy.formatted(parsed, fractionDigits: fractionDigits)
+    }
+
+    private func adjust(by delta: Double) {
+        // Commit a partially typed value first, so a nudge always starts from
+        // what the user sees instead of the last slider tick.
+        if isEditing { commit() }
+        let adjusted = PadAdjustmentPolicy.adjusted(
+            value,
+            by: delta,
+            range: range,
+            fractionDigits: fractionDigits
+        )
+        value = adjusted
+        text = PadAdjustmentPolicy.formatted(adjusted, fractionDigits: fractionDigits)
+    }
+
+    @ViewBuilder
+    private func stepButton(
+        systemName: String,
+        accessibilityKey: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .background(Color.primary.opacity(0.08), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .accessibilityLabel(Text("\(L10n.t(accessibilityKey)) \(label)"))
+        .help("\(L10n.t(accessibilityKey)) \(label)")
     }
 }

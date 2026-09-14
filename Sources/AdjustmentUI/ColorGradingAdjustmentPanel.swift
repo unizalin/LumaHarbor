@@ -29,13 +29,13 @@ public struct ColorGradingAdjustmentPanel: View {
         }
         AdjustmentSliderRow(
             label: L10n.t("Balance"), value: editor.adjustments.colorGrading.balance,
-            range: -100...100, fractionDigits: 0,
+            range: -100...100, fractionDigits: 1,
             onChange: { newValue in editor.updateAdjustments { $0.colorGrading.balance = newValue } },
             onReset: { editor.updateAdjustments { $0.colorGrading.balance = ColorGradingAdjustments.neutral.balance } }
         )
         AdjustmentSliderRow(
             label: L10n.t("Blending"), value: editor.adjustments.colorGrading.blending,
-            range: 0...100, fractionDigits: 0,
+            range: 0...100, fractionDigits: 1,
             onChange: { newValue in editor.updateAdjustments { $0.colorGrading.blending = newValue } },
             onReset: { editor.updateAdjustments { $0.colorGrading.blending = ColorGradingAdjustments.neutral.blending } }
         )
@@ -51,7 +51,7 @@ public struct ColorGradingAdjustmentPanel: View {
             label: L10n.t(fieldKey),
             value: field(editor.adjustments.colorGrading[keyPath: keyPath]),
             range: range,
-            fractionDigits: 0,
+            fractionDigits: 1,
             onChange: { newValue in
                 editor.updateAdjustments { adjustments in
                     Self.set(fieldKey, on: &adjustments.colorGrading[keyPath: keyPath], to: newValue)
