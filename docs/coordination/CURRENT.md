@@ -6,7 +6,7 @@ Updated by: Codex（iPad 直向非侵入式 Inspector）
 
 ## iPad 直向非侵入式 Inspector（2026-09-15, Codex）
 
-- **狀態**：實作完成；`codex/open-source-release-prep` HEAD `20f739d4ba6040c6d2e8d1f1c128820e835ec80a`。直向 Compact／Standard 的 Inspector 可完全收起，畫布不預留面板空間；收起後顯示 safe-area 內 44×44 圓形 launcher，並保留上方工具列入口。
+- **狀態**：實作完成；已驗證產品提交 `20f739d4ba6040c6d2e8d1f1c128820e835ec80a`（分支 `codex/open-source-release-prep`）。直向 Compact／Standard 的 Inspector 可完全收起，畫布不預留面板空間；收起後顯示 safe-area 內 44×44 圓形 launcher，並保留上方工具列入口。
 - **本輪修改**：`PadBottomDrawerPolicy` 增加 visibility 與 Compact transition policy；`PadEditorView` 使用 medium／large 可 dismiss sheet、上方與側邊共用入口、canvas overlay launcher；inline／standalone `PadInspectorHost` 的五個 domain 使用 GeometryReader 等寬配置；`PadInspectorDomain` 補 `Hashable` 以支援 SwiftUI `ForEach`。
 - **狀態與資料保護**：面板開合、domain 切換、旋轉／resize 只改 presentation state；不改 `EditorSession` 調整值、undo／redo、zoom、compare 或 autosave。首次進入窄版及從 trailing dock 回到窄版會預設收起，明確點擊後可再次開啟。
 - **驗證**：focused inspector／layout／domain／preset tests **89/89 PASS**；transition＋contract tests **5/5 PASS**；乾淨 HEAD 暫存副本完整 `swift test` **1923 tests、9 skipped、0 failures PASS**；generic iOS `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` **PASS**；`git diff --check` **PASS**。
