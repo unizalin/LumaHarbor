@@ -28,38 +28,85 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 820, height: 1180), .bottomDrawer)
     }
 
-    func testBottomDrawerUsesAReadableMaterialSurfaceAndScrollableDetents() throws {
+    func testCompactInspectorUsesOneCustomScrollableSurfaceInsteadOfASystemSheet() throws {
         let source = try Self.padEditorViewSource()
-        XCTAssertTrue(source.contains(".presentationDetents([.height(PadBottomDrawerMetrics.peekHeight), .medium, .large])"))
-        XCTAssertTrue(source.contains(".presentationDragIndicator(.hidden)"))
-        XCTAssertTrue(source.contains(".presentationCornerRadius(PadBottomDrawerMetrics.cornerRadius)"))
-        XCTAssertTrue(source.contains(".presentationBackground(.thickMaterial)"))
-        XCTAssertTrue(source.contains(".presentationContentInteraction(.scrolls)"))
+        XCTAssertFalse(source.contains(".sheet(isPresented: $isDrawerPresented"))
+        XCTAssertFalse(source.contains(".presentationDetents"))
+        XCTAssertTrue(source.contains("movableInspectorPanel(for: size)"))
+        XCTAssertTrue(source.contains(".frame(maxHeight: PadEditorLayoutPolicy.movableInspectorHeight(for: size))"))
+        XCTAssertTrue(source.contains("ScrollView"), "the compact Inspector must scroll inside its bounded overlay")
     }
 
-    func testDrawerAndFloatingInspectorShareOneHeaderComposition() throws {
+    func testDockAndMovableInspectorShareOneContentComposition() throws {
         let source = try Self.padEditorViewSource()
         XCTAssertTrue(source.contains("private var inspectorPanelHeader: some View"))
+        XCTAssertTrue(source.contains("private var inspectorPanelContent: some View"))
+        XCTAssertTrue(source.contains("trailingDockPanel(width:") && source.contains("movableInspectorPanel(for:"))
         XCTAssertGreaterThanOrEqual(
-            source.components(separatedBy: "inspectorPanelHeader").count - 1,
+            source.components(separatedBy: "inspectorPanelContent").count - 1,
             3,
-            "the bottom drawer and floating panel must render the same Inspector header"
+            "the trailing dock and movable overlay must render one shared Inspector surface"
         )
-        XCTAssertFalse(source.contains("private var bottomDrawerDragHandle"))
-        XCTAssertFalse(source.contains("private var floatingPanelHeader"))
+        XCTAssertEqual(
+            source.components(separatedBy: "PadInspectorHost(").count - 1,
+            1,
+            "the host should be composed once, inside inspectorPanelContent"
+        )
     }
 
-    func testBottomDrawerOffersDismissAndMoveToFocusActions() throws {
+    func testCompactInspectorMovesWithoutChangingWorkspaceMode() throws {
         let source = try Self.padEditorViewSource()
-        XCTAssertTrue(source.contains("isDrawerDismissedByUser"))
-        XCTAssertTrue(source.contains("moveDrawerToFocus(with:"))
-        XCTAssertTrue(source.contains("inspectorPanelDragHandle"), "the drawer should float through its unified panel handle")
+        XCTAssertFalse(source.contains("isDrawerDismissedByUser"))
+        XCTAssertFalse(source.contains("moveDrawerToFocus(with:"))
+        XCTAssertTrue(source.contains("commitMovableInspectorDrag(with:"))
+        XCTAssertTrue(source.contains("inspectorPanelDragHandle"), "the compact Inspector should move through its own header")
         XCTAssertTrue(source.contains("DragGesture(minimumDistance: 8)"))
-        XCTAssertTrue(source.contains(#"L10n.t("Drag to move this panel.")"#), "the drawer must expose the drag affordance in visible or accessibility text")
-        XCTAssertFalse(source.contains(#"L10n.t("Floating Panel")"#), "floating should not require a separate mode button")
-        XCTAssertFalse(source.contains(".simultaneousGesture("), "floating should be a direct drag, not a button plus gesture")
-        XCTAssertTrue(source.contains("workspaceState.workspaceMode = .focus"))
+        XCTAssertTrue(source.contains(#"L10n.t("Drag to move this panel.")"#), "the Inspector must expose the drag affordance in visible or accessibility text")
+        XCTAssertFalse(source.contains("workspaceState.workspaceMode = .focus"), "moving the Inspector must not enter a second workspace mode")
         XCTAssertFalse(source.contains(".interactiveDismissDisabled(true)"))
+    }
+
+    func testCompactDomainBarKeepsInactiveLabelsReadable() throws {
+        let source = try Self.padEditorViewSource()
+
+        XCTAssertTrue(source.contains("Text(L10n.t(item.labelKey))"))
+        XCTAssertTrue(
+            source.contains("isSelected ? Color.accentColor : Color.primary"),
+            "inactive domain labels must remain readable on the dark Inspector surface"
+        )
+    }
+
+    func testInspectorHeaderOffersAnExplicitMinimizeAction() throws {
+        let source = try Self.padEditorViewSource()
+
+        XCTAssertTrue(source.contains("inspectorMinimizeButton"))
+        XCTAssertTrue(source.contains("xmark.circle.fill"))
+        XCTAssertTrue(source.contains("Hide Inspector"))
+    }
+
+    func testPortraitInspectorCanBeDismissedWithADownwardHeaderSwipe() throws {
+        let source = try Self.padEditorViewSource()
+
+        XCTAssertTrue(source.contains("shouldDismissMovableInspector(for:"))
+        XCTAssertTrue(source.contains("minimizeInspector()"))
+    }
+
+    func testDownwardInspectorDismissalRequiresAPredominantlyVerticalDrag() {
+        XCTAssertTrue(
+            PadEditorLayoutPolicy.shouldDismissMovableInspector(
+                for: CGSize(width: 8, height: 120)
+            )
+        )
+        XCTAssertFalse(
+            PadEditorLayoutPolicy.shouldDismissMovableInspector(
+                for: CGSize(width: 140, height: 120)
+            )
+        )
+        XCTAssertFalse(
+            PadEditorLayoutPolicy.shouldDismissMovableInspector(
+                for: CGSize(width: 0, height: 99)
+            )
+        )
     }
 
     func testInspectorHasOneMinimizableSurfaceWithAVisibleRestoreTile() throws {
@@ -76,6 +123,31 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
             "the minimized Inspector entry must remain a reachable 44pt control"
         )
         XCTAssertFalse(source.contains("inspectorVisibilityToggle"), "minimize should live on the panel; do not add a second toolbar switch")
+    }
+
+    func testAdjustmentToolbarEntryReopensTheSingleInspectorPopup() throws {
+        let source = try Self.padEditorViewSource()
+
+        XCTAssertTrue(source.contains("private var inspectorPresentationButton: some View"))
+        XCTAssertTrue(source.contains("private func presentInspectorFromToolbar()"))
+        XCTAssertFalse(source.contains("presentBottomDrawer()"))
+        XCTAssertTrue(source.contains(#"Label(L10n.t("Adjustments"), systemImage: "slider.horizontal.3")"#))
+        XCTAssertTrue(source.contains(#".accessibilityHint(Text(L10n.t("Show Inspector")))"#))
+        let toolbarStart = try XCTUnwrap(source.range(of: "private func presentInspectorFromToolbar()"))
+        let dragStart = try XCTUnwrap(source.range(of: "private func commitMovableInspectorDrag"))
+        let toolbarBody = source[toolbarStart.lowerBound..<dragStart.lowerBound]
+        XCTAssertFalse(toolbarBody.contains("floatingPanelOffset"), "the entry point must not relocate a visible Inspector")
+    }
+
+    func testAdjustmentEntryDoesNotExposeACompetingFocusToggleAndFloatingPanelUsesVisibleOrigin() throws {
+        let source = try Self.padEditorViewSource()
+
+        XCTAssertFalse(source.contains("workspaceModeToggle"), "Focus must be entered by dragging the Inspector, not a competing toolbar toggle")
+        XCTAssertTrue(source.contains("ZStack(alignment: .topLeading)"), "floating coordinates must be based on a visible top-leading origin")
+        XCTAssertTrue(source.contains(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)"), "the minimized restore tile must remain reachable without affecting floating coordinates")
+        XCTAssertTrue(source.contains("movableInspectorWidth(for: size)"), "moving the panel must preserve the bottom-drawer width")
+        XCTAssertTrue(source.contains("movableInspectorOrigin(for: size)"), "the overlay must start from an adaptive bottom-centered origin")
+        XCTAssertFalse(source.contains("focusLayout(for:"), "the compact Inspector must not have a separate Focus-mode rendering path")
     }
 
     // MARK: - Adaptive workspace width profiles
@@ -199,6 +271,49 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
             PadEditorLayoutPolicy.maximumInspectorWidth,
             accuracy: 0.01
         )
+    }
+
+    func testMovableInspectorKeepsTheWideBottomDrawerTreatment() {
+        let portrait = PadEditorLayoutPolicy.movableInspectorWidth(for: CGSize(width: 820, height: 1_180))
+        XCTAssertEqual(portrait, 772, accuracy: 0.01)
+
+        let wide = PadEditorLayoutPolicy.movableInspectorWidth(for: CGSize(width: 1_400, height: 820))
+        XCTAssertEqual(wide, PadEditorLayoutPolicy.movableInspectorMaximumWidth, accuracy: 0.01)
+        XCTAssertGreaterThan(portrait, PadEditorLayoutPolicy.maximumInspectorWidth)
+    }
+
+    func testMovableInspectorHeightIsBoundedByAvailableHeight() {
+        XCTAssertEqual(
+            PadEditorLayoutPolicy.movableInspectorHeight(for: CGSize(width: 820, height: 1_180)),
+            PadEditorLayoutPolicy.movableInspectorMaximumHeight,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            PadEditorLayoutPolicy.movableInspectorHeight(for: CGSize(width: 750, height: 700)),
+            652,
+            accuracy: 0.01
+        )
+        XCTAssertGreaterThanOrEqual(
+            PadEditorLayoutPolicy.movableInspectorHeight(for: CGSize(width: 320, height: 300)),
+            PadEditorLayoutPolicy.movableInspectorMinimumHeight
+        )
+    }
+
+    func testMovableInspectorOriginIsBottomCenteredWithSafeInsets() {
+        let origin = PadEditorLayoutPolicy.movableInspectorOrigin(
+            for: CGSize(width: 820, height: 1_180),
+            panelSize: CGSize(width: 772, height: 652)
+        )
+
+        XCTAssertEqual(origin.x, 24, accuracy: 0.01)
+        XCTAssertEqual(origin.y, 504, accuracy: 0.01)
+
+        let narrowOrigin = PadEditorLayoutPolicy.movableInspectorOrigin(
+            for: CGSize(width: 320, height: 700),
+            panelSize: CGSize(width: 360, height: 652)
+        )
+        XCTAssertGreaterThanOrEqual(narrowOrigin.x, 24)
+        XCTAssertGreaterThanOrEqual(narrowOrigin.y, 24)
     }
 
     // MARK: - Square

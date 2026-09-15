@@ -200,13 +200,66 @@ public enum PadEditorLayoutPolicy {
     /// belongs to the canvas rather than making every control row oversized.
     public static let maximumInspectorWidth: CGFloat = 440
 
-    /// The focus-mode panel uses the same readable range as the dock, while
-    /// remaining independent from the work-mode canvas budget.
+    /// The legacy floating-panel clamp keeps at least this much of the
+    /// Inspector reachable after a drag or a resize.
     public static let floatingPanelMinimumVisibleEdge: CGFloat = 44
+
+    /// The movable Inspector keeps the wide bottom-drawer treatment when it
+    /// leaves the bottom edge. It must not collapse to the narrow trailing
+    /// dock width just because its position changed.
+    public static let movableInspectorHorizontalInset: CGFloat = 24
+    public static let movableInspectorMaximumWidth: CGFloat = 960
+    public static let movableInspectorMinimumHeight: CGFloat = 280
+    public static let movableInspectorMaximumHeight: CGFloat = 720
+    public static let movableInspectorDismissDragThreshold: CGFloat = 100
 
     public static func floatingPanelWidth(for size: CGSize) -> CGFloat {
         let availableWidth = max(0, size.width - (2 * floatingPanelMinimumVisibleEdge))
         return min(maximumInspectorWidth, max(minimumInspectorWidth, availableWidth))
+    }
+
+    /// Width for the single Inspector surface while it is being moved over
+    /// the canvas. This is intentionally wider than `floatingPanelWidth`:
+    /// moving the bottom drawer changes only its origin, never its editing
+    /// layout or readable control width.
+    public static func movableInspectorWidth(for size: CGSize) -> CGFloat {
+        let availableWidth = max(0, size.width - (2 * movableInspectorHorizontalInset))
+        return min(movableInspectorMaximumWidth, max(minimumInspectorWidth, availableWidth))
+    }
+
+    /// Bounds the single compact Inspector surface so portrait and Split View
+    /// keep a useful canvas while the Inspector body remains scrollable. The
+    /// minimum is intentionally below a typical iPad height; when a container
+    /// is smaller still, the clamp policy keeps the header reachable.
+    public static func movableInspectorHeight(for size: CGSize) -> CGFloat {
+        let availableHeight = max(0, size.height - (2 * movableInspectorHorizontalInset))
+        return min(
+            movableInspectorMaximumHeight,
+            max(movableInspectorMinimumHeight, availableHeight)
+        )
+    }
+
+    /// A downward gesture on the compact Inspector header is an intentional
+    /// dismissal only when it is long enough and predominantly vertical. This
+    /// keeps a short adjustment-panel drag or a horizontal repositioning drag
+    /// from unexpectedly hiding the Inspector.
+    public static func shouldDismissMovableInspector(for translation: CGSize) -> Bool {
+        translation.height >= movableInspectorDismissDragThreshold
+            && translation.height >= abs(translation.width)
+    }
+
+    /// Places a compact Inspector at the bottom center before its stored
+    /// document-scoped offset is applied. Keeping this origin pure lets the
+    /// same geometry be reused for first display, rotation, and Split View
+    /// re-clamping without knowing anything about SwiftUI containers.
+    public static func movableInspectorOrigin(
+        for size: CGSize,
+        panelSize: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: max(movableInspectorHorizontalInset, (size.width - panelSize.width) / 2),
+            y: max(movableInspectorHorizontalInset, size.height - panelSize.height - movableInspectorHorizontalInset)
+        )
     }
 
     /// The width, in points, at or above which the Expanded profile gets a

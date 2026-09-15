@@ -54,6 +54,16 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(source.contains("onEditingChanged(isEditing)"), "the caller's begin/end hook must still fire")
     }
 
+    func testIPadNudgeButtonsUseHighContrastWhiteGlyphs() throws {
+        let source = try Self.loadSource("AdjustmentValueInput.swift")
+
+        XCTAssertTrue(source.contains("#if os(iOS)"))
+        XCTAssertTrue(
+            source.contains(".foregroundStyle(Color.white)"),
+            "iPad plus/minus glyphs must remain white on the dark circular control"
+        )
+    }
+
     /// Inspector hierarchy/typography/preview spec (2026-09-14) §5.4/§5.6:
     /// the one shared row must not rely on 80% label scaling, must switch
     /// composition at the shared 340pt threshold, and must expose the

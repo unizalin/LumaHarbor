@@ -8,19 +8,16 @@ import RawProcessingCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The adaptive editing surface (Task 7): the same canvas and the same ten
-/// basic sliders as Task 6, but the *container* the sliders live in adapts
-/// to the available size and to an explicit work/focus toggle —
-/// `PadEditorLayoutPolicy` decides trailing dock vs. bottom drawer purely
-/// from width/height, `PadBottomDrawerPolicy` decides whether the drawer
-/// sheet should actually be presented, and `workspaceState.workspaceMode`
-/// decides work vs. focus.
+/// The adaptive editing surface: one Inspector content hierarchy whose
+/// container adapts to the available size. `PadEditorLayoutPolicy` decides
+/// trailing dock vs. movable compact overlay purely from width/height; the
+/// overlay's drag and minimize actions only change presentation state.
 ///
 /// `editor` — and therefore the open photo, its adjustments, and its undo
 /// stack — is the same `EditorSession` instance across every layout this
-/// view ever renders; resizing, rotating, or toggling work/focus only ever
-/// changes which container the same controls render inside, never what
-/// document is open or what state it holds.
+/// view ever renders; resizing, rotating, moving, or minimizing only changes
+/// where the same controls render, never what document is open or what state
+/// it holds.
 ///
 /// `workspaceState` (mode, canvas zoom, floating-panel offset) is
 /// deliberately scoped to *one specific document*, not to this view's own
@@ -40,12 +37,10 @@ struct PadEditorView: View {
     @ObservedObject private var presetLibrary: PadPresetLibrary
     @Binding private var sceneWorkspaceState: PadWorkspaceState
 
-    /// Work/focus mode, canvas zoom, and floating-panel position — see the
-    /// type's own documentation for why these three travel together and
-    /// reset together. View-local `@State`: survives every work/focus
-    /// toggle and every resize/rotation for the *same* document, but is
-    /// explicitly reset (not merely "happens to survive") when the open
-    /// document's id changes underneath this same view instance.
+    /// Document-scoped presentation preferences and floating-panel position.
+    /// The Inspector never changes `workspaceMode`; the existing field stays
+    /// in the shared state model for compatibility with other workspace
+    /// consumers.
     @State private var workspaceState = PadDocumentScopedWorkspaceState.initial
 
     /// Owns all inspector presentation state (active domain, Adjust submode,
@@ -61,16 +56,6 @@ struct PadEditorView: View {
     /// `activeSectionID` moves, whether from an explicit tap (search result,
     /// favorite) or from Smart Follow reacting to `editor.toolMode`.
     @StateObject private var inspectorNavigation = InspectorNavigationModel()
-
-    /// Whether the bottom drawer sheet is currently presented — a real,
-    /// toggleable binding driven by `PadBottomDrawerPolicy`, never a
-    /// `.sheet(isPresented: .constant(true))`. See `updateDrawerPresentation`.
-    @State private var isDrawerPresented = false
-
-    /// Remembers an intentional drawer dismissal so a rotation or Split View
-    /// resize does not immediately cover the photo again. Switching back to
-    /// work mode or pressing the inspector toolbar button clears this flag.
-    @State private var isDrawerDismissedByUser = false
 
     /// The single Inspector can be temporarily reduced to a visible restore
     /// tile so the photo stays unobstructed. This is presentation state only;
@@ -121,7 +106,6 @@ struct PadEditorView: View {
     /// How much of the floating panel must stay reachable within the
     /// available area at all times — see `PadFloatingPanelLayout`.
     private static let floatingPanelMinimumVisibleEdge = PadEditorLayoutPolicy.floatingPanelMinimumVisibleEdge
-    private static let floatingPanelDefaultOrigin = CGPoint(x: 24, y: 24)
 
     init(
         model: PadEditorModel,
@@ -148,29 +132,13 @@ struct PadEditorView: View {
             // callbacks, but it can lag one render behind during rotation or
             // Split View changes and must not decide whether the dock fits.
             workspaceContent(for: proxy.size)
-                .sheet(isPresented: $isDrawerPresented, onDismiss: handleDrawerDismissal) {
-                    bottomDrawerPanel
-                        .presentationDetents([.height(PadBottomDrawerMetrics.peekHeight), .medium, .large])
-                        .presentationDragIndicator(.hidden)
-                        .presentationCornerRadius(PadBottomDrawerMetrics.cornerRadius)
-                        .presentationBackground(.thickMaterial)
-                        .presentationContentInteraction(.scrolls)
-                        .presentationBackgroundInteraction(.enabled)
-                }
                 .onAppear {
                     availableSize = proxy.size
-                    updateDrawerPresentation()
+                    reclampFloatingPanelOffset(for: proxy.size)
                 }
                 .onChange(of: proxy.size) { _, newSize in
                     availableSize = newSize
-                    updateDrawerPresentation()
-                    reclampFloatingPanelOffset()
-                }
-                .onChange(of: workspaceState.workspaceMode) { _, newMode in
-                    if newMode == .work {
-                        isDrawerDismissedByUser = false
-                    }
-                    updateDrawerPresentation()
+                    reclampFloatingPanelOffset(for: newSize)
                 }
         }
         .toolbar {
@@ -181,7 +149,7 @@ struct PadEditorView: View {
                 .disabled(model.isPreparingDocument)
             }
             ToolbarItem(placement: .primaryAction) {
-                workspaceModeToggle
+                inspectorPresentationButton
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -304,110 +272,55 @@ struct PadEditorView: View {
         }
     }
 
-    // MARK: - Drawer presentation
-
-    /// Reconciles automatic layout presentation with the user's explicit
-    /// close choice. Called whenever mode or `availableSize` changes
-    /// (resize/rotation/Split View); explicit close/open actions use the
-    /// helpers below so they remain reversible.
-    private func updateDrawerPresentation() {
-        let inspectorPresentation = PadEditorLayoutPolicy.presentation(forWidth: availableSize.width, height: availableSize.height)
-        let target = PadBottomDrawerPolicy.presentation(mode: workspaceState.workspaceMode, inspectorPresentation: inspectorPresentation) == .presented
-        let shouldPresent = target && !isDrawerDismissedByUser && !isInspectorMinimized
-        if isDrawerPresented != shouldPresent {
-            isDrawerPresented = shouldPresent
-        }
-    }
-
-    /// A user-dismissed drawer stays out of the way until explicitly
-    /// reopened. Automatic layout changes still dismiss it when the editor
-    /// becomes wide enough for the trailing dock, without marking that as a
-    /// user preference.
-    private func handleDrawerDismissal() {
-        let presentation = PadEditorLayoutPolicy.presentation(
-            forWidth: availableSize.width,
-            height: availableSize.height
-        )
-        guard workspaceState.workspaceMode == .work, presentation == .bottomDrawer else { return }
-        isDrawerDismissedByUser = true
-    }
-
-    private func presentBottomDrawer() {
-        isInspectorMinimized = false
-        isDrawerDismissedByUser = false
-        isDrawerPresented = true
-    }
-
     private func minimizeInspector() {
         isInspectorMinimized = true
-        isDrawerDismissedByUser = true
-        isDrawerPresented = false
-        workspaceState.workspaceMode = .work
     }
 
     private func restoreInspector() {
         isInspectorMinimized = false
-        isDrawerDismissedByUser = false
-        updateDrawerPresentation()
+        reclampFloatingPanelOffset(for: availableSize)
     }
 
-    /// A horizontal drag on the drawer's dedicated handle hands the same
-    /// panel to Focus Mode. The offset is seeded from the drag so the panel
-    /// appears where the user moved it instead of jumping back to center.
-    private func moveDrawerToFocus(with translation: CGSize) {
-        guard abs(translation.width) >= abs(translation.height),
-              abs(translation.width) >= 48 else { return }
+    /// The toolbar action selects the Adjustments domain and restores the
+    /// one Inspector only when it is minimized. A visible compact Inspector
+    /// stays exactly where the user placed it.
+    private func presentInspectorFromToolbar() {
+        inspector.selectDomain(.adjust)
 
-        let proposedOffset = CGSize(width: translation.width, height: 0)
-        workspaceState.floatingPanelOffset = PadFloatingPanelLayout.clampedOffset(
-            proposedOffset: proposedOffset,
-            panelOrigin: Self.floatingPanelDefaultOrigin,
-            panelSize: floatingPanelMeasuredSize,
-            availableSize: availableSize,
-            minimumVisibleEdge: Self.floatingPanelMinimumVisibleEdge
-        )
-        isInspectorMinimized = false
-        isDrawerDismissedByUser = false
-        workspaceState.workspaceMode = .focus
+        if isInspectorMinimized {
+            restoreInspector()
+        }
     }
 
-    private func commitFloatingPanelDrag(with translation: CGSize) {
+    /// Commits a direct drag of the compact Inspector without entering a
+    /// second workspace mode. The offset is relative to the adaptive
+    /// bottom-centered origin, so the panel keeps its current visual place
+    /// when the available width changes.
+    private func commitMovableInspectorDrag(with translation: CGSize, in size: CGSize) {
         let proposed = CGSize(
             width: workspaceState.floatingPanelOffset.width + translation.width,
             height: workspaceState.floatingPanelOffset.height + translation.height
         )
         workspaceState.floatingPanelOffset = PadFloatingPanelLayout.clampedOffset(
             proposedOffset: proposed,
-            panelOrigin: Self.floatingPanelDefaultOrigin,
+            panelOrigin: movableInspectorOrigin(for: size),
             panelSize: floatingPanelMeasuredSize,
-            availableSize: availableSize,
+            availableSize: size,
             minimumVisibleEdge: Self.floatingPanelMinimumVisibleEdge
         )
     }
 
-    // MARK: - Work / focus toggle
+    // MARK: - Inspector presentation
 
-    private var workspaceModeToggle: some View {
-        // Switching `workspaceState.workspaceMode` is the only thing this
-        // button does directly — no `editor` call of any kind, so it can
-        // never create an undo entry, touch adjustments, or open/close
-        // anything. `updateDrawerPresentation()` (triggered by the
-        // `.onChange` below, not called here) only ever touches
-        // `isDrawerPresented`, equally inert from `editor`'s perspective.
-        Button {
-            workspaceState.workspaceMode = (workspaceState.workspaceMode == .work) ? .focus : .work
-        } label: {
-            switch workspaceState.workspaceMode {
-            case .work:
-                Label(L10n.t("Focus Mode"), systemImage: "rectangle.inset.filled")
-            case .focus:
-                Label(L10n.t("Work Mode"), systemImage: "rectangle.split.2x1")
-            }
+    /// The explicit entry point for the adjustment popup. It reuses the
+    /// single adaptive Inspector instead of introducing a second sheet or a
+    /// separate floating-panel toggle.
+    private var inspectorPresentationButton: some View {
+        Button(action: presentInspectorFromToolbar) {
+            Label(L10n.t("Adjustments"), systemImage: "slider.horizontal.3")
         }
-        // Explicit, not left to `Label`'s own inference — a toolbar can
-        // render this icon-only depending on available space, and an
-        // icon-only control must still have a real accessibility label.
-        .accessibilityLabel(Text(workspaceState.workspaceMode == .work ? L10n.t("Focus Mode") : L10n.t("Work Mode")))
+        .accessibilityLabel(Text(L10n.t("Adjustments")))
+        .accessibilityHint(Text(L10n.t("Show Inspector")))
     }
 
     private var compareMenu: some View {
@@ -538,27 +451,14 @@ struct PadEditorView: View {
 
     // MARK: - Layout selection
 
-    @ViewBuilder
     private func workspaceContent(for size: CGSize) -> some View {
-        switch workspaceState.workspaceMode {
-        case .work:
-            workLayout(for: size)
-        case .focus:
-            focusLayout(for: size)
-        }
+        workLayout(for: size)
     }
 
-    /// The bottom drawer's own presentation is handled entirely by the
-    /// `.sheet(isPresented: $isDrawerPresented)` attached once, up in
-    /// `body` — never nested inside this `switch`, so its view identity
-    /// stays stable across every presentation/mode change instead of
-    /// being torn down and rebuilt (which is what made the drawer
-    /// unreliable to close and reopen before). This only decides the
-    /// *dock* layout; `.bottomDrawer` just needs the canvas alone.
     @ViewBuilder
     private func workLayout(for size: CGSize) -> some View {
         let plan = PadEditorLayoutPolicy.plan(for: size)
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .topLeading) {
             switch plan.presentation {
             case .trailingDock:
                 HStack(spacing: 0) {
@@ -573,37 +473,26 @@ struct PadEditorView: View {
                         trailingDockPanel(width: plan.inspectorWidth ?? PadEditorLayoutPolicy.minimumInspectorWidth)
                     }
                 }
-            case .bottomDrawer:
+            case .bottomDrawer, .floating:
                 canvas(for: size)
-            case .floating:
-                // `.floating` is the focus-mode presentation and is never
-                // produced by `PadEditorLayoutPolicy` while in work mode.
-                // Treat it as canvas-only (the bottom drawer sheet, if needed,
-                // is still driven by `PadBottomDrawerPolicy` via the shared
-                // `.sheet` in `body`).
-                canvas(for: size)
+                if !isInspectorMinimized {
+                    movableInspectorPanel(for: size)
+                        .background(floatingPanelSizeReader)
+                        .offset(
+                            x: movableInspectorOrigin(for: size).x
+                                + workspaceState.floatingPanelOffset.width
+                                + floatingPanelDragTranslation.width,
+                            y: movableInspectorOrigin(for: size).y
+                                + workspaceState.floatingPanelOffset.height
+                                + floatingPanelDragTranslation.height
+                        )
+                }
             }
 
             if isInspectorMinimized {
                 inspectorRestoreTile
                     .padding(12)
-            }
-        }
-    }
-
-    private func focusLayout(for size: CGSize) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            canvas(for: size)
-            if !isInspectorMinimized {
-                floatingPanel(width: PadEditorLayoutPolicy.floatingPanelWidth(for: size))
-                    .background(floatingPanelSizeReader)
-                    .offset(
-                        x: Self.floatingPanelDefaultOrigin.x + workspaceState.floatingPanelOffset.width + floatingPanelDragTranslation.width,
-                        y: Self.floatingPanelDefaultOrigin.y + workspaceState.floatingPanelOffset.height + floatingPanelDragTranslation.height
-                    )
-            } else {
-                inspectorRestoreTile
-                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
     }
@@ -654,8 +543,7 @@ struct PadEditorView: View {
     }
 
     private func shouldShowFilmstrip(forWidth width: CGFloat) -> Bool {
-        guard workspaceState.workspaceMode == .work,
-              sceneWorkspaceState.isFilmstripVisible else { return false }
+        guard sceneWorkspaceState.isFilmstripVisible else { return false }
         return PadWorkspaceLayoutPolicy.layout(
             forWidth: width
         ).showsFilmstrip
@@ -943,55 +831,32 @@ struct PadEditorView: View {
         }
     }
 
-    // MARK: - Work mode: trailing dock
-
     private func trailingDockPanel(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    saveStatusIndicator
-                    Spacer(minLength: 8)
-                    inspectorMinimizeButton
-                }
-                undoRedoControls
-            }
-            .padding()
-            Divider()
-            PadInspectorHost(
-                inspector: inspector,
-                navigation: inspectorNavigation,
-                editor: editor,
-                presetLibrary: presetLibrary,
-                library: library,
-                batchCoordinator: batchCoordinator,
-                showsDomainBar: false
-            )
-        }
+        inspectorPanelContent(showsDomainBar: false)
         .frame(width: width)
         .background(.thickMaterial)
     }
 
-    // MARK: - Work mode: bottom drawer
-
-    private var bottomDrawerPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            inspectorPanelHeader
-            Divider()
-            PadInspectorHost(
-                inspector: inspector,
-                navigation: inspectorNavigation,
-                editor: editor,
-                presetLibrary: presetLibrary,
-                library: library,
-                batchCoordinator: batchCoordinator,
-                showsDomainBar: true
-            )
-        }
+    /// The same Inspector surface used by the compact path. Its width and
+    /// height adapt to the current GeometryReader size, while the content
+    /// hierarchy and coordinator identity remain unchanged.
+    private func movableInspectorPanel(for size: CGSize) -> some View {
+        inspectorPanelContent
+            .frame(width: PadEditorLayoutPolicy.movableInspectorWidth(for: size))
+            .frame(maxHeight: PadEditorLayoutPolicy.movableInspectorHeight(for: size))
+            .background(.thickMaterial, in: RoundedRectangle(cornerRadius: PadBottomDrawerMetrics.cornerRadius, style: .continuous))
+            .shadow(radius: 12)
     }
 
-    // MARK: - Focus mode: floating panel
+    /// The single Inspector surface used before and after a move. Position
+    /// and hosting container may change, but the header, domain bar, content,
+    /// and adjustment controls do not.
+    private var inspectorPanelContent: some View {
+        inspectorPanelContent(showsDomainBar: true)
+    }
 
-    private func floatingPanel(width: CGFloat) -> some View {
+    @ViewBuilder
+    private func inspectorPanelContent(showsDomainBar: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             inspectorPanelHeader
             Divider()
@@ -1002,13 +867,9 @@ struct PadEditorView: View {
                 presetLibrary: presetLibrary,
                 library: library,
                 batchCoordinator: batchCoordinator,
-                showsDomainBar: true
+                showsDomainBar: showsDomainBar
             )
-                .frame(maxHeight: 420)
         }
-        .frame(width: width)
-        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(radius: 12)
     }
 
     /// Measures the floating panel's actual rendered size into
@@ -1024,18 +885,22 @@ struct PadEditorView: View {
         .onPreferenceChange(FloatingPanelSizeKey.self) { size in
             guard size != .zero else { return }
             floatingPanelMeasuredSize = size
+            reclampFloatingPanelOffset(for: availableSize)
         }
     }
 
-    /// One header is shared by the bottom sheet and the floating panel so a
-    /// small detent does not introduce a second, clipped control hierarchy.
-    /// Only this handle owns the drag gesture; sliders and the rest of the
+    /// One header is shared by the trailing dock and movable overlay. Only
+    /// this handle owns the panel drag gesture; sliders and the rest of the
     /// Inspector remain free to receive their own gestures.
     private var inspectorPanelHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            inspectorPanelDragHandle
-            saveStatusIndicator
-            undoRedoControls
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                inspectorPanelDragHandle
+                saveStatusIndicator
+                undoRedoControls
+            }
+            Spacer(minLength: 0)
+            inspectorMinimizeButton
         }
         .padding()
     }
@@ -1061,28 +926,38 @@ struct PadEditorView: View {
         .gesture(
             DragGesture(minimumDistance: 8)
                 .updating($floatingPanelDragTranslation) { value, state, _ in
-                    if workspaceState.workspaceMode == .focus {
+                    if isCompactInspectorPresentation {
                         state = value.translation
                     }
                 }
                 .onEnded { value in
-                    switch workspaceState.workspaceMode {
-                    case .work:
-                        moveDrawerToFocus(with: value.translation)
-                    case .focus:
-                        commitFloatingPanelDrag(with: value.translation)
+                    guard isCompactInspectorPresentation else { return }
+                    if PadEditorLayoutPolicy.shouldDismissMovableInspector(for: value.translation) {
+                        minimizeInspector()
+                    } else {
+                        commitMovableInspectorDrag(with: value.translation, in: availableSize)
                     }
                 }
         )
     }
 
+    private var isCompactInspectorPresentation: Bool {
+        PadEditorLayoutPolicy.presentation(
+            forWidth: availableSize.width,
+            height: availableSize.height
+        ) == .bottomDrawer
+    }
+
     private var inspectorMinimizeButton: some View {
         Button(action: minimizeInspector) {
-            Image(systemName: "rectangle.compress.vertical")
+            Image(systemName: "xmark.circle.fill")
+                .imageScale(.large)
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(L10n.t("Minimize Inspector")))
+        .foregroundStyle(Color.primary)
+        .accessibilityLabel(Text(L10n.t("Hide Inspector")))
+        .accessibilityHint(Text(L10n.t("Show Inspector")))
         .help(Text(L10n.t("Minimize Inspector")))
     }
 
@@ -1101,12 +976,20 @@ struct PadEditorView: View {
     /// `availableSize` — called on every resize/rotation/Split View change,
     /// so a panel left near an edge before the area shrank doesn't end up
     /// stranded outside it.
-    private func reclampFloatingPanelOffset() {
+    private func movableInspectorOrigin(for size: CGSize) -> CGPoint {
+        PadEditorLayoutPolicy.movableInspectorOrigin(
+            for: size,
+            panelSize: floatingPanelMeasuredSize
+        )
+    }
+
+    private func reclampFloatingPanelOffset(for size: CGSize) {
+        guard size != .zero else { return }
         workspaceState.floatingPanelOffset = PadFloatingPanelLayout.clampedOffset(
             proposedOffset: workspaceState.floatingPanelOffset,
-            panelOrigin: Self.floatingPanelDefaultOrigin,
+            panelOrigin: movableInspectorOrigin(for: size),
             panelSize: floatingPanelMeasuredSize,
-            availableSize: availableSize,
+            availableSize: size,
             minimumVisibleEdge: Self.floatingPanelMinimumVisibleEdge
         )
     }
@@ -1545,7 +1428,7 @@ private struct PadInspectorHost: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                     .background(
                         isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)

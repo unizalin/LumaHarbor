@@ -148,7 +148,11 @@ public struct AdjustmentValueInput: View {
                 .background(Color.primary.opacity(0.08), in: Circle())
         }
         .buttonStyle(.plain)
+#if os(iOS)
+        .foregroundStyle(Color.white)
+#else
         .foregroundStyle(.secondary)
+#endif
         .frame(width: AdjustmentControlMetrics.nudgeHitTarget, height: AdjustmentControlMetrics.nudgeHitTarget)
         .contentShape(Rectangle())
         .accessibilityLabel(Text("\(L10n.t(accessibilityKey)) \(label)"))
