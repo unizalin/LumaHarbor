@@ -1,8 +1,16 @@
 # Current Coordination State
 
-Updated: 2026-09-15
+Updated: 2026-09-16
 
-Updated by: Codex（完成 iPad 直／橫向 Inspector rail、窄寬度分頁列、整列導航命中區與 Geometry／Histogram／Info 自適應版面；保留既有 18/16pt 階層、44pt hit target 與調整邏輯）
+Updated by: Codex（完成五份使用者提供 Lightroom XMP 的實檔驗測，修正限定式巢狀 RDF 匯出後結構漂移）
+
+## Lightroom XMP 限定式巢狀 RDF round-trip（2026-09-16, Codex）
+
+- **實際問題**：新版 Lightroom preset 內的 `rdf:parseType="Resource"` 限定式巢狀結構在匯出時被額外包進 `rdf:value`；每次匯出再匯入都會多一層，違反未知欄位語意保存契約。一般數值的正規化（例如正號或尾端零）不影響調整語意，不列為缺陷。
+- **修正**：`XMPSerializer` 直接以原屬性的限定屬性序列化 array／structure，且 `rdf:li` 共用相同路徑；不再對只有文字限定屬性的複合值加入多餘 `rdf:value`。
+- **實檔驗測**：五份使用者提供的 Lightroom XMP 均成功解析，名稱正確、無診斷警告；每份可套用 21–49 個 native／approximate 欄位，66–69 個較新 Adobe 欄位在匯出再匯入後逐項、逐結構保留，調整 patch 亦保持一致。原始 XMP 與私人路徑未加入 repository。
+- **自動驗證**：新增去識別化限定式 resource／巢狀 list 回歸測試；XMP／Preset／App workflow 聚焦測試 136/136 PASS；完整 strict-concurrency `swift test` 執行 2336、跳過 9、失敗 0；strict-concurrency build PASS；iPad generic build PASS；實體 11 吋 iPad Pro build、安裝、啟動與啟動後存活檢查 PASS。
+- **限制**：桌面自動化無法操作實體 iPad 的 Files picker，因此「在 iPad UI 手動挑選這五份 XMP 並逐張目視比較 Lightroom 畫面」仍為 `NOT RUN`；本輪證據覆蓋 production importer／exporter、preset preview／commit 與真機啟動，但不宣稱與 Lightroom 像素級一致。
 
 ## Inspector 底部／浮動外觀統一（2026-09-15, Codex）
 

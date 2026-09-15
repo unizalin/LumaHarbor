@@ -565,10 +565,19 @@ private struct XMPSerializer {
         switch inner {
         case .text(let text):
             return "<\(tag)\(attrs)>\(escapeText(text))</\(tag)>"
+        case .array(let kind, let values) where extraQualifiers.isEmpty:
+            let containerTag = "rdf:\(containerName(for: kind))"
+            let items = values.map { serializeListItem($0, prefixes: prefixes) }.joined()
+            return "<\(tag)\(attrs)><\(containerTag)>\(items)</\(containerTag)></\(tag)>"
+        case .structure(let properties) where extraQualifiers.isEmpty:
+            let fields = properties.sorted(by: Self.byID)
+                .map { serializeProperty(id: $0.0, value: $0.1, prefixes: prefixes) }
+                .joined()
+            return "<\(tag)\(attrs)><rdf:Description>\(fields)</rdf:Description></\(tag)>"
         default:
-            // A non-text qualified value (rare) -- keep the qualifiers as
-            // sibling struct fields alongside the value under `rdf:value`
-            // rather than dropping them, so nothing is lost.
+            // A complex qualified value with non-text qualifiers is rare;
+            // keep those qualifiers as sibling fields alongside rdf:value
+            // rather than dropping them.
             var fields: [(XMPPropertyID, XMPValue)] = [(XMPPropertyID(namespaceURI: XMPNamespace.rdf, localName: "value"), inner)]
             fields.append(contentsOf: extraQualifiers)
             let innerXML = fields.sorted(by: Self.byID)
@@ -588,17 +597,21 @@ private struct XMPSerializer {
             )
         case .qualified(let inner, let qualifiers):
             var attrs = ""
+            var remainingQualifiers: [(XMPPropertyID, XMPValue)] = []
             for (qid, qvalue) in qualifiers.sorted(by: Self.byID) {
                 if case .text(let qtext) = qvalue {
                     let qprefix = prefixes[qid.namespaceURI] ?? "ns"
                     attrs += " \(qprefix):\(qid.localName)=\"\(escapeAttribute(qtext))\""
+                } else {
+                    remainingQualifiers.append((qid, qvalue))
                 }
             }
-            if case .text(let text) = inner {
-                return "<rdf:li\(attrs)>\(escapeText(text))</rdf:li>"
-            }
-            return serializeProperty(
-                id: XMPPropertyID(namespaceURI: XMPNamespace.rdf, localName: "li"), value: inner, prefixes: prefixes
+            return serializeQualifiedProperty(
+                tag: "rdf:li",
+                inner: inner,
+                attrs: attrs,
+                extraQualifiers: remainingQualifiers,
+                prefixes: prefixes
             )
         }
     }

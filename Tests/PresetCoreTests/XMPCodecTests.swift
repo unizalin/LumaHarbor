@@ -64,6 +64,33 @@ final class XMPCodecTests: XCTestCase {
         )
     }
 
+    func testQualifiedResourceStructureSurvivesSemanticRoundTrip() throws {
+        let xml = """
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+                   xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/">
+            <rdf:Description rdf:about="">
+              <crs:FilterList rdf:parseType="Resource">
+                <crs:Filters>
+                  <rdf:Seq>
+                    <rdf:li rdf:parseType="Resource">
+                      <crs:FilterID>1</crs:FilterID>
+                      <crs:Title>Example</crs:Title>
+                    </rdf:li>
+                  </rdf:Seq>
+                </crs:Filters>
+              </crs:FilterList>
+            </rdf:Description>
+          </rdf:RDF>
+        </x:xmpmeta>
+        """
+        let codec = XMPCodec()
+        let original = try codec.parse(Data(xml.utf8))
+        let reparsed = try codec.parse(codec.serialize(original))
+
+        XCTAssertTrue(codec.semanticallyEquivalent(original, reparsed))
+    }
+
     func testUnknownBagPreservesUnorderedMembership() throws {
         let document = try XMPCodec().parse(try fixture("unknown-nested-rdf.xmp"))
         guard case .array(let kind, let values)? = document.property(namespaceURI: "urn:test:future", localName: "Tags") else {
