@@ -207,6 +207,7 @@
 "failed to export" = "枚の書き出しに失敗";
 "failed to revert" = "枚の復元に失敗";
 "Focus Mode" = "フォーカスモード";
+"Floating Panel" = "フローティングパネル";
 "Format" = "形式";
 "found" = "枚見つかりました";
 "Free up space on the drive, then retry." = "ドライブの空き容量を確保してから再試行してください。";
@@ -491,6 +492,7 @@
 "Your photos are still browsable." = "写真は引き続き閲覧できます。";
 "Your RAW original was not changed." = "RAWオリジナルは変更されていません。";
 "Geometry" = "ジオメトリ";
+"Info" = "情報";
 "Rotate & Flip" = "回転・反転";
 "Rotate Left" = "左に回転";
 "Rotate Right" = "右に回転";
@@ -577,6 +579,7 @@
 "Workspace" = "ワークスペース";
 "Show Sidebar" = "サイドバーを表示";
 "Show Inspector" = "インスペクタを表示";
+"Minimize Inspector" = "インスペクタを縮小";
 "Show Filmstrip" = "フィルムストリップを表示";
 "Distraction-Free Mode" = "集中モード";
 "Inspector Width" = "インスペクタの幅";
@@ -707,3 +710,12 @@
 "sRGB" = "sRGB";
 "Display P3" = "Display P3";
 "Adobe RGB" = "Adobe RGB";
+
+"Not Adjusted" = "未調整";
+"%d Adjusted" = "%d件調整済み";
+"Collapse Histogram" = "ヒストグラムを折りたたむ";
+"Expand Histogram" = "ヒストグラムを展開";
+"Expanded" = "展開";
+"Collapsed" = "折りたたみ";
+"HSL" = "HSL（色相・彩度・輝度）";
+"%@ Actions" = "%@の操作";

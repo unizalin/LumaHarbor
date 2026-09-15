@@ -207,6 +207,7 @@
 "failed to export" = "개 내보내기 실패";
 "failed to revert" = "개 되돌리기 실패";
 "Focus Mode" = "초점 모드";
+"Floating Panel" = "플로팅 패널";
 "Format" = "형식";
 "found" = "개 찾음";
 "Free up space on the drive, then retry." = "드라이브의 공간을 확보한 후 다시 시도하세요.";
@@ -491,6 +492,7 @@
 "Your photos are still browsable." = "사진은 계속 찾아볼 수 있습니다.";
 "Your RAW original was not changed." = "RAW 원본은 변경되지 않았습니다.";
 "Geometry" = "기하학적 조정";
+"Info" = "정보";
 "Rotate & Flip" = "회전 및 뒤집기";
 "Rotate Left" = "왼쪽으로 회전";
 "Rotate Right" = "오른쪽으로 회전";
@@ -577,6 +579,7 @@
 "Workspace" = "작업 공간";
 "Show Sidebar" = "사이드바 표시";
 "Show Inspector" = "인스펙터 표시";
+"Minimize Inspector" = "인스펙터 축소";
 "Show Filmstrip" = "필름스트립 표시";
 "Distraction-Free Mode" = "집중 모드";
 "Inspector Width" = "인스펙터 너비";
@@ -707,3 +710,12 @@
 "sRGB" = "sRGB";
 "Display P3" = "Display P3";
 "Adobe RGB" = "Adobe RGB";
+
+"Not Adjusted" = "조정 안 됨";
+"%d Adjusted" = "%d개 조정됨";
+"Collapse Histogram" = "히스토그램 접기";
+"Expand Histogram" = "히스토그램 펼치기";
+"Expanded" = "펼침";
+"Collapsed" = "접힘";
+"HSL" = "HSL(색조/채도/광도)";
+"%@ Actions" = "%@ 작업";

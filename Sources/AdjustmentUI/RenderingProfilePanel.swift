@@ -29,6 +29,7 @@ public struct RenderingProfilePanel: View {
                 }
             }
             .pickerStyle(.menu)
+            .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
 
             if editor.adjustments.renderingProfile.profileID != nil {
                 AdjustmentSliderRow(

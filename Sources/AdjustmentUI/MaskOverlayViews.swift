@@ -73,7 +73,9 @@ public struct RadialMaskOverlayView: View {
     @State private var dragBaseGeometry: [UUID: LocalAdjustmentGeometry] = [:]
 
     private static let handleSize: CGFloat = 12
-    private static let handleHitAreaSize: CGFloat = 28
+    /// Keep the visible handle compact while matching the iPad touch-target
+    /// contract used by crop, linear-gradient, and spot-heal overlays.
+    private static let handleHitAreaSize: CGFloat = 44
 
     public init(editor: EditorSession, imageFrame: CGRect) {
         self.editor = editor

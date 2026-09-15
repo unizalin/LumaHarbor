@@ -18,12 +18,16 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
         XCTAssertEqual(BasicAdjustmentPanelModel.formatted(0, fractionDigits: 0), "0")
     }
 
-    func testMacResetGestureAndHelpRemainPlatformGuarded() throws {
+    func testLabelSelectionDoesNotResetTheAdjustment() throws {
         let panelSource = try panelSource()
 
-        XCTAssertTrue(panelSource.contains("#if os(macOS)"))
-        XCTAssertTrue(panelSource.contains(".onTapGesture(count: 2)"))
-        XCTAssertTrue(panelSource.contains(".help(L10n.t(\"Double-click the row to reset\"))"))
+        // The reset gesture itself now lives once in the shared row
+        // (`AdjustmentGroupPanelsContractTests
+        // .testSharedSliderRowProvidesExplicitResetWithoutLabelSelectionReset`)
+        // -- this only has to confirm the panel neither reinvents a
+        // double-click reset nor drops its own reset wiring.
+        XCTAssertFalse(panelSource.contains(".onTapGesture(count: 2)"))
+        XCTAssertTrue(panelSource.contains("editor.resetAdjustment(definition.kind)"))
     }
 
     func testViewUsesCanonicalRowsWithoutGroupReordering() throws {
@@ -47,14 +51,27 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
         XCTAssertTrue(panelSource.contains("editor.endAdjustmentGesture()"))
     }
 
-    func testBasicRowsUseAnAdaptiveValueColumn() throws {
+    /// Inspector hierarchy/typography spec (2026-09-14) §5.3/§5.4: the ten
+    /// basic rows must not fall back to 80% label scaling, and must build on
+    /// the one shared adaptive row (`AdjustmentSliderRow`) rather than a
+    /// second, duplicated row layout.
+    func testBasicRowsUseTheSharedAdaptiveRowWithoutLabelScaling() throws {
         let panelSource = try panelSource()
 
-        XCTAssertTrue(panelSource.contains("Spacer(minLength: 8)"))
-        XCTAssertTrue(panelSource.contains(".lineLimit(1)"))
-        XCTAssertTrue(panelSource.contains(".minimumScaleFactor(0.8)"))
-        XCTAssertTrue(panelSource.contains(".layoutPriority(1)"))
-        XCTAssertTrue(panelSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        XCTAssertFalse(panelSource.contains(".minimumScaleFactor(0.8)"), "basic rows must not rely on 80% label scaling")
+        XCTAssertTrue(panelSource.contains("AdjustmentSliderRow("), "basic rows must build on the one shared adaptive row")
+    }
+
+    /// The preview/commit transaction (spec §5.6) must be wired at the
+    /// slider-drag call site, not just declared on `EditorSession` -- a
+    /// migrated panel passes both `onPreview` and `onCommitPreview`.
+    func testBasicSlidersWireTheContinuousEditTransaction() throws {
+        let panelSource = try panelSource()
+
+        XCTAssertTrue(panelSource.contains("onPreview:"), "the slider drag must preview through the shared transaction")
+        XCTAssertTrue(panelSource.contains("editor.previewContinuousEdit"))
+        XCTAssertTrue(panelSource.contains("onCommitPreview:"), "the slider drag must commit exactly once at gesture end")
+        XCTAssertTrue(panelSource.contains("editor.commitContinuousEdit()"))
     }
 
     private func panelSource() throws -> String {

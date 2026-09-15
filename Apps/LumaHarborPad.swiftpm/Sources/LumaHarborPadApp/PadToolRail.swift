@@ -29,10 +29,10 @@ struct PadToolRail: View {
     }
 
     private static let items: [RailItem] = [
-        RailItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjust"),
+        RailItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjustments"),
         RailItem(id: .preset,   symbol: "sparkles",            labelKey: "Presets"),
         RailItem(id: .geometry, symbol: "crop.rotate",         labelKey: "Geometry"),
-        RailItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local"),
+        RailItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local Adjustments"),
         RailItem(id: .info,     symbol: "info.circle",         labelKey: "Info"),
     ]
 
@@ -45,7 +45,6 @@ struct PadToolRail: View {
                     ForEach(Self.items) { item in railButton(item) }
                     Spacer()
                 }
-                .frame(width: 52)
             } else {
                 HStack(spacing: 0) {
                     ForEach(Self.items) { item in railButton(item) }
@@ -53,6 +52,10 @@ struct PadToolRail: View {
             }
         }
         .padding(axis == .vertical ? .vertical : .horizontal, 8)
+        // The layout policy reserves 88pt for the complete rail. Apply that
+        // width after the rail's padding so the material and hit areas stay
+        // inside the same budget instead of rendering at 104pt.
+        .frame(width: axis == .vertical ? 88 : nil)
         .background(.thickMaterial)
     }
 
@@ -63,9 +66,17 @@ struct PadToolRail: View {
         return Button {
             selection = item.id
         } label: {
-            Image(systemName: item.symbol)
-                .imageScale(.medium)
-                .frame(width: 44, height: 44)
+            VStack(spacing: 2) {
+                Image(systemName: item.symbol)
+                    .imageScale(.small)
+                Text(L10n.t(item.labelKey))
+                    .font(.caption.weight(.medium))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(minWidth: 64, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)

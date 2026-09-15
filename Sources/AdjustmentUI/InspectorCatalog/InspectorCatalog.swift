@@ -194,6 +194,13 @@ public enum InspectorCatalog {
         return copy
     }
 
+    /// Resets every catalog section represented by one visual group. macOS
+    /// combines White Balance and HSL under a single Color disclosure, so its
+    /// group action must clear both sections instead of only the primary one.
+    public static func resetting(_ ids: [InspectorSectionID], in adjustments: PhotoAdjustments) -> PhotoAdjustments {
+        ids.reduce(adjustments) { partial, id in resetting(id, in: partial) }
+    }
+
     /// Resets every section in `domain` that opts into domain-wide reset
     /// (`resetsWithDomain`), leaving other domains untouched.
     public static func resetting(domain: PadInspectorDomain, in adjustments: PhotoAdjustments) -> PhotoAdjustments {
@@ -206,6 +213,10 @@ public enum InspectorCatalog {
 
     public static func isNeutral(_ id: InspectorSectionID, in adjustments: PhotoAdjustments) -> Bool {
         resetting(id, in: adjustments) == adjustments
+    }
+
+    public static func isNeutral(_ ids: [InspectorSectionID], in adjustments: PhotoAdjustments) -> Bool {
+        resetting(ids, in: adjustments) == adjustments
     }
 
     public static func isNeutral(domain: PadInspectorDomain, in adjustments: PhotoAdjustments) -> Bool {

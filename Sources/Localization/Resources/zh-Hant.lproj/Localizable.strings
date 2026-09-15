@@ -207,6 +207,7 @@
 "failed to export" = "張匯出失敗";
 "failed to revert" = "張復原失敗";
 "Focus Mode" = "專注模式";
+"Floating Panel" = "浮動面板";
 "Format" = "格式";
 "found" = "張照片";
 "Free up space on the drive, then retry." = "騰出磁碟空間，然後重試。";
@@ -477,7 +478,7 @@
 "Unlock the drive, or copy the library somewhere writable." = "解鎖磁碟，或把相片庫複製到可寫入的位置。";
 "Unsaved" = "未儲存";
 "Update LumaHarbor, or edit this photo on the device that wrote it." = "更新 LumaHarbor，或在寫入這筆編輯的裝置上編輯這張照片。";
-"Vibrance" = "自然飽和度";
+"Vibrance" = "鮮豔度";
 "Vignette" = "暈影";
 "Virtual copy" = "虛擬副本";
 "Wait a moment, then try again." = "稍等一下，然後再試一次。";
@@ -491,6 +492,7 @@
 "Your photos are still browsable." = "你的照片仍然可以瀏覽。";
 "Your RAW original was not changed." = "你的 RAW 原始檔沒有被修改。";
 "Geometry" = "幾何調整";
+"Info" = "資訊";
 "Rotate & Flip" = "旋轉與翻轉";
 "Rotate Left" = "向左旋轉";
 "Rotate Right" = "向右旋轉";
@@ -577,6 +579,7 @@
 "Workspace" = "工作區";
 "Show Sidebar" = "顯示側邊欄";
 "Show Inspector" = "顯示檢閱器";
+"Minimize Inspector" = "縮小檢閱器";
 "Show Filmstrip" = "顯示縮圖列";
 "Distraction-Free Mode" = "無干擾模式";
 "Inspector Width" = "檢閱器寬度";
@@ -707,3 +710,12 @@
 "sRGB" = "sRGB";
 "Display P3" = "Display P3";
 "Adobe RGB" = "Adobe RGB";
+
+"Not Adjusted" = "未調整";
+"%d Adjusted" = "%d 項已調整";
+"Collapse Histogram" = "收合直方圖";
+"Expand Histogram" = "展開直方圖";
+"Expanded" = "展開";
+"Collapsed" = "收合";
+"HSL" = "HSL 色相飽和度";
+"%@ Actions" = "%@ 動作";

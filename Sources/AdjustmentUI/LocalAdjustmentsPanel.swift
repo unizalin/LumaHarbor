@@ -56,38 +56,7 @@ public struct LocalAdjustmentsPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Menu {
-                    Button(L10n.t("Linear Gradient")) { addMask(kind: .linearGradient) }
-                    Button(L10n.t("Radial Gradient")) { addMask(kind: .radialGradient) }
-                    Button(L10n.t("Brush")) { addMask(kind: .brush) }
-                    Button(L10n.t("Luminance Range")) { addMask(kind: .luminanceRange) }
-                    Button(L10n.t("Color Range")) { addMask(kind: .colorRange) }
-                    Button(L10n.t("Subject")) { addMask(kind: .subject) }
-                    Button(L10n.t("Background")) { addMask(kind: .background) }
-                } label: {
-                    Label(L10n.t("Add Mask"), systemImage: "plus")
-                }
-                .disabled(editor.photo == nil)
-
-                Spacer()
-
-                Button {
-                    if let selectedMaskToolMode,
-                       editor.toolMode == selectedMaskToolMode {
-                        editor.setToolMode(.adjust)
-                    } else if let selectedMaskToolMode {
-                        editor.setToolMode(selectedMaskToolMode)
-                    }
-                } label: {
-                    Text(editor.toolMode == selectedMaskToolMode ? L10n.t("Done") : L10n.t("Edit Masks"))
-                }
-                .disabled(
-                    editor.photo == nil
-                        || masks.isEmpty
-                        || (!selectedMaskIsLinear && selectedMaskToolMode == nil)
-                )
-            }
+            maskToolbar
 
             if masks.isEmpty {
                 Text(L10n.t("No masks yet."))
@@ -101,26 +70,7 @@ public struct LocalAdjustmentsPanel: View {
 
             Divider()
 
-            HStack {
-                Button {
-                    let newHeal = LocalAdjustment(kind: .spotHeal)
-                    editor.updateAdjustments { $0.localAdjustments.append(newHeal) }
-                    editor.selectedLocalAdjustmentID = newHeal.id
-                    editor.setToolMode(.spotHeal)
-                } label: {
-                    Label(L10n.t("Add Spot Heal"), systemImage: "bandage")
-                }
-                .disabled(editor.photo == nil)
-
-                Spacer()
-
-                Button {
-                    editor.setToolMode(editor.toolMode == .spotHeal ? .adjust : .spotHeal)
-                } label: {
-                    Text(editor.toolMode == .spotHeal ? L10n.t("Done") : L10n.t("Edit Spot Heals"))
-                }
-                .disabled(editor.photo == nil || spotHeals.isEmpty)
-            }
+            spotHealToolbar
 
             if spotHeals.isEmpty {
                 Text(L10n.t("No spot heals yet."))
@@ -139,6 +89,94 @@ public struct LocalAdjustmentsPanel: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+    }
+
+    private var maskToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                addMaskButton
+                Spacer(minLength: 8)
+                editMasksButton
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                addMaskButton
+                editMasksButton
+            }
+        }
+    }
+
+    private var addMaskButton: some View {
+        Menu {
+            Button(L10n.t("Linear Gradient")) { addMask(kind: .linearGradient) }
+            Button(L10n.t("Radial Gradient")) { addMask(kind: .radialGradient) }
+            Button(L10n.t("Brush")) { addMask(kind: .brush) }
+            Button(L10n.t("Luminance Range")) { addMask(kind: .luminanceRange) }
+            Button(L10n.t("Color Range")) { addMask(kind: .colorRange) }
+            Button(L10n.t("Subject")) { addMask(kind: .subject) }
+            Button(L10n.t("Background")) { addMask(kind: .background) }
+        } label: {
+            Label(L10n.t("Add Mask"), systemImage: "plus")
+        }
+        .disabled(editor.photo == nil)
+        .frame(minHeight: 44)
+    }
+
+    private var editMasksButton: some View {
+        Button {
+            if let selectedMaskToolMode,
+               editor.toolMode == selectedMaskToolMode {
+                editor.setToolMode(.adjust)
+            } else if let selectedMaskToolMode {
+                editor.setToolMode(selectedMaskToolMode)
+            }
+        } label: {
+            Text(editor.toolMode == selectedMaskToolMode ? L10n.t("Done") : L10n.t("Edit Masks"))
+        }
+        .disabled(
+            editor.photo == nil
+                || masks.isEmpty
+                || (!selectedMaskIsLinear && selectedMaskToolMode == nil)
+        )
+        .frame(minHeight: 44)
+    }
+
+    private var spotHealToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                addSpotHealButton
+                Spacer(minLength: 8)
+                editSpotHealsButton
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                addSpotHealButton
+                editSpotHealsButton
+            }
+        }
+    }
+
+    private var addSpotHealButton: some View {
+        Button {
+            let newHeal = LocalAdjustment(kind: .spotHeal)
+            editor.updateAdjustments { $0.localAdjustments.append(newHeal) }
+            editor.selectedLocalAdjustmentID = newHeal.id
+            editor.setToolMode(.spotHeal)
+        } label: {
+            Label(L10n.t("Add Spot Heal"), systemImage: "bandage")
+        }
+        .disabled(editor.photo == nil)
+        .frame(minHeight: 44)
+    }
+
+    private var editSpotHealsButton: some View {
+        Button {
+            editor.setToolMode(editor.toolMode == .spotHeal ? .adjust : .spotHeal)
+        } label: {
+            Text(editor.toolMode == .spotHeal ? L10n.t("Done") : L10n.t("Edit Spot Heals"))
+        }
+        .disabled(editor.photo == nil || spotHeals.isEmpty)
+        .frame(minHeight: 44)
     }
 
     private func addMask(kind: LocalAdjustmentKind) {
@@ -195,62 +233,21 @@ public struct LocalAdjustmentsPanel: View {
         }()
 
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    editor.selectedLocalAdjustmentID = mask.id
-                    if mask.kind == .linearGradient {
-                        editor.setToolMode(.linearGradient)
-                    } else if let mode = canvasToolMode(for: mask.kind) {
-                        editor.setToolMode(mode)
-                    } else if canvasToolMode(for: editor.toolMode) != nil {
-                        editor.setToolMode(.adjust)
-                    }
-                } label: {
-                    Label(
-                        mask.isEnabled ? title : "\(title) (\(L10n.t("Off")))",
-                        systemImage: symbol
-                    )
-                    .fontWeight(isSelected ? .semibold : .regular)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    maskSelectionButton(mask, title: title, symbol: symbol, isSelected: isSelected)
+                    Spacer(minLength: 8)
+                    maskActions(mask)
                 }
-                .buttonStyle(.plain)
 
-                Spacer()
-
-                Toggle(L10n.t("Enabled"), isOn: Binding(
-                    get: { mask.isEnabled },
-                    set: { newValue in
-                        editor.updateAdjustments { adjustments in
-                            if let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) {
-                                adjustments.localAdjustments[index].isEnabled = newValue
-                            }
-                        }
+                VStack(alignment: .leading, spacing: 6) {
+                    maskSelectionButton(mask, title: title, symbol: symbol, isSelected: isSelected)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Spacer(minLength: 0)
+                        maskActions(mask)
                     }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-
-                Button {
-                    editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.duplicating(mask.id) }
-                } label: {
-                    Image(systemName: "plus.square.on.square")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(L10n.t("Duplicate Mask")))
-
-                Button(role: .destructive) {
-                    editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(mask.id) }
-                    if editor.selectedLocalAdjustmentID == mask.id {
-                        editor.selectedLocalAdjustmentID = nil
-                        if canvasToolMode(for: editor.toolMode) != nil {
-                            editor.setToolMode(.adjust)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(L10n.t("Delete Mask")))
             }
 
             if isSelected {
@@ -290,7 +287,11 @@ public struct LocalAdjustmentsPanel: View {
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
                                 adjustments.localAdjustments[index].opacity = 100
                             }
-                        }
+                        },
+                        onPreview: { newValue in
+                            previewLocalAdjustment(mask.id) { $0.opacity = newValue }
+                        },
+                        onCommitPreview: { editor.commitContinuousEdit() }
                     )
 
                     AdjustmentSliderRow(
@@ -309,7 +310,11 @@ public struct LocalAdjustmentsPanel: View {
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
                                 adjustments.localAdjustments[index].adjustments.exposure = nil
                             }
-                        }
+                        },
+                        onPreview: { newValue in
+                            previewLocalAdjustment(mask.id) { $0.adjustments.exposure = newValue }
+                        },
+                        onCommitPreview: { editor.commitContinuousEdit() }
                     )
 
                     AdjustmentSliderRow(
@@ -328,7 +333,11 @@ public struct LocalAdjustmentsPanel: View {
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
                                 adjustments.localAdjustments[index].adjustments.contrast = nil
                             }
-                        }
+                        },
+                        onPreview: { newValue in
+                            previewLocalAdjustment(mask.id) { $0.adjustments.contrast = newValue }
+                        },
+                        onCommitPreview: { editor.commitContinuousEdit() }
                     )
 
                     AdjustmentSliderRow(
@@ -347,13 +356,91 @@ public struct LocalAdjustmentsPanel: View {
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) else { return }
                                 adjustments.localAdjustments[index].adjustments.saturation = nil
                             }
-                        }
+                        },
+                        onPreview: { newValue in
+                            previewLocalAdjustment(mask.id) { $0.adjustments.saturation = newValue }
+                        },
+                        onCommitPreview: { editor.commitContinuousEdit() }
                     )
                 }
             }
         }
         .padding(6)
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func maskSelectionButton(
+        _ mask: LocalAdjustment,
+        title: String,
+        symbol: String,
+        isSelected: Bool
+    ) -> some View {
+        Button {
+            editor.selectedLocalAdjustmentID = mask.id
+            if mask.kind == .linearGradient {
+                editor.setToolMode(.linearGradient)
+            } else if let mode = canvasToolMode(for: mask.kind) {
+                editor.setToolMode(mode)
+            } else if canvasToolMode(for: editor.toolMode) != nil {
+                editor.setToolMode(.adjust)
+            }
+        } label: {
+            Label(
+                mask.isEnabled ? title : "\(title) (\(L10n.t("Off")))",
+                systemImage: symbol
+            )
+            .fontWeight(isSelected ? .semibold : .regular)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .multilineTextAlignment(.leading)
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 44, alignment: .leading)
+        // Keep the complete wrapped mask label row tappable in narrow iPad
+        // drawers, not only the glyphs and text bounds.
+        .contentShape(Rectangle())
+    }
+
+    private func maskActions(_ mask: LocalAdjustment) -> some View {
+        HStack(spacing: 4) {
+            Toggle(L10n.t("Enabled"), isOn: Binding(
+                get: { mask.isEnabled },
+                set: { newValue in
+                    editor.updateAdjustments { adjustments in
+                        if let index = adjustments.localAdjustments.firstIndex(where: { $0.id == mask.id }) {
+                            adjustments.localAdjustments[index].isEnabled = newValue
+                        }
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .frame(minWidth: 44, minHeight: 44)
+
+            Button {
+                editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.duplicating(mask.id) }
+            } label: {
+                Image(systemName: "plus.square.on.square")
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(Text(L10n.t("Duplicate Mask")))
+
+            Button(role: .destructive) {
+                editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(mask.id) }
+                if editor.selectedLocalAdjustmentID == mask.id {
+                    editor.selectedLocalAdjustmentID = nil
+                    if canvasToolMode(for: editor.toolMode) != nil {
+                        editor.setToolMode(.adjust)
+                    }
+                }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(Text(L10n.t("Delete Mask")))
+        }
     }
 
     @ViewBuilder
@@ -372,7 +459,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.angleDegrees = LocalAdjustmentGeometry.neutral.angleDegrees }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.angleDegrees = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             AdjustmentSliderRow(
@@ -385,7 +476,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.range = LocalAdjustmentGeometry.neutral.range }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.range = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             featherControl(for: mask)
@@ -403,7 +498,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.radius = LocalAdjustmentGeometry.neutral.radius }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.radius = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             AdjustmentSliderRow(
@@ -416,7 +515,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.radialRadiusY = nil }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.radialRadiusY = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             featherControl(for: mask)
@@ -433,7 +536,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.radius = LocalAdjustmentGeometry.neutral.radius }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.radius = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
             featherControl(for: mask)
             if mask.geometry.brushStrokes.isEmpty {
@@ -456,7 +563,14 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.luminanceMin = nil }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { geometry in
+                        let maximum = geometry.luminanceMax ?? 1
+                        geometry.luminanceMin = Swift.min(newValue, maximum)
+                    }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             AdjustmentSliderRow(
@@ -472,7 +586,14 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.luminanceMax = nil }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { geometry in
+                        let minimum = geometry.luminanceMin ?? 0
+                        geometry.luminanceMax = Swift.max(newValue, minimum)
+                    }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
             featherControl(for: mask)
 
@@ -487,7 +608,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.colorTargetHue = nil }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.colorTargetHue = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             AdjustmentSliderRow(
@@ -500,7 +625,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.colorHueTolerance = nil }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.colorHueTolerance = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
             featherControl(for: mask)
 
@@ -526,7 +655,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.x = LocalAdjustmentGeometry.neutral.x }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.x = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
 
             AdjustmentSliderRow(
@@ -539,7 +672,11 @@ public struct LocalAdjustmentsPanel: View {
                 },
                 onReset: {
                     updateMaskGeometry(mask.id) { $0.y = LocalAdjustmentGeometry.neutral.y }
-                }
+                },
+                onPreview: { newValue in
+                    previewMaskGeometry(mask.id) { $0.y = newValue }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
             )
         }
     }
@@ -555,7 +692,11 @@ public struct LocalAdjustmentsPanel: View {
             },
             onReset: {
                 updateMaskGeometry(mask.id) { $0.feather = LocalAdjustmentGeometry.neutral.feather }
-            }
+            },
+            onPreview: { newValue in
+                previewMaskGeometry(mask.id) { $0.feather = newValue }
+            },
+            onCommitPreview: { editor.commitContinuousEdit() }
         )
     }
 
@@ -563,6 +704,20 @@ public struct LocalAdjustmentsPanel: View {
         editor.updateAdjustments { adjustments in
             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == id }) else { return }
             change(&adjustments.localAdjustments[index].geometry)
+        }
+    }
+
+    private func previewMaskGeometry(_ id: UUID, _ change: (inout LocalAdjustmentGeometry) -> Void) {
+        editor.previewContinuousEdit { adjustments in
+            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == id }) else { return }
+            change(&adjustments.localAdjustments[index].geometry)
+        }
+    }
+
+    private func previewLocalAdjustment(_ id: UUID, _ change: (inout LocalAdjustment) -> Void) {
+        editor.previewContinuousEdit { adjustments in
+            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == id }) else { return }
+            change(&adjustments.localAdjustments[index])
         }
     }
 
@@ -585,66 +740,25 @@ public struct LocalAdjustmentsPanel: View {
     private func spotHealRow(for heal: LocalAdjustment) -> some View {
         let isSelected = editor.selectedLocalAdjustmentID == heal.id
         return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Button {
-                    editor.selectedLocalAdjustmentID = heal.id
-                    editor.setToolMode(.spotHeal)
-                } label: {
-                    Label(
-                        heal.isEnabled ? (heal.geometry.healMode == .redEye ? L10n.t("Red-Eye") : L10n.t("Spot Heal")) : L10n.t("Spot Heal (Off)"),
-                        systemImage: heal.geometry.healMode == .redEye ? "eye" : "bandage"
-                    )
-                    .fontWeight(isSelected ? .semibold : .regular)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    spotHealSelectionButton(heal, isSelected: isSelected)
+                    Spacer(minLength: 8)
+                    spotHealActions(heal)
                 }
-                .buttonStyle(.plain)
 
-                Spacer()
-
-                Toggle(L10n.t("Enabled"), isOn: Binding(
-                    get: { heal.isEnabled },
-                    set: { newValue in
-                        editor.updateAdjustments { adjustments in
-                            if let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) {
-                                adjustments.localAdjustments[index].isEnabled = newValue
-                            }
-                        }
+                VStack(alignment: .leading, spacing: 6) {
+                    spotHealSelectionButton(heal, isSelected: isSelected)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Spacer(minLength: 0)
+                        spotHealActions(heal)
                     }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-
-                Button(role: .destructive) {
-                    editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(heal.id) }
-                    if editor.selectedLocalAdjustmentID == heal.id {
-                        editor.selectedLocalAdjustmentID = nil
-                        if editor.toolMode == .spotHeal {
-                            editor.setToolMode(.adjust)
-                        }
-                    }
-                } label: {
-                    Label(L10n.t("Delete Spot Heal"), systemImage: "trash")
                 }
-                .buttonStyle(.plain)
-                .labelStyle(.iconOnly)
             }
 
             if isSelected {
-                Picker(L10n.t("Mode"), selection: Binding(
-                    get: { heal.geometry.healMode },
-                    set: { newValue in
-                        editor.updateAdjustments { adjustments in
-                            guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
-                            adjustments.localAdjustments[index].geometry.healMode = newValue
-                        }
-                    }
-                )) {
-                    Text(L10n.t("Heal")).tag(SpotHealMode.heal)
-                    Text(L10n.t("Clone")).tag(SpotHealMode.clone)
-                    Text(L10n.t("Red-Eye")).tag(SpotHealMode.redEye)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                spotHealModePicker(for: heal)
 
                 // Roadmap Task 4.5: "record quality limitations honestly" --
                 // heal mode is a fixed, deterministic auto-sample (see
@@ -677,7 +791,11 @@ public struct LocalAdjustmentsPanel: View {
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
                             adjustments.localAdjustments[index].geometry.radius = LocalAdjustmentGeometry.neutral.radius
                         }
-                    }
+                    },
+                    onPreview: { newValue in
+                        previewMaskGeometry(heal.id) { $0.radius = newValue }
+                    },
+                    onCommitPreview: { editor.commitContinuousEdit() }
                 )
 
                 AdjustmentSliderRow(
@@ -696,7 +814,11 @@ public struct LocalAdjustmentsPanel: View {
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
                             adjustments.localAdjustments[index].geometry.feather = LocalAdjustmentGeometry.neutral.feather
                         }
-                    }
+                    },
+                    onPreview: { newValue in
+                        previewMaskGeometry(heal.id) { $0.feather = newValue }
+                    },
+                    onCommitPreview: { editor.commitContinuousEdit() }
                 )
 
                 if heal.geometry.healMode == .redEye {
@@ -716,12 +838,111 @@ public struct LocalAdjustmentsPanel: View {
                                 guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
                                 adjustments.localAdjustments[index].geometry.redEyePupilRadius = nil
                             }
-                        }
+                        },
+                        onPreview: { newValue in
+                            previewMaskGeometry(heal.id) { $0.redEyePupilRadius = newValue }
+                        },
+                        onCommitPreview: { editor.commitContinuousEdit() }
                     )
                 }
             }
         }
         .padding(6)
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func spotHealModePicker(for heal: LocalAdjustment) -> some View {
+        ViewThatFits(in: .horizontal) {
+            spotHealModeSegmentedPicker(for: heal)
+            spotHealModeMenu(for: heal)
+        }
+        .labelsHidden()
+        .accessibilityLabel(Text(L10n.t("Mode")))
+    }
+
+    private func spotHealModeSegmentedPicker(for heal: LocalAdjustment) -> some View {
+        Picker(L10n.t("Mode"), selection: spotHealModeBinding(for: heal)) {
+            Text(L10n.t("Heal")).tag(SpotHealMode.heal)
+            Text(L10n.t("Clone")).tag(SpotHealMode.clone)
+            Text(L10n.t("Red-Eye")).tag(SpotHealMode.redEye)
+        }
+        .pickerStyle(.segmented)
+        .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)
+    }
+
+    private func spotHealModeMenu(for heal: LocalAdjustment) -> some View {
+        Picker(L10n.t("Mode"), selection: spotHealModeBinding(for: heal)) {
+            Text(L10n.t("Heal")).tag(SpotHealMode.heal)
+            Text(L10n.t("Clone")).tag(SpotHealMode.clone)
+            Text(L10n.t("Red-Eye")).tag(SpotHealMode.redEye)
+        }
+        .pickerStyle(.menu)
+        .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
+    }
+
+    private func spotHealModeBinding(for heal: LocalAdjustment) -> Binding<SpotHealMode> {
+        Binding(
+            get: { heal.geometry.healMode },
+            set: { newValue in
+                editor.updateAdjustments { adjustments in
+                    guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }
+                    adjustments.localAdjustments[index].geometry.healMode = newValue
+                }
+            }
+        )
+    }
+
+    private func spotHealSelectionButton(_ heal: LocalAdjustment, isSelected: Bool) -> some View {
+        Button {
+            editor.selectedLocalAdjustmentID = heal.id
+            editor.setToolMode(.spotHeal)
+        } label: {
+            Label(
+                heal.isEnabled ? (heal.geometry.healMode == .redEye ? L10n.t("Red-Eye") : L10n.t("Spot Heal")) : L10n.t("Spot Heal (Off)"),
+                systemImage: heal.geometry.healMode == .redEye ? "eye" : "bandage"
+            )
+            .fontWeight(isSelected ? .semibold : .regular)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .multilineTextAlignment(.leading)
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 44, alignment: .leading)
+        // Match mask selection: the full wrapped Spot Heal row is a stable
+        // touch target when the inspector switches to stacked layout.
+        .contentShape(Rectangle())
+    }
+
+    private func spotHealActions(_ heal: LocalAdjustment) -> some View {
+        HStack(spacing: 4) {
+            Toggle(L10n.t("Enabled"), isOn: Binding(
+                get: { heal.isEnabled },
+                set: { newValue in
+                    editor.updateAdjustments { adjustments in
+                        if let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) {
+                            adjustments.localAdjustments[index].isEnabled = newValue
+                        }
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .frame(minWidth: 44, minHeight: 44)
+
+            Button(role: .destructive) {
+                editor.updateAdjustments { $0.localAdjustments = $0.localAdjustments.removing(heal.id) }
+                if editor.selectedLocalAdjustmentID == heal.id {
+                    editor.selectedLocalAdjustmentID = nil
+                    if editor.toolMode == .spotHeal {
+                        editor.setToolMode(.adjust)
+                    }
+                }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(Text(L10n.t("Delete Spot Heal")))
+        }
     }
 }

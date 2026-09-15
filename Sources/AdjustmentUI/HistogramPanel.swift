@@ -19,9 +19,16 @@ public enum HistogramDisplayMode: String, CaseIterable, Identifiable, Sendable {
 /// Small, reusable histogram presentation for both the Mac inspector and the
 /// iPad Info domain. The data still comes from the rendered preview, while the
 /// mode switch and clipping readout make the graph useful during exposure work.
+///
+/// Collapsing/expanding is purely local `@State` (inspector hierarchy/
+/// preview spec §5.5): `histogram` itself only ever changes because the
+/// caller passed a new value from a delivered preview frame, so toggling
+/// `isCollapsed` can never submit a preview or recompute a histogram --
+/// there is nothing in this type that could do either.
 public struct HistogramPanel: View {
     let histogram: HistogramData?
     @State private var mode: HistogramDisplayMode = .rgb
+    @State private var isCollapsed = false
 
     public init(histogram: HistogramData?) {
         self.histogram = histogram
@@ -29,20 +36,12 @@ public struct HistogramPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(L10n.t("Histogram"), systemImage: "chart.bar.xaxis")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Picker(L10n.t("Histogram"), selection: $mode) {
-                    ForEach(HistogramDisplayMode.allCases) { item in
-                        Text(L10n.t(item.localizationKey)).tag(item)
-                    }
+            header
+            if isCollapsed {
+                if let histogram {
+                    clippingSummary(histogram)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 190)
-            }
-
-            if let histogram {
+            } else if let histogram {
                 Canvas { context, size in
                     draw(histogram, mode: mode, in: &context, size: size)
                 }
@@ -52,20 +51,7 @@ public struct HistogramPanel: View {
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityLabel(Text(L10n.t("Histogram")))
 
-                let clipping = HistogramPresentationMetrics.clippingCounts(histogram)
-                if clipping.shadows > 0 || clipping.highlights > 0 {
-                    HStack(spacing: 12) {
-                        if clipping.shadows > 0 {
-                            Label("\(L10n.t("Shadows clipped")) \(clipping.shadows)", systemImage: "triangle.fill")
-                                .foregroundStyle(.blue)
-                        }
-                        if clipping.highlights > 0 {
-                            Label("\(L10n.t("Highlights clipped")) \(clipping.highlights)", systemImage: "triangle.fill")
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .font(.caption2)
-                }
+                clippingSummary(histogram)
             } else {
                 Text(L10n.t("No histogram available yet"))
                     .font(.caption)
@@ -73,6 +59,81 @@ public struct HistogramPanel: View {
                     .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
                     .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
             }
+        }
+    }
+
+    private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                headerButton
+                Spacer(minLength: 8)
+                modePicker
+                    .frame(maxWidth: 190)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                headerButton
+                modePicker
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var headerButton: some View {
+        Button {
+            isCollapsed.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    .foregroundStyle(.secondary)
+                Label(L10n.t("Histogram"), systemImage: "chart.bar.xaxis")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(isCollapsed ? L10n.t("Expand Histogram") : L10n.t("Collapse Histogram")))
+        .help(isCollapsed ? L10n.t("Expand Histogram") : L10n.t("Collapse Histogram"))
+        .frame(minHeight: 44)
+    }
+
+    private var modePicker: some View {
+        Picker(L10n.t("Histogram"), selection: $mode) {
+            ForEach(HistogramDisplayMode.allCases) { item in
+                Text(L10n.t(item.localizationKey)).tag(item)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)
+    }
+
+    @ViewBuilder
+    private func clippingSummary(_ histogram: HistogramData) -> some View {
+        let clipping = HistogramPresentationMetrics.clippingCounts(histogram)
+        if clipping.shadows > 0 || clipping.highlights > 0 {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    clippingLabel(shadows: clipping.shadows, highlights: clipping.highlights)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    clippingLabel(shadows: clipping.shadows, highlights: clipping.highlights)
+                }
+            }
+            .font(.caption2)
+        }
+    }
+
+    @ViewBuilder
+    private func clippingLabel(shadows: Int, highlights: Int) -> some View {
+        if shadows > 0 {
+            Label("\(L10n.t("Shadows clipped")) \(shadows)", systemImage: "triangle.fill")
+                .foregroundStyle(.blue)
+        }
+        if highlights > 0 {
+            Label("\(L10n.t("Highlights clipped")) \(highlights)", systemImage: "triangle.fill")
+                .foregroundStyle(.orange)
         }
     }
 

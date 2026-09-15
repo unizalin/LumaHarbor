@@ -220,6 +220,8 @@ struct PadLibrarySidebar: View {
             library.select(selection)
         } label: {
             Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .listRowBackground(library.selection == selection ? Color.accentColor.opacity(0.15) : Color.clear)
@@ -230,19 +232,41 @@ struct PadLibrarySidebar: View {
         return Button {
             library.select(selection)
         } label: {
-            HStack {
-                Label(source.displayName, systemImage: sourceIcon(for: source))
-                Spacer()
-                if let message = statusMessage(for: source) {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    sourceNameLabel(source)
+                    Spacer(minLength: 8)
+                    sourceStatusLabel(source)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    sourceNameLabel(source)
+                    sourceStatusLabel(source)
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .listRowBackground(library.selection == selection ? Color.accentColor.opacity(0.15) : Color.clear)
         .accessibilityLabel(Text(accessibilityLabel(for: source)))
+    }
+
+    private func sourceNameLabel(_ source: LibraryFolder) -> some View {
+        Label(source.displayName, systemImage: sourceIcon(for: source))
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+    }
+
+    @ViewBuilder
+    private func sourceStatusLabel(_ source: LibraryFolder) -> some View {
+        if let message = statusMessage(for: source) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
     }
 
     private func sourceIcon(for source: LibraryFolder) -> String {

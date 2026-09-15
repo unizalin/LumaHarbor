@@ -39,4 +39,19 @@ final class AdjustmentValueInputTests: XCTestCase {
             -0.1
         )
     }
+
+    func testSnappedSliderValueUsesStepWithoutNativeTickMarks() {
+        XCTAssertEqual(
+            PadAdjustmentPolicy.snapped(0.14, step: 0.1, range: -5...5, fractionDigits: 1),
+            0.1
+        )
+        XCTAssertEqual(
+            PadAdjustmentPolicy.snapped(0.16, step: 0.1, range: -5...5, fractionDigits: 1),
+            0.2
+        )
+        XCTAssertEqual(
+            PadAdjustmentPolicy.snapped(9, step: 0.1, range: -5...5, fractionDigits: 1),
+            5
+        )
+    }
 }

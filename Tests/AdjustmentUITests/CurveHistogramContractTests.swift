@@ -27,6 +27,16 @@ final class CurveHistogramContractTests: XCTestCase {
         XCTAssertTrue(source.contains("Button(L10n.t(\"Reset All\")"))
     }
 
+    func testCurveChannelPickerFallsBackToAMenuInNarrowColumns() throws {
+        let source = try source("Sources/AdjustmentUI/CurveAdjustmentPanel.swift")
+
+        XCTAssertTrue(source.contains("ViewThatFits(in: .horizontal)"))
+        XCTAssertTrue(source.contains(".pickerStyle(.segmented)"))
+        XCTAssertTrue(source.contains(".pickerStyle(.menu)"))
+        XCTAssertTrue(source.contains(".frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)"))
+        XCTAssertTrue(source.contains(".frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)"))
+    }
+
     func testPadInfoDomainUsesTheSharedHistogramInsteadOfAPlaceholder() throws {
         let host = try source("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadInspectorHost.swift")
         let inlinedHost = try source("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
@@ -34,5 +44,14 @@ final class CurveHistogramContractTests: XCTestCase {
         XCTAssertTrue(host.contains("HistogramPanel(histogram: editor.histogram)"))
         XCTAssertFalse(host.contains("EXIF metadata and histogram are not yet wired."))
         XCTAssertTrue(inlinedHost.contains("HistogramPanel(histogram: histogram)"))
+    }
+
+    func testHistogramModePickerUsesPlatformTouchMetrics() throws {
+        let source = try source("Sources/AdjustmentUI/HistogramPanel.swift")
+
+        XCTAssertTrue(
+            source.contains(".frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)"),
+            "histogram mode switching must use 44pt on iPad while retaining the Mac metric"
+        )
     }
 }

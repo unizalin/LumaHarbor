@@ -133,6 +133,32 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
     }
 
+    /// Multi-select actions must remain usable in a narrow Split View pane.
+    /// The inline summary/actions row is preferred at normal widths, while a
+    /// stacked fallback gives the action labels their own line instead of
+    /// squeezing or clipping the selected-count label.
+    func testSelectionBarUsesAnAdaptiveNarrowWidthFallback() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(
+            source.contains("ViewThatFits(in: .horizontal)"),
+            "the selection bar must switch composition when a narrow pane cannot fit one row"
+        )
+        XCTAssertTrue(
+            source.contains("private var selectionSummary"),
+            "the selected-count label must be kept separate from the action buttons"
+        )
+        XCTAssertTrue(
+            source.contains("private var selectionActions"),
+            "the batch actions must be reusable in both inline and stacked compositions"
+        )
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".frame(minWidth: 44, minHeight: 44)").count - 1,
+            5,
+            "selection actions and toolbar controls must retain 44pt hit targets"
+        )
+    }
+
     /// Step 3's fixed-sort UI concern: while `.recentlyEdited` is selected,
     /// the sort control must not offer a choice that has no effect (the
     /// SQL layer always overrides sort for that scope -- see
@@ -506,6 +532,42 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(
             source.contains("manifest"),
             "the remove confirmation must also mention the source's .lumaharbor manifest is untouched"
+        )
+    }
+
+    /// Long external-drive names and connection-state labels must not compete
+    /// for one fixed line in the persistent sidebar. The row keeps a compact
+    /// inline form when it fits and stacks the status below the name in a
+    /// narrow pane.
+    func testSourceRowsUseAnAdaptiveNarrowWidthFallback() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertTrue(
+            source.contains("ViewThatFits(in: .horizontal)"),
+            "source rows must switch composition when the sidebar is narrow"
+        )
+        XCTAssertTrue(
+            source.contains("private func sourceNameLabel") && source.contains("private func sourceStatusLabel"),
+            "source name and status must be independently reusable in both row compositions"
+        )
+        XCTAssertTrue(
+            source.contains(".lineLimit(2)") && source.contains(".lineLimit(1)"),
+            "the narrow fallback must wrap the source name while keeping status legible"
+        )
+    }
+
+    func testSidebarRowsKeepStableTouchHeight() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)").count - 1,
+            2,
+            "smart scopes and source rows must keep a stable 44pt full-row touch target"
+        )
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".contentShape(Rectangle())").count - 1,
+            2,
+            "smart scopes and source rows must make the full row tappable"
         )
     }
 

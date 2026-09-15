@@ -465,15 +465,38 @@ struct PadLibraryGrid: View {
     }
 
     private var selectionBar: some View {
-        HStack(spacing: 12) {
-            Label(
-                "\(library.selectedPhotoIDs.count) \(L10n.t("selected"))",
-                systemImage: "checkmark.circle.fill"
-            )
-            .lineLimit(1)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                selectionSummary
+                Spacer(minLength: 8)
+                selectionActions
+            }
 
-            Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 4) {
+                selectionSummary
+                HStack {
+                    Spacer(minLength: 0)
+                    selectionActions
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+    }
 
+    private var selectionSummary: some View {
+        Label(
+            "\(library.selectedPhotoIDs.count) \(L10n.t("selected"))",
+            systemImage: "checkmark.circle.fill"
+        )
+        .lineLimit(1)
+    }
+
+    private var selectionActions: some View {
+        HStack(spacing: 4) {
             Button(L10n.t("Select All")) {
                 library.selectAllVisiblePhotos()
             }
@@ -485,56 +508,56 @@ struct PadLibraryGrid: View {
             }
             .frame(minWidth: 44, minHeight: 44)
 
+            batchActionsMenu
+        }
+    }
+
+    private var batchActionsMenu: some View {
+        Menu {
             Menu {
-                Menu {
-                    ForEach(0...5, id: \.self) { rating in
-                        Button {
-                            applyRatingToSelected(rating)
-                        } label: {
-                            Label(
-                                rating == 0 ? L10n.t("None") : "\(rating)",
-                                systemImage: rating == 0 ? "xmark.circle" : "star.fill"
-                            )
-                        }
+                ForEach(0...5, id: \.self) { rating in
+                    Button {
+                        applyRatingToSelected(rating)
+                    } label: {
+                        Label(
+                            rating == 0 ? L10n.t("None") : "\(rating)",
+                            systemImage: rating == 0 ? "xmark.circle" : "star.fill"
+                        )
                     }
-                } label: {
-                    Label(L10n.t("Rating"), systemImage: "star")
-                }
-
-                Menu {
-                    ForEach(PhotoFlag.allCases, id: \.self) { flag in
-                        Button {
-                            applyFlagToSelected(flag)
-                        } label: {
-                            Label(flagTitle(flag), systemImage: flagSymbol(flag))
-                        }
-                    }
-                } label: {
-                    Label(L10n.t("Flag"), systemImage: "flag")
-                }
-
-                Button {
-                    isShowingBatchKeywords = true
-                } label: {
-                    Label(L10n.t("Keywords"), systemImage: "tag")
-                }
-
-                Divider()
-                Button {
-                    createVirtualCopies()
-                } label: {
-                    Label(L10n.t("Create virtual copies"), systemImage: "plus.square.on.square")
                 }
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .frame(width: 44, height: 44)
+                Label(L10n.t("Rating"), systemImage: "star")
             }
-            .accessibilityLabel(Text(L10n.t("Batch actions")))
+
+            Menu {
+                ForEach(PhotoFlag.allCases, id: \.self) { flag in
+                    Button {
+                        applyFlagToSelected(flag)
+                    } label: {
+                        Label(flagTitle(flag), systemImage: flagSymbol(flag))
+                    }
+                }
+            } label: {
+                Label(L10n.t("Flag"), systemImage: "flag")
+            }
+
+            Button {
+                isShowingBatchKeywords = true
+            } label: {
+                Label(L10n.t("Keywords"), systemImage: "tag")
+            }
+
+            Divider()
+            Button {
+                createVirtualCopies()
+            } label: {
+                Label(L10n.t("Create virtual copies"), systemImage: "plus.square.on.square")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .frame(width: 44, height: 44)
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 56)
-        .background(.bar)
-        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(L10n.t("Batch actions")))
     }
 
     private func createVirtualCopies() {

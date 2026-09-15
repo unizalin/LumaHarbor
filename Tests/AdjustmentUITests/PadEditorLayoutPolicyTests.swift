@@ -28,6 +28,44 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 820, height: 1180), .bottomDrawer)
     }
 
+    func testBottomDrawerUsesAReadableMaterialSurfaceAndScrollableDetents() throws {
+        let source = try Self.padEditorViewSource()
+        XCTAssertTrue(source.contains(".presentationDetents([.height(PadBottomDrawerMetrics.peekHeight), .medium, .large])"))
+        XCTAssertTrue(source.contains(".presentationCornerRadius(PadBottomDrawerMetrics.cornerRadius)"))
+        XCTAssertTrue(source.contains(".presentationBackground(.thickMaterial)"))
+        XCTAssertTrue(source.contains(".presentationContentInteraction(.scrolls)"))
+    }
+
+    func testBottomDrawerOffersDismissAndMoveToFocusActions() throws {
+        let source = try Self.padEditorViewSource()
+        XCTAssertTrue(source.contains("isDrawerDismissedByUser"))
+        XCTAssertTrue(source.contains("dismissBottomDrawer()"))
+        XCTAssertTrue(source.contains("moveDrawerToFocus(with:"))
+        XCTAssertTrue(source.contains("bottomDrawerDragHandle"), "the drawer should float through its existing drag handle")
+        XCTAssertTrue(source.contains("DragGesture(minimumDistance: 8)"))
+        XCTAssertTrue(source.contains(#"L10n.t("Drag to move this panel.")"#), "the drawer must expose the drag affordance in visible or accessibility text")
+        XCTAssertFalse(source.contains(#"L10n.t("Floating Panel")"#), "floating should not require a separate mode button")
+        XCTAssertFalse(source.contains(".simultaneousGesture("), "floating should be a direct drag, not a button plus gesture")
+        XCTAssertTrue(source.contains("workspaceState.workspaceMode = .focus"))
+        XCTAssertFalse(source.contains(".interactiveDismissDisabled(true)"))
+    }
+
+    func testInspectorHasOneMinimizableSurfaceWithAVisibleRestoreTile() throws {
+        let source = try Self.padEditorViewSource()
+
+        XCTAssertTrue(source.contains("isInspectorMinimized"))
+        XCTAssertTrue(source.contains("minimizeInspector()"))
+        XCTAssertTrue(source.contains("restoreInspector()"))
+        XCTAssertTrue(source.contains("inspectorRestoreTile"))
+        XCTAssertTrue(source.contains(#"L10n.t("Minimize Inspector")"#))
+        XCTAssertTrue(source.contains(#"L10n.t("Show Inspector")"#))
+        XCTAssertTrue(
+            source.contains(".frame(minWidth: 44, minHeight: 44)"),
+            "the minimized Inspector entry must remain a reachable 44pt control"
+        )
+        XCTAssertFalse(source.contains("inspectorVisibilityToggle"), "minimize should live on the panel; do not add a second toolbar switch")
+    }
+
     // MARK: - Adaptive workspace width profiles
 
     func testWidthProfilesUseAvailableWidthNotDeviceOrientation() {
@@ -109,7 +147,11 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         let plan = PadEditorLayoutPolicy.plan(for: CGSize(width: 1_100, height: 700))
 
         XCTAssertEqual(plan.presentation, .trailingDock)
-        XCTAssertEqual(plan.inspectorWidth ?? .nan, 406, accuracy: 0.01)
+        let expectedInspectorWidth = 1_100
+            - PadEditorLayoutPolicy.toolRailWidth
+            - PadEditorLayoutPolicy.layoutSeparators
+            - PadEditorLayoutPolicy.minimumCanvasWidth
+        XCTAssertEqual(plan.inspectorWidth ?? .nan, expectedInspectorWidth, accuracy: 0.01)
         XCTAssertGreaterThanOrEqual(plan.inspectorWidth ?? 0, PadEditorLayoutPolicy.minimumInspectorWidth)
         XCTAssertEqual(
             (plan.inspectorWidth ?? 0) + PadEditorLayoutPolicy.toolRailWidth + PadEditorLayoutPolicy.minimumCanvasWidth + PadEditorLayoutPolicy.layoutSeparators,
@@ -317,6 +359,21 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(whileFocused, .dismissed)
         let afterReturningToWork = PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .bottomDrawer)
         XCTAssertEqual(afterReturningToWork, .presented)
+    }
+
+    private static let repositoryRootURL: URL = {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // PadEditorLayoutPolicyTests.swift
+            .deletingLastPathComponent() // AdjustmentUITests
+            .deletingLastPathComponent() // Tests
+    }()
+
+    private static func padEditorViewSource() throws -> String {
+        try String(
+            contentsOf: repositoryRootURL
+                .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"),
+            encoding: .utf8
+        )
     }
 
     // MARK: - PadFloatingPanelLayout.clampedOffset (Codex round-2 review)

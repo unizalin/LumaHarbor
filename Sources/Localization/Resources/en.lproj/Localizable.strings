@@ -207,6 +207,7 @@
 "failed to export" = "failed to export";
 "failed to revert" = "failed to revert";
 "Focus Mode" = "Focus Mode";
+"Floating Panel" = "Floating Panel";
 "Format" = "Format";
 "found" = "found";
 "Free up space on the drive, then retry." = "Free up space on the drive, then retry.";
@@ -491,6 +492,7 @@
 "Your photos are still browsable." = "Your photos are still browsable.";
 "Your RAW original was not changed." = "Your RAW original was not changed.";
 "Geometry" = "Geometry";
+"Info" = "Info";
 "Rotate & Flip" = "Rotate & Flip";
 "Rotate Left" = "Rotate Left";
 "Rotate Right" = "Rotate Right";
@@ -577,6 +579,7 @@
 "Workspace" = "Workspace";
 "Show Sidebar" = "Show Sidebar";
 "Show Inspector" = "Show Inspector";
+"Minimize Inspector" = "Minimize Inspector";
 "Show Filmstrip" = "Show Filmstrip";
 "Distraction-Free Mode" = "Distraction-Free Mode";
 "Inspector Width" = "Inspector Width";
@@ -707,3 +710,12 @@
 "sRGB" = "sRGB";
 "Display P3" = "Display P3";
 "Adobe RGB" = "Adobe RGB";
+
+"Not Adjusted" = "Not Adjusted";
+"%d Adjusted" = "%d Adjusted";
+"Collapse Histogram" = "Collapse Histogram";
+"Expand Histogram" = "Expand Histogram";
+"Expanded" = "Expanded";
+"Collapsed" = "Collapsed";
+"HSL" = "HSL";
+"%@ Actions" = "%@ Actions";

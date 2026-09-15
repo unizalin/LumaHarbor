@@ -45,4 +45,25 @@ public enum PadAdjustmentPolicy {
         // Avoid exposing a signed zero after a decrement crosses zero.
         return clamp(rounded == 0 ? 0 : rounded, to: range)
     }
+
+    /// Snaps a slider value to the same increments used by the numeric field.
+    /// This keeps discrete editing without asking the macOS native Slider to
+    /// render thousands of tick marks below its track.
+    public static func snapped(
+        _ value: Double,
+        step: Double,
+        range: ClosedRange<Double>,
+        fractionDigits: Int
+    ) -> Double {
+        guard value.isFinite, step.isFinite, step > 0 else {
+            return clamp(value, to: range)
+        }
+
+        let origin = range.lowerBound
+        let tick = ((value - origin) / step).rounded()
+        let candidate = origin + tick * step
+        let scale = pow(10.0, Double(max(0, fractionDigits)))
+        let rounded = (candidate * scale).rounded() / scale
+        return clamp(rounded == 0 ? 0 : rounded, to: range)
+    }
 }

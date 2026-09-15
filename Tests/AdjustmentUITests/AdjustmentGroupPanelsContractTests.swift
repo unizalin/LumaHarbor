@@ -29,17 +29,14 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         )
     }
 
-    /// The shared slider row every sub-struct panel uses: it must reproduce
-    /// `BasicAdjustmentPanel`'s macOS double-click-to-reset gesture, a
-    /// context-menu reset item, and route every edit through
+    /// The shared slider row every sub-struct panel uses: it must provide an
+    /// explicit context-menu reset item and route every edit through
     /// `EditorSession.updateAdjustments(_:)` -- not `setAdjustment(_:to:)`,
-    /// which has no case for these fields.
-    func testSharedSliderRowReproducesTheBasicPanelsResetGesture() throws {
+    /// which has no case for these fields. Selecting a label must not reset it.
+    func testSharedSliderRowProvidesExplicitResetWithoutLabelSelectionReset() throws {
         let source = try Self.loadSource("AdjustmentSliderRow.swift")
 
-        XCTAssertTrue(source.contains("#if os(macOS)"))
-        XCTAssertTrue(source.contains(".onTapGesture(count: 2)"))
-        XCTAssertTrue(source.contains("L10n.t(\"Double-click the row to reset\")"))
+        XCTAssertFalse(source.contains(".onTapGesture(count: 2)"))
         XCTAssertTrue(source.contains("contextMenu"))
         XCTAssertTrue(source.contains("L10n.t(\"Reset\")"))
     }
@@ -53,15 +50,37 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         let source = try Self.loadSource("AdjustmentSliderRow.swift")
 
         XCTAssertTrue(source.contains("onEditingChanged: (Bool) -> Void"), "the row must accept a drag start/end callback")
-        XCTAssertTrue(source.contains("onEditingChanged: onEditingChanged"), "it must actually be wired into the underlying Slider, not just declared")
+        XCTAssertTrue(source.contains("onEditingChanged: { isEditing in"), "it must actually be wired into the underlying Slider, not just declared")
+        XCTAssertTrue(source.contains("onEditingChanged(isEditing)"), "the caller's begin/end hook must still fire")
     }
 
-    func testColorPanelCoversAllEightHSLBandsWithHueSaturationAndLuminanceRows() throws {
-        let source = try Self.loadSource("ColorAdjustmentPanel.swift")
+    /// Inspector hierarchy/typography/preview spec (2026-09-14) §5.4/§5.6:
+    /// the one shared row must not rely on 80% label scaling, must switch
+    /// composition at the shared 340pt threshold, and must expose the
+    /// preview/commit transaction hooks every continuous control migrates to.
+    func testSharedSliderRowIsAdaptiveAndSupportsTheContinuousEditTransaction() throws {
+        let source = try Self.loadSource("AdjustmentSliderRow.swift")
 
-        for band in ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"] {
-            XCTAssertTrue(source.contains("\"\(band)\""), "the Color panel must label the \(band) HSL band")
+        XCTAssertFalse(source.contains(".minimumScaleFactor(0.8)"), "the shared row must not rely on 80% label scaling")
+        XCTAssertTrue(source.contains("AdaptiveRowContainer"), "the shared row must switch composition at the shared width threshold")
+        XCTAssertTrue(source.contains("onPreview"), "the shared row must accept a continuous-drag preview write")
+        XCTAssertTrue(source.contains("onCommitPreview"), "the shared row must accept a one-shot commit at gesture end")
+    }
+
+    /// Inspector hierarchy/typography spec (2026-09-14) §5.2: the eight HSL
+    /// bands now come from the shared `HSLBandID`/`HSLBandSelectorModel`
+    /// adaptive selector, not per-band literal labels inside
+    /// `ColorAdjustmentPanel.swift` itself -- so the band-name coverage
+    /// check moves to `HSLBandSelectorModel.swift`, while the panel itself
+    /// is checked for the Hue/Saturation/Luminance field rows, the adaptive
+    /// selector, and the no-nested-disclosure contract.
+    func testColorPanelCoversAllEightHSLBandsWithHueSaturationAndLuminanceRows() throws {
+        let bandModelSource = try Self.loadSource("HSLBandSelectorModel.swift")
+        for band in ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"] {
+            XCTAssertTrue(bandModelSource.contains(band), "the shared band model must declare the \(band) HSL band")
         }
+
+        let source = try Self.loadSource("ColorAdjustmentPanel.swift")
         for field in ["Hue", "Saturation", "Luminance"] {
             XCTAssertTrue(source.contains("\"\(field)\""), "the Color panel must label the \(field) row")
         }
@@ -71,6 +90,27 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(
             source.contains("AdjustmentSliderRow("),
             "the Color panel must build its hue/saturation/luminance rows from the shared AdjustmentSliderRow, not one-off Sliders"
+        )
+        XCTAssertTrue(
+            source.contains("HSLBandGridSelector("),
+            "the Color panel must present bands through the shared adaptive grid selector, not per-band disclosure groups"
+        )
+        XCTAssertFalse(
+            source.contains("DisclosureGroup(L10n.t(band"),
+            "the Color panel must not reintroduce one nested DisclosureGroup per HSL band"
+        )
+    }
+
+    func testColorPanelUsesARealSecondLevelSectionAndCumulativeThirdLevelInset() throws {
+        let source = try Self.loadSource("ColorAdjustmentPanel.swift")
+
+        XCTAssertTrue(
+            source.contains("Level2DisclosureGroup(L10n.t(\"HSL\"), initiallyExpanded: true)"),
+            "HSL must be a visibly distinct Level 2 disclosure under the Level 1 Color group"
+        )
+        XCTAssertTrue(
+            source.contains("Level2Section(L10n.t(\"Black & White\")"),
+            "Black & White must use the same Level 2 hierarchy rather than align with Level 3 controls"
         )
     }
 
@@ -82,6 +122,13 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(source.contains(".sharpening"))
         XCTAssertTrue(source.contains(".noiseReduction"))
         XCTAssertTrue(source.contains("editor.updateAdjustments"))
+
+        let disclosureCount = source.components(separatedBy: "Level2DisclosureGroup(").count - 1
+        XCTAssertEqual(
+            disclosureCount,
+            2,
+            "Detail may disclose Sharpening and Noise Reduction, but Luminance and Color must be Level 3 headings rather than nested Level 2 disclosures"
+        )
     }
 
     func testEffectsPanelCoversVignetteAndGrain() throws {
@@ -137,6 +184,10 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(source.contains("L10n.t(\"Aspect Ratio\")"))
         XCTAssertTrue(source.contains("CropAspectRatio.freeform"))
         XCTAssertTrue(source.contains("CropAspectRatio.square"))
+        XCTAssertTrue(
+            source.contains("GridItem(.adaptive(minimum: 96)") && source.contains(".frame(maxWidth: .infinity, minHeight: 44)"),
+            "rotate and flip controls must reflow into readable, tappable cells on narrow iPad inspectors"
+        )
 
         XCTAssertTrue(
             source.contains("L10n.t(\"Geometry adjustments are non-destructive.\")"),

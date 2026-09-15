@@ -5,6 +5,8 @@ import SwiftUI
 
 /// Texture, Clarity, Dehaze (P4, design spec §6.3 "Presence"). None has an
 /// `AdjustmentKind` case of its own, same convention as `EffectsAdjustmentPanel`.
+/// Drag previews through the shared continuous-edit transaction (inspector
+/// hierarchy/preview spec §5.6) so a whole drag becomes exactly one Undo entry.
 public struct PresenceAdjustmentPanel: View {
     @ObservedObject private var editor: EditorSession
 
@@ -13,23 +15,25 @@ public struct PresenceAdjustmentPanel: View {
     }
 
     public var body: some View {
+        row(L10n.t("Texture"), value: \.presence.texture, reset: PresenceAdjustments.neutral.texture)
+        row(L10n.t("Clarity"), value: \.presence.clarity, reset: PresenceAdjustments.neutral.clarity)
+        row(L10n.t("Dehaze"), value: \.presence.dehaze, reset: PresenceAdjustments.neutral.dehaze)
+    }
+
+    private func row(
+        _ label: String,
+        value keyPath: WritableKeyPath<PhotoAdjustments, Double>,
+        reset defaultValue: Double
+    ) -> some View {
         AdjustmentSliderRow(
-            label: L10n.t("Texture"), value: editor.adjustments.presence.texture,
-            range: -100...100, fractionDigits: 1,
-            onChange: { newValue in editor.updateAdjustments { $0.presence.texture = newValue } },
-            onReset: { editor.updateAdjustments { $0.presence.texture = PresenceAdjustments.neutral.texture } }
-        )
-        AdjustmentSliderRow(
-            label: L10n.t("Clarity"), value: editor.adjustments.presence.clarity,
-            range: -100...100, fractionDigits: 1,
-            onChange: { newValue in editor.updateAdjustments { $0.presence.clarity = newValue } },
-            onReset: { editor.updateAdjustments { $0.presence.clarity = PresenceAdjustments.neutral.clarity } }
-        )
-        AdjustmentSliderRow(
-            label: L10n.t("Dehaze"), value: editor.adjustments.presence.dehaze,
-            range: -100...100, fractionDigits: 1,
-            onChange: { newValue in editor.updateAdjustments { $0.presence.dehaze = newValue } },
-            onReset: { editor.updateAdjustments { $0.presence.dehaze = PresenceAdjustments.neutral.dehaze } }
+            label: label,
+            value: editor.displayedAdjustments[keyPath: keyPath],
+            range: -100...100,
+            fractionDigits: 1,
+            onChange: { newValue in editor.updateAdjustments { $0[keyPath: keyPath] = newValue } },
+            onReset: { editor.updateAdjustments { $0[keyPath: keyPath] = defaultValue } },
+            onPreview: { newValue in editor.previewContinuousEdit { $0[keyPath: keyPath] = newValue } },
+            onCommitPreview: { editor.commitContinuousEdit() }
         )
     }
 }

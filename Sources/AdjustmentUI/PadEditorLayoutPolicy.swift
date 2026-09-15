@@ -179,8 +179,11 @@ public enum PadWorkspaceLayoutPolicy {
 /// turns this into an actual container.
 public enum PadEditorLayoutPolicy {
     /// The fixed width occupied by the leading tool rail in work mode.
-    /// This is a control budget, not a device-specific measurement.
-    public static let toolRailWidth: CGFloat = 52
+    /// This is a control budget, not a device-specific measurement. It must
+    /// match the labelled five-item rail used by both iPad source paths;
+    /// keeping the budget smaller than the rendered rail causes the canvas
+    /// and trailing inspector to overlap at the landscape boundary.
+    public static let toolRailWidth: CGFloat = 88
 
     /// The two separators around the canvas/dock boundary in work mode.
     public static let layoutSeparators: CGFloat = 2
@@ -300,6 +303,19 @@ public enum PadBottomDrawerPolicy {
     ) -> PadDrawerPresentation {
         mode == .work && inspectorPresentation == .bottomDrawer ? .presented : .dismissed
     }
+}
+
+/// Visual constants for the iPad bottom drawer. Keeping these values outside
+/// the view makes the portrait presentation easy to verify without a live
+/// sheet and prevents the surface treatment from drifting between hosts.
+public enum PadBottomDrawerMetrics {
+    /// The initial peek keeps the grabber and the first controls reachable
+    /// while leaving the photo visible behind the drawer.
+    public static let peekHeight: CGFloat = 220
+
+    /// A slightly softened corner keeps the drawer distinct from the canvas
+    /// without turning it into a floating card.
+    public static let cornerRadius: CGFloat = 22
 }
 
 // MARK: - Floating panel position clamping

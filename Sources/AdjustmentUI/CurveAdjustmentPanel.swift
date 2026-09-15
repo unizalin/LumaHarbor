@@ -149,29 +149,9 @@ public struct CurveAdjustmentPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(L10n.t("Tone curve"), systemImage: "chart.xyaxis.line")
-                    .font(.headline)
-                Spacer()
-                Button(L10n.t("Reset Channel")) {
-                    editor.updateAdjustments { $0.advancedToneCurve = $0.advancedToneCurve.resetting(selectedChannel) }
-                }
-                .controlSize(.small)
-                .disabled(editor.adjustments.advancedToneCurve.isIdentity(for: selectedChannel))
-                Button(L10n.t("Reset All")) {
-                    editor.updateAdjustments { $0.advancedToneCurve = .neutral }
-                }
-                .controlSize(.small)
-                .disabled(editor.adjustments.advancedToneCurve.isIdentity)
-            }
+            curveHeader
 
-            Picker(L10n.t("Tone curve"), selection: $selectedChannel) {
-                ForEach(ToneCurveChannel.allCases) { channel in
-                    Text(L10n.t(channel.localizationKey)).tag(channel)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel(Text(L10n.t("Tone curve")))
+            channelPicker
 
             ToneCurveGraph(
                 points: ToneCurveEditorModel.points(for: editor.displayedAdjustments.advancedToneCurve, channel: selectedChannel),
@@ -201,6 +181,73 @@ public struct CurveAdjustmentPanel: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    private var channelPicker: some View {
+        ViewThatFits(in: .horizontal) {
+            Picker(L10n.t("Tone curve"), selection: $selectedChannel) {
+                ForEach(ToneCurveChannel.allCases) { channel in
+                    Text(L10n.t(channel.localizationKey)).tag(channel)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)
+
+            Picker(L10n.t("Tone curve"), selection: $selectedChannel) {
+                ForEach(ToneCurveChannel.allCases) { channel in
+                    Text(L10n.t(channel.localizationKey)).tag(channel)
+                }
+        }
+        .pickerStyle(.menu)
+        .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
+    }
+        .accessibilityLabel(Text(L10n.t("Tone curve")))
+    }
+
+    /// Reset actions remain beside the title when the inspector is wide, but
+    /// move to their own row before the title or buttons can be clipped in a
+    /// narrow iPad split view. Both buttons retain their full localized names.
+    private var curveHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                curveTitle
+                Spacer(minLength: 8)
+                resetButtons
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                curveTitle
+                HStack(spacing: 8) {
+                    resetButtons
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var curveTitle: some View {
+        Label(L10n.t("Tone curve"), systemImage: "chart.xyaxis.line")
+            .font(.headline)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var resetButtons: some View {
+        Group {
+            Button(L10n.t("Reset Channel")) {
+                editor.updateAdjustments { $0.advancedToneCurve = $0.advancedToneCurve.resetting(selectedChannel) }
+            }
+            .controlSize(.small)
+            .disabled(editor.adjustments.advancedToneCurve.isIdentity(for: selectedChannel))
+            .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)
+
+            Button(L10n.t("Reset All")) {
+                editor.updateAdjustments { $0.advancedToneCurve = .neutral }
+            }
+            .controlSize(.small)
+            .disabled(editor.adjustments.advancedToneCurve.isIdentity)
+            .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight)
         }
     }
 

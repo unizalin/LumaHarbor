@@ -29,6 +29,7 @@ struct RootView: View {
     /// widens the right-hand inspector) rather than accumulating error
     /// across frames.
     @State private var inspectorWidthDragBaseline: Double?
+    @State private var isHoveringInspectorResizeHandle = false
 
     private var layout: WorkspaceLayoutState {
         WorkspaceLayoutState(
@@ -150,30 +151,43 @@ struct RootView: View {
     /// enforces, applied here on every drag update rather than once at the
     /// end, so the inspector never visibly overshoots mid-drag).
     private var inspectorResizeHandle: some View {
-        Divider()
-            .overlay {
-                Color.clear
-                    .frame(width: 8)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                let baseline = inspectorWidthDragBaseline ?? inspectorWidth
-                                inspectorWidthDragBaseline = baseline
-                                inspectorWidth = WorkspaceLayoutState.clampedInspectorWidth(
-                                    baseline - value.translation.width
-                                )
-                            }
-                            .onEnded { _ in inspectorWidthDragBaseline = nil }
-                    )
-                    .onHover { hovering in
-                        if hovering {
-                            NSCursor.resizeLeftRight.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
+        ZStack {
+            Color.clear
+            VStack(spacing: 4) {
+                Image(systemName: "arrow.left.and.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.secondary.opacity(isHoveringInspectorResizeHandle ? 0.9 : 0.65))
+                Capsule()
+                    .fill(Color.secondary.opacity(isHoveringInspectorResizeHandle ? 0.7 : 0.35))
+                    .frame(width: 3, height: 28)
             }
+        }
+        .frame(width: 20)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let baseline = inspectorWidthDragBaseline ?? inspectorWidth
+                    inspectorWidthDragBaseline = baseline
+                    inspectorWidth = WorkspaceLayoutState.clampedInspectorWidth(
+                        baseline - value.translation.width
+                    )
+                }
+                .onEnded { _ in inspectorWidthDragBaseline = nil }
+        )
+        .onHover { hovering in
+            isHoveringInspectorResizeHandle = hovering
+            if hovering {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .help(L10n.t("Inspector Width"))
+        .accessibilityElement()
+        .accessibilityLabel(Text(L10n.t("Inspector Width")))
+        .accessibilityHint(Text(L10n.t("Show, hide, or resize workspace panels")))
     }
 
     @ViewBuilder

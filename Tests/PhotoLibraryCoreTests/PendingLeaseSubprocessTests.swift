@@ -9,7 +9,7 @@ import XCTest
 /// elsewhere in `PhotoDocumentStoreTests` cannot demonstrate, since they
 /// never leave the parent's process table at all. Each test here launches
 /// `PendingLeaseHelper` (a small standalone executable — see
-/// `Sources/PendingLeaseHelper/main.swift`) as a genuine child process that
+/// `Sources/PendingLeaseHelper/PendingLeaseHelper.swift`) as a genuine child process that
 /// acquires and holds a lease, then proves the parent's own
 /// `reconcileOrphanedImports` skips it while the child is alive and can
 /// reclaim it once the child is actually gone — whether by a graceful

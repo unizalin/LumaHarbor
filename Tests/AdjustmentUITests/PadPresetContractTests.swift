@@ -139,6 +139,31 @@ final class PadPresetContractTests: XCTestCase {
         XCTAssertTrue(source.contains("PresetApplicationMode.replace"), "Replace mode must be accessible")
     }
 
+    func testPresetPickersKeepStableIPadTouchHeightInBothCompositions() throws {
+        let source = try Self.loadAppSource("PadEditorView.swift")
+
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".pickerStyle(.segmented)\n            .frame(minHeight: 44)").count - 1,
+            2,
+            "preset scope and apply-mode segmented controls must keep a 44pt iPad hit height"
+        )
+    }
+
+    func testPresetActionsStayVisibleInsideThePageOnNarrowIPadLayouts() throws {
+        let source = try Self.loadAppSource("PadEditorView.swift")
+
+        XCTAssertTrue(
+            source.contains("private var presetActionBar: some View") &&
+                source.contains("ViewThatFits(in: .horizontal)"),
+            "Preset actions must have an in-page adaptive action bar"
+        )
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".frame(width: 44, height: 44)").count - 1,
+            3,
+            "favorites, create, and overflow actions must retain stable iPad hit targets"
+        )
+    }
+
     func testPresetPanelHasExplicitApplyButton() throws {
         let source = try Self.loadAppSource("PadEditorView.swift")
         // The Apply button must be distinct from the tap-to-preview gesture

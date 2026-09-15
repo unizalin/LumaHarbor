@@ -58,4 +58,10 @@ final class AdvancedMaskPanelContractTests: XCTestCase {
         XCTAssertTrue(source.contains("selectedMaskIsLinear"))
         XCTAssertTrue(source.contains("!selectedMaskIsLinear"))
     }
+
+    func testMaskAndSpotHealRowsExposeTheWholeStableTouchTarget() throws {
+        let source = try Self.panelSource()
+        XCTAssertEqual(source.components(separatedBy: ".contentShape(Rectangle())").count - 1, 2)
+        XCTAssertEqual(source.components(separatedBy: ".frame(minHeight: 44, alignment: .leading)").count - 1, 2)
+    }
 }

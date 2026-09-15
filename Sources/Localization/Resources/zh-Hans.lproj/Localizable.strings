@@ -207,6 +207,7 @@
 "failed to export" = "张导出失败";
 "failed to revert" = "张还原失败";
 "Focus Mode" = "对焦模式";
+"Floating Panel" = "浮动面板";
 "Format" = "格式";
 "found" = "张已找到";
 "Free up space on the drive, then retry." = "请清理硬盘空间，然后重试。";
@@ -491,6 +492,7 @@
 "Your photos are still browsable." = "您的照片仍可浏览。";
 "Your RAW original was not changed." = "您的 RAW 原始文件未被更改。";
 "Geometry" = "几何调整";
+"Info" = "信息";
 "Rotate & Flip" = "旋转与翻转";
 "Rotate Left" = "向左旋转";
 "Rotate Right" = "向右旋转";
@@ -577,6 +579,7 @@
 "Workspace" = "工作区";
 "Show Sidebar" = "显示侧边栏";
 "Show Inspector" = "显示检查器";
+"Minimize Inspector" = "缩小检查器";
 "Show Filmstrip" = "显示缩略图条";
 "Distraction-Free Mode" = "无干扰模式";
 "Inspector Width" = "检查器宽度";
@@ -707,3 +710,12 @@
 "sRGB" = "sRGB";
 "Display P3" = "Display P3";
 "Adobe RGB" = "Adobe RGB";
+
+"Not Adjusted" = "未调整";
+"%d Adjusted" = "%d 项已调整";
+"Collapse Histogram" = "收起直方图";
+"Expand Histogram" = "展开直方图";
+"Expanded" = "展开";
+"Collapsed" = "收起";
+"HSL" = "HSL 色相饱和度";
+"%@ Actions" = "%@ 操作";

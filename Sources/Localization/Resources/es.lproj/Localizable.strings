@@ -207,6 +207,7 @@
 "failed to export" = "con error al exportar";
 "failed to revert" = "con error al revertir";
 "Focus Mode" = "Modo de enfoque";
+"Floating Panel" = "Panel flotante";
 "Format" = "Formato";
 "found" = "encontrada(s)";
 "Free up space on the drive, then retry." = "Libera espacio en la unidad y vuelve a intentarlo.";
@@ -491,6 +492,7 @@
 "Your photos are still browsable." = "Tus fotos se pueden seguir explorando.";
 "Your RAW original was not changed." = "Tu RAW original no se modificó.";
 "Geometry" = "Geometría";
+"Info" = "Información";
 "Rotate & Flip" = "Girar y voltear";
 "Rotate Left" = "Girar a la izquierda";
 "Rotate Right" = "Girar a la derecha";
@@ -577,6 +579,7 @@
 "Workspace" = "Espacio de trabajo";
 "Show Sidebar" = "Mostrar barra lateral";
 "Show Inspector" = "Mostrar inspector";
+"Minimize Inspector" = "Minimizar inspector";
 "Show Filmstrip" = "Mostrar tira de película";
 "Distraction-Free Mode" = "Modo sin distracciones";
 "Inspector Width" = "Ancho del inspector";
@@ -707,3 +710,12 @@
 "sRGB" = "sRGB";
 "Display P3" = "Display P3";
 "Adobe RGB" = "Adobe RGB";
+
+"Not Adjusted" = "Sin ajustar";
+"%d Adjusted" = "%d ajustado(s)";
+"Collapse Histogram" = "Contraer histograma";
+"Expand Histogram" = "Expandir histograma";
+"Expanded" = "Expandido";
+"Collapsed" = "Contraído";
+"HSL" = "HSL (Tono/Saturación/Luminancia)";
+"%@ Actions" = "Acciones de %@";

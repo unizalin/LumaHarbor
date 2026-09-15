@@ -80,4 +80,24 @@ final class MaskOverlayTests: XCTestCase {
             XCTAssertTrue(source.contains("BrushMaskOverlayView("))
         }
     }
+
+    func testRadialHandlesKeepTheShared44PointTouchTarget() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Sources/AdjustmentUI/MaskOverlayViews.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            source.contains("private static let handleHitAreaSize: CGFloat = 44"),
+            "radial mask handles must meet the shared iPad touch-target minimum"
+        )
+        XCTAssertTrue(
+            source.contains(".frame(width: Self.handleHitAreaSize, height: Self.handleHitAreaSize)"),
+            "radial mask gestures must be attached to the expanded hit area"
+        )
+    }
 }

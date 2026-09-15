@@ -47,17 +47,18 @@ public struct AdjustmentValueInput: View {
             }, onCommit: commit)
             .multilineTextAlignment(.trailing)
             .textFieldStyle(.plain)
-            .font(.body.monospacedDigit())
+            .font(.callout.monospacedDigit())
             .padding(.horizontal, 10)
-            // Keep the field compact enough for the two nudge controls while
+            // Platform-specific width (spec §5.4: 64-72pt on macOS, 72-88pt
+            // on iPad) -- compact enough for the two nudge controls while
             // allowing it to contract further in a narrow inspector dock.
             .frame(
-                minWidth: 56,
-                idealWidth: 72,
-                maxWidth: 72,
-                minHeight: 36,
-                idealHeight: 36,
-                maxHeight: 36
+                minWidth: AdjustmentControlMetrics.numericFieldWidth - 12,
+                idealWidth: AdjustmentControlMetrics.numericFieldWidth,
+                maxWidth: AdjustmentControlMetrics.numericFieldWidth,
+                minHeight: AdjustmentControlMetrics.nudgeHitTarget,
+                idealHeight: AdjustmentControlMetrics.nudgeHitTarget,
+                maxHeight: AdjustmentControlMetrics.nudgeHitTarget
             )
             .background(
                 Color.primary.opacity(0.08),
@@ -92,16 +93,16 @@ public struct AdjustmentValueInput: View {
             } label: {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 30, height: 30)
+                    .frame(width: AdjustmentControlMetrics.nudgeVisualDiameter, height: AdjustmentControlMetrics.nudgeVisualDiameter)
                     .background(Color.accentColor.opacity(0.12), in: Circle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.tint)
-            // The visible circle stays 30pt, but the tappable/touchable
-            // region is the full 44×44 pt minimum (spec §4.2), so the
-            // reset control is reliably hittable without inflating the
-            // row's visual weight.
-            .frame(width: 44, height: 44)
+            // The visible circle is smaller, but the tappable/touchable
+            // region matches the platform's own minimum (spec §5.4: 28-32pt
+            // on macOS, 44pt on iPad), so the reset control is reliably
+            // hittable without inflating the row's visual weight on macOS.
+            .frame(width: AdjustmentControlMetrics.nudgeHitTarget, height: AdjustmentControlMetrics.nudgeHitTarget)
             .contentShape(Rectangle())
             .accessibilityLabel(Text("\(label) \(L10n.t("Reset"))"))
         }
@@ -143,12 +144,12 @@ public struct AdjustmentValueInput: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .semibold))
-                .frame(width: 30, height: 30)
+                .frame(width: AdjustmentControlMetrics.nudgeVisualDiameter, height: AdjustmentControlMetrics.nudgeVisualDiameter)
                 .background(Color.primary.opacity(0.08), in: Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .frame(width: 44, height: 44)
+        .frame(width: AdjustmentControlMetrics.nudgeHitTarget, height: AdjustmentControlMetrics.nudgeHitTarget)
         .contentShape(Rectangle())
         .accessibilityLabel(Text("\(L10n.t(accessibilityKey)) \(label)"))
         .help("\(L10n.t(accessibilityKey)) \(label)")

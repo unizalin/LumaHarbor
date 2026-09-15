@@ -67,6 +67,16 @@ struct PadEditorView: View {
     /// `.sheet(isPresented: .constant(true))`. See `updateDrawerPresentation`.
     @State private var isDrawerPresented = false
 
+    /// Remembers an intentional drawer dismissal so a rotation or Split View
+    /// resize does not immediately cover the photo again. Switching back to
+    /// work mode or pressing the inspector toolbar button clears this flag.
+    @State private var isDrawerDismissedByUser = false
+
+    /// The single Inspector can be temporarily reduced to a visible restore
+    /// tile so the photo stays unobstructed. This is presentation state only;
+    /// adjustment values remain owned by `EditorSession`.
+    @State private var isInspectorMinimized = false
+
     /// The most recent size `GeometryReader` reported. Kept as `@State`
     /// (rather than threaded through every computed property that needs
     /// it) so gesture callbacks — which run outside `body`'s own
@@ -97,6 +107,11 @@ struct PadEditorView: View {
     /// never a second export path, only a second *destination picker* over
     /// the same already-exported file at `exportedURL`.
     @State private var isPresentingFileExporter = false
+    /// The wipe handle is rendered as a 44pt strip, so `DragGesture`'s local
+    /// location cannot be treated as a canvas coordinate. Capture the
+    /// normalized position once per drag and apply the gesture translation to
+    /// it instead; this keeps the divider stable while the strip moves.
+    @State private var wipeDragStartPosition: CGFloat?
 
     @GestureState private var floatingPanelDragTranslation: CGSize = .zero
     @GestureState private var canvasMagnification: CGFloat = 1
@@ -133,16 +148,13 @@ struct PadEditorView: View {
             // callbacks, but it can lag one render behind during rotation or
             // Split View changes and must not decide whether the dock fits.
             workspaceContent(for: proxy.size)
-                .sheet(isPresented: $isDrawerPresented) {
+                .sheet(isPresented: $isDrawerPresented, onDismiss: handleDrawerDismissal) {
                     bottomDrawerPanel
-                        .presentationDetents([.height(220), .medium, .large])
+                        .presentationDetents([.height(PadBottomDrawerMetrics.peekHeight), .medium, .large])
                         .presentationDragIndicator(.visible)
-                        // A drawer that could be swiped away entirely would
-                        // leave the user with no way back to the controls
-                        // short of resizing/rotating the window again —
-                        // resizing between the three detents above is
-                        // still fully interactive.
-                        .interactiveDismissDisabled(true)
+                        .presentationCornerRadius(PadBottomDrawerMetrics.cornerRadius)
+                        .presentationBackground(.thickMaterial)
+                        .presentationContentInteraction(.scrolls)
                         .presentationBackgroundInteraction(.enabled)
                 }
                 .onAppear {
@@ -154,7 +166,10 @@ struct PadEditorView: View {
                     updateDrawerPresentation()
                     reclampFloatingPanelOffset()
                 }
-                .onChange(of: workspaceState.workspaceMode) { _, _ in
+                .onChange(of: workspaceState.workspaceMode) { _, newMode in
+                    if newMode == .work {
+                        isDrawerDismissedByUser = false
+                    }
                     updateDrawerPresentation()
                 }
         }
@@ -291,17 +306,74 @@ struct PadEditorView: View {
 
     // MARK: - Drawer presentation
 
-    /// The single place `isDrawerPresented` is ever written — always
-    /// derived from `PadBottomDrawerPolicy`, from the two facts it needs
-    /// (current mode, current inspector presentation for `availableSize`).
-    /// Called whenever either of those can have changed: mode toggling,
-    /// and `availableSize` changing (resize/rotation/Split View).
+    /// Reconciles automatic layout presentation with the user's explicit
+    /// close choice. Called whenever mode or `availableSize` changes
+    /// (resize/rotation/Split View); explicit close/open actions use the
+    /// helpers below so they remain reversible.
     private func updateDrawerPresentation() {
         let inspectorPresentation = PadEditorLayoutPolicy.presentation(forWidth: availableSize.width, height: availableSize.height)
         let target = PadBottomDrawerPolicy.presentation(mode: workspaceState.workspaceMode, inspectorPresentation: inspectorPresentation) == .presented
-        if isDrawerPresented != target {
-            isDrawerPresented = target
+        let shouldPresent = target && !isDrawerDismissedByUser && !isInspectorMinimized
+        if isDrawerPresented != shouldPresent {
+            isDrawerPresented = shouldPresent
         }
+    }
+
+    /// A user-dismissed drawer stays out of the way until explicitly
+    /// reopened. Automatic layout changes still dismiss it when the editor
+    /// becomes wide enough for the trailing dock, without marking that as a
+    /// user preference.
+    private func handleDrawerDismissal() {
+        let presentation = PadEditorLayoutPolicy.presentation(
+            forWidth: availableSize.width,
+            height: availableSize.height
+        )
+        guard workspaceState.workspaceMode == .work, presentation == .bottomDrawer else { return }
+        isDrawerDismissedByUser = true
+    }
+
+    private func dismissBottomDrawer() {
+        isDrawerDismissedByUser = true
+        isDrawerPresented = false
+    }
+
+    private func presentBottomDrawer() {
+        isInspectorMinimized = false
+        isDrawerDismissedByUser = false
+        isDrawerPresented = true
+    }
+
+    private func minimizeInspector() {
+        isInspectorMinimized = true
+        isDrawerDismissedByUser = true
+        isDrawerPresented = false
+        workspaceState.workspaceMode = .work
+    }
+
+    private func restoreInspector() {
+        isInspectorMinimized = false
+        isDrawerDismissedByUser = false
+        updateDrawerPresentation()
+    }
+
+    /// A horizontal drag on the drawer's dedicated handle hands the same
+    /// panel to Focus Mode. The offset is seeded from the drag so the panel
+    /// appears where the user moved it instead of jumping back to center.
+    private func moveDrawerToFocus(with translation: CGSize) {
+        guard abs(translation.width) >= abs(translation.height),
+              abs(translation.width) >= 48 else { return }
+
+        let proposedOffset = CGSize(width: translation.width, height: 0)
+        workspaceState.floatingPanelOffset = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposedOffset,
+            panelOrigin: Self.floatingPanelDefaultOrigin,
+            panelSize: floatingPanelMeasuredSize,
+            availableSize: availableSize,
+            minimumVisibleEdge: Self.floatingPanelMinimumVisibleEdge
+        )
+        isInspectorMinimized = false
+        isDrawerDismissedByUser = false
+        workspaceState.workspaceMode = .focus
     }
 
     // MARK: - Work / focus toggle
@@ -334,21 +406,21 @@ struct PadEditorView: View {
             Button {
                 editor.setCompareMode(.single)
             } label: {
-                Label(L10n.t("Single view"), systemImage: "rectangle")
+                Label(L10n.t("Single View"), systemImage: "rectangle")
             }
             .disabled(editor.compareMode == .single)
 
             Button {
                 editor.setCompareMode(.sideBySide)
             } label: {
-                Label(L10n.t("Side by side"), systemImage: "rectangle.split.2x1")
+                Label(L10n.t("Side by Side"), systemImage: "rectangle.split.2x1")
             }
             .disabled(!editor.canCompareWithOriginal)
 
             Button {
                 editor.setCompareMode(.verticalWipe)
             } label: {
-                Label(L10n.t("Wipe comparison"), systemImage: "rectangle.split.2x1.fill")
+                Label(L10n.t("Wipe"), systemImage: "rectangle.split.2x1.fill")
             }
             .disabled(!editor.canCompareWithOriginal)
 
@@ -387,7 +459,7 @@ struct PadEditorView: View {
                 }
             }
         } label: {
-            Image(systemName: "rectangle.on.rectangle")
+            Label(L10n.t("Compare Mode"), systemImage: "rectangle.on.rectangle")
         }
         .accessibilityLabel(Text(L10n.t("Compare")))
     }
@@ -477,39 +549,53 @@ struct PadEditorView: View {
     @ViewBuilder
     private func workLayout(for size: CGSize) -> some View {
         let plan = PadEditorLayoutPolicy.plan(for: size)
-        switch plan.presentation {
-        case .trailingDock:
-            HStack(spacing: 0) {
-                PadToolRail(selection: Binding(
-                    get: { inspector.activeDomain },
-                    set: { inspector.selectDomain($0) }
-                ))
-                Divider()
+        ZStack(alignment: .bottomTrailing) {
+            switch plan.presentation {
+            case .trailingDock:
+                HStack(spacing: 0) {
+                    PadToolRail(selection: Binding(
+                        get: { inspector.activeDomain },
+                        set: { inspector.selectDomain($0) }
+                    ))
+                    Divider()
+                    canvas(for: size)
+                    if !isInspectorMinimized {
+                        Divider()
+                        trailingDockPanel(width: plan.inspectorWidth ?? PadEditorLayoutPolicy.minimumInspectorWidth)
+                    }
+                }
+            case .bottomDrawer:
                 canvas(for: size)
-                Divider()
-                trailingDockPanel(width: plan.inspectorWidth ?? PadEditorLayoutPolicy.minimumInspectorWidth)
+            case .floating:
+                // `.floating` is the focus-mode presentation and is never
+                // produced by `PadEditorLayoutPolicy` while in work mode.
+                // Treat it as canvas-only (the bottom drawer sheet, if needed,
+                // is still driven by `PadBottomDrawerPolicy` via the shared
+                // `.sheet` in `body`).
+                canvas(for: size)
             }
-        case .bottomDrawer:
-            canvas(for: size)
-        case .floating:
-            // `.floating` is the focus-mode presentation and is never
-            // produced by `PadEditorLayoutPolicy` while in work mode.
-            // Treat it as canvas-only (the bottom drawer sheet, if needed,
-            // is still driven by `PadBottomDrawerPolicy` via the shared
-            // `.sheet` in `body`).
-            canvas(for: size)
+
+            if isInspectorMinimized {
+                inspectorRestoreTile
+                    .padding(12)
+            }
         }
     }
 
     private func focusLayout(for size: CGSize) -> some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .bottomTrailing) {
             canvas(for: size)
-            floatingPanel(width: PadEditorLayoutPolicy.floatingPanelWidth(for: size))
-                .background(floatingPanelSizeReader)
-                .offset(
-                    x: Self.floatingPanelDefaultOrigin.x + workspaceState.floatingPanelOffset.width + floatingPanelDragTranslation.width,
-                    y: Self.floatingPanelDefaultOrigin.y + workspaceState.floatingPanelOffset.height + floatingPanelDragTranslation.height
-                )
+            if !isInspectorMinimized {
+                floatingPanel(width: PadEditorLayoutPolicy.floatingPanelWidth(for: size))
+                    .background(floatingPanelSizeReader)
+                    .offset(
+                        x: Self.floatingPanelDefaultOrigin.x + workspaceState.floatingPanelOffset.width + floatingPanelDragTranslation.width,
+                        y: Self.floatingPanelDefaultOrigin.y + workspaceState.floatingPanelOffset.height + floatingPanelDragTranslation.height
+                    )
+            } else {
+                inspectorRestoreTile
+                    .padding(12)
+            }
         }
     }
 
@@ -609,30 +695,59 @@ struct PadEditorView: View {
                 }
                 .padding()
             case .verticalWipe:
-                ZStack(alignment: .leading) {
-                    if let edited = editor.previewImage {
-                        canvasImage(edited)
-                    }
-                    if let original = editor.originalImage {
-                        canvasImage(original)
-                            .frame(width: proxy.size.width * editor.wipePosition)
-                            .clipped()
-                    }
-                    Rectangle()
-                        .fill(.white.opacity(0.9))
-                        .frame(width: 2)
-                        .offset(x: proxy.size.width * editor.wipePosition - 1)
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    guard proxy.size.width > 0 else { return }
-                                    editor.setWipePosition(value.location.x / proxy.size.width)
-                                }
-                        )
-                }
-                .padding()
+                verticalWipeCanvas
             }
         }
+    }
+
+    /// The wipe viewport is padded like the side-by-side comparison, so its
+    /// divider must use the post-padding content width. A nested reader keeps
+    /// the image clip, divider, and 44pt gesture strip on the same coordinate
+    /// system in portrait, landscape, and Split View.
+    private var verticalWipeCanvas: some View {
+        GeometryReader { wipeProxy in
+            ZStack(alignment: .leading) {
+                if let edited = editor.previewImage {
+                    canvasImage(edited)
+                }
+                if let original = editor.originalImage {
+                    canvasImage(original)
+                        .frame(width: wipeProxy.size.width * editor.wipePosition)
+                        .clipped()
+                }
+                Rectangle()
+                    .fill(.white.opacity(0.9))
+                    .frame(width: 2)
+                    .offset(x: wipeProxy.size.width * editor.wipePosition - 1)
+
+                // Keep the divider visually precise while giving iPad a
+                // reliable touch target in portrait and Split View.
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: 44)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .offset(x: wipeProxy.size.width * editor.wipePosition - 22)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard wipeProxy.size.width > 0 else { return }
+                                let start = wipeDragStartPosition ?? editor.wipePosition
+                                if wipeDragStartPosition == nil {
+                                    wipeDragStartPosition = start
+                                }
+                                editor.setWipePosition(
+                                    start + value.translation.width / wipeProxy.size.width
+                                )
+                            }
+                            .onEnded { _ in
+                                wipeDragStartPosition = nil
+                            }
+                    )
+            }
+            .frame(width: wipeProxy.size.width, height: wipeProxy.size.height)
+        }
+        .padding()
     }
 
     private func canvasImageWithOverlays(_ image: CGImage, in canvasSize: CGSize) -> some View {
@@ -655,6 +770,14 @@ struct PadEditorView: View {
 
             if editor.toolMode == .brush {
                 BrushMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+
+            if editor.toolMode == .linearGradient {
+                LinearGradientMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+
+            if editor.toolMode == .spotHeal {
+                SpotHealMaskOverlayView(editor: editor, imageFrame: imageFrame)
             }
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
@@ -816,7 +939,11 @@ struct PadEditorView: View {
     private func trailingDockPanel(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
-                saveStatusIndicator
+                HStack {
+                    saveStatusIndicator
+                    Spacer(minLength: 8)
+                    inspectorMinimizeButton
+                }
                 undoRedoControls
             }
             .padding()
@@ -840,7 +967,21 @@ struct PadEditorView: View {
     private var bottomDrawerPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
-                saveStatusIndicator
+                HStack(alignment: .center, spacing: 12) {
+                    saveStatusIndicator
+                    Spacer(minLength: 8)
+                    bottomDrawerDragHandle
+                    inspectorMinimizeButton
+                    Button {
+                        dismissBottomDrawer()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(L10n.t("Close")))
+                    .help(Text(L10n.t("Close")))
+                }
                 undoRedoControls
             }
             .padding()
@@ -862,7 +1003,10 @@ struct PadEditorView: View {
     private func floatingPanel(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                floatingPanelHeader
+                HStack(spacing: 12) {
+                    floatingPanelHeader
+                    inspectorMinimizeButton
+                }
                 saveStatusIndicator
                 undoRedoControls
             }
@@ -911,8 +1055,13 @@ struct PadEditorView: View {
                 .accessibilityHidden(true)
             Text(L10n.t("Adjustments"))
                 .font(.headline)
-            Spacer()
+            Text(L10n.t("Drag to move this panel."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(L10n.t("Adjustments")))
@@ -936,6 +1085,46 @@ struct PadEditorView: View {
                     )
                 }
         )
+    }
+
+    /// The drawer uses the same direct manipulation model as the floating
+    /// panel. Dragging this handle moves the existing Inspector into Focus
+    /// mode; there is no second "floating panel" mode button to discover.
+    private var bottomDrawerDragHandle: some View {
+        Image(systemName: "line.3.horizontal")
+            .foregroundStyle(.secondary)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel(Text(L10n.t("Adjustments")))
+            .accessibilityHint(Text(L10n.t("Drag to move this panel.")))
+            .help(Text(L10n.t("Drag to move this panel.")))
+            .gesture(
+                DragGesture(minimumDistance: 8)
+                    .onEnded { value in
+                        moveDrawerToFocus(with: value.translation)
+                    }
+            )
+    }
+
+    private var inspectorMinimizeButton: some View {
+        Button(action: minimizeInspector) {
+            Image(systemName: "rectangle.compress.vertical")
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(L10n.t("Minimize Inspector")))
+        .help(Text(L10n.t("Minimize Inspector")))
+    }
+
+    private var inspectorRestoreTile: some View {
+        Button(action: restoreInspector) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.headline)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityLabel(Text(L10n.t("Show Inspector")))
+        .help(Text(L10n.t("Show Inspector")))
     }
 
     /// Re-clamps whatever offset is already committed against the current
@@ -1036,10 +1225,10 @@ private struct PadToolRail: View {
     }
 
     private static let items: [RailItem] = [
-        RailItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjust"),
+        RailItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjustments"),
         RailItem(id: .preset,   symbol: "sparkles",            labelKey: "Presets"),
         RailItem(id: .geometry, symbol: "crop.rotate",         labelKey: "Geometry"),
-        RailItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local"),
+        RailItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local Adjustments"),
         RailItem(id: .info,     symbol: "info.circle",         labelKey: "Info"),
     ]
 
@@ -1050,7 +1239,6 @@ private struct PadToolRail: View {
                     ForEach(Self.items) { item in railButton(item) }
                     Spacer()
                 }
-                .frame(width: 52)
             } else {
                 HStack(spacing: 0) {
                     ForEach(Self.items) { item in railButton(item) }
@@ -1058,6 +1246,9 @@ private struct PadToolRail: View {
             }
         }
         .padding(axis == .vertical ? .vertical : .horizontal, 8)
+        // Keep the rendered rail, including its horizontal padding, inside
+        // the 88pt budget used by PadEditorLayoutPolicy.
+        .frame(width: axis == .vertical ? 88 : nil)
         .background(.thickMaterial)
     }
 
@@ -1066,9 +1257,19 @@ private struct PadToolRail: View {
         return Button {
             selection = item.id
         } label: {
-            Image(systemName: item.symbol)
-                .imageScale(.medium)
-                .frame(width: 44, height: 44)
+            VStack(spacing: 2) {
+                Image(systemName: item.symbol)
+                    .imageScale(.small)
+                Text(L10n.t(item.labelKey))
+                    .font(.caption.weight(.medium))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(minWidth: 64, minHeight: 44)
+            // Keep the whole stable rail cell tappable, including the
+            // wrapped-label area in portrait and Split View layouts.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
@@ -1098,6 +1299,12 @@ private struct PadInspectorHost: View {
     @ObservedObject var library: PadLibraryModel
     @ObservedObject var batchCoordinator: PadBatchAdjustmentCoordinator
     let showsDomainBar: Bool
+    // Adjustments starts with only Basic open. Dedicated Geometry and Local
+    // pages are already inside their own first-level host, so they open with
+    // their page content available on first visit rather than showing a
+    // seemingly empty inspector until the user taps the title.
+    @State private var expandedSections = InspectorSectionExpansionPolicy.initialExpanded
+        .union([.geometry, .local])
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1105,9 +1312,12 @@ private struct PadInspectorHost: View {
                 compactDomainBar
                 Divider()
             }
-            catalogToolbar
-            Divider()
-            if !navigation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if showsCatalogNavigation {
+                catalogToolbar
+                Divider()
+            }
+            if showsCatalogNavigation,
+               !navigation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 searchResultsList
             } else {
                 switch inspector.activeDomain {
@@ -1117,19 +1327,73 @@ private struct PadInspectorHost: View {
                     PadPresetPanel(editor: editor, presetLibrary: presetLibrary)
                 case .geometry:
                     ScrollView {
-                        GeometryAdjustmentPanel(editor: editor)
-                            .padding()
+                        domainSection(
+                            .geometry,
+                            titleKey: "Geometry"
+                        ) {
+                            GeometryAdjustmentPanel(editor: editor)
+                        }
+                        .padding()
                     }
                 case .local:
                     ScrollView {
-                        LocalAdjustmentsPanel(editor: editor)
-                            .padding()
+                        domainSection(
+                            .local,
+                            titleKey: "Local Adjustments"
+                        ) {
+                            LocalAdjustmentsPanel(editor: editor)
+                        }
+                        .padding()
                     }
                 case .info:
                     infoPanel
                 }
             }
         }
+        .onChange(of: inspector.activeDomain) { _, _ in
+            // A domain switch is an explicit navigation action. Do not leave
+            // an old catalog query intercepting the newly selected page; the
+            // Preset page owns its own search field and Info has none.
+            navigation.clearSearch()
+        }
+    }
+
+    /// The shared catalog only describes editable adjustment domains. Presets
+    /// and Info have their own page-specific controls and must not inherit a
+    /// misleading "Search Adjustments" field or catalog result list.
+    private var showsCatalogNavigation: Bool {
+        switch inspector.activeDomain {
+        case .adjust, .geometry, .local:
+            return true
+        case .preset, .info:
+            return false
+        }
+    }
+
+    /// Geometry and Local are dedicated domains on iPad, but their content
+    /// still needs the same Level 1 hierarchy as an Adjustments page. Without
+    /// this host the panels' Level 2 groups render at the page root, so their
+    /// chevrons, titles, and 16pt inset lose the cross-platform relationship.
+    @ViewBuilder
+    private func domainSection<Content: View>(
+        _ sectionID: InspectorSectionID,
+        titleKey: String,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        let summary = InspectorGroupSummary.summary(for: sectionID, in: editor.adjustments)
+        InspectorLevel1DisclosureGroup(
+            L10n.t(titleKey),
+            summary: summary.localizedText,
+            isExpanded: Binding(
+                get: { expandedSections.contains(sectionID) },
+                set: { isExpanded in
+                    expandedSections = isExpanded
+                        ? expandedSections.union([sectionID])
+                        : expandedSections.subtracting([sectionID])
+                }
+            ),
+            content: content
+        )
     }
 
     // MARK: - Shared catalog toolbar (search, favorite, pin, reset)
@@ -1141,6 +1405,27 @@ private struct PadInspectorHost: View {
     /// Info domains, which are not part of the field catalog: favorite/reset
     /// simply hide rather than show a control with nothing to act on.
     private var catalogToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                catalogSearchField
+                Spacer(minLength: 4)
+                catalogToolbarActions
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                catalogSearchField
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Spacer(minLength: 0)
+                    catalogToolbarActions
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
+    private var catalogSearchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
@@ -1155,40 +1440,42 @@ private struct PadInspectorHost: View {
                 .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel(Text(L10n.t("Clear Search")))
             }
-            Spacer(minLength: 4)
-            if let sectionID = currentSectionID {
-                Button {
-                    navigation.toggleFavorite(sectionID)
-                } label: {
-                    Image(systemName: navigation.isFavorite(sectionID) ? "star.fill" : "star")
-                        .foregroundStyle(navigation.isFavorite(sectionID) ? .yellow : .secondary)
-                }
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel(Text(navigation.isFavorite(sectionID) ? L10n.t("Remove from Favorites") : L10n.t("Add to Favorites")))
-            }
+        }
+        .frame(minHeight: 44)
+    }
+
+    @ViewBuilder
+    private var catalogToolbarActions: some View {
+        if let sectionID = currentSectionID {
             Button {
-                navigation.togglePin()
+                navigation.toggleFavorite(sectionID)
             } label: {
-                Image(systemName: navigation.isPinned ? "pin.fill" : "pin")
+                Image(systemName: navigation.isFavorite(sectionID) ? "star.fill" : "star")
+                    .foregroundStyle(navigation.isFavorite(sectionID) ? .yellow : .secondary)
             }
             .frame(minWidth: 44, minHeight: 44)
-            .accessibilityLabel(Text(navigation.isPinned ? L10n.t("Unpin Section") : L10n.t("Pin Section")))
-            .accessibilityAddTraits(navigation.isPinned ? .isSelected : [])
-            if let domain = currentResetDomain {
-                Button {
-                    editor.updateAdjustments { adjustments in
-                        adjustments = InspectorCatalog.resetting(domain: domain, in: adjustments)
-                    }
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .frame(minWidth: 44, minHeight: 44)
-                .disabled(editor.photo == nil || InspectorCatalog.isNeutral(domain: domain, in: editor.adjustments))
-                .accessibilityLabel(Text(L10n.t("Reset")))
-            }
+            .accessibilityLabel(Text(navigation.isFavorite(sectionID) ? L10n.t("Remove from Favorites") : L10n.t("Add to Favorites")))
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        Button {
+            navigation.togglePin()
+        } label: {
+            Image(systemName: navigation.isPinned ? "pin.fill" : "pin")
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(Text(navigation.isPinned ? L10n.t("Unpin Section") : L10n.t("Pin Section")))
+        .accessibilityAddTraits(navigation.isPinned ? .isSelected : [])
+        if let domain = currentResetDomain {
+            Button {
+                editor.updateAdjustments { adjustments in
+                    adjustments = InspectorCatalog.resetting(domain: domain, in: adjustments)
+                }
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .disabled(editor.photo == nil || InspectorCatalog.isNeutral(domain: domain, in: editor.adjustments))
+            .accessibilityLabel(Text(L10n.t("Reset")))
+        }
     }
 
     /// A representative catalog section for the currently active
@@ -1260,35 +1547,45 @@ private struct PadInspectorHost: View {
     }
 
     private static let domainBarItems: [DomainBarItem] = [
-        DomainBarItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjust"),
+        DomainBarItem(id: .adjust,   symbol: "slider.horizontal.3", labelKey: "Adjustments"),
         DomainBarItem(id: .preset,   symbol: "sparkles",            labelKey: "Presets"),
         DomainBarItem(id: .geometry, symbol: "crop.rotate",         labelKey: "Geometry"),
-        DomainBarItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local"),
+        DomainBarItem(id: .local,    symbol: "paintbrush.pointed",  labelKey: "Local Adjustments"),
         DomainBarItem(id: .info,     symbol: "info.circle",         labelKey: "Info"),
     ]
 
     private var compactDomainBar: some View {
-        HStack(spacing: 0) {
-            ForEach(Self.domainBarItems) { item in
-                let isSelected = inspector.activeDomain == item.id
-                Button {
-                    inspector.selectDomain(item.id)
-                } label: {
-                    Image(systemName: item.symbol)
-                        .imageScale(.medium)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(Self.domainBarItems) { item in
+                    let isSelected = inspector.activeDomain == item.id
+                    Button {
+                        inspector.selectDomain(item.id)
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: item.symbol)
+                                .imageScale(.small)
+                            Text(L10n.t(item.labelKey))
+                                .font(.caption.weight(.medium))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(minWidth: 88, minHeight: 52)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .background(
+                        isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .accessibilityLabel(Text(L10n.t(item.labelKey)))
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                .background(
-                    isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .accessibilityLabel(Text(L10n.t(item.labelKey)))
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
+        .scrollIndicators(.hidden)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
     }
@@ -1310,7 +1607,15 @@ private struct PadInspectorHost: View {
     }
 
     private var adjustSubmodePicker: some View {
-        Picker(L10n.t("Adjust"), selection: Binding(
+        ViewThatFits(in: .horizontal) {
+            submodePicker
+            submodeMenu
+        }
+        .accessibilityLabel(Text(L10n.t("Adjust submode")))
+    }
+
+    private var submodePicker: some View {
+        Picker(L10n.t("Adjustments"), selection: Binding(
             get: { inspector.adjustSubmode },
             set: { inspector.selectAdjustSubmode($0) }
         )) {
@@ -1319,7 +1624,20 @@ private struct PadInspectorHost: View {
             Text(L10n.t("Detail")).tag(PadAdjustSubmode.detail)
         }
         .pickerStyle(.segmented)
-        .accessibilityLabel(Text(L10n.t("Adjust submode")))
+        .frame(minHeight: 44)
+    }
+
+    private var submodeMenu: some View {
+        Picker(L10n.t("Adjustments"), selection: Binding(
+            get: { inspector.adjustSubmode },
+            set: { inspector.selectAdjustSubmode($0) }
+        )) {
+            Text(L10n.t("Light")).tag(PadAdjustSubmode.light)
+            Text(L10n.t("Color")).tag(PadAdjustSubmode.color)
+            Text(L10n.t("Detail")).tag(PadAdjustSubmode.detail)
+        }
+        .pickerStyle(.menu)
+        .frame(minHeight: 44, alignment: .leading)
     }
 
     /// P2 (`2026-09-10-shared-professional-inspector-catalog.md` §2): field
@@ -1334,18 +1652,66 @@ private struct PadInspectorHost: View {
     private var adjustContent: some View {
         switch inspector.adjustSubmode {
         case .light:
-            RenderingProfilePanel(editor: editor)
-            BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.basic).adjustmentKinds)
-            PresenceAdjustmentPanel(editor: editor)
-            CurveAdjustmentPanel(editor: editor)
+            adjustmentSection(.basic, titleKey: "Basic") {
+                RenderingProfilePanel(editor: editor)
+                BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.basic).adjustmentKinds)
+            }
+            adjustmentSection(.presence, titleKey: "Presence") {
+                PresenceAdjustmentPanel(editor: editor)
+            }
+            adjustmentSection(.curve, titleKey: "Curve") {
+                CurveAdjustmentPanel(editor: editor)
+            }
         case .color:
-            BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)
-            ColorAdjustmentPanel(editor: editor)
-            ColorGradingAdjustmentPanel(editor: editor)
+            adjustmentSection(.hsl, titleKey: "Color", summarySections: [.whiteBalance, .hsl]) {
+                Level2Section(L10n.t("White Balance")) {
+                    BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)
+                }
+                ColorAdjustmentPanel(editor: editor)
+            }
+            adjustmentSection(.colorGrading, titleKey: "Color Grading") {
+                ColorGradingAdjustmentPanel(editor: editor)
+            }
         case .detail:
-            DetailAdjustmentPanel(editor: editor)
-            EffectsAdjustmentPanel(editor: editor)
+            adjustmentSection(.detail, titleKey: "Detail") {
+                DetailAdjustmentPanel(editor: editor)
+            }
+            adjustmentSection(.effects, titleKey: "Effects") {
+                EffectsAdjustmentPanel(editor: editor)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func adjustmentSection<Content: View>(
+        _ sectionID: InspectorSectionID,
+        titleKey: String,
+        summarySections: [InspectorSectionID]? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        let ids = summarySections ?? [sectionID]
+        let adjustedCount = ids.reduce(0) { partial, id in
+            switch InspectorGroupSummary.summary(for: id, in: editor.adjustments) {
+            case .notAdjusted:
+                return partial
+            case .adjusted(let count):
+                return partial + count
+            }
+        }
+        let summary: InspectorGroupSummary = adjustedCount == 0 ? .notAdjusted : .adjusted(count: adjustedCount)
+        InspectorLevel1DisclosureGroup(
+            L10n.t(titleKey),
+            summary: summary.localizedText,
+            isExpanded: Binding(
+                get: { expandedSections.contains(sectionID) },
+                set: { isExpanded in
+                    expandedSections = isExpanded
+                        ? expandedSections.union([sectionID])
+                        : expandedSections.subtracting([sectionID])
+                }
+            ),
+            content: content
+        )
     }
 
     // MARK: Info domain
@@ -1356,8 +1722,6 @@ private struct PadInspectorHost: View {
             VStack(alignment: .leading, spacing: 20) {
                 PadHistogramBlock(histogram: editor.histogram)
                 Divider()
-                PadSaveStateBlock(saveState: editor.saveState)
-                Divider()
                 if let photo = editor.photo {
                     let curationPhoto = library.photos.first(where: { $0.id == photo.id }) ?? photo
                     PadMetadataBlock(
@@ -1365,14 +1729,18 @@ private struct PadInspectorHost: View {
                         photo: curationPhoto,
                         batchCoordinator: batchCoordinator
                     )
-                    Divider()
-                    SnapshotsPanel(editor: editor)
                 } else {
                     Text(L10n.t("Photo not yet loaded."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding()
+                }
+                Divider()
+                PadSaveStateBlock(saveState: editor.saveState)
+                Divider()
+                if editor.photo != nil {
+                    SnapshotsPanel(editor: editor)
                 }
             }
             .padding()
@@ -1471,17 +1839,35 @@ private struct PadMetadataBlock: View {
     private struct Row: View {
         let label: String
         let value: String
+
         var body: some View {
-            HStack(alignment: .top) {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 120, alignment: .leading)
-                Text(value)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-                Spacer()
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 8) {
+                    labelView
+                        .frame(width: 96, alignment: .leading)
+                    valueView
+                    Spacer(minLength: 0)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    labelView
+                    valueView
+                }
             }
+        }
+
+        private var labelView: some View {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        private var valueView: some View {
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1500,6 +1886,7 @@ private struct PadMetadataBlock: View {
             if let v = snapshot.shutterSpeedDescription { Row(label: L10n.t("Shutter"), value: v) }
             if let v = snapshot.isoDescription       { Row(label: L10n.t("ISO"),        value: v) }
             if let v = snapshot.captureDateDescription { Row(label: L10n.t("Date"),     value: v) }
+            if let v = snapshot.orientationDescription { Row(label: L10n.t("Orientation"), value: v) }
 
             Divider()
             Text(L10n.t("Curation"))
@@ -1510,26 +1897,7 @@ private struct PadMetadataBlock: View {
                 Text(L10n.t("Keywords"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    TextField(L10n.t("Keyword"), text: $keywordText)
-                        .textFieldStyle(.roundedBorder)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
-                    Button {
-                        saveKeywords()
-                    } label: {
-                        if isSavingKeywords {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .disabled(isSavingKeywords)
-                    .accessibilityLabel(Text(L10n.t("Save Keywords")))
-                }
+                keywordEditor
             }
             if let message {
                 Text(message)
@@ -1543,12 +1911,71 @@ private struct PadMetadataBlock: View {
         }
     }
 
+    private var keywordEditor: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                keywordField
+                saveKeywordsButton
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                keywordField
+                HStack {
+                    Spacer(minLength: 0)
+                    saveKeywordsButton
+                }
+            }
+        }
+    }
+
+    private var keywordField: some View {
+        TextField(L10n.t("Keyword"), text: $keywordText)
+            .textFieldStyle(.roundedBorder)
+            .textInputAutocapitalization(.never)
+            .disableAutocorrection(true)
+    }
+
+    private var saveKeywordsButton: some View {
+        Button {
+            saveKeywords()
+        } label: {
+            if isSavingKeywords {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "checkmark")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .frame(minWidth: 44, minHeight: 44)
+        .disabled(isSavingKeywords)
+        .accessibilityLabel(Text(L10n.t("Save Keywords")))
+    }
+
     private var ratingControls: some View {
-        HStack(spacing: 4) {
-            Text(L10n.t("Rating"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 120, alignment: .leading)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                ratingLabel
+                    .frame(width: 96, alignment: .leading)
+                ratingButtons
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                ratingLabel
+                ratingButtons
+            }
+        }
+    }
+
+    private var ratingLabel: some View {
+        Text(L10n.t("Rating"))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var ratingButtons: some View {
+        HStack(spacing: 0) {
             ForEach(0...5, id: \.self) { value in
                 Button {
                     Task {
@@ -1560,36 +1987,50 @@ private struct PadMetadataBlock: View {
                         .foregroundStyle(value > photo.rating ? Color.secondary : Color.yellow)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 32, height: 32)
+                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel(Text("\(L10n.t("Rating")) \(value)"))
             }
-            Spacer()
         }
     }
 
     private var flagControl: some View {
-        HStack {
-            Text(L10n.t("Flag"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 120, alignment: .leading)
-            Menu {
-                ForEach(PhotoFlag.allCases, id: \.self) { flag in
-                    Button {
-                        Task {
-                            let succeeded = await batchCoordinator.setFlag(flag, for: photo.id)
-                            if !succeeded { message = L10n.t("Couldn't save flag") }
-                        }
-                    } label: {
-                        Label(flagTitle(flag), systemImage: photo.flag == flag ? "checkmark" : "")
-                    }
-                }
-            } label: {
-                Label(flagTitle(photo.flag), systemImage: flagSymbol(photo.flag))
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                flagLabel
+                    .frame(width: 96, alignment: .leading)
+                flagMenu
+                Spacer(minLength: 0)
             }
-            .frame(minWidth: 44, minHeight: 44)
-            Spacer()
+
+            VStack(alignment: .leading, spacing: 4) {
+                flagLabel
+                flagMenu
+            }
         }
+    }
+
+    private var flagLabel: some View {
+        Text(L10n.t("Flag"))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var flagMenu: some View {
+        Menu {
+            ForEach(PhotoFlag.allCases, id: \.self) { flag in
+                Button {
+                    Task {
+                        let succeeded = await batchCoordinator.setFlag(flag, for: photo.id)
+                        if !succeeded { message = L10n.t("Couldn't save flag") }
+                    }
+                } label: {
+                    Label(flagTitle(flag), systemImage: photo.flag == flag ? "checkmark" : "")
+                }
+            }
+        } label: {
+            Label(flagTitle(photo.flag), systemImage: flagSymbol(photo.flag))
+        }
+        .frame(minWidth: 44, minHeight: 44)
     }
 
     private func saveKeywords() {
@@ -1651,6 +2092,8 @@ struct PadPresetPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            presetActionBar
+            Divider()
             searchBar
             Divider()
             scopePicker
@@ -1658,45 +2101,6 @@ struct PadPresetPanel: View {
             applyModePicker
             Divider()
             presetList
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    presetLibrary.favoritesOnly.toggle()
-                } label: {
-                    Image(systemName: presetLibrary.favoritesOnly ? "star.fill" : "star")
-                }
-                .accessibilityLabel(Text(L10n.t("Favorites only")))
-                .accessibilityAddTraits(presetLibrary.favoritesOnly ? .isSelected : [])
-
-                Button {
-                    isCreatingPreset = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel(Text(L10n.t("Create preset")))
-
-                Menu {
-                    Button {
-                        isImportingFiles = true
-                    } label: {
-                        Label(L10n.t("Import preset files"), systemImage: "square.and.arrow.down")
-                    }
-                    Button {
-                        isRestoringBackup = true
-                    } label: {
-                        Label(L10n.t("Restore backup"), systemImage: "arrow.counterclockwise")
-                    }
-                    Button {
-                        exportBackup()
-                    } label: {
-                        Label(L10n.t("Export backup"), systemImage: "archivebox")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel(Text(L10n.t("Preset actions")))
-            }
         }
         .task { await presetLibrary.load() }
         .onDisappear {
@@ -1768,6 +2172,76 @@ struct PadPresetPanel: View {
         }
     }
 
+    /// Keeps Preset actions attached to the page instead of relying on the
+    /// editor's root NavigationStack toolbar, whose many document actions can
+    /// collapse page-specific controls into an overflow menu on iPad.
+    private var presetActionBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                favoritesButton
+                createPresetButton
+                presetActionsMenu
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    favoritesButton
+                    createPresetButton
+                    presetActionsMenu
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+    }
+
+    private var favoritesButton: some View {
+        Button {
+            presetLibrary.favoritesOnly.toggle()
+        } label: {
+            Image(systemName: presetLibrary.favoritesOnly ? "star.fill" : "star")
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(Text(L10n.t("Favorites only")))
+        .accessibilityAddTraits(presetLibrary.favoritesOnly ? .isSelected : [])
+    }
+
+    private var createPresetButton: some View {
+        Button {
+            isCreatingPreset = true
+        } label: {
+            Image(systemName: "plus")
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(Text(L10n.t("Create preset")))
+    }
+
+    private var presetActionsMenu: some View {
+        Menu {
+            Button {
+                isImportingFiles = true
+            } label: {
+                Label(L10n.t("Import preset files"), systemImage: "square.and.arrow.down")
+            }
+            Button {
+                isRestoringBackup = true
+            } label: {
+                Label(L10n.t("Restore backup"), systemImage: "arrow.counterclockwise")
+            }
+            Button {
+                exportBackup()
+            } label: {
+                Label(L10n.t("Export backup"), systemImage: "archivebox")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(Text(L10n.t("Preset actions")))
+    }
+
     private var searchBar: some View {
         HStack {
             Image(systemName: "magnifyingglass")
@@ -1783,23 +2257,44 @@ struct PadPresetPanel: View {
     }
 
     private var scopePicker: some View {
-        Picker(L10n.t("Scope"), selection: $presetLibrary.scope) {
-            ForEach(PadPresetScope.allCases) { scope in
-                Text(L10n.t(scope.rawValue)).tag(scope)
+        ViewThatFits(in: .horizontal) {
+            Picker(L10n.t("Scope"), selection: $presetLibrary.scope) {
+                ForEach(PadPresetScope.allCases) { scope in
+                    Text(L10n.t(scope.rawValue)).tag(scope)
+                }
             }
+            .pickerStyle(.segmented)
+            .frame(minHeight: 44)
+
+            Picker(L10n.t("Scope"), selection: $presetLibrary.scope) {
+                ForEach(PadPresetScope.allCases) { scope in
+                    Text(L10n.t(scope.rawValue)).tag(scope)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(minHeight: 44, alignment: .leading)
         }
-        .pickerStyle(.segmented)
         .padding(.horizontal)
         .padding(.vertical, 6)
         .accessibilityLabel(Text(L10n.t("Preset scope")))
     }
 
     private var applyModePicker: some View {
-        Picker(L10n.t("Apply Mode"), selection: $applicationMode) {
-            Text(L10n.t("Merge")).tag(PresetApplicationMode.merge)
-            Text(L10n.t("Replace")).tag(PresetApplicationMode.replace)
+        ViewThatFits(in: .horizontal) {
+            Picker(L10n.t("Apply Mode"), selection: $applicationMode) {
+                Text(L10n.t("Merge")).tag(PresetApplicationMode.merge)
+                Text(L10n.t("Replace")).tag(PresetApplicationMode.replace)
+            }
+            .pickerStyle(.segmented)
+            .frame(minHeight: 44)
+
+            Picker(L10n.t("Apply Mode"), selection: $applicationMode) {
+                Text(L10n.t("Merge")).tag(PresetApplicationMode.merge)
+                Text(L10n.t("Replace")).tag(PresetApplicationMode.replace)
+            }
+            .pickerStyle(.menu)
+            .frame(minHeight: 44, alignment: .leading)
         }
-        .pickerStyle(.segmented)
         .padding(.horizontal)
         .padding(.vertical, 6)
         .accessibilityLabel(Text(L10n.t("Apply mode")))
@@ -1835,73 +2330,29 @@ struct PadPresetPanel: View {
 
     private func presetRow(_ preset: PresetDocument) -> some View {
         let isPreviewing = previewingPresetID == preset.id
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(preset.name)
-                    .font(.body)
-                if !preset.groupPath.isEmpty {
-                    Text(preset.groupPath.joined(separator: " › "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                presetSummary(preset)
+                Spacer(minLength: 8)
+                favoriteButton(for: preset)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Spacer(minLength: 0)
+                    presetApplyButton(preset, isPreviewing: isPreviewing)
+                    presetActionsMenu(for: preset)
                 }
-                if presetLibrary.isBuiltIn(preset) {
-                    Text(L10n.t("Built-In"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    presetApplyButton(preset, isPreviewing: isPreviewing)
+                    presetActionsMenu(for: preset)
                 }
             }
-            Spacer()
-            Button {
-                Task { await presetLibrary.toggleFavorite(preset) }
-            } label: {
-                Image(systemName: preset.isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(preset.isFavorite ? .yellow : .secondary)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .disabled(presetLibrary.isBuiltIn(preset))
-            .accessibilityLabel(Text(preset.isFavorite ? L10n.t("Remove favorite") : L10n.t("Add favorite")))
-            if isPreviewing {
-                Button(L10n.t("Apply")) {
-                    editor.commitPreset(preset, mode: applicationMode)
-                    previewingPresetID = nil
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityLabel(Text(L10n.t("Apply") + " " + preset.name))
-            }
-            Menu {
-                if !presetLibrary.isBuiltIn(preset) {
-                    Button {
-                        editingPreset = preset
-                    } label: {
-                        Label(L10n.t("Edit preset"), systemImage: "pencil")
-                    }
-                    Button(role: .destructive) {
-                        Task { await presetLibrary.delete(preset) }
-                    } label: {
-                        Label(L10n.t("Delete preset"), systemImage: "trash")
-                    }
-                }
-                Button {
-                    exportPreset(preset, as: .native)
-                } label: {
-                    Label(L10n.t("Export .lhpreset"), systemImage: "square.and.arrow.up")
-                }
-                Button {
-                    exportPreset(preset, as: .xmp)
-                } label: {
-                    Label(L10n.t("Export XMP"), systemImage: "doc.text")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 44, height: 44)
-            }
-            .menuOrder(.fixed)
-            .accessibilityLabel(Text(L10n.t("Preset actions")))
         }
         .padding(.horizontal)
-        .frame(minHeight: 52)
+        .padding(.vertical, 8)
+        .frame(minHeight: 76)
         .background(
             isPreviewing ? Color.accentColor.opacity(0.10) : Color.clear
         )
@@ -1924,6 +2375,88 @@ struct PadPresetPanel: View {
             ? L10n.t("Previewing. Tap again or use Apply button to commit.")
             : L10n.t("Tap to preview this preset.")))
         .accessibilityAddTraits(isPreviewing ? .isSelected : [])
+    }
+
+    private func presetSummary(_ preset: PresetDocument) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(preset.name)
+                .font(.body)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+            if !preset.groupPath.isEmpty {
+                Text(preset.groupPath.joined(separator: " › "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if presetLibrary.isBuiltIn(preset) {
+                Text(L10n.t("Built-In"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func favoriteButton(for preset: PresetDocument) -> some View {
+        Button {
+            Task { await presetLibrary.toggleFavorite(preset) }
+        } label: {
+            Image(systemName: preset.isFavorite ? "star.fill" : "star")
+                .foregroundStyle(preset.isFavorite ? .yellow : .secondary)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .disabled(presetLibrary.isBuiltIn(preset))
+        .accessibilityLabel(Text(preset.isFavorite ? L10n.t("Remove favorite") : L10n.t("Add favorite")))
+    }
+
+    @ViewBuilder
+    private func presetApplyButton(_ preset: PresetDocument, isPreviewing: Bool) -> some View {
+        if isPreviewing {
+            Button(L10n.t("Apply")) {
+                editor.commitPreset(preset, mode: applicationMode)
+                previewingPresetID = nil
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .frame(minHeight: 44)
+            .accessibilityLabel(Text(L10n.t("Apply") + " " + preset.name))
+        }
+    }
+
+    private func presetActionsMenu(for preset: PresetDocument) -> some View {
+        Menu {
+            if !presetLibrary.isBuiltIn(preset) {
+                Button {
+                    editingPreset = preset
+                } label: {
+                    Label(L10n.t("Edit preset"), systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    Task { await presetLibrary.delete(preset) }
+                } label: {
+                    Label(L10n.t("Delete preset"), systemImage: "trash")
+                }
+            }
+            Button {
+                exportPreset(preset, as: .native)
+            } label: {
+                Label(L10n.t("Export .lhpreset"), systemImage: "square.and.arrow.up")
+            }
+            Button {
+                exportPreset(preset, as: .xmp)
+            } label: {
+                Label(L10n.t("Export XMP"), systemImage: "doc.text")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 44, height: 44)
+        }
+        .menuOrder(.fixed)
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(Text(L10n.t("Preset actions")))
     }
 
     private enum ExportKind { case native, xmp }
@@ -2270,6 +2803,11 @@ private struct PadCropOverlayView: View {
     @ObservedObject private var editor: EditorSession
     let imageFrame: CGRect
 
+    /// The white corner dot stays visually small, but its transparent gesture
+    /// surface must meet the iPad touch-target minimum so crop handles remain
+    /// usable in portrait and Split View layouts.
+    private static let handleHitAreaSize: CGFloat = 44
+
     @State private var dragBaseCrop: NormalizedCropRect?
 
     init(editor: EditorSession, imageFrame: CGRect) {
@@ -2333,7 +2871,7 @@ private struct PadCropOverlayView: View {
                     .fill(Color.white)
                     .frame(width: 12, height: 12)
                     .shadow(radius: 1)
-                    .frame(width: 28, height: 28)
+                    .frame(width: Self.handleHitAreaSize, height: Self.handleHitAreaSize)
                     .contentShape(Circle())
                     .position(handlePosition(handle))
                     .gesture(dragGesture(for: handle))

@@ -169,14 +169,17 @@ public final class EditorSession: ObservableObject {
     /// hover can never clobber each other's preview state.
     private var previewedEyedropperAdjustments: PhotoAdjustments?
 
-    /// A tone-curve control-point drag/insert/delete applied via
-    /// `previewCurveEdit(_:)`, not yet committed. Same non-committing
-    /// contract as `previewedEyedropperAdjustments` -- `CurveAdjustmentPanel`
-    /// calls this on every drag tick so the render stays live, but only
-    /// `commitCurveEdit()` pushes an Undo entry, so a whole gesture
-    /// (however many ticks it reports) becomes exactly one Undo step
-    /// (visual polish spec §5.1: "拖曳控制點時...形成一筆可復原的 compound undo").
-    private var previewedCurveAdjustments: PhotoAdjustments?
+    /// A continuous-drag preview (slider tick, tone-curve control-point
+    /// drag/insert/delete, ...) applied via `previewContinuousEdit(_:)`, not
+    /// yet committed. Same non-committing contract as
+    /// `previewedEyedropperAdjustments` -- a caller invokes this on every
+    /// drag tick so the render stays live, but only `commitContinuousEdit()`
+    /// pushes an Undo entry, so a whole gesture (however many ticks it
+    /// reports) becomes exactly one Undo step (visual polish spec §5.1;
+    /// generalized by the 2026-09-14 inspector hierarchy/preview spec §5.6
+    /// from what was originally curve-only state under the name
+    /// `previewedCurveAdjustments`).
+    private var previewedContinuousAdjustments: PhotoAdjustments?
 
     /// What `previewPreset(_:mode:)` reported about the *currently previewed*
     /// preset -- e.g. a contextual leaf skipped for lack of a white-balance
@@ -268,7 +271,7 @@ public final class EditorSession: ObservableObject {
         if let comparisonSnapshot {
             return comparisonSnapshot.adjustments
         }
-        var adjustments = previewedEyedropperAdjustments ?? previewedCurveAdjustments ?? previewedPresetAdjustments ?? history.current
+        var adjustments = previewedEyedropperAdjustments ?? previewedContinuousAdjustments ?? previewedPresetAdjustments ?? history.current
         if toolMode == .crop {
             adjustments.geometry.crop = nil
         }
@@ -333,7 +336,7 @@ public final class EditorSession: ObservableObject {
         self.whiteBalanceBaseline = nil
         self.previewedPresetAdjustments = nil
         self.previewedEyedropperAdjustments = nil
-        self.previewedCurveAdjustments = nil
+        self.previewedContinuousAdjustments = nil
         self.presetPreviewDiagnostics = []
         self.previewRenderFailureMessage = nil
         self.previewIntentVersion += 1
@@ -370,7 +373,7 @@ public final class EditorSession: ObservableObject {
         whiteBalanceBaseline = nil
         previewedPresetAdjustments = nil
         previewedEyedropperAdjustments = nil
-        previewedCurveAdjustments = nil
+        previewedContinuousAdjustments = nil
         presetPreviewDiagnostics = []
         previewRenderFailureMessage = nil
         previewIntentVersion += 1
@@ -791,33 +794,61 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
-    /// Live tone-curve preview for a drag/insert/delete gesture on
-    /// `CurveAdjustmentPanel`. Mirrors `previewEyedropper(sample:)`: never
-    /// touches `history` by itself, so `CurveAdjustmentPanel` can call this
-    /// on every drag tick for a live render without filling the Undo stack
-    /// -- only `commitCurveEdit()` does that, once, at the end of the
-    /// gesture.
-    public func previewCurveEdit(_ transform: (inout PhotoAdjustments) -> Void) {
+    /// Live preview for one continuous-adjustment gesture (slider drag,
+    /// pointer drag, keyboard continuous adjustment, accessibility
+    /// adjustable action, or a tone-curve control-point drag/insert/delete).
+    /// Mirrors `previewEyedropper(sample:)`: never touches `history` by
+    /// itself, so a caller can invoke this on every drag tick for a live
+    /// render without filling the Undo stack -- only
+    /// `commitContinuousEdit()` does that, once, at the end of the gesture
+    /// (inspector hierarchy/preview spec §5.6: "one gesture, one edit").
+    public func previewContinuousEdit(_ transform: (inout PhotoAdjustments) -> Void) {
         guard photo != nil else { return }
         previewIntentVersion += 1
         var updated = history.current
         transform(&updated)
-        previewedCurveAdjustments = updated
+        previewedContinuousAdjustments = updated
         guard updated != history.current else { return }
         requestInteractivePreview()
     }
 
-    /// Commits the current tone-curve preview as one undoable step. A no-op
-    /// if nothing is being previewed, or if the gesture resolved to exactly
-    /// the current curve (`history.record` itself is the no-op guard, same
-    /// as every other edit path in this class).
-    public func commitCurveEdit() {
-        guard let previewed = previewedCurveAdjustments else { return }
-        previewedCurveAdjustments = nil
+    /// Commits the current continuous-adjustment preview as one undoable
+    /// step. A no-op if nothing is being previewed, or if the gesture
+    /// resolved to exactly the current value (`history.record` itself is
+    /// the no-op guard, same as every other edit path in this class).
+    public func commitContinuousEdit() {
+        guard let previewed = previewedContinuousAdjustments else { return }
+        previewedContinuousAdjustments = nil
         previewIntentVersion += 1
         previewImageReflectsAPreview = false
         guard history.record(previewed.clamped()) else { return }
         didChangeAdjustments()
+    }
+
+    /// Cancels the current continuous-adjustment preview, restoring the
+    /// display to the committed baseline without adding a history entry
+    /// (spec §5.6 "cancel"). Safe to call even if no preview is active.
+    public func cancelContinuousEdit() {
+        guard previewedContinuousAdjustments != nil else { return }
+        previewedContinuousAdjustments = nil
+        previewIntentVersion += 1
+        guard previewImageReflectsAPreview else { return }
+        previewImageReflectsAPreview = false
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// `CurveAdjustmentPanel`'s original entry points, kept as aliases over
+    /// the generalized lifecycle above (2026-09-14 inspector hierarchy/
+    /// preview spec §5.6) so existing call sites and tests keep compiling
+    /// and behaving identically -- both names share the same underlying
+    /// `previewedContinuousAdjustments` slot.
+    public func previewCurveEdit(_ transform: (inout PhotoAdjustments) -> Void) {
+        previewContinuousEdit(transform)
+    }
+
+    public func commitCurveEdit() {
+        commitContinuousEdit()
     }
 
     private func didChangeAdjustments() {
@@ -858,7 +889,7 @@ public final class EditorSession: ObservableObject {
         // whatever `previewedPresetAdjustments`/`previewedEyedropperAdjustments`/
         // `previewIntentVersion` are *right now* is the truth for this
         // submission).
-        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil || previewedCurveAdjustments != nil
+        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil || previewedContinuousAdjustments != nil
         let intentVersion = previewIntentVersion
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),

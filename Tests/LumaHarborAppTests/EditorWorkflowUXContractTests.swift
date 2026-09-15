@@ -252,6 +252,23 @@ final class EditorWorkflowUXContractTests: XCTestCase {
         )
     }
 
+    func testPadCompareMenuUsesLocalizedVisibleModeNames() throws {
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+
+        XCTAssertTrue(source.contains(#"Label(L10n.t("Compare Mode")"#))
+        XCTAssertTrue(source.contains(#"L10n.t("Single View")"#))
+        XCTAssertTrue(source.contains(#"L10n.t("Side by Side")"#))
+        XCTAssertTrue(source.contains(#"L10n.t("Wipe")"#))
+        XCTAssertFalse(
+            source.contains(#"L10n.t("Single view")"#),
+            "the iPad menu must use the shared localization key casing"
+        )
+        XCTAssertFalse(
+            source.contains(#"L10n.t("Side by side")"#),
+            "the iPad menu must use the shared localization key casing"
+        )
+    }
+
     func testEditorSessionExposesCompareModeAndClampedWipePosition() throws {
         let source = try Self.loadSource("Sources/EditorCore/EditorSession.swift")
 
@@ -350,6 +367,19 @@ final class EditorWorkflowUXContractTests: XCTestCase {
         XCTAssertTrue(
             source.contains("WorkspaceLayoutState.clampedInspectorWidth("),
             "both the drag-to-resize handle and any direct-entry control (e.g. a slider) must clamp through the shared policy, not duplicate 280...420 inline"
+        )
+    }
+
+    func testMacInspectorResizeHandleHasAVisibleDirectionalSignpost() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/Views/RootView.swift")
+
+        XCTAssertTrue(
+            source.contains(#"Image(systemName: "arrow.left.and.right")"#),
+            "the resize handle needs a visible directional cue instead of relying on hover alone"
+        )
+        XCTAssertTrue(
+            source.contains(".frame(width: 20)"),
+            "the resize handle needs a wider, discoverable hit area than the divider itself"
         )
     }
 

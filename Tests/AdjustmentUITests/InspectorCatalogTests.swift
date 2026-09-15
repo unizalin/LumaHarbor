@@ -131,6 +131,24 @@ final class InspectorCatalogTests: XCTestCase {
         XCTAssertEqual(reset.hsl.red.hue, 30, "hsl must be untouched by a basic reset")
     }
 
+    func testResettingAVisualSectionGroupClearsEveryOwnedSectionAndNothingElse() {
+        var adjustments = PhotoAdjustments()
+        adjustments.exposure = 1.25
+        adjustments.temperature = 4_000
+        adjustments.tint = 18
+        adjustments.hsl.red.hue = 30
+        adjustments.hsl.blue.saturation = -20
+        adjustments.colorGrading.balance = 12
+
+        let reset = InspectorCatalog.resetting([.whiteBalance, .hsl], in: adjustments)
+
+        XCTAssertEqual(reset.temperature, PhotoAdjustments().temperature)
+        XCTAssertEqual(reset.tint, PhotoAdjustments().tint)
+        XCTAssertEqual(reset.hsl, .neutral)
+        XCTAssertEqual(reset.exposure, 1.25, "a Color group reset must not clear Basic")
+        XCTAssertEqual(reset.colorGrading.balance, 12, "a Color group reset must not clear Color Grading")
+    }
+
     func testResettingCurveOnlyTouchesCurve() {
         var adjustments = PhotoAdjustments()
         adjustments.exposure = 1.0
@@ -229,6 +247,7 @@ final class InspectorCatalogTests: XCTestCase {
     func testIsNeutralTrueForFreshAdjustments() {
         XCTAssertTrue(InspectorCatalog.isNeutral(.basic, in: PhotoAdjustments()))
         XCTAssertTrue(InspectorCatalog.isNeutral(domain: .adjust, in: PhotoAdjustments()))
+        XCTAssertTrue(InspectorCatalog.isNeutral([.whiteBalance, .hsl], in: PhotoAdjustments()))
     }
 
     func testIsNeutralFalseAfterEditingASectionField() {
