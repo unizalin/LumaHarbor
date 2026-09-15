@@ -75,14 +75,15 @@ struct PadInspectorHost: View {
             let itemWidth = max(44, availableWidth / CGFloat(Self.domainBarItems.count))
 
             HStack(spacing: spacing) {
-                ForEach(Self.domainBarItems) { item in
+                ForEach(Self.domainBarItems, id: \.id) { item in
                     let isSelected = inspector.activeDomain == item.id
                     Button {
                         inspector.selectDomain(item.id)
                     } label: {
                         Image(systemName: item.symbol)
                             .imageScale(.medium)
-                            .frame(width: itemWidth, minHeight: 44)
+                            .frame(width: itemWidth)
+                            .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)

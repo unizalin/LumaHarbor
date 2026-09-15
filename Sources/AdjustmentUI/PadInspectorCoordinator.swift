@@ -3,7 +3,7 @@ import Foundation
 /// The five mutually-exclusive editor domains that the Studio Rails tool rail
 /// exposes. Switching domain is pure presentation state — it never creates an
 /// undo entry, triggers autosave, or re-decodes RAW.
-public enum PadInspectorDomain: String, CaseIterable, Equatable, Sendable {
+public enum PadInspectorDomain: String, CaseIterable, Equatable, Hashable, Sendable {
     case adjust
     case preset
     case geometry

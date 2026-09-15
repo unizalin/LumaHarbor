@@ -59,6 +59,10 @@ struct PadEditorView: View {
     /// `.sheet(isPresented: .constant(true))`. See `updateDrawerPresentation`.
     @State private var isDrawerPresented = false
 
+    /// Tracks the previous width-driven host so entering Compact/Standard can
+    /// start dismissed without overriding an explicit reopen of the sheet.
+    @State private var lastInspectorPresentation: PadInspectorPresentation?
+
     /// The most recent size `GeometryReader` reported. Kept as `@State`
     /// (rather than threaded through every computed property that needs
     /// it) so gesture callbacks — which run outside `body`'s own
@@ -127,11 +131,11 @@ struct PadEditorView: View {
                 }
                 .onAppear {
                     availableSize = proxy.size
-                    updateDrawerPresentation()
+                    updateDrawerPresentation(for: proxy.size)
                 }
                 .onChange(of: proxy.size) { _, newSize in
                     availableSize = newSize
-                    updateDrawerPresentation()
+                    updateDrawerPresentation(for: newSize)
                     reclampFloatingPanelOffset()
                 }
                 .onChange(of: workspaceState.workspaceMode) { _, _ in
@@ -294,11 +298,19 @@ struct PadEditorView: View {
         updateDrawerPresentation()
     }
 
-    private func updateDrawerPresentation() {
+    private func updateDrawerPresentation(for size: CGSize? = nil) {
+        let effectiveSize = size ?? availableSize
         let inspectorPresentation = PadEditorLayoutPolicy.presentation(
-            forWidth: availableSize.width,
-            height: availableSize.height
+            forWidth: effectiveSize.width,
+            height: effectiveSize.height
         )
+        if PadBottomDrawerPolicy.shouldCollapseInspector(
+            previousPresentation: lastInspectorPresentation,
+            currentPresentation: inspectorPresentation
+        ) {
+            inspector.isInspectorVisible = false
+        }
+        lastInspectorPresentation = inspectorPresentation
         let target = PadBottomDrawerPolicy.presentation(
             mode: workspaceState.workspaceMode,
             inspectorPresentation: inspectorPresentation,
@@ -1103,14 +1115,15 @@ private struct PadInspectorHost: View {
             let itemWidth = max(44, availableWidth / CGFloat(Self.domainBarItems.count))
 
             HStack(spacing: spacing) {
-                ForEach(Self.domainBarItems) { item in
+                ForEach(Self.domainBarItems, id: \.id) { item in
                     let isSelected = inspector.activeDomain == item.id
                     Button {
                         inspector.selectDomain(item.id)
                     } label: {
                         Image(systemName: item.symbol)
                             .imageScale(.medium)
-                            .frame(width: itemWidth, minHeight: 44)
+                            .frame(width: itemWidth)
+                            .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)

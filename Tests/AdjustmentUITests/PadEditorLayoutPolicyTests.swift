@@ -317,6 +317,33 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         )
     }
 
+    func testEnteringBottomDrawerCollapsesInspectorOnlyOncePerTransition() {
+        XCTAssertTrue(
+            PadBottomDrawerPolicy.shouldCollapseInspector(
+                previousPresentation: nil,
+                currentPresentation: .bottomDrawer
+            )
+        )
+        XCTAssertTrue(
+            PadBottomDrawerPolicy.shouldCollapseInspector(
+                previousPresentation: .trailingDock,
+                currentPresentation: .bottomDrawer
+            )
+        )
+        XCTAssertFalse(
+            PadBottomDrawerPolicy.shouldCollapseInspector(
+                previousPresentation: .bottomDrawer,
+                currentPresentation: .bottomDrawer
+            )
+        )
+        XCTAssertFalse(
+            PadBottomDrawerPolicy.shouldCollapseInspector(
+                previousPresentation: .trailingDock,
+                currentPresentation: .trailingDock
+            )
+        )
+    }
+
     // MARK: - PadFloatingPanelLayout.clampedOffset (Codex round-2 review)
 
     private let sampleAvailableSize = CGSize(width: 1_180, height: 820)

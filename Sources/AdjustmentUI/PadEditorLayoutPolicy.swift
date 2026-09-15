@@ -6,8 +6,8 @@ import Foundation
 public enum PadInspectorPresentation: String, Equatable, Sendable {
     /// A persistent 320pt panel trailing the canvas, side by side.
     case trailingDock
-    /// A bottom sheet the user can drag between a collapsed peek, medium,
-    /// and large detent, over the canvas.
+    /// A bottom sheet the user can drag between medium and large detents,
+    /// or dismiss completely, over the canvas.
     case bottomDrawer
     /// A detached, draggable floating panel — activated in focus mode so the
     /// canvas can fill the available space while the inspector stays reachable.
@@ -237,6 +237,16 @@ public enum PadBottomDrawerPolicy {
         isInspectorVisible: Bool
     ) -> Bool {
         mode == .work && inspectorPresentation == .bottomDrawer && !isInspectorVisible
+    }
+
+    /// Returns whether entering a compact/standard presentation should start
+    /// with the inspector hidden. This is intentionally transition-based so
+    /// an explicitly reopened drawer stays open across its own state updates.
+    public static func shouldCollapseInspector(
+        previousPresentation: PadInspectorPresentation?,
+        currentPresentation: PadInspectorPresentation
+    ) -> Bool {
+        currentPresentation == .bottomDrawer && previousPresentation != .bottomDrawer
     }
 }
 
