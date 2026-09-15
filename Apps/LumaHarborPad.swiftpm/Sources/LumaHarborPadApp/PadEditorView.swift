@@ -811,9 +811,13 @@ struct PadEditorView: View {
 
     private var bottomDrawerPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 16) {
-                saveStatusIndicator
-                undoRedoControls
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
+                    saveStatusIndicator
+                    undoRedoControls
+                }
+                Spacer(minLength: 0)
+                bottomDrawerDismissButton
             }
             .padding()
             Divider()
@@ -826,6 +830,20 @@ struct PadEditorView: View {
                 showsDomainBar: true
             )
         }
+    }
+
+    private var bottomDrawerDismissButton: some View {
+        Button {
+            setInspectorVisible(false)
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .imageScale(.large)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.primary)
+        .accessibilityLabel(Text(L10n.t("Hide Inspector")))
+        .accessibilityHint(Text(L10n.t("Show, hide, or resize workspace panels")))
     }
 
     // MARK: - Focus mode: floating panel
@@ -1123,13 +1141,19 @@ private struct PadInspectorHost: View {
                     Button {
                         inspector.selectDomain(item.id)
                     } label: {
-                        Image(systemName: item.symbol)
-                            .imageScale(.medium)
+                        VStack(spacing: 2) {
+                            Image(systemName: item.symbol)
+                                .imageScale(.medium)
+                            Text(L10n.t(item.labelKey))
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
                             .frame(width: itemWidth)
                             .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                     .background(
                         isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)

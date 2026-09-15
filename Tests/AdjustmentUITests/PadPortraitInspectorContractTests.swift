@@ -62,6 +62,27 @@ final class PadPortraitInspectorContractTests: XCTestCase {
         )
     }
 
+    func testCompactDomainLabelsUseVisibleInactiveTextColor() throws {
+        for name in ["PadEditorView.swift", "PadInspectorHost.swift"] {
+            let source = try Self.load(name)
+            XCTAssertTrue(
+                source.contains("VStack(spacing: 2)") &&
+                    source.contains("Text(L10n.t(item.labelKey))"),
+                "\(name) must render the domain label in the compact bar"
+            )
+            XCTAssertTrue(
+                source.contains("isSelected ? Color.accentColor : Color.primary"),
+                "\(name) must keep inactive domain text readable on dark material"
+            )
+        }
+    }
+
+    func testBottomDrawerHasAnExplicitDismissButton() throws {
+        let source = try Self.load("PadEditorView.swift")
+        XCTAssertTrue(source.contains("xmark.circle.fill"))
+        XCTAssertTrue(source.contains("setInspectorVisible(false)"))
+    }
+
     func testInlineHostHasAllFiveDomainEntries() throws {
         let source = try Self.load("PadEditorView.swift")
         for key in [".adjust", ".preset", ".geometry", ".local", ".info"] {

@@ -80,13 +80,19 @@ struct PadInspectorHost: View {
                     Button {
                         inspector.selectDomain(item.id)
                     } label: {
-                        Image(systemName: item.symbol)
-                            .imageScale(.medium)
+                        VStack(spacing: 2) {
+                            Image(systemName: item.symbol)
+                                .imageScale(.medium)
+                            Text(L10n.t(item.labelKey))
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
                             .frame(width: itemWidth)
                             .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
                     .background(
                         isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)
