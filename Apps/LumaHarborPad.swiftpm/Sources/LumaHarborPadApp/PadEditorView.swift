@@ -151,7 +151,7 @@ struct PadEditorView: View {
                 .sheet(isPresented: $isDrawerPresented, onDismiss: handleDrawerDismissal) {
                     bottomDrawerPanel
                         .presentationDetents([.height(PadBottomDrawerMetrics.peekHeight), .medium, .large])
-                        .presentationDragIndicator(.visible)
+                        .presentationDragIndicator(.hidden)
                         .presentationCornerRadius(PadBottomDrawerMetrics.cornerRadius)
                         .presentationBackground(.thickMaterial)
                         .presentationContentInteraction(.scrolls)
@@ -332,11 +332,6 @@ struct PadEditorView: View {
         isDrawerDismissedByUser = true
     }
 
-    private func dismissBottomDrawer() {
-        isDrawerDismissedByUser = true
-        isDrawerPresented = false
-    }
-
     private func presentBottomDrawer() {
         isInspectorMinimized = false
         isDrawerDismissedByUser = false
@@ -374,6 +369,20 @@ struct PadEditorView: View {
         isInspectorMinimized = false
         isDrawerDismissedByUser = false
         workspaceState.workspaceMode = .focus
+    }
+
+    private func commitFloatingPanelDrag(with translation: CGSize) {
+        let proposed = CGSize(
+            width: workspaceState.floatingPanelOffset.width + translation.width,
+            height: workspaceState.floatingPanelOffset.height + translation.height
+        )
+        workspaceState.floatingPanelOffset = PadFloatingPanelLayout.clampedOffset(
+            proposedOffset: proposed,
+            panelOrigin: Self.floatingPanelDefaultOrigin,
+            panelSize: floatingPanelMeasuredSize,
+            availableSize: availableSize,
+            minimumVisibleEdge: Self.floatingPanelMinimumVisibleEdge
+        )
     }
 
     // MARK: - Work / focus toggle
@@ -966,25 +975,7 @@ struct PadEditorView: View {
 
     private var bottomDrawerPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .center, spacing: 12) {
-                    saveStatusIndicator
-                    Spacer(minLength: 8)
-                    bottomDrawerDragHandle
-                    inspectorMinimizeButton
-                    Button {
-                        dismissBottomDrawer()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text(L10n.t("Close")))
-                    .help(Text(L10n.t("Close")))
-                }
-                undoRedoControls
-            }
-            .padding()
+            inspectorPanelHeader
             Divider()
             PadInspectorHost(
                 inspector: inspector,
@@ -1002,15 +993,7 @@ struct PadEditorView: View {
 
     private func floatingPanel(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    floatingPanelHeader
-                    inspectorMinimizeButton
-                }
-                saveStatusIndicator
-                undoRedoControls
-            }
-            .padding()
+            inspectorPanelHeader
             Divider()
             PadInspectorHost(
                 inspector: inspector,
@@ -1044,12 +1027,21 @@ struct PadEditorView: View {
         }
     }
 
-    /// A dedicated drag handle, not the whole panel — the panel also
-    /// contains `Slider`s (via `BasicAdjustmentPanel`), and a drag
-    /// gesture covering the entire panel would fight their own drag
-    /// gestures instead of letting them work.
-    private var floatingPanelHeader: some View {
-        HStack {
+    /// One header is shared by the bottom sheet and the floating panel so a
+    /// small detent does not introduce a second, clipped control hierarchy.
+    /// Only this handle owns the drag gesture; sliders and the rest of the
+    /// Inspector remain free to receive their own gestures.
+    private var inspectorPanelHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            inspectorPanelDragHandle
+            saveStatusIndicator
+            undoRedoControls
+        }
+        .padding()
+    }
+
+    private var inspectorPanelDragHandle: some View {
+        HStack(spacing: 12) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -1067,43 +1059,21 @@ struct PadEditorView: View {
         .accessibilityLabel(Text(L10n.t("Adjustments")))
         .accessibilityHint(Text(L10n.t("Drag to move this panel.")))
         .gesture(
-            DragGesture()
+            DragGesture(minimumDistance: 8)
                 .updating($floatingPanelDragTranslation) { value, state, _ in
-                    state = value.translation
+                    if workspaceState.workspaceMode == .focus {
+                        state = value.translation
+                    }
                 }
                 .onEnded { value in
-                    let proposed = CGSize(
-                        width: workspaceState.floatingPanelOffset.width + value.translation.width,
-                        height: workspaceState.floatingPanelOffset.height + value.translation.height
-                    )
-                    workspaceState.floatingPanelOffset = PadFloatingPanelLayout.clampedOffset(
-                        proposedOffset: proposed,
-                        panelOrigin: Self.floatingPanelDefaultOrigin,
-                        panelSize: floatingPanelMeasuredSize,
-                        availableSize: availableSize,
-                        minimumVisibleEdge: Self.floatingPanelMinimumVisibleEdge
-                    )
+                    switch workspaceState.workspaceMode {
+                    case .work:
+                        moveDrawerToFocus(with: value.translation)
+                    case .focus:
+                        commitFloatingPanelDrag(with: value.translation)
+                    }
                 }
         )
-    }
-
-    /// The drawer uses the same direct manipulation model as the floating
-    /// panel. Dragging this handle moves the existing Inspector into Focus
-    /// mode; there is no second "floating panel" mode button to discover.
-    private var bottomDrawerDragHandle: some View {
-        Image(systemName: "line.3.horizontal")
-            .foregroundStyle(.secondary)
-            .frame(width: 44, height: 44)
-            .contentShape(Rectangle())
-            .accessibilityLabel(Text(L10n.t("Adjustments")))
-            .accessibilityHint(Text(L10n.t("Drag to move this panel.")))
-            .help(Text(L10n.t("Drag to move this panel.")))
-            .gesture(
-                DragGesture(minimumDistance: 8)
-                    .onEnded { value in
-                        moveDrawerToFocus(with: value.translation)
-                    }
-            )
     }
 
     private var inspectorMinimizeButton: some View {

@@ -31,17 +31,29 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
     func testBottomDrawerUsesAReadableMaterialSurfaceAndScrollableDetents() throws {
         let source = try Self.padEditorViewSource()
         XCTAssertTrue(source.contains(".presentationDetents([.height(PadBottomDrawerMetrics.peekHeight), .medium, .large])"))
+        XCTAssertTrue(source.contains(".presentationDragIndicator(.hidden)"))
         XCTAssertTrue(source.contains(".presentationCornerRadius(PadBottomDrawerMetrics.cornerRadius)"))
         XCTAssertTrue(source.contains(".presentationBackground(.thickMaterial)"))
         XCTAssertTrue(source.contains(".presentationContentInteraction(.scrolls)"))
     }
 
+    func testDrawerAndFloatingInspectorShareOneHeaderComposition() throws {
+        let source = try Self.padEditorViewSource()
+        XCTAssertTrue(source.contains("private var inspectorPanelHeader: some View"))
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: "inspectorPanelHeader").count - 1,
+            3,
+            "the bottom drawer and floating panel must render the same Inspector header"
+        )
+        XCTAssertFalse(source.contains("private var bottomDrawerDragHandle"))
+        XCTAssertFalse(source.contains("private var floatingPanelHeader"))
+    }
+
     func testBottomDrawerOffersDismissAndMoveToFocusActions() throws {
         let source = try Self.padEditorViewSource()
         XCTAssertTrue(source.contains("isDrawerDismissedByUser"))
-        XCTAssertTrue(source.contains("dismissBottomDrawer()"))
         XCTAssertTrue(source.contains("moveDrawerToFocus(with:"))
-        XCTAssertTrue(source.contains("bottomDrawerDragHandle"), "the drawer should float through its existing drag handle")
+        XCTAssertTrue(source.contains("inspectorPanelDragHandle"), "the drawer should float through its unified panel handle")
         XCTAssertTrue(source.contains("DragGesture(minimumDistance: 8)"))
         XCTAssertTrue(source.contains(#"L10n.t("Drag to move this panel.")"#), "the drawer must expose the drag affordance in visible or accessibility text")
         XCTAssertFalse(source.contains(#"L10n.t("Floating Panel")"#), "floating should not require a separate mode button")

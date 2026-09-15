@@ -309,9 +309,10 @@ public enum PadBottomDrawerPolicy {
 /// the view makes the portrait presentation easy to verify without a live
 /// sheet and prevents the surface treatment from drifting between hosts.
 public enum PadBottomDrawerMetrics {
-    /// The initial peek keeps the grabber and the first controls reachable
-    /// while leaving the photo visible behind the drawer.
-    public static let peekHeight: CGFloat = 220
+    /// The initial peek keeps the unified Inspector header and domain bar
+    /// entirely inside the sheet. A smaller detent would clip the save row or
+    /// place it beneath the system drag indicator on portrait iPad.
+    public static let peekHeight: CGFloat = 280
 
     /// A slightly softened corner keeps the drawer distinct from the canvas
     /// without turning it into a floating card.

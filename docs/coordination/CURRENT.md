@@ -4,6 +4,13 @@ Updated: 2026-09-15
 
 Updated by: Codex（完成 iPad 直／橫向 Inspector rail、窄寬度分頁列、整列導航命中區與 Geometry／Histogram／Info 自適應版面；保留既有 18/16pt 階層、44pt hit target 與調整邏輯）
 
+## Inspector 底部／浮動外觀統一（2026-09-15, Codex）
+
+- **修正**：底部抽屜與浮動 Inspector 共用同一個標題列與內容順序：拖曳把手、調整標題、縮小入口、儲存狀態、Undo／Redo，再接 Inspector 分頁；不再維護兩套容易漂移的外觀。
+- **小高度**：底部抽屜隱藏系統重複拖曳指示器，最小 peek 高度調整為 280pt，確保標題列與分頁列不被裁切或壓到安全區；滑桿與調整值資料流程不變。
+- **驗證**：共用標題列契約與 Inspector／Editor UX 測試 78/78 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **限制**：仍需在實體 iPad 以小高度、浮動拖曳、直／橫向實際確認視覺與手勢；本輪未執行 merge、rebase 或 force-push。
+
 ## Inspector 面板可發現性再調整（2026-09-15, Codex）
 
 - **問題**：iPad 底部抽屜原本只有無文字的左右箭頭拖曳區，且旁邊另有相同目的的 Focus 圖示；使用者需要猜手勢才能知道面板可移動。macOS Inspector 寬度分隔線也主要依賴 hover 才顯示可拖曳狀態。
