@@ -566,6 +566,7 @@
 "Workspace" = "Espacio de trabajo";
 "Show Sidebar" = "Mostrar barra lateral";
 "Show Inspector" = "Mostrar inspector";
+"Hide Inspector" = "Ocultar inspector";
 "Show Filmstrip" = "Mostrar tira de película";
 "Distraction-Free Mode" = "Modo sin distracciones";
 "Inspector Width" = "Ancho del inspector";

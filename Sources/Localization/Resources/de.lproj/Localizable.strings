@@ -566,6 +566,7 @@
 "Workspace" = "Arbeitsbereich";
 "Show Sidebar" = "Seitenleiste einblenden";
 "Show Inspector" = "Inspektor einblenden";
+"Hide Inspector" = "Inspektor ausblenden";
 "Show Filmstrip" = "Filmstreifen einblenden";
 "Distraction-Free Mode" = "Ablenkungsfreier Modus";
 "Inspector Width" = "Inspektorbreite";

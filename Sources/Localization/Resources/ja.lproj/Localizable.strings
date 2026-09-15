@@ -566,6 +566,7 @@
 "Workspace" = "ワークスペース";
 "Show Sidebar" = "サイドバーを表示";
 "Show Inspector" = "インスペクタを表示";
+"Hide Inspector" = "インスペクタを非表示";
 "Show Filmstrip" = "フィルムストリップを表示";
 "Distraction-Free Mode" = "集中モード";
 "Inspector Width" = "インスペクタの幅";

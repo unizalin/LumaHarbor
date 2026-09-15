@@ -566,6 +566,7 @@
 "Workspace" = "Workspace";
 "Show Sidebar" = "Show Sidebar";
 "Show Inspector" = "Show Inspector";
+"Hide Inspector" = "Hide Inspector";
 "Show Filmstrip" = "Show Filmstrip";
 "Distraction-Free Mode" = "Distraction-Free Mode";
 "Inspector Width" = "Inspector Width";

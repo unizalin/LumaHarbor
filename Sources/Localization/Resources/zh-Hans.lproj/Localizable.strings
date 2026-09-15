@@ -566,6 +566,7 @@
 "Workspace" = "工作区";
 "Show Sidebar" = "显示侧边栏";
 "Show Inspector" = "显示检查器";
+"Hide Inspector" = "隐藏检查器";
 "Show Filmstrip" = "显示缩略图条";
 "Distraction-Free Mode" = "无干扰模式";
 "Inspector Width" = "检查器宽度";

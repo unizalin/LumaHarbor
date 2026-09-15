@@ -566,6 +566,7 @@
 "Workspace" = "工作區";
 "Show Sidebar" = "顯示側邊欄";
 "Show Inspector" = "顯示檢閱器";
+"Hide Inspector" = "隱藏檢閱器";
 "Show Filmstrip" = "顯示縮圖列";
 "Distraction-Free Mode" = "無干擾模式";
 "Inspector Width" = "檢閱器寬度";

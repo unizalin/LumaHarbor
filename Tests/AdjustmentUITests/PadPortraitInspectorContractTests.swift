@@ -29,6 +29,23 @@ final class PadPortraitInspectorContractTests: XCTestCase {
         }
     }
 
+    func testEditorExposesBothInspectorEntrypointsAndDismissibleSheet() throws {
+        let source = try Self.load("PadEditorView.swift")
+        XCTAssertTrue(source.contains("inspectorLauncher"))
+        XCTAssertTrue(source.contains("inspectorToggle"))
+        XCTAssertTrue(source.contains("L10n.t(\"Show Inspector\")"))
+        XCTAssertTrue(source.contains("interactiveDismissDisabled(false)"))
+        XCTAssertTrue(source.contains("PadBottomDrawerPolicy.shouldShowLauncher"))
+        XCTAssertTrue(source.contains("overlay(alignment: .trailing)"))
+    }
+
+    func testInspectorLauncherUsesA44PointCircularHitTarget() throws {
+        let source = try Self.load("PadEditorView.swift")
+        XCTAssertTrue(source.contains("frame(width: 44, height: 44)"))
+        XCTAssertTrue(source.contains("Circle()"))
+        XCTAssertTrue(source.contains("Show, hide, or resize workspace panels"))
+    }
+
     func testInlineHostHasAllFiveDomainEntries() throws {
         let source = try Self.load("PadEditorView.swift")
         for key in [".adjust", ".preset", ".geometry", ".local", ".info"] {

@@ -566,6 +566,7 @@
 "Workspace" = "작업 공간";
 "Show Sidebar" = "사이드바 표시";
 "Show Inspector" = "인스펙터 표시";
+"Hide Inspector" = "인스펙터 숨기기";
 "Show Filmstrip" = "필름스트립 표시";
 "Distraction-Free Mode" = "집중 모드";
 "Inspector Width" = "인스펙터 너비";

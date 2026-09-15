@@ -120,14 +120,9 @@ struct PadEditorView: View {
             workspaceContent
                 .sheet(isPresented: $isDrawerPresented) {
                     bottomDrawerPanel
-                        .presentationDetents([.height(220), .medium, .large])
+                        .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
-                        // A drawer that could be swiped away entirely would
-                        // leave the user with no way back to the controls
-                        // short of resizing/rotating the window again —
-                        // resizing between the three detents above is
-                        // still fully interactive.
-                        .interactiveDismissDisabled(true)
+                        .interactiveDismissDisabled(false)
                         .presentationBackgroundInteraction(.enabled)
                 }
                 .onAppear {
@@ -142,6 +137,17 @@ struct PadEditorView: View {
                 .onChange(of: workspaceState.workspaceMode) { _, _ in
                     updateDrawerPresentation()
                 }
+                .onChange(of: inspector.isInspectorVisible) { _, _ in
+                    updateDrawerPresentation()
+                }
+                .onChange(of: isDrawerPresented) { _, presented in
+                    // A user swipe-down dismisses the sheet by changing its
+                    // binding. Do not clear visibility when a width/mode
+                    // transition dismisses it for a different presentation.
+                    if isBottomDrawerPresentation && !presented && inspector.isInspectorVisible {
+                        inspector.isInspectorVisible = false
+                    }
+                }
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -149,6 +155,9 @@ struct PadEditorView: View {
                     Task { await model.closeCurrentDocument() }
                 }
                 .disabled(model.isPreparingDocument)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                inspectorToggle
             }
             ToolbarItem(placement: .primaryAction) {
                 workspaceModeToggle
@@ -258,16 +267,57 @@ struct PadEditorView: View {
     // MARK: - Drawer presentation
 
     /// The single place `isDrawerPresented` is ever written — always
-    /// derived from `PadBottomDrawerPolicy`, from the two facts it needs
-    /// (current mode, current inspector presentation for `availableSize`).
+    /// derived from `PadBottomDrawerPolicy`, from the current mode,
+    /// inspector presentation, and explicit inspector visibility.
     /// Called whenever either of those can have changed: mode toggling,
     /// and `availableSize` changing (resize/rotation/Split View).
+    private var isBottomDrawerPresentation: Bool {
+        PadEditorLayoutPolicy.presentation(
+            forWidth: availableSize.width,
+            height: availableSize.height
+        ) == .bottomDrawer
+    }
+
+    private var shouldShowInspectorLauncher: Bool {
+        PadBottomDrawerPolicy.shouldShowLauncher(
+            mode: workspaceState.workspaceMode,
+            inspectorPresentation: PadEditorLayoutPolicy.presentation(
+                forWidth: availableSize.width,
+                height: availableSize.height
+            ),
+            isInspectorVisible: inspector.isInspectorVisible
+        )
+    }
+
+    private func setInspectorVisible(_ visible: Bool) {
+        inspector.isInspectorVisible = visible
+        updateDrawerPresentation()
+    }
+
     private func updateDrawerPresentation() {
-        let inspectorPresentation = PadEditorLayoutPolicy.presentation(forWidth: availableSize.width, height: availableSize.height)
-        let target = PadBottomDrawerPolicy.presentation(mode: workspaceState.workspaceMode, inspectorPresentation: inspectorPresentation) == .presented
+        let inspectorPresentation = PadEditorLayoutPolicy.presentation(
+            forWidth: availableSize.width,
+            height: availableSize.height
+        )
+        let target = PadBottomDrawerPolicy.presentation(
+            mode: workspaceState.workspaceMode,
+            inspectorPresentation: inspectorPresentation,
+            isInspectorVisible: inspector.isInspectorVisible
+        ) == .presented
         if isDrawerPresented != target {
             isDrawerPresented = target
         }
+    }
+
+    private var inspectorToggle: some View {
+        Button {
+            setInspectorVisible(!inspector.isInspectorVisible)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+        }
+        .disabled(!isBottomDrawerPresentation)
+        .accessibilityLabel(Text(L10n.t(inspector.isInspectorVisible ? "Hide Inspector" : "Show Inspector")))
+        .accessibilityHint(Text(L10n.t("Show, hide, or resize workspace panels")))
     }
 
     // MARK: - Work / focus toggle
@@ -494,6 +544,26 @@ struct PadEditorView: View {
                 )
             }
         }
+        .overlay(alignment: .trailing) {
+            if shouldShowInspectorLauncher {
+                inspectorLauncher
+                    .padding(.trailing, 12)
+            }
+        }
+    }
+
+    private var inspectorLauncher: some View {
+        Button {
+            setInspectorVisible(true)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(L10n.t("Show Inspector")))
+        .accessibilityHint(Text(L10n.t("Show, hide, or resize workspace panels")))
     }
 
     private var shouldShowFilmstrip: Bool {
