@@ -20,14 +20,18 @@ public struct GeometryAdjustmentPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            DisclosureGroup(L10n.t("Rotate & Flip")) {
-                HStack(spacing: 16) {
+            Level2DisclosureGroup(L10n.t("Rotate & Flip")) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 96), spacing: 8)],
+                    spacing: 8
+                ) {
                     Button {
                         editor.updateAdjustments { $0.geometry = $0.geometry.rotatedCounterclockwise() }
                     } label: {
                         Label(L10n.t("Rotate Left"), systemImage: "rotate.left")
                     }
                     .help(L10n.t("Rotate Left"))
+                    .frame(maxWidth: .infinity, minHeight: 44)
 
                     Button {
                         editor.updateAdjustments { $0.geometry = $0.geometry.rotatedClockwise() }
@@ -35,6 +39,7 @@ public struct GeometryAdjustmentPanel: View {
                         Label(L10n.t("Rotate Right"), systemImage: "rotate.right")
                     }
                     .help(L10n.t("Rotate Right"))
+                    .frame(maxWidth: .infinity, minHeight: 44)
 
                     Button {
                         editor.updateAdjustments { $0.geometry = $0.geometry.flippingHorizontal() }
@@ -42,6 +47,7 @@ public struct GeometryAdjustmentPanel: View {
                         Label(L10n.t("Flip Horizontal"), systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
                     }
                     .help(L10n.t("Flip Horizontal"))
+                    .frame(maxWidth: .infinity, minHeight: 44)
 
                     Button {
                         editor.updateAdjustments { $0.geometry = $0.geometry.flippingVertical() }
@@ -49,23 +55,61 @@ public struct GeometryAdjustmentPanel: View {
                         Label(L10n.t("Flip Vertical"), systemImage: "arrow.up.and.down.righttriangle.up.righttriangle.down")
                     }
                     .help(L10n.t("Flip Vertical"))
+                    .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .labelStyle(.iconOnly)
                 .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .labelStyle(.titleAndIcon)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 44)
             }
 
-            DisclosureGroup(L10n.t("Straighten")) {
+            Level2DisclosureGroup(L10n.t("Straighten")) {
                 AdjustmentSliderRow(
                     label: L10n.t("Straighten"),
                     value: editor.adjustments.geometry.straightenDegrees,
                     range: GeometryAdjustments.straightenRange,
                     fractionDigits: 1,
                     onChange: { newValue in editor.updateAdjustments { $0.geometry.straightenDegrees = newValue } },
-                    onReset: { editor.updateAdjustments { $0.geometry = $0.geometry.resettingStraighten() } }
+                    onReset: { editor.updateAdjustments { $0.geometry = $0.geometry.resettingStraighten() } },
+                    onPreview: { newValue in editor.previewContinuousEdit { $0.geometry.straightenDegrees = newValue } },
+                    onCommitPreview: { editor.commitContinuousEdit() }
                 )
             }
 
-            DisclosureGroup(L10n.t("Crop")) {
+            Level2DisclosureGroup(L10n.t("Perspective")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    AdjustmentSliderRow(
+                        label: L10n.t("Vertical"),
+                        value: editor.adjustments.geometry.perspectiveVertical,
+                        range: GeometryAdjustments.perspectiveRange,
+                        fractionDigits: 1,
+                        onChange: { newValue in editor.updateAdjustments { $0.geometry.perspectiveVertical = newValue } },
+                        onReset: { editor.updateAdjustments { $0.geometry.perspectiveVertical = 0 } },
+                        onPreview: { newValue in editor.previewContinuousEdit { $0.geometry.perspectiveVertical = newValue } },
+                        onCommitPreview: { editor.commitContinuousEdit() }
+                    )
+                    AdjustmentSliderRow(
+                        label: L10n.t("Horizontal"),
+                        value: editor.adjustments.geometry.perspectiveHorizontal,
+                        range: GeometryAdjustments.perspectiveRange,
+                        fractionDigits: 1,
+                        onChange: { newValue in editor.updateAdjustments { $0.geometry.perspectiveHorizontal = newValue } },
+                        onReset: { editor.updateAdjustments { $0.geometry.perspectiveHorizontal = 0 } },
+                        onPreview: { newValue in editor.previewContinuousEdit { $0.geometry.perspectiveHorizontal = newValue } },
+                        onCommitPreview: { editor.commitContinuousEdit() }
+                    )
+                    Button(L10n.t("Reset Perspective")) {
+                        editor.updateAdjustments { $0.geometry = $0.geometry.resettingPerspective() }
+                    }
+                    .controlSize(.small)
+                    .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
+                    .disabled(editor.adjustments.geometry.perspectiveHorizontal == 0 && editor.adjustments.geometry.perspectiveVertical == 0 && editor.adjustments.geometry.cornerPins == nil)
+                }
+            }
+
+            Level2DisclosureGroup(L10n.t("Crop")) {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
                         editor.setToolMode(editor.toolMode == .crop ? .adjust : .crop)
@@ -74,22 +118,61 @@ public struct GeometryAdjustmentPanel: View {
                             .frame(maxWidth: .infinity)
                     }
 
-                    // Records the lock the user wants; the overlay
-                    // enforcing it during a drag (rather than only when a
-                    // preset value is picked) is a follow-up, not this
-                    // foundation round's scope.
                     Picker(L10n.t("Aspect Ratio"), selection: aspectRatioBinding) {
                         Text(L10n.t("Freeform")).tag(CropAspectRatio.freeform)
                         Text(L10n.t("Original")).tag(CropAspectRatio.original)
                         Text(L10n.t("Square")).tag(CropAspectRatio.square)
                     }
                     .pickerStyle(.menu)
+                    .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
 
                     Button(L10n.t("Reset Crop")) {
                         editor.updateAdjustments { $0.geometry = $0.geometry.resettingCrop() }
                     }
                     .controlSize(.small)
+                    .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
                     .disabled(editor.adjustments.geometry.crop == nil)
+                }
+            }
+
+            Level2DisclosureGroup(L10n.t("Lens Correction")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker(L10n.t("Lens Correction"), selection: lensCorrectionModeBinding) {
+                        Text(L10n.t("Off")).tag(LensCorrectionMode.off)
+                        Text(L10n.t("Automatic")).tag(LensCorrectionMode.automatic)
+                        Text(L10n.t("Manual")).tag(LensCorrectionMode.manual)
+                        Text(L10n.t("Bundled Profile")).tag(LensCorrectionMode.bundledProfile)
+                    }
+                    .pickerStyle(.menu)
+                    .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
+
+                    if editor.adjustments.lensCorrection.mode == .manual
+                        || editor.adjustments.lensCorrection.mode == .bundledProfile {
+                        AdjustmentSliderRow(
+                            label: L10n.t("Distortion"), value: editor.adjustments.lensCorrection.distortionAmount,
+                            range: -100...100, fractionDigits: 1,
+                            onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.distortionAmount = newValue } },
+                            onReset: { editor.updateAdjustments { $0.lensCorrection.distortionAmount = 0 } },
+                            onPreview: { newValue in editor.previewContinuousEdit { $0.lensCorrection.distortionAmount = newValue } },
+                            onCommitPreview: { editor.commitContinuousEdit() }
+                        )
+                        AdjustmentSliderRow(
+                            label: L10n.t("Vignetting"), value: editor.adjustments.lensCorrection.vignettingAmount,
+                            range: -100...100, fractionDigits: 1,
+                            onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.vignettingAmount = newValue } },
+                            onReset: { editor.updateAdjustments { $0.lensCorrection.vignettingAmount = 0 } },
+                            onPreview: { newValue in editor.previewContinuousEdit { $0.lensCorrection.vignettingAmount = newValue } },
+                            onCommitPreview: { editor.commitContinuousEdit() }
+                        )
+                        AdjustmentSliderRow(
+                            label: L10n.t("Chromatic Aberration"), value: editor.adjustments.lensCorrection.tcaAmount,
+                            range: -100...100, fractionDigits: 1,
+                            onChange: { newValue in editor.updateAdjustments { $0.lensCorrection.tcaAmount = newValue } },
+                            onReset: { editor.updateAdjustments { $0.lensCorrection.tcaAmount = 0 } },
+                            onPreview: { newValue in editor.previewContinuousEdit { $0.lensCorrection.tcaAmount = newValue } },
+                            onCommitPreview: { editor.commitContinuousEdit() }
+                        )
+                    }
                 }
             }
 
@@ -101,17 +184,52 @@ public struct GeometryAdjustmentPanel: View {
             .foregroundStyle(.secondary)
 
             Button(L10n.t("Reset")) {
-                editor.updateAdjustments { $0.geometry = .neutral }
+                editor.updateAdjustments {
+                    $0.geometry = .neutral
+                    $0.lensCorrection = .neutral
+                }
             }
             .controlSize(.small)
-            .disabled(editor.adjustments.geometry.isIdentity)
+            .frame(minHeight: AdjustmentControlMetrics.actionMinimumHeight, alignment: .leading)
+            .disabled(editor.adjustments.geometry.isIdentity && editor.adjustments.lensCorrection.isIdentity)
         }
+    }
+
+    private var lensCorrectionModeBinding: Binding<LensCorrectionMode> {
+        Binding(
+            get: { editor.adjustments.lensCorrection.mode },
+            set: { newValue in editor.updateAdjustments { $0.lensCorrection.mode = newValue } }
+        )
     }
 
     private var aspectRatioBinding: Binding<CropAspectRatio> {
         Binding(
             get: { editor.adjustments.geometry.cropAspectRatio },
-            set: { newValue in editor.updateAdjustments { $0.geometry.cropAspectRatio = newValue } }
+            set: { newValue in
+                let normalizedRatio = normalizedAspectRatio(for: newValue)
+                editor.updateAdjustments { adjustments in
+                    adjustments.geometry.cropAspectRatio = newValue
+                    guard let normalizedRatio else { return }
+                    let crop = adjustments.geometry.crop ?? .full
+                    adjustments.geometry.crop = crop.fitting(aspectRatio: normalizedRatio)
+                }
+            }
         )
+    }
+
+    private func normalizedAspectRatio(for ratio: CropAspectRatio) -> Double? {
+        switch ratio {
+        case .freeform:
+            return nil
+        case .original:
+            return 1
+        case .square:
+            guard let image = editor.displayedImage, image.width > 0 else { return nil }
+            return Double(image.height) / Double(image.width)
+        case .custom(let width, let height):
+            guard width.isFinite, height.isFinite, width > 0, height > 0,
+                  let image = editor.displayedImage, image.width > 0, image.height > 0 else { return nil }
+            return (width / height) * Double(image.height) / Double(image.width)
+        }
     }
 }

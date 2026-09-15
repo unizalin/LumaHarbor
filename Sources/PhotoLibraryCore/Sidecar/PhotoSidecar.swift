@@ -29,7 +29,10 @@ public struct DecoderDescriptor: Codable, Equatable, Sendable {
 public struct PhotoSidecar: Codable, Equatable, Sendable {
     /// Bumped only for breaking changes. A sidecar carrying a *higher* value is
     /// rejected rather than partially read (spec §12.1).
-    public static let currentSchemaVersion = 2
+    ///
+    /// v4 (DECISIONS.md D-006 / P6) adds `snapshots`. Missing on a v1/v2/v3
+    /// sidecar; decodes to empty array `[]` rather than failing.
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
     public var photoID: PhotoID
@@ -38,6 +41,12 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
     public var sourceFingerprint: FileFingerprint
     public var decoder: DecoderDescriptor
     public var adjustments: PhotoAdjustments
+    /// Portable rating/flag/keyword record (spec §6.1). Missing on a v1/v2
+    /// sidecar; decodes to `.neutral` rather than failing.
+    public var curation: PhotoCuration
+    /// Portable snapshot history milestones (spec §6.6). Missing on pre-v4
+    /// sidecars; decodes to empty array `[]` rather than failing.
+    public var snapshots: [EditSnapshot]
     public var createdAt: Date
     public var modifiedAt: Date
     /// Phase 3 Task 3.5: `nil` for an original photo's sidecar; the
@@ -58,6 +67,8 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         sourceFingerprint: FileFingerprint,
         decoder: DecoderDescriptor = .coreImageDefault,
         adjustments: PhotoAdjustments = .neutral,
+        curation: PhotoCuration = .neutral,
+        snapshots: [EditSnapshot] = [],
         createdAt: Date = Date(),
         modifiedAt: Date = Date(),
         variantOf: PhotoID? = nil
@@ -68,9 +79,48 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         self.sourceFingerprint = sourceFingerprint
         self.decoder = decoder
         self.adjustments = adjustments
+        self.curation = curation
+        self.snapshots = snapshots
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.variantOf = variantOf
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, photoID, sourceRelativePath, sourceFingerprint
+        case decoder, adjustments, curation, snapshots, createdAt, modifiedAt, variantOf
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        photoID = try container.decode(PhotoID.self, forKey: .photoID)
+        sourceRelativePath = try container.decode(String.self, forKey: .sourceRelativePath)
+        sourceFingerprint = try container.decode(FileFingerprint.self, forKey: .sourceFingerprint)
+        self.decoder = try container.decodeIfPresent(DecoderDescriptor.self, forKey: .decoder) ?? .coreImageDefault
+        adjustments = try container.decodeIfPresent(PhotoAdjustments.self, forKey: .adjustments) ?? .neutral
+        curation = try container.decodeIfPresent(PhotoCuration.self, forKey: .curation) ?? .neutral
+        snapshots = try container.decodeIfPresent([EditSnapshot].self, forKey: .snapshots) ?? []
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        modifiedAt = try container.decode(Date.self, forKey: .modifiedAt)
+        variantOf = try container.decodeIfPresent(PhotoID.self, forKey: .variantOf)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(photoID, forKey: .photoID)
+        try container.encode(sourceRelativePath, forKey: .sourceRelativePath)
+        try container.encode(sourceFingerprint, forKey: .sourceFingerprint)
+        try container.encode(decoder, forKey: .decoder)
+        try container.encode(adjustments, forKey: .adjustments)
+        try container.encode(curation, forKey: .curation)
+        if !snapshots.isEmpty {
+            try container.encode(snapshots, forKey: .snapshots)
+        }
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(modifiedAt, forKey: .modifiedAt)
+        try container.encodeIfPresent(variantOf, forKey: .variantOf)
     }
 
     /// `true` when this file was written by a version that changed the format in
@@ -84,6 +134,29 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         var copy = self
         copy.adjustments = adjustments
         copy.modifiedAt = modifiedAt
+        return copy
+    }
+
+    /// Curation is not an "edit" -- `modifiedAt` elsewhere in this codebase
+    /// means "adjustments changed" (see `PhotoAsset.lastEditAt`), so this
+    /// does not bump it unless the caller explicitly asks.
+    public func updating(
+        curation: PhotoCuration,
+        modifiedAt: Date? = nil
+    ) -> PhotoSidecar {
+        var copy = self
+        copy.curation = curation
+        if let modifiedAt { copy.modifiedAt = modifiedAt }
+        return copy
+    }
+
+    public func updating(
+        snapshots: [EditSnapshot],
+        modifiedAt: Date? = nil
+    ) -> PhotoSidecar {
+        var copy = self
+        copy.snapshots = snapshots
+        if let modifiedAt { copy.modifiedAt = modifiedAt }
         return copy
     }
 }

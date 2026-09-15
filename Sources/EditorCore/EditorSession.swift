@@ -73,6 +73,25 @@ public final class EditorSession: ObservableObject {
     @Published public var isShowingOriginal = false
     @Published public var alert: EditorAlert?
 
+    /// Before/after comparison layout (spec §6.1). `.single` is the
+    /// pre-existing hold-to-peek/click-to-pin behavior driven by
+    /// `isShowingOriginal`; `.sideBySide` and `.verticalWipe` show both
+    /// images at once. Purely UI/view state -- like `toolMode`, it never
+    /// touches `history`, `saveState` or the sidecar.
+    public enum CompareMode: Equatable, Sendable {
+        case single
+        case sideBySide
+        case verticalWipe
+    }
+
+    @Published public private(set) var compareMode: CompareMode = .single
+    /// Fraction (0...1) of the canvas width where the vertical wipe divider
+    /// sits, clamped away from the very edges so dragging it can never fully
+    /// collapse the comparison down to showing only one image.
+    @Published public private(set) var wipePosition: Double = 0.5
+    public static let minimumWipePosition: Double = 0.02
+    public static let maximumWipePosition: Double = 0.98
+
     /// Which on-canvas tool is active right now (design spec §6.5). Reset to
     /// `.adjust` on every `open()`/`close()` so switching photos never
     /// leaves a crop overlay armed against a photo the user didn't ask to
@@ -87,6 +106,16 @@ public final class EditorSession: ObservableObject {
     /// never leave a selection pointed at an entry that belongs to the
     /// photo just left behind.
     @Published public var selectedLocalAdjustmentID: UUID?
+
+    /// Snapshots saved on this photo (spec §6.6).
+    @Published public private(set) var snapshots: [EditSnapshot] = []
+
+    /// Professional preview overlays and soft-proofing options (spec §7.4).
+    @Published public var previewOptions: ProfessionalPreviewOptions = .standard
+
+    /// Transient snapshot reference used for A/B comparison.
+    /// Toggling comparison changes session state only; never mutates adjustments or writes sidecar.
+    @Published public var comparisonSnapshot: EditSnapshot?
 
     /// Longest edge the preview should cover, in backing-store pixels.
     @Published public var previewPixelDimension = 1_600
@@ -139,6 +168,18 @@ public final class EditorSession: ObservableObject {
     /// reusing the preset one so an eyedropper drag and a preset-browser
     /// hover can never clobber each other's preview state.
     private var previewedEyedropperAdjustments: PhotoAdjustments?
+
+    /// A continuous-drag preview (slider tick, tone-curve control-point
+    /// drag/insert/delete, ...) applied via `previewContinuousEdit(_:)`, not
+    /// yet committed. Same non-committing contract as
+    /// `previewedEyedropperAdjustments` -- a caller invokes this on every
+    /// drag tick so the render stays live, but only `commitContinuousEdit()`
+    /// pushes an Undo entry, so a whole gesture (however many ticks it
+    /// reports) becomes exactly one Undo step (visual polish spec §5.1;
+    /// generalized by the 2026-09-14 inspector hierarchy/preview spec §5.6
+    /// from what was originally curve-only state under the name
+    /// `previewedCurveAdjustments`).
+    private var previewedContinuousAdjustments: PhotoAdjustments?
 
     /// What `previewPreset(_:mode:)` reported about the *currently previewed*
     /// preset -- e.g. a contextual leaf skipped for lack of a white-balance
@@ -227,7 +268,10 @@ public final class EditorSession: ObservableObject {
     /// this, re-editing an existing crop had no correct frame to reference
     /// at all.
     public var displayedAdjustments: PhotoAdjustments {
-        var adjustments = previewedEyedropperAdjustments ?? previewedPresetAdjustments ?? history.current
+        if let comparisonSnapshot {
+            return comparisonSnapshot.adjustments
+        }
+        var adjustments = previewedEyedropperAdjustments ?? previewedContinuousAdjustments ?? previewedPresetAdjustments ?? history.current
         if toolMode == .crop {
             adjustments.geometry.crop = nil
         }
@@ -267,7 +311,8 @@ public final class EditorSession: ObservableObject {
         photo: PhotoAsset,
         sourceURL: URL,
         adjustments: PhotoAdjustments,
-        isReadOnly: Bool
+        isReadOnly: Bool,
+        snapshots: [EditSnapshot] = []
     ) {
         cancelPendingWork()
 
@@ -276,16 +321,22 @@ public final class EditorSession: ObservableObject {
         self.history = EditHistory(initial: adjustments)
         self.lastSavedAdjustments = adjustments
         self.isReadOnlyLibrary = isReadOnly
+        self.snapshots = snapshots
+        self.previewOptions = .standard
+        self.comparisonSnapshot = nil
         self.previewImage = nil
         self.decodeFailed = false
         self.histogram = nil
         self.originalImage = nil
         self.isShowingOriginal = false
+        self.compareMode = .single
+        self.wipePosition = 0.5
         self.saveState = .unchanged
         self.lastDisplayedGeneration = 0
         self.whiteBalanceBaseline = nil
         self.previewedPresetAdjustments = nil
         self.previewedEyedropperAdjustments = nil
+        self.previewedContinuousAdjustments = nil
         self.presetPreviewDiagnostics = []
         self.previewRenderFailureMessage = nil
         self.previewIntentVersion += 1
@@ -312,11 +363,17 @@ public final class EditorSession: ObservableObject {
         decodeFailed = false
         histogram = nil
         originalImage = nil
+        compareMode = .single
+        wipePosition = 0.5
+        snapshots = []
+        previewOptions = .standard
+        comparisonSnapshot = nil
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
         whiteBalanceBaseline = nil
         previewedPresetAdjustments = nil
         previewedEyedropperAdjustments = nil
+        previewedContinuousAdjustments = nil
         presetPreviewDiagnostics = []
         previewRenderFailureMessage = nil
         previewIntentVersion += 1
@@ -421,6 +478,24 @@ public final class EditorSession: ObservableObject {
         toolMode = mode
     }
 
+    /// Switches the before/after comparison layout (spec §6.1). Entering
+    /// `.sideBySide`/`.verticalWipe` requires both an original to compare
+    /// against and an actual edit to show -- the same gate the pre-existing
+    /// hold/pin compare control already uses (`canCompareWithOriginal`) --
+    /// so a stale menu selection can never leave the canvas trying to show a
+    /// comparison with nothing real to compare. `.single` is always allowed,
+    /// so leaving a comparison layout never gets stuck.
+    public func setCompareMode(_ mode: CompareMode) {
+        guard mode == .single || canCompareWithOriginal else { return }
+        compareMode = mode
+    }
+
+    /// Moves the vertical wipe divider (spec §6.1: "wipe 分隔位置要可由拖曳調整並
+    /// clamp 在合理範圍"). Purely UI state, like `compareMode` itself.
+    public func setWipePosition(_ position: Double) {
+        wipePosition = min(max(position, Self.minimumWipePosition), Self.maximumWipePosition)
+    }
+
     public func redo() {
         guard history.redo() != nil else { return }
         didChangeAdjustments()
@@ -517,6 +592,119 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    /// Phase 2.2 "Paste Adjustments" (spec §6.2): applies a copied
+    /// `AdjustmentPatch` as one undoable step, the same "one action, one
+    /// Undo entry" contract `commitPreset` already gives preset application.
+    /// `patch` goes through the same `.merge`-mode `PresetApplicator` path a
+    /// preset does, so any field the patch doesn't include is left exactly
+    /// as this photo's own edits left it -- never a blind overwrite.
+    /// `geometry`/`localAdjustments` are copied verbatim only when the
+    /// caller passes them (the clipboard's own opt-in checkboxes), never
+    /// partially or inferred; passing `nil` for either leaves this photo's
+    /// own current value untouched.
+    public func pasteAdjustments(patch: AdjustmentPatch, geometry: GeometryAdjustments?, localAdjustments: [LocalAdjustment]?) {
+        guard photo != nil else { return }
+        let context = PresetApplicationContext(
+            baselineTemperatureKelvin: whiteBalanceBaseline?.temperatureKelvin,
+            baselineTint: whiteBalanceBaseline?.tint
+        )
+        var result = PresetApplicator().apply(patch, to: history.current, mode: .merge, context: context).adjustments
+        if let geometry {
+            result.geometry = geometry
+        }
+        if let localAdjustments {
+            result.localAdjustments = localAdjustments
+        }
+        guard history.record(result) else { return }
+        didChangeAdjustments()
+    }
+
+    // MARK: - Snapshots & Professional Preview
+
+    /// Captures the current adjustments as a new snapshot (spec §6.6).
+    public func createSnapshot(name: String) {
+        guard let photo else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let snapshotName = trimmed.isEmpty ? "\(L10n.t("Snapshot")) \(snapshots.count + 1)" : trimmed
+        let snapshot = EditSnapshot(name: snapshotName, adjustments: history.current)
+        snapshots.append(snapshot)
+        persistSnapshots(for: photo)
+    }
+
+    /// Renames an existing snapshot by ID.
+    public func renameSnapshot(id: UUID, newName: String) {
+        guard let photo, let index = snapshots.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        snapshots[index].name = trimmed
+        persistSnapshots(for: photo)
+    }
+
+    /// Duplicates an existing snapshot.
+    public func duplicateSnapshot(id: UUID) {
+        guard let photo, let snapshot = snapshots.first(where: { $0.id == id }) else { return }
+        let copy = EditSnapshot(
+            name: "\(snapshot.name) \(L10n.t("Copy"))",
+            adjustments: snapshot.adjustments
+        )
+        snapshots.append(copy)
+        persistSnapshots(for: photo)
+    }
+
+    /// Deletes a snapshot by ID.
+    public func deleteSnapshot(id: UUID) {
+        guard let photo, let index = snapshots.firstIndex(where: { $0.id == id }) else { return }
+        snapshots.remove(at: index)
+        if comparisonSnapshot?.id == id {
+            comparisonSnapshot = nil
+            requestInteractivePreview()
+        }
+        persistSnapshots(for: photo)
+    }
+
+    /// Restores adjustments from a snapshot in a single compound undo transaction (spec §6.6).
+    public func restoreSnapshot(id: UUID) {
+        guard let snapshot = snapshots.first(where: { $0.id == id }) else { return }
+        updateAdjustments { adjustments in
+            adjustments = snapshot.adjustments
+        }
+    }
+
+    /// Updates preview options (highlight/shadow clipping, gamut warning, soft proof).
+    /// Purely preview state; never saved to sidecar or export.
+    public func setPreviewOptions(_ options: ProfessionalPreviewOptions) {
+        previewOptions = options
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// Sets or clears the comparison snapshot for A/B preview.
+    /// Purely session state; never mutates adjustments or saves to sidecar.
+    public func setComparisonSnapshot(_ snapshot: EditSnapshot?) {
+        comparisonSnapshot = snapshot
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// Toggles A/B compare against the first snapshot or clears comparison.
+    public func toggleABCompare() {
+        if comparisonSnapshot != nil {
+            comparisonSnapshot = nil
+        } else if let first = snapshots.first {
+            comparisonSnapshot = first
+        }
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    private func persistSnapshots(for photo: PhotoAsset) {
+        guard let save = services?.saveSnapshots else { return }
+        let currentSnapshots = self.snapshots
+        Task {
+            try? await save(currentSnapshots, photo)
+        }
+    }
+
     /// Safe, fixed, localizable text per diagnostic code -- never the
     /// diagnostic's own `detail` (spec §11: user-facing text must not carry
     /// unvetted internal detail). `nil` when there's nothing worth telling
@@ -606,6 +794,63 @@ public final class EditorSession: ObservableObject {
         didChangeAdjustments()
     }
 
+    /// Live preview for one continuous-adjustment gesture (slider drag,
+    /// pointer drag, keyboard continuous adjustment, accessibility
+    /// adjustable action, or a tone-curve control-point drag/insert/delete).
+    /// Mirrors `previewEyedropper(sample:)`: never touches `history` by
+    /// itself, so a caller can invoke this on every drag tick for a live
+    /// render without filling the Undo stack -- only
+    /// `commitContinuousEdit()` does that, once, at the end of the gesture
+    /// (inspector hierarchy/preview spec §5.6: "one gesture, one edit").
+    public func previewContinuousEdit(_ transform: (inout PhotoAdjustments) -> Void) {
+        guard photo != nil else { return }
+        previewIntentVersion += 1
+        var updated = history.current
+        transform(&updated)
+        previewedContinuousAdjustments = updated
+        guard updated != history.current else { return }
+        requestInteractivePreview()
+    }
+
+    /// Commits the current continuous-adjustment preview as one undoable
+    /// step. A no-op if nothing is being previewed, or if the gesture
+    /// resolved to exactly the current value (`history.record` itself is
+    /// the no-op guard, same as every other edit path in this class).
+    public func commitContinuousEdit() {
+        guard let previewed = previewedContinuousAdjustments else { return }
+        previewedContinuousAdjustments = nil
+        previewIntentVersion += 1
+        previewImageReflectsAPreview = false
+        guard history.record(previewed.clamped()) else { return }
+        didChangeAdjustments()
+    }
+
+    /// Cancels the current continuous-adjustment preview, restoring the
+    /// display to the committed baseline without adding a history entry
+    /// (spec §5.6 "cancel"). Safe to call even if no preview is active.
+    public func cancelContinuousEdit() {
+        guard previewedContinuousAdjustments != nil else { return }
+        previewedContinuousAdjustments = nil
+        previewIntentVersion += 1
+        guard previewImageReflectsAPreview else { return }
+        previewImageReflectsAPreview = false
+        requestInteractivePreview()
+        scheduleSettledPreview()
+    }
+
+    /// `CurveAdjustmentPanel`'s original entry points, kept as aliases over
+    /// the generalized lifecycle above (2026-09-14 inspector hierarchy/
+    /// preview spec §5.6) so existing call sites and tests keep compiling
+    /// and behaving identically -- both names share the same underlying
+    /// `previewedContinuousAdjustments` slot.
+    public func previewCurveEdit(_ transform: (inout PhotoAdjustments) -> Void) {
+        previewContinuousEdit(transform)
+    }
+
+    public func commitCurveEdit() {
+        commitContinuousEdit()
+    }
+
     private func didChangeAdjustments() {
         refreshUndoState()
         // Interactive first so the slider keeps up (spec §11), then the good one
@@ -644,14 +889,15 @@ public final class EditorSession: ObservableObject {
         // whatever `previewedPresetAdjustments`/`previewedEyedropperAdjustments`/
         // `previewIntentVersion` are *right now* is the truth for this
         // submission).
-        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil
+        let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil || previewedContinuousAdjustments != nil
         let intentVersion = previewIntentVersion
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),
             url: sourceURL,
             adjustments: displayedAdjustments,
             targetPixelDimension: previewPixelDimension,
-            quality: quality
+            quality: quality,
+            previewOptions: previewOptions
         )
         Task {
             let token = await services.previewScheduler.submit(request)

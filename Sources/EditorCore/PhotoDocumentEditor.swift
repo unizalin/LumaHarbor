@@ -63,6 +63,11 @@ public struct PhotoDocumentEditorDependencies {
     /// used only to restore an `.inPlace` document after a relaunch.
     public let resolveScope: (Data) throws -> ResolvedSecurityScope
     public let makeBookmark: (URL) throws -> Data
+    /// Optional batch-edit hooks forwarded to the single document editor's
+    /// `EditorSession`. The app layer supplies these when it owns a
+    /// multi-selection; document-only callers keep the default `nil` values.
+    public let onBeginAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)?
+    public let onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)?
 
     public init(
         store: PhotoDocumentStore,
@@ -71,7 +76,9 @@ public struct PhotoDocumentEditorDependencies {
         previewRenderer: any PreviewRendering,
         makeScope: @escaping (URL) -> any SecurityScopedResource,
         resolveScope: @escaping (Data) throws -> ResolvedSecurityScope,
-        makeBookmark: @escaping (URL) throws -> Data
+        makeBookmark: @escaping (URL) throws -> Data,
+        onBeginAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil,
+        onEndAdjustmentGesture: (@Sendable (PhotoAdjustments) -> Void)? = nil
     ) {
         self.store = store
         self.decoder = decoder
@@ -80,6 +87,8 @@ public struct PhotoDocumentEditorDependencies {
         self.makeScope = makeScope
         self.resolveScope = resolveScope
         self.makeBookmark = makeBookmark
+        self.onBeginAdjustmentGesture = onBeginAdjustmentGesture
+        self.onEndAdjustmentGesture = onEndAdjustmentGesture
     }
 }
 
@@ -244,7 +253,9 @@ public final class PhotoDocumentEditor: ObservableObject {
             },
             saveAdjustments: { adjustments, photo in
                 try await store.saveAdjustments(adjustments, documentID: photo.id.rawValue)
-            }
+            },
+            onBeginAdjustmentGesture: dependencies.onBeginAdjustmentGesture,
+            onEndAdjustmentGesture: dependencies.onEndAdjustmentGesture
         ))
     }
 

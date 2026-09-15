@@ -1446,6 +1446,36 @@ public actor PhotoLibraryService {
             by: { $0.variantOf! }
         )
 
+        // Curation sidecar v3 migration (professional editing completion
+        // spec §6.1, plan gap G1): one bulk read per scan, not one query per
+        // file, of "what SQLite currently thinks" every photo's rating/flag/
+        // keywords are. `CurationMigration.decide` compares this against
+        // each photo's own sidecar. A newly rebuilt index returns an empty
+        // snapshot normally. A thrown read error is different: fail this scan
+        // instead of treating unknown data as empty and risking a neutral
+        // projection over the last known state.
+        let curationSnapshot: [PhotoID: PhotoCuration]
+        do {
+            curationSnapshot = try index.curationSnapshot(inLibrary: libraryID)
+        } catch {
+            await emit(.failed(.indexUnavailable((error as NSError).localizedDescription)))
+            // The scan sequence contract exposes an explicit terminal result
+            // after a started run. This run has no trustworthy curation
+            // baseline, so finish it as cancelled rather than letting the
+            // consumer interpret the failure as a clean completion.
+            await emit(.finished(LibraryScanResult(
+                libraryID: libraryID,
+                indexedCount: 0,
+                failedCount: 0,
+                ambiguousCount: 0,
+                movedCount: 0,
+                wasCancelled: true,
+                completedAt: Date()
+            )))
+            return
+        }
+        let decoderDescriptor = DecoderDescriptor(decoder.identifier)
+
         var indexed = 0
         var failed = 0
         var ambiguous = 0
@@ -1502,9 +1532,12 @@ public actor PhotoLibraryService {
                     case .success(var asset, let record, let decision):
                         if case .ambiguous = decision { ambiguous += 1 }
                         if case .moved = decision { moved += 1 }
-                        let editState = Self.editState(photoID: asset.id, repository: repository)
-                        asset.hasEdits = editState.hasEdits
-                        asset.lastEditAt = editState.lastEditAt
+                        Self.hydrateCurationAndEditState(
+                            asset: &asset,
+                            existingSQLiteCuration: curationSnapshot[asset.id],
+                            repository: repository,
+                            decoder: decoderDescriptor
+                        )
                         manifest.upsert(record)
                         batch.append(asset)
                         indexed += 1
@@ -1512,14 +1545,17 @@ public actor PhotoLibraryService {
                         // photo back into the index too -- it was never
                         // discovered by the walk above (see
                         // `virtualCopyAssets(for:...)`'s own doc comment).
-                        batch.append(contentsOf: Self.virtualCopyAssets(
+                        let copies = Self.virtualCopyAssets(
                             for: asset.id,
                             metadata: asset.metadata,
                             status: asset.status,
                             libraryID: libraryID,
                             recordsByOriginal: variantRecordsByOriginal,
-                            repository: repository
-                        ))
+                            repository: repository,
+                            curationSnapshot: curationSnapshot,
+                            decoder: decoderDescriptor
+                        )
+                        batch.append(contentsOf: copies)
                     }
 
                     if cancelled { break }
@@ -1549,6 +1585,13 @@ public actor PhotoLibraryService {
                         // rechecked immediately before this synchronous write.
                         try recoverPendingRegistryTransaction()
                         try index.upsert(photos: batch)
+                        // Must run after the batch upsert above: `photo_keyword`
+                        // has a foreign key onto `photo.photo_id` (enforced,
+                        // `SQLiteDatabase` turns `PRAGMA foreign_keys` on), so
+                        // projecting curation for a row that doesn't exist in
+                        // `photo` yet -- e.g. every photo during an index
+                        // rebuild -- would fail this insert outright.
+                        for photo in batch { projectCuration(of: photo) }
                         await emit(.photosIndexed(batch))
                     } catch LibraryError.registryRecoveryRequired {
                         await emit(.failed(.registryRecoveryRequired))
@@ -1970,19 +2013,100 @@ public actor PhotoLibraryService {
         }
     }
 
-    /// Reconstructs both edit-state columns from the sidecar during a
-    /// rescan: the sidecar is authoritative, SQLite is a rebuildable
-    /// projection of it (spec §8.1). A neutral or absent sidecar maps to
-    /// `(false, nil)`; a non-neutral one carries its own `modifiedAt`
-    /// forward as `lastEditAt`, matching what `saveAdjustments` would have
-    /// projected at save time.
-    private static func editState(
-        photoID: PhotoID,
-        repository: FileSidecarRepository
-    ) -> (hasEdits: Bool, lastEditAt: Date?) {
-        guard let sidecar = try? repository.loadSidecar(for: photoID) else { return (false, nil) }
-        let hasEdits = !sidecar.adjustments.isNeutral
-        return (hasEdits, hasEdits ? sidecar.modifiedAt : nil)
+    /// Explicitly projects a scan-hydrated asset's resolved curation into
+    /// SQLite (spec §8.1: sidecar authoritative, SQLite a rebuildable
+    /// projection). This does not rely on `upsertPhoto`'s own `INSERT`
+    /// values: `photo_keyword` is a separate table that a batch
+    /// `upsert(photos:)` never touches at all, and `rating`/`flag` are
+    /// intentionally excluded from `upsertPhoto`'s own `ON CONFLICT` `SET`
+    /// clause so an unrelated rescan can never clobber a value only
+    /// `setRating`/`setFlag`/`setKeywords` should change. Every failure here
+    /// is best-effort by design, same as `saveAdjustments`'s own
+    /// `index.setEditState` call: the sidecar write already succeeded (or
+    /// intentionally didn't happen), so a SQLite failure here must never be
+    /// surfaced as a lost edit.
+    private func projectCuration(of asset: PhotoAsset) {
+        try? index.setRating(asset.rating, for: asset.id)
+        try? index.setFlag(asset.flag, for: asset.id)
+        try? index.setKeywords(asset.keywords.map(\.displayValue), for: asset.id)
+        try? index.setCurationMigrationPending(asset.curationMigrationPending, for: asset.id)
+    }
+
+    /// Reconstructs a scanned photo's edit-state columns and curation from
+    /// its sidecar, and runs the curation migration state machine (plan gap
+    /// G1) against `existingSQLiteCuration` -- the current SQLite row's
+    /// rating/flag/keywords, taken from a `curationSnapshot` computed once
+    /// per scan, or `nil` for a photo with no prior row.
+    ///
+    /// Edit-state reconstruction is unchanged from before this plan: the
+    /// sidecar is authoritative, SQLite is a rebuildable projection of it
+    /// (spec §8.1). A neutral or absent sidecar maps to `(false, nil)`; a
+    /// non-neutral one carries its own `modifiedAt` forward as `lastEditAt`,
+    /// matching what `saveAdjustments` would have projected at save time.
+    ///
+    /// Curation resolution never throws and never leaves the caller with
+    /// stale/lost values: `CurationMigration.decide` picks exactly one of
+    /// three outcomes, and only `.migrate` attempts a sidecar write. If that
+    /// write fails (offline, read-only, out of space, or the write races a
+    /// cancel), the asset keeps `existingSQLiteCuration`'s old values and is
+    /// marked `curationMigrationPending` so the next scan retries the exact
+    /// same decision from scratch -- see the plan's G1 table for why no
+    /// separate retry queue is needed.
+    private static func hydrateCurationAndEditState(
+        asset: inout PhotoAsset,
+        existingSQLiteCuration: PhotoCuration?,
+        repository: FileSidecarRepository,
+        decoder: DecoderDescriptor
+    ) {
+        let existingSidecar: PhotoSidecar?
+        do {
+            existingSidecar = try repository.loadSidecar(for: asset.id)
+        } catch {
+            // A newer-schema sidecar must remain byte-for-byte untouched, and
+            // a corrupt/unavailable one must not be treated as absent. Keep the
+            // last known projection visible and mark it for a later retry.
+            let fallback = existingSQLiteCuration ?? .neutral
+            asset.hasEdits = false
+            asset.lastEditAt = nil
+            asset.rating = fallback.rating
+            asset.flag = fallback.flag
+            asset.keywords = fallback.keywords
+            asset.curationMigrationPending = true
+            return
+        }
+        let hasEdits = existingSidecar.map { !$0.adjustments.isNeutral } ?? false
+        asset.hasEdits = hasEdits
+        asset.lastEditAt = hasEdits ? existingSidecar?.modifiedAt : nil
+
+        let decision = CurationMigration.decide(
+            existingSidecar: existingSidecar,
+            existingSQLiteCuration: existingSQLiteCuration,
+            photoID: asset.id,
+            sourceRelativePath: asset.relativePath,
+            sourceFingerprint: asset.fingerprint,
+            decoder: decoder,
+            now: Date()
+        )
+        switch decision {
+        case .sidecarAuthoritative(let curation), .unchanged(let curation):
+            asset.rating = curation.rating
+            asset.flag = curation.flag
+            asset.keywords = curation.keywords
+            asset.curationMigrationPending = false
+        case .migrate(let sidecar, let curation):
+            if (try? repository.write(sidecar: sidecar)) != nil {
+                asset.rating = curation.rating
+                asset.flag = curation.flag
+                asset.keywords = curation.keywords
+                asset.curationMigrationPending = false
+            } else {
+                let fallback = existingSQLiteCuration ?? .neutral
+                asset.rating = fallback.rating
+                asset.flag = fallback.flag
+                asset.keywords = fallback.keywords
+                asset.curationMigrationPending = true
+            }
+        }
     }
 
     /// Phase 3 Task 3.5: a virtual copy is never independently discovered
@@ -2020,7 +2144,9 @@ public actor PhotoLibraryService {
         status: PhotoStatus,
         libraryID: LibraryID,
         recordsByOriginal: [PhotoID: [PhotoRecord]],
-        repository: FileSidecarRepository
+        repository: FileSidecarRepository,
+        curationSnapshot: [PhotoID: PhotoCuration],
+        decoder: DecoderDescriptor
     ) -> [PhotoAsset] {
         guard let records = recordsByOriginal[originalID] else { return [] }
         var result: [PhotoAsset] = []
@@ -2033,9 +2159,8 @@ public actor PhotoLibraryService {
             // has. Skipping a record with no loadable sidecar here is what
             // stops a copy that failed exactly that manifest cleanup from
             // being silently resurrected into the index by a later rescan.
-            guard let sidecar = try? repository.loadSidecar(for: record.photoID) else { continue }
-            let hasEdits = !sidecar.adjustments.isNeutral
-            let copyAsset = PhotoAsset(
+            guard (try? repository.loadSidecar(for: record.photoID)) != nil else { continue }
+            var copyAsset = PhotoAsset(
                 id: record.photoID,
                 libraryID: libraryID,
                 relativePath: record.relativePath,
@@ -2043,10 +2168,14 @@ public actor PhotoLibraryService {
                 metadata: metadata,
                 status: status,
                 lastSeenAt: Date(),
-                hasEdits: hasEdits,
-                lastEditAt: hasEdits ? sidecar.modifiedAt : nil,
                 variantOf: record.variantOf,
                 variantName: record.variantName
+            )
+            Self.hydrateCurationAndEditState(
+                asset: &copyAsset,
+                existingSQLiteCuration: curationSnapshot[record.photoID],
+                repository: repository,
+                decoder: decoder
             )
             result.append(copyAsset)
             result.append(contentsOf: Self.virtualCopyAssets(
@@ -2055,7 +2184,9 @@ public actor PhotoLibraryService {
                 status: status,
                 libraryID: libraryID,
                 recordsByOriginal: recordsByOriginal,
-                repository: repository
+                repository: repository,
+                curationSnapshot: curationSnapshot,
+                decoder: decoder
             ))
         }
         return result
@@ -2099,10 +2230,10 @@ public actor PhotoLibraryService {
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
 
         do {
-            // `try?` flattens, so this is a single-level optional: nil means
-            // "no sidecar yet" or "unreadable", and either way we write a fresh
-            // one rather than inheriting a bogus creation date.
-            let existing = try? repository.loadSidecar(for: photo.id)
+            // Only a confirmed missing sidecar may start from neutral. Read
+            // errors, corruption, and newer schemas must propagate so this
+            // older build cannot replace edits it does not understand.
+            let existing = try repository.loadSidecar(for: photo.id)
             let now = Date()
             let sidecar = PhotoSidecar(
                 photoID: photo.id,
@@ -2110,6 +2241,11 @@ public actor PhotoLibraryService {
                 sourceFingerprint: photo.fingerprint,
                 decoder: DecoderDescriptor(decoder.identifier),
                 adjustments: adjustments,
+                // Preserve whatever curation already exists (spec §6.1): an
+                // adjustment save is unrelated to rating/flag/keywords, and
+                // must never silently reset them to neutral.
+                curation: existing?.curation ?? .neutral,
+                snapshots: existing?.snapshots ?? [],
                 createdAt: existing?.createdAt ?? now,
                 modifiedAt: now,
                 variantOf: photo.variantOf ?? existing?.variantOf
@@ -2128,6 +2264,146 @@ public actor PhotoLibraryService {
             )
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
+        }
+    }
+
+    // MARK: - Curation
+
+    /// Reads a photo's curation from its sidecar -- never from SQLite, which
+    /// is only a rebuildable projection (spec §6.1 rule 1).
+    public func curation(for photo: PhotoAsset) throws -> PhotoCuration {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+        do {
+            return try repository.loadSidecar(for: photo.id)?.curation ?? .neutral
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    /// Sidecar-first curation mutation shared by `setRating`/`setFlag`/
+    /// `setKeywords` (spec §6.1 rule 5): load the existing sidecar (or start
+    /// from neutral), apply `transform`, write atomically, then best-effort
+    /// project the result into SQLite -- exactly the same tolerance
+    /// `saveAdjustments`'s own `index.setEditState` call already has. A
+    /// curation-only mutation never touches `adjustments`/`modifiedAt`'s own
+    /// "last edit" meaning used elsewhere (see `PhotoAsset.lastEditAt`).
+    private func mutateCuration(
+        for photo: PhotoAsset,
+        transform: (inout PhotoCuration) -> Void
+    ) throws {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+
+        do {
+            let existing = try repository.loadSidecar(for: photo.id)
+            var curation = existing?.curation ?? .neutral
+            transform(&curation)
+            let now = Date()
+            let sidecar = PhotoSidecar(
+                photoID: photo.id,
+                sourceRelativePath: photo.relativePath,
+                sourceFingerprint: photo.fingerprint,
+                decoder: DecoderDescriptor(decoder.identifier),
+                adjustments: existing?.adjustments ?? .neutral,
+                curation: curation,
+                snapshots: existing?.snapshots ?? [],
+                createdAt: existing?.createdAt ?? now,
+                modifiedAt: existing?.modifiedAt ?? now,
+                variantOf: photo.variantOf ?? existing?.variantOf
+            )
+            try repository.write(sidecar: sidecar)
+            try? index.setRating(curation.rating, for: photo.id)
+            try? index.setFlag(curation.flag, for: photo.id)
+            try? index.setKeywords(curation.keywords.map(\.displayValue), for: photo.id)
+            try? index.setCurationMigrationPending(false, for: photo.id)
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    // MARK: - Snapshots
+
+    /// Reads a photo's snapshots from its sidecar (spec §6.6).
+    public func snapshots(for photo: PhotoAsset) throws -> [EditSnapshot] {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+        do {
+            return try repository.loadSidecar(for: photo.id)?.snapshots ?? []
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    /// Persists snapshots to the sidecar while preserving existing adjustments and curation.
+    public func saveSnapshots(_ snapshots: [EditSnapshot], for photo: PhotoAsset) throws {
+        try recoverPendingRegistryTransaction()
+        guard let folder = libraries[photo.libraryID] else {
+            throw LibraryError.notFound(photo.libraryID)
+        }
+        guard folder.isOnline else {
+            throw LibraryError.offline(path: folder.lastKnownPath)
+        }
+        let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
+
+        do {
+            let existing = try repository.loadSidecar(for: photo.id)
+            let now = Date()
+            let sidecar = PhotoSidecar(
+                photoID: photo.id,
+                sourceRelativePath: photo.relativePath,
+                sourceFingerprint: photo.fingerprint,
+                decoder: DecoderDescriptor(decoder.identifier),
+                adjustments: existing?.adjustments ?? .neutral,
+                curation: existing?.curation ?? .neutral,
+                snapshots: snapshots,
+                createdAt: existing?.createdAt ?? now,
+                modifiedAt: existing?.modifiedAt ?? now,
+                variantOf: photo.variantOf ?? existing?.variantOf
+            )
+            try repository.write(sidecar: sidecar)
+        } catch let error as SidecarError {
+            throw LibraryError.sidecar(error)
+        }
+    }
+
+    public func setRating(_ rating: Int, for photo: PhotoAsset) throws {
+        guard (0...5).contains(rating) else { throw LibraryQueryError.invalidRating(rating) }
+        try mutateCuration(for: photo) { $0.rating = rating }
+    }
+
+    public func setFlag(_ flag: PhotoFlag, for photo: PhotoAsset) throws {
+        try mutateCuration(for: photo) { $0.flag = flag }
+    }
+
+    public func setKeywords(_ inputs: [String], for photo: PhotoAsset) throws {
+        var keywords: [PhotoKeyword] = []
+        for input in inputs {
+            guard let keyword = PhotoKeyword.make(from: input) else {
+                throw LibraryQueryError.invalidKeyword
+            }
+            keywords.append(keyword)
+        }
+        try mutateCuration(for: photo) {
+            $0 = PhotoCuration(rating: $0.rating, flag: $0.flag, keywords: keywords)
         }
     }
 

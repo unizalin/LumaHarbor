@@ -143,6 +143,14 @@ public struct XMPMappingRegistry: Sendable {
         mappings.append(scalar(.cameraRaw("Whites2012"), .basicWhites, .approximate))
         mappings.append(scalar(.cameraRaw("Blacks2012"), .basicBlacks, .approximate))
 
+        // MARK: Presence -- approximate (P4 spec §5.1: this app's texture/
+        // clarity/dehaze render is a documented simplification, not a literal
+        // match of Adobe's own algorithm, even though the property names and
+        // -100...100 ranges line up exactly).
+        mappings.append(scalar(.cameraRaw("Texture"), .presenceTexture, .approximate))
+        mappings.append(scalar(.cameraRaw("Clarity2012"), .presenceClarity, .approximate))
+        mappings.append(scalar(.cameraRaw("Dehaze"), .presenceDehaze, .approximate))
+
         // MARK: HSL -- native, all eight bands, identical -100...100 range
         let hslColors: [(adobe: String, field: (hue: AdjustmentFieldID, saturation: AdjustmentFieldID, luminance: AdjustmentFieldID))] = [
             ("Red", (.hslRedHue, .hslRedSaturation, .hslRedLuminance)),

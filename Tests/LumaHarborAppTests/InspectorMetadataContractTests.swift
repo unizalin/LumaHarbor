@@ -38,8 +38,8 @@ final class InspectorMetadataContractTests: XCTestCase {
             "InspectorView must build its metadata panel from EditorMetadataSnapshot, not re-derive metadata text itself"
         )
         XCTAssertTrue(
-            source.contains("L10n.t(\"Metadata\")"),
-            "the metadata section must have a visible, localized header"
+            source.contains("L10n.t(\"File Info\")"),
+            "the metadata section must have the shared, visible, localized File Info header"
         )
     }
 

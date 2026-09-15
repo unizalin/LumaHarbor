@@ -6,76 +6,49 @@ import SwiftUI
 /// The ten basic adjustments, usable in a Mac inspector or an iPad editing surface.
 public struct BasicAdjustmentPanel: View {
     @ObservedObject private var editor: EditorSession
+    private let kinds: [AdjustmentKind]
 
-    public init(editor: EditorSession) {
+    public init(editor: EditorSession, kinds: [AdjustmentKind]? = nil) {
         self.editor = editor
+        self.kinds = kinds ?? AdjustmentCatalog.ordered.map(\.kind)
     }
 
     public var body: some View {
         ForEach(BasicAdjustmentPanelModel.rows, id: \.kind) { definition in
-            row(definition)
+            if kinds.contains(definition.kind) {
+                row(definition)
+            }
         }
     }
 
+    /// Built on the shared `AdjustmentSliderRow` (inspector hierarchy/preview
+    /// spec §5.6, §5.4): the numeric field's nudge/typed entry stays a
+    /// discrete, immediate commit via `setAdjustment(_:to:)`, while the
+    /// slider drag previews through `previewContinuousEdit`/
+    /// `commitContinuousEdit` so a whole drag becomes exactly one Undo entry
+    /// and one autosave, and the row adopts the same adaptive width
+    /// composition every other continuous control uses.
     private func row(_ definition: AdjustmentDefinition) -> some View {
-        macOSResetGesture(
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(definition.kind.displayName)
-                    Spacer()
-                    Text(BasicAdjustmentPanelModel.formatted(
-                        editor.adjustments[definition.kind],
-                        fractionDigits: definition.fractionDigits
-                    ))
-                    .monospacedDigit()
-                }
-                Slider(
-                    value: Binding(
-                        get: { editor.adjustments[definition.kind] },
-                        set: { editor.setAdjustment(definition.kind, to: $0) }
-                    ),
-                    in: definition.range,
-                    // Phase 3 Task 3.3: distinct from the value binding's own
-                    // `set` above, which fires on every tick during a drag --
-                    // this reports only the drag's start/end, which is what
-                    // batch sync needs to snapshot the source photo's
-                    // before/after just once per drag, not once per tick.
-                    onEditingChanged: { isEditing in
-                        if isEditing {
-                            editor.beginAdjustmentGesture()
-                        } else {
-                            editor.endAdjustmentGesture()
-                        }
-                    }
-                )
-                .accessibilityLabel(Text(definition.kind.displayName))
-                .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(
-                    editor.adjustments[definition.kind],
-                    fractionDigits: definition.fractionDigits
-                )))
-            }
-            .contextMenu {
-                Button("\(L10n.t("Reset")) \(definition.kind.displayName)") {
-                    editor.resetAdjustment(definition.kind)
+        AdjustmentSliderRow(
+            label: definition.kind.displayName,
+            value: editor.displayedAdjustments[definition.kind],
+            range: definition.range,
+            fractionDigits: definition.fractionDigits,
+            step: definition.step,
+            onChange: { editor.setAdjustment(definition.kind, to: $0) },
+            onReset: { editor.resetAdjustment(definition.kind) },
+            onEditingChanged: { isEditing in
+                if isEditing {
+                    editor.beginAdjustmentGesture()
+                } else {
+                    editor.endAdjustmentGesture()
                 }
             },
-            definition: definition
+            onPreview: { newValue in
+                editor.previewContinuousEdit { $0[definition.kind] = newValue }
+            },
+            onCommitPreview: { editor.commitContinuousEdit() }
         )
     }
 
-    private func macOSResetGesture<Content: View>(
-        _ content: Content,
-        definition: AdjustmentDefinition
-    ) -> some View {
-        #if os(macOS)
-        content
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                editor.resetAdjustment(definition.kind)
-            }
-            .help(L10n.t("Double-click the row to reset"))
-        #else
-        content
-        #endif
-    }
 }

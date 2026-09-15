@@ -131,6 +131,18 @@ public final class LibraryBrowserSession: ObservableObject {
     @Published public private(set) var selection: LibrarySelection = .smart(.all)
     @Published public private(set) var sort: PhotoSort = .captureDateDescending
     @Published public private(set) var searchText: String = ""
+    /// Catalog curation filters are owned by the same browser session as the
+    /// filename search and sort. Keeping them here means iPad and any future
+    /// browser surface produce one `LibraryQuery` instead of maintaining a
+    /// second UI-only filter pass over already-loaded photos.
+    @Published public private(set) var ratingFilter: PhotoRatingFilter?
+    @Published public private(set) var flagFilter: PhotoFlag?
+    @Published public private(set) var hasEditsFilter: Bool?
+    @Published public private(set) var formatFilter: String?
+    @Published public private(set) var cameraFilter: String?
+    @Published public private(set) var lensFilter: String?
+    @Published public private(set) var captureDateFilter: PhotoDateRange?
+    @Published public private(set) var keywordFilter: String?
     @Published public private(set) var photos: [PhotoAsset] = []
     @Published public private(set) var nextCursor: PhotoPageCursor?
     @Published public private(set) var loadState: LibraryBrowserLoadState = .idle
@@ -161,6 +173,9 @@ public final class LibraryBrowserSession: ObservableObject {
     /// restoration and whenever the anchor isn't found (the page-one
     /// fallback never sets this -- there is nothing to scroll to).
     @Published public private(set) var pendingScrollAnchor: PhotoID?
+    /// Touch-first multi-selection for the iPad grid. This is presentation
+    /// selection, not the open document and not an edit/undo state.
+    @Published public private(set) var selectedPhotoIDs: Set<PhotoID> = []
 
     private let dependencies: LibraryBrowserDependencies
     private var queryGeneration: UInt64 = 0
@@ -184,7 +199,19 @@ public final class LibraryBrowserSession: ObservableObject {
     /// always read live, never cached, so it reflects exactly what a page
     /// fetch started right now would ask for.
     public var currentQuery: LibraryQuery {
-        LibraryQuery(scope: selection.scope, filenameSearch: searchText.isEmpty ? nil : searchText, sort: sort)
+        LibraryQuery(
+            scope: selection.scope,
+            filenameSearch: searchText.isEmpty ? nil : searchText,
+            sort: sort,
+            rating: ratingFilter,
+            flag: flagFilter,
+            hasEdits: hasEditsFilter,
+            format: formatFilter,
+            camera: cameraFilter,
+            lens: lensFilter,
+            captureDate: captureDateFilter,
+            keyword: keywordFilter
+        )
     }
 
     /// The known source for `libraryID`, or `nil` for a library ID that
@@ -269,6 +296,109 @@ public final class LibraryBrowserSession: ObservableObject {
         beginNewQuery()
     }
 
+    /// Applies all catalog filters as one query transition. The keyword is
+    /// normalized through the shared catalog value type, so whitespace-only
+    /// input becomes `nil` and the SQL layer receives the same spelling on
+    /// every platform.
+    public func setCatalogFilters(
+        rating: PhotoRatingFilter? = nil,
+        flag: PhotoFlag? = nil,
+        hasEdits: Bool? = nil,
+        format: String? = nil,
+        camera: String? = nil,
+        lens: String? = nil,
+        captureDate: PhotoDateRange? = nil,
+        keyword: String? = nil
+    ) {
+        let normalizedKeyword = keyword.flatMap { PhotoKeyword.make(from: $0)?.displayValue }
+        guard ratingFilter != rating
+            || flagFilter != flag
+            || hasEditsFilter != hasEdits
+            || formatFilter != format
+            || cameraFilter != camera
+            || lensFilter != lens
+            || captureDateFilter != captureDate
+            || keywordFilter != normalizedKeyword else { return }
+
+        ratingFilter = rating
+        flagFilter = flag
+        hasEditsFilter = hasEdits
+        formatFilter = format
+        cameraFilter = camera
+        lensFilter = lens
+        captureDateFilter = captureDate
+        keywordFilter = normalizedKeyword
+        beginNewQuery()
+    }
+
+    public func clearCatalogFilters() {
+        setCatalogFilters()
+    }
+
+    /// Updates one quick-filter dimension without clearing the other staged
+    /// catalog filters. Toolbar menus use these helpers so rating, flag and
+    /// edited-state choices remain composable with keyword and file facts.
+    public func setRatingFilter(_ rating: PhotoRatingFilter?) {
+        setCatalogFilters(
+            rating: rating,
+            flag: flagFilter,
+            hasEdits: hasEditsFilter,
+            format: formatFilter,
+            camera: cameraFilter,
+            lens: lensFilter,
+            captureDate: captureDateFilter,
+            keyword: keywordFilter
+        )
+    }
+
+    public func setFlagFilter(_ flag: PhotoFlag?) {
+        setCatalogFilters(
+            rating: ratingFilter,
+            flag: flag,
+            hasEdits: hasEditsFilter,
+            format: formatFilter,
+            camera: cameraFilter,
+            lens: lensFilter,
+            captureDate: captureDateFilter,
+            keyword: keywordFilter
+        )
+    }
+
+    public func setHasEditsFilter(_ hasEdits: Bool?) {
+        setCatalogFilters(
+            rating: ratingFilter,
+            flag: flagFilter,
+            hasEdits: hasEdits,
+            format: formatFilter,
+            camera: cameraFilter,
+            lens: lensFilter,
+            captureDate: captureDateFilter,
+            keyword: keywordFilter
+        )
+    }
+
+    // MARK: Touch-first photo selection
+
+    public func togglePhotoSelection(_ photoID: PhotoID) {
+        if selectedPhotoIDs.contains(photoID) {
+            selectedPhotoIDs.remove(photoID)
+        } else {
+            selectedPhotoIDs.insert(photoID)
+        }
+    }
+
+    /// Selects every row currently retained by the bounded page window. The
+    /// session deliberately does not materialize an entire library just to
+    /// implement a toolbar action, so this stays within the browser's paging
+    /// memory contract.
+    public func selectAllVisiblePhotos() {
+        selectedPhotoIDs.formUnion(photos.map(\.id))
+    }
+
+    public func clearPhotoSelection() {
+        selectedPhotoIDs.removeAll()
+    }
+
     /// `searchText` itself updates immediately, so a bound text field stays
     /// responsive, and so does invalidating whatever query is currently
     /// outstanding -- only *starting the new fetch* is debounced by
@@ -348,6 +478,48 @@ public final class LibraryBrowserSession: ObservableObject {
         pageTask?.cancel()
         pageTask = Task { [weak self] in
             await self?.loadFirstPage(generation: generation)
+        }
+    }
+
+    /// Re-fetches the current query after an external library mutation (for
+    /// example a virtual-copy transaction). Presentation selection is
+    /// cleared because the returned page may contain newly-created IDs.
+    public func refresh() {
+        selectedPhotoIDs.removeAll()
+        beginNewQuery()
+    }
+
+    /// Updates the in-memory edit badge after a sidecar mutation that did not
+    /// come through the currently-open document's ordinary save callback
+    /// (for example a batch adjustment sync). Keeping this as a targeted
+    /// update preserves the user's multi-selection and avoids a full refresh
+    /// that would clear selection and reset the visible page.
+    public func markPhotoHasEdits(_ photoID: PhotoID, hasEdits: Bool) {
+        guard let index = photos.firstIndex(where: { $0.id == photoID }) else { return }
+        guard photos[index].hasEdits != hasEdits else { return }
+        photos[index].hasEdits = hasEdits
+        photos[index].lastEditAt = hasEdits ? Date() : nil
+    }
+
+    /// Applies curation metadata returned by the authoritative index store to
+    /// the currently visible projection without re-querying the page. This is
+    /// intentionally targeted so editing a rating, flag, or keyword never
+    /// clears the user's touch selection or resets their scroll window.
+    public func updatePhotoCuration(
+        photoID: PhotoID,
+        rating: Int? = nil,
+        flag: PhotoFlag? = nil,
+        keywords: [PhotoKeyword]? = nil
+    ) {
+        guard let index = photos.firstIndex(where: { $0.id == photoID }) else { return }
+        if let rating {
+            photos[index].rating = min(max(rating, 0), 5)
+        }
+        if let flag {
+            photos[index].flag = flag
+        }
+        if let keywords {
+            photos[index].keywords = keywords
         }
     }
 

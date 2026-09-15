@@ -133,6 +133,32 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
     }
 
+    /// Multi-select actions must remain usable in a narrow Split View pane.
+    /// The inline summary/actions row is preferred at normal widths, while a
+    /// stacked fallback gives the action labels their own line instead of
+    /// squeezing or clipping the selected-count label.
+    func testSelectionBarUsesAnAdaptiveNarrowWidthFallback() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(
+            source.contains("ViewThatFits(in: .horizontal)"),
+            "the selection bar must switch composition when a narrow pane cannot fit one row"
+        )
+        XCTAssertTrue(
+            source.contains("private var selectionSummary"),
+            "the selected-count label must be kept separate from the action buttons"
+        )
+        XCTAssertTrue(
+            source.contains("private var selectionActions"),
+            "the batch actions must be reusable in both inline and stacked compositions"
+        )
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".frame(minWidth: 44, minHeight: 44)").count - 1,
+            5,
+            "selection actions and toolbar controls must retain 44pt hit targets"
+        )
+    }
+
     /// Step 3's fixed-sort UI concern: while `.recentlyEdited` is selected,
     /// the sort control must not offer a choice that has no effect (the
     /// SQL layer always overrides sort for that scope -- see
@@ -454,20 +480,14 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         )
 
         let viewSource = try Self.loadSource("PadLibraryView.swift")
-        guard let sheetMarkerRange = viewSource.range(of: ".sheet(isPresented: $isSidebarPresented)"),
-              let elseMarkerRange = viewSource.range(of: "} else {"),
-              let trueRange = viewSource.range(of: "showsOperationOverlay: true"),
-              let falseRange = viewSource.range(of: "showsOperationOverlay: false") else {
-            return XCTFail("PadLibraryView must wire showsOperationOverlay differently for its compact sheet and regular-width layouts")
+        guard viewSource.contains(".sheet(isPresented: $isSidebarPresented)"),
+              viewSource.contains("private var sidebarSheet"),
+              viewSource.contains("case .persistent:"),
+              viewSource.contains("case .persistentWithDetails:"),
+              viewSource.contains("showsOperationOverlay: true"),
+              viewSource.contains("showsOperationOverlay: false") else {
+            return XCTFail("PadLibraryView must wire showsOperationOverlay differently for overlay and persistent layouts")
         }
-        XCTAssertTrue(
-            sheetMarkerRange.upperBound < trueRange.lowerBound && trueRange.lowerBound < elseMarkerRange.lowerBound,
-            "the compact-width sheet's PadLibrarySidebar call must pass showsOperationOverlay: true, since it sits above the global overlay"
-        )
-        XCTAssertTrue(
-            elseMarkerRange.upperBound < falseRange.lowerBound,
-            "the regular-width PadLibrarySidebar call must pass showsOperationOverlay: false, since the global overlay already covers it"
-        )
     }
 
     /// Source rows should expose scan state inline, not only as a temporary
@@ -512,6 +532,42 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         XCTAssertTrue(
             source.contains("manifest"),
             "the remove confirmation must also mention the source's .lumaharbor manifest is untouched"
+        )
+    }
+
+    /// Long external-drive names and connection-state labels must not compete
+    /// for one fixed line in the persistent sidebar. The row keeps a compact
+    /// inline form when it fits and stacks the status below the name in a
+    /// narrow pane.
+    func testSourceRowsUseAnAdaptiveNarrowWidthFallback() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertTrue(
+            source.contains("ViewThatFits(in: .horizontal)"),
+            "source rows must switch composition when the sidebar is narrow"
+        )
+        XCTAssertTrue(
+            source.contains("private func sourceNameLabel") && source.contains("private func sourceStatusLabel"),
+            "source name and status must be independently reusable in both row compositions"
+        )
+        XCTAssertTrue(
+            source.contains(".lineLimit(2)") && source.contains(".lineLimit(1)"),
+            "the narrow fallback must wrap the source name while keeping status legible"
+        )
+    }
+
+    func testSidebarRowsKeepStableTouchHeight() throws {
+        let source = try Self.loadSource("PadLibrarySidebar.swift")
+
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)").count - 1,
+            2,
+            "smart scopes and source rows must keep a stable 44pt full-row touch target"
+        )
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: ".contentShape(Rectangle())").count - 1,
+            2,
+            "smart scopes and source rows must make the full row tappable"
         )
     }
 
@@ -641,5 +697,42 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
             body.contains("alert = SafeErrorPresentation.alert("),
             "apply(_:) must surface the failure as a SafeErrorPresentation alert"
         )
+    }
+
+    func testGridProvidesTouchSelectModeAndBatchBar() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+
+        XCTAssertTrue(source.contains("@State private var isSelectMode = false"))
+        XCTAssertTrue(source.contains("library.selectedPhotoIDs"))
+        XCTAssertTrue(source.contains("library.togglePhotoSelection(photo.id)"))
+        XCTAssertTrue(source.contains(".safeAreaInset(edge: .bottom"))
+        XCTAssertTrue(source.contains("library.selectAllVisiblePhotos()"))
+        XCTAssertTrue(source.contains("library.clearPhotoSelection()"))
+        XCTAssertTrue(
+            source.contains(".frame(minWidth: 44, minHeight: 44)"),
+            "selection actions must retain the global 44 pt hit target"
+        )
+    }
+
+    func testGridUsesSharedCatalogFiltersAndAnAdvancedFilterSheet() throws {
+        let source = try Self.loadSource("PadLibraryGrid.swift")
+        let sheet = try Self.loadSource("PadLibraryFilterSheet.swift")
+
+        XCTAssertTrue(source.contains("PadLibraryFilterSheet("))
+        XCTAssertTrue(source.contains("library.setRatingFilter("))
+        XCTAssertTrue(source.contains("library.setFlagFilter("))
+        XCTAssertTrue(source.contains("library.setHasEditsFilter("))
+        XCTAssertTrue(source.contains("library.ratingFilter"))
+        XCTAssertTrue(source.contains("library.flagFilter"))
+        XCTAssertTrue(sheet.contains("library.keywordFilter"))
+        XCTAssertTrue(sheet.contains("library.setCatalogFilters("))
+    }
+
+    func testThumbnailCellExposesSelectionStateToVoiceOver() throws {
+        let source = try Self.loadSource("PadThumbnailCell.swift")
+
+        XCTAssertTrue(source.contains("let isBatchSelected: Bool"))
+        XCTAssertTrue(source.contains("isBatchSelected ? L10n.t(\"selected\")"))
+        XCTAssertTrue(source.contains(".accessibilityValue("))
     }
 }

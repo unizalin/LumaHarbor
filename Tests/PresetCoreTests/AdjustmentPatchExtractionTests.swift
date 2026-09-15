@@ -120,6 +120,34 @@ final class AdjustmentPatchExtractionTests: XCTestCase {
         XCTAssertEqual(patch.excluding([]), patch)
     }
 
+    // MARK: - Per-channel tone curves (P3): a change to only one non-composite
+    // channel must still surface through the same whole-value `.advancedToneCurve`
+    // leaf every copy/paste, batch-sync and preset code path already uses.
+
+    func testModifiedFieldsDetectsARedOnlyChannelChangeWithNoCompositeEdit() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = adjustments.advancedToneCurve.settingPoints(
+            [ToneCurvePoint(x: 0.2, y: 0.8)], for: .red
+        )
+        XCTAssertTrue(adjustments.advancedToneCurve.isIdentity(for: .composite))
+        XCTAssertTrue(AdjustmentPatch.modifiedFields(in: adjustments).contains(.advancedToneCurve))
+    }
+
+    func testExtractingToneCurvePreservesAllFourChannels() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.advancedToneCurve = AdvancedToneCurve(
+            points: [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 1)],
+            redPoints: [ToneCurvePoint(x: 0.2, y: 0.8)],
+            greenPoints: [ToneCurvePoint(x: 0.3, y: 0.7)],
+            bluePoints: [ToneCurvePoint(x: 0.4, y: 0.6)]
+        )
+        let patch = AdjustmentPatch.extracting([.advancedToneCurve], from: adjustments)
+        XCTAssertEqual(patch.advancedToneCurve, adjustments.advancedToneCurve)
+        XCTAssertEqual(patch.advancedToneCurve?.redPoints, [ToneCurvePoint(x: 0.2, y: 0.8)])
+        XCTAssertEqual(patch.advancedToneCurve?.greenPoints, [ToneCurvePoint(x: 0.3, y: 0.7)])
+        XCTAssertEqual(patch.advancedToneCurve?.bluePoints, [ToneCurvePoint(x: 0.4, y: 0.6)])
+    }
+
     func testExtractingEveryFieldRoundTripsThroughApplication() throws {
         var adjustments = PhotoAdjustments.neutral
         adjustments.exposure = 1.2

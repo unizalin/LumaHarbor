@@ -165,7 +165,9 @@ public actor PhotoExporter {
         pipeline: AdjustmentPipeline = AdjustmentPipeline(),
         renderService: ImageRenderService = ImageRenderService(),
         fileManager: FileManager = .default,
-        encodableTypeIdentifiers: @escaping @Sendable () -> Set<String> = ExportFormat.systemEncodableTypeIdentifiers
+        encodableTypeIdentifiers: @escaping @Sendable () -> Set<String> = {
+            ExportFormat.systemEncodableTypeIdentifiers()
+        }
     ) {
         self.decoder = decoder
         self.pipeline = pipeline
@@ -258,7 +260,8 @@ public actor PhotoExporter {
         let decodeRequest = RawDecodeRequest(
             url: request.sourceURL,
             quality: .full,
-            whiteBalance: parameters.whiteBalance
+            whiteBalance: parameters.whiteBalance,
+            lensCorrection: request.adjustments.lensCorrection
         )
         let decoder = self.decoder
         let pipeline = self.pipeline

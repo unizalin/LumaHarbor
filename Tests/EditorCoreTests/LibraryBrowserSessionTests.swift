@@ -131,7 +131,7 @@ private actor FakeLibraryEnvironment {
     /// *different* query's scope/search/sort.
     private(set) var fetchCalls: [(query: LibraryQuery, cursor: PhotoPageCursor?)] = []
     /// Scripted pages, keyed by a query's own string description (stable
-    /// and distinct per distinct scope/search/sort combination). Which page
+    /// and distinct per distinct scope/search/sort/filter combination). Which page
     /// a call serves is decided by the `cursor` it passes, exactly like the
     /// real index -- not by how many times that signature has been queried.
     private var pagesBySignature: [String: [[PhotoAsset]]] = [:]
@@ -201,7 +201,7 @@ private actor FakeLibraryEnvironment {
     }
 
     private static func signature(for query: LibraryQuery) -> String {
-        "\(query.scope)|\(query.filenameSearch ?? "")|\(query.sort)"
+        String(describing: query)
     }
 
     // MARK: Child directories
@@ -1526,5 +1526,206 @@ final class LibraryBrowserSessionTests: XCTestCase {
 
         XCTAssertEqual(session.sourceProgress[sourceID]?.indexedCount, 1)
         XCTAssertEqual(session.sourceProgress[sourceID]?.phase, .finished)
+    }
+
+    // MARK: 8. iPad curation and touch selection
+
+    func testCatalogFiltersReloadThroughTheSharedLibraryQuery() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+
+        let defaultQuery = LibraryQuery(scope: .all, sort: .captureDateDescending)
+        await environment.setPages(for: defaultQuery, pages: [[]])
+
+        let captureDate = PhotoDateRange(
+            start: Date(timeIntervalSince1970: 1_700_000_000),
+            end: Date(timeIntervalSince1970: 1_700_100_000)
+        )
+        let filteredQuery = LibraryQuery(
+            scope: .all,
+            sort: .captureDateDescending,
+            rating: .exact(4),
+            flag: .pick,
+            hasEdits: true,
+            format: "arw",
+            camera: "Sony",
+            lens: "35mm",
+            captureDate: captureDate,
+            keyword: "Selects"
+        )
+        let filteredPhoto = makePhoto(libraryID: LibraryID(), name: "Select.ARW", hasEdits: true)
+        await environment.setPages(for: filteredQuery, pages: [[filteredPhoto]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.loadState == .loaded }
+
+        session.setCatalogFilters(
+            rating: .exact(4),
+            flag: .pick,
+            hasEdits: true,
+            format: "arw",
+            camera: "Sony",
+            lens: "35mm",
+            captureDate: captureDate,
+            keyword: " Selects "
+        )
+
+        try await waitUntil { session.photos.map(\.id) == [filteredPhoto.id] }
+        XCTAssertEqual(session.currentQuery, filteredQuery)
+        XCTAssertEqual(session.keywordFilter, "Selects")
+    }
+
+    func testCatalogFilterClearRestoresUnfilteredQuery() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+
+        let defaultQuery = LibraryQuery(scope: .all, sort: .captureDateDescending)
+        let photo = makePhoto(libraryID: LibraryID(), name: "All.ARW")
+        await environment.setPages(for: defaultQuery, pages: [[photo]])
+
+        let filteredQuery = LibraryQuery(scope: .all, sort: .captureDateDescending, rating: .unrated)
+        await environment.setPages(for: filteredQuery, pages: [[]])
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.photos.map(\.id) == [photo.id] }
+
+        session.setCatalogFilters(rating: .unrated)
+        try await waitUntil { session.currentQuery == filteredQuery }
+        session.clearCatalogFilters()
+        try await waitUntil { session.currentQuery == defaultQuery && session.photos.map(\.id) == [photo.id] }
+
+        XCTAssertNil(session.ratingFilter)
+        XCTAssertNil(session.keywordFilter)
+    }
+
+    func testQuickFilterUpdatesPreserveTheOtherCatalogFilters() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+
+        session.setCatalogFilters(
+            rating: .exact(2),
+            flag: .pick,
+            hasEdits: true,
+            format: "ARW",
+            camera: "ILCE",
+            lens: "35mm",
+            captureDate: PhotoDateRange(
+                start: Date(timeIntervalSince1970: 1_700_000_000),
+                end: Date(timeIntervalSince1970: 1_700_100_000)
+            ),
+            keyword: "Trip"
+        )
+
+        session.setRatingFilter(.exact(5))
+        session.setFlagFilter(.reject)
+        session.setHasEditsFilter(nil)
+
+        XCTAssertEqual(session.ratingFilter, .exact(5))
+        XCTAssertEqual(session.flagFilter, .reject)
+        XCTAssertNil(session.hasEditsFilter)
+        XCTAssertEqual(session.formatFilter, "ARW")
+        XCTAssertEqual(session.cameraFilter, "ILCE")
+        XCTAssertEqual(session.lensFilter, "35mm")
+        XCTAssertEqual(session.keywordFilter, "Trip")
+        XCTAssertNotNil(session.captureDateFilter)
+    }
+
+    func testTouchSelectionSupportsToggleSelectAllAndClear() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let first = makePhoto(libraryID: LibraryID(), name: "First.ARW")
+        let second = makePhoto(libraryID: LibraryID(), name: "Second.ARW")
+        await environment.setPages(
+            for: LibraryQuery(scope: .all, sort: .captureDateDescending),
+            pages: [[first, second]]
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.photos.count == 2 }
+
+        session.togglePhotoSelection(first.id)
+        XCTAssertEqual(session.selectedPhotoIDs, [first.id])
+        session.selectAllVisiblePhotos()
+        XCTAssertEqual(session.selectedPhotoIDs, Set([first.id, second.id]))
+        session.togglePhotoSelection(second.id)
+        XCTAssertEqual(session.selectedPhotoIDs, [first.id])
+        session.clearPhotoSelection()
+        XCTAssertTrue(session.selectedPhotoIDs.isEmpty)
+    }
+
+    func testMarkPhotoEditedUpdatesLoadedBadgeWithoutClearingSelection() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let photo = makePhoto(libraryID: LibraryID(), name: "Edited.ARW")
+        await environment.setPages(
+            for: LibraryQuery(scope: .all, sort: .captureDateDescending),
+            pages: [[photo]]
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.photos.map(\.id) == [photo.id] }
+        session.togglePhotoSelection(photo.id)
+
+        session.markPhotoHasEdits(photo.id, hasEdits: true)
+
+        XCTAssertTrue(session.photos[0].hasEdits)
+        XCTAssertEqual(session.selectedPhotoIDs, [photo.id])
+    }
+
+    func testUpdatePhotoCurationPreservesSelectionAndUpdatesLoadedProjection() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let photo = makePhoto(libraryID: LibraryID(), name: "Curation.ARW")
+        await environment.setPages(
+            for: LibraryQuery(scope: .all, sort: .captureDateDescending),
+            pages: [[photo]]
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.photos.map(\.id) == [photo.id] }
+        session.togglePhotoSelection(photo.id)
+
+        let keyword = PhotoKeyword.make(from: "Trip")!
+        session.updatePhotoCuration(
+            photoID: photo.id,
+            rating: 4,
+            flag: .pick,
+            keywords: [keyword]
+        )
+
+        XCTAssertEqual(session.photos[0].rating, 4)
+        XCTAssertEqual(session.photos[0].flag, .pick)
+        XCTAssertEqual(session.photos[0].keywords, [keyword])
+        XCTAssertEqual(session.selectedPhotoIDs, [photo.id])
+    }
+
+    func testRefreshRequeriesCurrentPageAndClearsSelection() async throws {
+        let environment = FakeLibraryEnvironment()
+        await environment.setSourcesResult(.success([]))
+        let photo = makePhoto(libraryID: LibraryID(), name: "Refresh.ARW")
+        await environment.setPages(
+            for: LibraryQuery(scope: .all, sort: .captureDateDescending),
+            pages: [[photo]]
+        )
+
+        let session = LibraryBrowserSession(dependencies: makeDependencies(environment))
+        session.start()
+        try await waitUntil { session.photos.map(\.id) == [photo.id] }
+        session.togglePhotoSelection(photo.id)
+        let callsBeforeRefresh = await environment.fetchCallCount
+
+        session.refresh()
+        try await waitUntilAsync { await environment.fetchCallCount >= callsBeforeRefresh + 1 }
+        try await waitUntil { session.loadState == .loaded && session.photos.map(\.id) == [photo.id] }
+
+        XCTAssertTrue(session.selectedPhotoIDs.isEmpty)
+        let callsAfterRefresh = await environment.fetchCallCount
+        XCTAssertEqual(callsAfterRefresh, callsBeforeRefresh + 1)
     }
 }

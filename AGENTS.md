@@ -9,11 +9,12 @@
 
 Before modifying this repository, every agent must read:
 
-1. `docs/coordination/CURRENT.md`
-2. `docs/coordination/DECISIONS.md`
-3. The plan, spec, verification spec, and report linked under Canonical project artifacts below.
+1. `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md`
+2. `docs/coordination/CURRENT.md`
+3. `docs/coordination/DECISIONS.md`
+4. The plan, spec, verification spec, and report linked under Canonical project artifacts below.
 
-Confirm the current branch, HEAD, worktree, and dirty files against `CURRENT.md`. If they disagree, stop writing and resolve the source-of-truth mismatch first.
+Confirm the current branch, HEAD, worktree, and dirty files against `CURRENT.md`. If they disagree, stop writing and resolve the source-of-truth mismatch first. A later coordination-only commit may legitimately follow the validated product SHA recorded in `CURRENT.md`; inspect that diff and continue only when it is limited to coordination documents.
 
 ## Codex and Claude collaboration
 
@@ -47,6 +48,7 @@ Confirm the current branch, HEAD, worktree, and dirty files against `CURRENT.md`
 
 ## Canonical project artifacts
 
+- Shared agent read protocol: `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md`
 - Multi-source implementation plan: `docs/superpowers/plans/2026-08-26-ipad-multi-source-photo-library.md`
 - Shared coordination design: `docs/superpowers/specs/2026-08-31-shared-agent-coordination-design.md`
 - Shared coordination implementation plan: `docs/superpowers/plans/2026-08-31-shared-agent-coordination.md`
@@ -56,6 +58,7 @@ Confirm the current branch, HEAD, worktree, and dirty files against `CURRENT.md`
 - Current coordination state: `docs/coordination/CURRENT.md`
 - Cross-agent decisions: `docs/coordination/DECISIONS.md`
 - Handoff template: `docs/coordination/HANDOFF_TEMPLATE.md`
+- Legacy Gemini reading protocol (compatibility reference): `docs/superpowers/specs/2026-09-10-gemini-project-spec-reading-protocol.md`
 
 ## Completion and handoff
 

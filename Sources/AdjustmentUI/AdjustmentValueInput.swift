@@ -1,0 +1,161 @@
+import Localization
+import SwiftUI
+
+/// A compact, keyboard-friendly numeric editor for one adjustment value.
+/// Invalid input is never sent to the editor; committing it restores the last
+/// valid value. Slider changes update the field once editing has ended so a
+/// partially typed decimal is not destroyed mid-entry.
+public struct AdjustmentValueInput: View {
+    @Binding private var value: Double
+    private let range: ClosedRange<Double>
+    private let fractionDigits: Int
+    private let step: Double
+    private let label: String
+    private let onReset: () -> Void
+    @State private var text: String
+    @State private var isEditing = false
+    @FocusState private var isFocused: Bool
+
+    public init(
+        label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        fractionDigits: Int,
+        step: Double = 0.1,
+        onReset: @escaping () -> Void
+    ) {
+        self.label = label
+        self._value = value
+        self.range = range
+        self.fractionDigits = fractionDigits
+        self.step = step.isFinite && step > 0 ? step : 0.1
+        self.onReset = onReset
+        self._text = State(initialValue: PadAdjustmentPolicy.formatted(value.wrappedValue, fractionDigits: fractionDigits))
+    }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            stepButton(
+                systemName: "minus",
+                accessibilityKey: "Decrease",
+                action: { adjust(by: -step) }
+            )
+
+            TextField(label, text: $text, onEditingChanged: { editing in
+                isEditing = editing
+                if !editing { commit() }
+            }, onCommit: commit)
+            .multilineTextAlignment(.trailing)
+            .textFieldStyle(.plain)
+            .font(.callout.monospacedDigit())
+            .padding(.horizontal, 10)
+            // Platform-specific width (spec §5.4: 64-72pt on macOS, 72-88pt
+            // on iPad) -- compact enough for the two nudge controls while
+            // allowing it to contract further in a narrow inspector dock.
+            .frame(
+                minWidth: AdjustmentControlMetrics.numericFieldWidth - 12,
+                idealWidth: AdjustmentControlMetrics.numericFieldWidth,
+                maxWidth: AdjustmentControlMetrics.numericFieldWidth,
+                minHeight: AdjustmentControlMetrics.nudgeHitTarget,
+                idealHeight: AdjustmentControlMetrics.nudgeHitTarget,
+                maxHeight: AdjustmentControlMetrics.nudgeHitTarget
+            )
+            .background(
+                Color.primary.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    // Focus is shown by a *thicker* ring, not just a color
+                    // change, so it does not depend on color perception
+                    // (spec §4.2: "焦點狀態不可只靠顏色").
+                    .stroke(
+                        isFocused ? Color.accentColor : Color.primary.opacity(0.14),
+                        lineWidth: isFocused ? 2 : 1
+                    )
+            )
+            #if os(iOS)
+            .keyboardType(.numbersAndPunctuation)
+            #endif
+            .focused($isFocused)
+            .accessibilityLabel(Text(label))
+            .accessibilityValue(Text(text))
+
+            stepButton(
+                systemName: "plus",
+                accessibilityKey: "Increase",
+                action: { adjust(by: step) }
+            )
+
+            Button {
+                onReset()
+                text = PadAdjustmentPolicy.formatted(value, fractionDigits: fractionDigits)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: AdjustmentControlMetrics.nudgeVisualDiameter, height: AdjustmentControlMetrics.nudgeVisualDiameter)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            // The visible circle is smaller, but the tappable/touchable
+            // region matches the platform's own minimum (spec §5.4: 28-32pt
+            // on macOS, 44pt on iPad), so the reset control is reliably
+            // hittable without inflating the row's visual weight on macOS.
+            .frame(width: AdjustmentControlMetrics.nudgeHitTarget, height: AdjustmentControlMetrics.nudgeHitTarget)
+            .contentShape(Rectangle())
+            .accessibilityLabel(Text("\(label) \(L10n.t("Reset"))"))
+        }
+        .onChange(of: value) { _, newValue in
+            guard !isEditing else { return }
+            text = PadAdjustmentPolicy.formatted(newValue, fractionDigits: fractionDigits)
+        }
+    }
+
+    private func commit() {
+        guard let parsed = PadAdjustmentPolicy.parse(text, range: range, fractionDigits: fractionDigits) else {
+            text = PadAdjustmentPolicy.formatted(value, fractionDigits: fractionDigits)
+            return
+        }
+        value = parsed
+        text = PadAdjustmentPolicy.formatted(parsed, fractionDigits: fractionDigits)
+    }
+
+    private func adjust(by delta: Double) {
+        // Commit a partially typed value first, so a nudge always starts from
+        // what the user sees instead of the last slider tick.
+        if isEditing { commit() }
+        let adjusted = PadAdjustmentPolicy.adjusted(
+            value,
+            by: delta,
+            range: range,
+            fractionDigits: fractionDigits
+        )
+        value = adjusted
+        text = PadAdjustmentPolicy.formatted(adjusted, fractionDigits: fractionDigits)
+    }
+
+    @ViewBuilder
+    private func stepButton(
+        systemName: String,
+        accessibilityKey: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: AdjustmentControlMetrics.nudgeVisualDiameter, height: AdjustmentControlMetrics.nudgeVisualDiameter)
+                .background(Color.primary.opacity(0.08), in: Circle())
+        }
+        .buttonStyle(.plain)
+#if os(iOS)
+        .foregroundStyle(Color.white)
+#else
+        .foregroundStyle(.secondary)
+#endif
+        .frame(width: AdjustmentControlMetrics.nudgeHitTarget, height: AdjustmentControlMetrics.nudgeHitTarget)
+        .contentShape(Rectangle())
+        .accessibilityLabel(Text("\(L10n.t(accessibilityKey)) \(label)"))
+        .help("\(L10n.t(accessibilityKey)) \(label)")
+    }
+}

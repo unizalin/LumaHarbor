@@ -1,3 +1,4 @@
+import AdjustmentUI
 import EditorCore
 import Localization
 import PhotoLibraryCore
@@ -16,43 +17,20 @@ struct PadLibraryView: View {
     @ObservedObject var library: PadLibraryModel
     @ObservedObject var editor: PadEditorModel
     let services: PadAppServices
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Scene-scoped, owned by `PadRootView` -- see that type's own comment
+    /// on why this lives above the library/editor route switch instead of
+    /// as `@State` here. Only `isSidebarVisible` has a wired effect so far:
+    /// whether the persistent source column (Expanded/Wide) is currently
+    /// collapsed. Compact/Standard's sidebar sheet stays view-local
+    /// (`isSidebarPresented` below), since a modal's momentary presentation
+    /// isn't a workspace preference worth remembering across a route switch.
+    @Binding var workspaceState: PadWorkspaceState
     @State private var isSidebarPresented = false
     @State private var isAddingSource = false
 
     var body: some View {
-        Group {
-            if horizontalSizeClass == .compact {
-                content
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            Button {
-                                isSidebarPresented = true
-                            } label: {
-                                Label(L10n.t("Sources"), systemImage: "sidebar.left")
-                            }
-                        }
-                    }
-                    .sheet(isPresented: $isSidebarPresented) {
-                        NavigationStack {
-                            PadLibrarySidebar(library: library, onAddSource: presentAddSourcePicker, showsOperationOverlay: true)
-                                .toolbar {
-                                    ToolbarItem(placement: .confirmationAction) {
-                                        Button(L10n.t("Close")) {
-                                            isSidebarPresented = false
-                                        }
-                                    }
-                                }
-                        }
-                    }
-            } else {
-                HStack(spacing: 0) {
-                    PadLibrarySidebar(library: library, onAddSource: presentAddSourcePicker, showsOperationOverlay: false)
-                        .frame(width: 280)
-                    Divider()
-                    content
-                }
-            }
+        GeometryReader { proxy in
+            workspace(forWidth: proxy.size.width)
         }
         .overlay {
             if let overlay = activeLibraryOverlay {
@@ -87,6 +65,97 @@ struct PadLibraryView: View {
                 dismissButton: .default(Text(L10n.t("OK")))
             )
         }
+    }
+
+    /// `content` (`PadLibraryGrid`, holding its own Select-mode, filter-sheet,
+    /// and photo-opening `@State`) must render at the *same* position in the
+    /// view tree across every width profile and every sidebar toggle --
+    /// never nested separately inside more than one branch of a `switch`.
+    /// SwiftUI gives every branch of a `switch`/`if-else` its own distinct
+    /// identity path (`_ConditionalContent`'s `.first`/`.second`), so a
+    /// `content` built inside the `.overlay` case and a *different*
+    /// `content` built inside a `.persistent` case are, to SwiftUI, two
+    /// unrelated views -- crossing a width breakpoint (rotation, Stage
+    /// Manager resize) would tear the first down and mount the second fresh,
+    /// silently dropping `isSelectMode`/`isShowingFilters`/`openingPhotoID`
+    /// even though `library`'s own selection and scroll-anchor state (an
+    /// `@ObservedObject`, not view-local) survives regardless. Building
+    /// `content` exactly once, as the trailing element of one `HStack`, with
+    /// only its *leading sidebar sibling* appearing/disappearing via `if`,
+    /// keeps `content` at one stable position no matter which profile or
+    /// sidebar-visibility state produced this render.
+    @ViewBuilder
+    private func workspace(forWidth width: CGFloat) -> some View {
+        let layout = PadWorkspaceLayoutPolicy.layout(forWidth: width)
+        let showsPersistentSidebar = self.showsPersistentSidebar(for: layout.librarySidebar)
+
+        HStack(spacing: 0) {
+            if showsPersistentSidebar && workspaceState.isSidebarVisible {
+                PadLibrarySidebar(
+                    library: library,
+                    onAddSource: presentAddSourcePicker,
+                    showsOperationOverlay: false
+                )
+                .frame(width: sidebarWidth(for: layout.profile))
+                Divider()
+            }
+            content
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if showsPersistentSidebar {
+                        workspaceState.isSidebarVisible.toggle()
+                    } else {
+                        isSidebarPresented = true
+                    }
+                } label: {
+                    Label(L10n.t("Sources"), systemImage: "sidebar.left")
+                }
+                .frame(minWidth: 44, minHeight: 44)
+            }
+        }
+        .sheet(isPresented: $isSidebarPresented) {
+            sidebarSheet
+        }
+    }
+
+    /// A plain (non-`@ViewBuilder`) function -- inlining this `switch` back
+    /// into `workspace(forWidth:)` would make the Swift compiler try to
+    /// interpret each `Bool`-assigning case as its own view-producing
+    /// branch (result builders apply to every statement in an
+    /// `@ViewBuilder` function body, not just its trailing expression),
+    /// which fails to type-check since `Bool` doesn't conform to `View`.
+    private func showsPersistentSidebar(for sidebar: PadLibrarySidebarPresentation) -> Bool {
+        switch sidebar {
+        case .overlay:
+            return false
+        case .persistent:
+            return true
+        case .persistentWithDetails:
+            return true
+        }
+    }
+
+    private var sidebarSheet: some View {
+        NavigationStack {
+            PadLibrarySidebar(
+                library: library,
+                onAddSource: presentAddSourcePicker,
+                showsOperationOverlay: true
+            )
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.t("Close")) {
+                        isSidebarPresented = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func sidebarWidth(for profile: PadWorkspaceWidthProfile) -> CGFloat {
+        profile == .wide ? 300 : 280
     }
 
     private var content: some View {

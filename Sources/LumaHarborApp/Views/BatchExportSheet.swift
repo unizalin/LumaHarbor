@@ -75,6 +75,10 @@ struct BatchExportSheet: View {
                 exifPolicyPicker
                 namingPicker
                 collisionPolicyPicker
+                Toggle(
+                    L10n.t("Include rejected photos"),
+                    isOn: $model.includeRejectedInBatchExport
+                )
                 watermarkSection
             } else {
                 progressList

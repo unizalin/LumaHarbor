@@ -11,7 +11,7 @@ import RawProcessingCore
 /// synchronous SQLite call, and making callers `await` each row would push
 /// suspension points into the middle of scan batches for no benefit.
 public final class PhotoIndexStore: @unchecked Sendable {
-    public static let schemaVersion = 3
+    public static let schemaVersion = 5
 
     private let database: SQLiteDatabase
     /// Recursive because `transaction` re-enters through `upsertPhoto`.
@@ -94,6 +94,17 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 failure_reason     TEXT,
                 has_edits          INTEGER NOT NULL DEFAULT 0,
                 last_seen_at       REAL NOT NULL
+                ,format_normalized  TEXT NOT NULL DEFAULT ''
+                ,rating             INTEGER NOT NULL DEFAULT 0
+                ,flag               TEXT NOT NULL DEFAULT 'none'
+            );
+
+            CREATE TABLE IF NOT EXISTS photo_keyword (
+                photo_id       TEXT NOT NULL,
+                normalized     TEXT NOT NULL,
+                display_value  TEXT NOT NULL,
+                PRIMARY KEY (photo_id, normalized),
+                FOREIGN KEY (photo_id) REFERENCES photo(photo_id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS photo_library_path
@@ -102,6 +113,8 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 ON photo (edge_digest, file_size);
             CREATE INDEX IF NOT EXISTS photo_capture_date
                 ON photo (library_id, capture_date);
+            CREATE INDEX IF NOT EXISTS photo_keyword_normalized
+                ON photo_keyword (normalized, photo_id);
             """)
 
         try database.run(
@@ -178,6 +191,38 @@ public final class PhotoIndexStore: @unchecked Sendable {
                     try addColumnIfNeeded("variant_name", to: "photo", definition: "TEXT")
                 }
 
+                if version < 4 {
+                    try addColumnIfNeeded("format_normalized", to: "photo", definition: "TEXT NOT NULL DEFAULT ''")
+                    try addColumnIfNeeded("rating", to: "photo", definition: "INTEGER NOT NULL DEFAULT 0")
+                    try addColumnIfNeeded("flag", to: "photo", definition: "TEXT NOT NULL DEFAULT 'none'")
+                    try backfillFormatNormalized()
+                    try database.execute("""
+                        CREATE TABLE IF NOT EXISTS photo_keyword (
+                            photo_id       TEXT NOT NULL,
+                            normalized     TEXT NOT NULL,
+                            display_value  TEXT NOT NULL,
+                            PRIMARY KEY (photo_id, normalized),
+                            FOREIGN KEY (photo_id) REFERENCES photo(photo_id) ON DELETE CASCADE
+                        );
+                        CREATE INDEX IF NOT EXISTS photo_rating_flag
+                            ON photo (library_id, rating, flag);
+                        CREATE INDEX IF NOT EXISTS photo_format
+                            ON photo (library_id, format_normalized);
+                        CREATE INDEX IF NOT EXISTS photo_keyword_normalized
+                            ON photo_keyword (normalized, photo_id);
+                        """)
+                }
+
+                if version < 5 {
+                    // Curation sidecar v3 migration (professional editing
+                    // completion spec §6.1): purely observational, never
+                    // authoritative -- see `PhotoAsset.curationMigrationPending`.
+                    try addColumnIfNeeded(
+                        "curation_migration_pending", to: "photo",
+                        definition: "INTEGER NOT NULL DEFAULT 0"
+                    )
+                }
+
                 try migrationHook()
 
                 try database.run(
@@ -219,12 +264,25 @@ public final class PhotoIndexStore: @unchecked Sendable {
         }
     }
 
+    private func backfillFormatNormalized() throws {
+        let rows = try database.query("SELECT photo_id, relative_path FROM photo;") {
+            (id: $0.string(0), relativePath: $0.string(1))
+        }
+        for row in rows {
+            try database.run(
+                "UPDATE photo SET format_normalized = ? WHERE photo_id = ?;",
+                [.text(Self.formatComponent(of: row.relativePath)), .text(row.id)]
+            )
+        }
+    }
+
     private static let photoColumnList = [
         "photo_id", "library_id", "relative_path", "file_size", "edge_digest",
         "capture_date", "camera_make", "camera_model", "lens_model",
         "pixel_width", "pixel_height", "iso_speed", "shutter_speed", "aperture", "orientation",
         "status", "failure_reason", "has_edits", "last_seen_at", "last_edit_at",
-        "variant_of", "variant_name"
+        "variant_of", "variant_name", "format_normalized", "rating", "flag",
+        "curation_migration_pending"
     ]
     private static let photoColumns = photoColumnList.joined(separator: ", ")
     private static let qualifiedPhotoColumns = photoColumnList.map { "p.\($0)" }.joined(separator: ", ")
@@ -238,6 +296,14 @@ public final class PhotoIndexStore: @unchecked Sendable {
 
     private static func filenameComponent(of relativePath: String) -> String {
         relativePath.split(separator: "/").last.map(String.init) ?? relativePath
+    }
+
+    private static func formatComponent(of relativePath: String) -> String {
+        let filename = filenameComponent(of: relativePath)
+        guard let dot = filename.lastIndex(of: "."), dot < filename.index(before: filename.endIndex) else {
+            return ""
+        }
+        return normalizeForSearch(String(filename[filename.index(after: dot)...]))
     }
 
     /// NFC composition plus `String.lowercased()` (Unicode default case
@@ -419,12 +485,17 @@ public final class PhotoIndexStore: @unchecked Sendable {
         try withLock { try upsertPhoto(photo) }
     }
 
+    /// `rating`/`flag`/`curation_migration_pending` are intentionally absent
+    /// from the `ON CONFLICT` `SET` list below, same as `rating`/`flag`
+    /// already were before this column existed: a plain rescan upsert must
+    /// never clobber curation state that only `setRating`/`setFlag`/
+    /// `setKeywords`/`setCurationMigrationPending` are allowed to change.
     private func upsertPhoto(_ photo: PhotoAsset) throws {
         try database.run("""
             INSERT INTO photo (
                 \(Self.photoColumns), filename_normalized, relative_directory
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(photo_id) DO UPDATE SET
                 library_id          = excluded.library_id,
                 relative_path       = excluded.relative_path,
@@ -447,6 +518,7 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 last_edit_at        = excluded.last_edit_at,
                 variant_of          = excluded.variant_of,
                 variant_name        = excluded.variant_name,
+                format_normalized   = excluded.format_normalized,
                 filename_normalized = excluded.filename_normalized,
                 relative_directory  = excluded.relative_directory;
             """, [
@@ -472,6 +544,10 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 photo.lastEditAt.map { .real($0.timeIntervalSince1970) } ?? .null,
                 photo.variantOf.map { .text($0.description) } ?? .null,
                 photo.variantName.map { .text($0) } ?? .null,
+                .text(Self.formatComponent(of: photo.relativePath)),
+                .integer(Int64(photo.rating)),
+                .text(photo.flag.rawValue),
+                .integer(photo.curationMigrationPending ? 1 : 0),
                 .text(Self.normalizeForSearch(Self.filenameComponent(of: photo.relativePath))),
                 .text(Self.directoryComponent(of: photo.relativePath))
             ])
@@ -497,17 +573,17 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 parameters.append(.integer(Int64(offset)))
             }
             sql += ";"
-            return try database.query(sql, parameters, transform: Self.photoAsset(from:))
+            return try attachKeywords(to: database.query(sql, parameters, transform: Self.photoAsset(from:)))
         }
     }
 
     public func photo(id: PhotoID) throws -> PhotoAsset? {
         try withLock {
-            try database.query(
+            try attachKeywords(to: database.query(
                 "SELECT \(Self.photoColumns) FROM photo WHERE photo_id = ?;",
                 [.text(id.description)],
                 transform: Self.photoAsset(from:)
-            ).first
+            )).first
         }
     }
 
@@ -558,6 +634,106 @@ public final class PhotoIndexStore: @unchecked Sendable {
             try database.run(
                 "UPDATE photo SET has_edits = ? WHERE photo_id = ?;",
                 [.integer(hasEdits ? 1 : 0), .text(photoID.description)]
+            )
+        }
+    }
+
+    public func setRating(_ rating: Int, for photoID: PhotoID) throws {
+        guard (0...5).contains(rating) else { throw LibraryQueryError.invalidRating(rating) }
+        try withLock {
+            try database.run(
+                "UPDATE photo SET rating = ? WHERE photo_id = ?;",
+                [.integer(Int64(rating)), .text(photoID.description)]
+            )
+        }
+    }
+
+    public func setFlag(_ flag: PhotoFlag, for photoID: PhotoID) throws {
+        try withLock {
+            try database.run(
+                "UPDATE photo SET flag = ? WHERE photo_id = ?;",
+                [.text(flag.rawValue), .text(photoID.description)]
+            )
+        }
+    }
+
+    /// Replaces the complete keyword set atomically. A blank input is invalid
+    /// rather than silently becoming a hidden no-op.
+    public func setKeywords(_ inputs: [String], for photoID: PhotoID) throws {
+        var keywords: [PhotoKeyword] = []
+        var seen = Set<String>()
+        for input in inputs {
+            guard let keyword = PhotoKeyword.make(from: input) else {
+                throw LibraryQueryError.invalidKeyword
+            }
+            if seen.insert(keyword.normalized).inserted {
+                keywords.append(keyword)
+            }
+        }
+        try withLock {
+            try database.transaction {
+                try database.run(
+                    "DELETE FROM photo_keyword WHERE photo_id = ?;",
+                    [.text(photoID.description)]
+                )
+                for keyword in keywords {
+                    try database.run(
+                        "INSERT INTO photo_keyword (photo_id, normalized, display_value) VALUES (?, ?, ?);",
+                        [.text(photoID.description), .text(keyword.normalized), .text(keyword.displayValue)]
+                    )
+                }
+            }
+        }
+    }
+
+    public func keywords(for photoID: PhotoID) throws -> [PhotoKeyword] {
+        try withLock {
+            try database.query(
+                "SELECT normalized, display_value FROM photo_keyword WHERE photo_id = ? ORDER BY normalized;",
+                [.text(photoID.description)]
+            ) { PhotoKeyword(normalized: $0.string(0), displayValue: $0.string(1)) }
+        }
+    }
+
+    /// One bulk read of every photo's current rating/flag/keywords in
+    /// `libraryID`, used once per scan (not per file) so
+    /// `CurationMigration.decide` has "the current SQLite row" to compare a
+    /// sidecar against without a per-file query (spec gap G1/G4).
+    public func curationSnapshot(inLibrary libraryID: LibraryID) throws -> [PhotoID: PhotoCuration] {
+        try withLock {
+            let ratingsAndFlags = try database.query(
+                "SELECT photo_id, rating, flag FROM photo WHERE library_id = ?;",
+                [.text(libraryID.description)]
+            ) { (id: $0.string(0), rating: Int($0.int(1)), flag: PhotoFlag(rawValue: $0.string(2)) ?? .none) }
+
+            let keywordRows = try database.query("""
+                SELECT k.photo_id, k.normalized, k.display_value
+                FROM photo_keyword k
+                JOIN photo p ON p.photo_id = k.photo_id
+                WHERE p.library_id = ?;
+                """, [.text(libraryID.description)]
+            ) { (id: $0.string(0), keyword: PhotoKeyword(normalized: $0.string(1), displayValue: $0.string(2))) }
+            var keywordsByID: [String: [PhotoKeyword]] = [:]
+            for row in keywordRows { keywordsByID[row.id, default: []].append(row.keyword) }
+
+            var result: [PhotoID: PhotoCuration] = [:]
+            for row in ratingsAndFlags {
+                guard let id = PhotoID(uuidString: row.id) else { continue }
+                result[id] = PhotoCuration(rating: row.rating, flag: row.flag, keywords: keywordsByID[row.id] ?? [])
+            }
+            return result
+        }
+    }
+
+    /// Purely observational (spec gap G4): never treated as authoritative,
+    /// only reported. Only `PhotoLibraryService`'s migration hydration is
+    /// expected to call this; a plain rescan upsert never touches it (see
+    /// `upsertPhoto`'s own doc comment).
+    public func setCurationMigrationPending(_ pending: Bool, for photoID: PhotoID) throws {
+        try withLock {
+            try database.run(
+                "UPDATE photo SET curation_migration_pending = ? WHERE photo_id = ?;",
+                [.integer(pending ? 1 : 0), .text(photoID.description)]
             )
         }
     }
@@ -662,6 +838,56 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 parameters.append(.text("%" + escapedSearch + "%"))
             }
 
+            if let rating = query.rating {
+                switch rating {
+                case .unrated:
+                    conditions.append("p.rating = 0")
+                case .exact(let value):
+                    guard (0...5).contains(value) else {
+                        throw LibraryQueryError.invalidRating(value)
+                    }
+                    conditions.append("p.rating = ?")
+                    parameters.append(.integer(Int64(value)))
+                }
+            }
+            if let flag = query.flag {
+                conditions.append("p.flag = ?")
+                parameters.append(.text(flag.rawValue))
+            }
+            if let hasEdits = query.hasEdits {
+                conditions.append("p.has_edits = ?")
+                parameters.append(.integer(hasEdits ? 1 : 0))
+            }
+            if let format = query.format, !format.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                conditions.append("p.format_normalized = ?")
+                parameters.append(.text(Self.normalizeForSearch(format).trimmingCharacters(in: CharacterSet(charactersIn: "."))))
+            }
+            if let camera = query.camera, !camera.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                conditions.append("lower(COALESCE(p.camera_model, '')) = ?")
+                parameters.append(.text(Self.normalizeForSearch(camera)))
+            }
+            if let lens = query.lens, !lens.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                conditions.append("lower(COALESCE(p.lens_model, '')) = ?")
+                parameters.append(.text(Self.normalizeForSearch(lens)))
+            }
+            if let captureDate = query.captureDate {
+                if let start = captureDate.start {
+                    conditions.append("p.capture_date >= ?")
+                    parameters.append(.real(start.timeIntervalSince1970))
+                }
+                if let end = captureDate.end {
+                    conditions.append("p.capture_date <= ?")
+                    parameters.append(.real(end.timeIntervalSince1970))
+                }
+            }
+            if let keyword = query.keyword {
+                guard let normalized = PhotoKeyword.make(from: keyword)?.normalized else {
+                    throw LibraryQueryError.invalidKeyword
+                }
+                conditions.append("EXISTS (SELECT 1 FROM photo_keyword k WHERE k.photo_id = p.photo_id AND k.normalized = ?)")
+                parameters.append(.text(normalized))
+            }
+
             let sortKey: EffectiveSortKey
             if isRecentlyEdited {
                 sortKey = .lastEditDate
@@ -732,7 +958,10 @@ public final class PhotoIndexStore: @unchecked Sendable {
                 }
             }
 
-            return PhotoPage(photos: pageRows.map(\.asset), nextCursor: nextCursor)
+            return PhotoPage(
+                photos: try attachKeywords(to: pageRows.map(\.asset)),
+                nextCursor: nextCursor
+            )
         }
     }
 
@@ -874,6 +1103,29 @@ public final class PhotoIndexStore: @unchecked Sendable {
         withLock { database.close() }
     }
 
+    private func attachKeywords(to assets: [PhotoAsset]) throws -> [PhotoAsset] {
+        guard !assets.isEmpty else { return assets }
+        let ids = assets.map { $0.id.description }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ", ")
+        let rows = try database.query(
+            """
+            SELECT photo_id, normalized, display_value
+            FROM photo_keyword
+            WHERE photo_id IN (\(placeholders))
+            ORDER BY photo_id, normalized;
+            """,
+            ids.map(SQLiteValue.text)
+        ) { (id: $0.string(0), keyword: PhotoKeyword(normalized: $0.string(1), displayValue: $0.string(2))) }
+
+        var keywordsByID: [String: [PhotoKeyword]] = [:]
+        for row in rows { keywordsByID[row.id, default: []].append(row.keyword) }
+        return assets.map { asset in
+            var copy = asset
+            copy.keywords = keywordsByID[asset.id.description] ?? []
+            return copy
+        }
+    }
+
     private static func photoAsset(from row: SQLiteRow) -> PhotoAsset {
         PhotoAsset(
             id: PhotoID(uuidString: row.string(0)) ?? PhotoID(),
@@ -898,7 +1150,10 @@ public final class PhotoIndexStore: @unchecked Sendable {
             hasEdits: row.bool(17),
             lastEditAt: row.date(19),
             variantOf: row.optionalString(20).flatMap(PhotoID.init(uuidString:)),
-            variantName: row.optionalString(21)
+            variantName: row.optionalString(21),
+            rating: Int(row.int(23)),
+            flag: PhotoFlag(rawValue: row.string(24)) ?? .none,
+            curationMigrationPending: row.bool(25)
         )
     }
 }

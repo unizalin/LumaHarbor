@@ -207,6 +207,116 @@ final class XMPImportExportTests: XCTestCase {
         XCTAssertTrue(preview.diagnostics.contains { $0.code == "malformedToneCurve" })
     }
 
+    // MARK: - Per-channel tone curves (P3)
+
+    func testImportsRedGreenBlueToneCurvesIndependently() throws {
+        let xml = """
+        <?xpacket begin="\u{FEFF}" id="W5M0MpCehiHzreSzNTczkc9d"?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+          crs:ProcessVersion="15.4">
+          <crs:ToneCurvePV2012>
+           <rdf:Seq><rdf:li>0, 0</rdf:li><rdf:li>255, 255</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012>
+          <crs:ToneCurvePV2012Red>
+           <rdf:Seq><rdf:li>0, 10</rdf:li><rdf:li>255, 245</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Red>
+          <crs:ToneCurvePV2012Green>
+           <rdf:Seq><rdf:li>0, 20</rdf:li><rdf:li>255, 235</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Green>
+          <crs:ToneCurvePV2012Blue>
+           <rdf:Seq><rdf:li>0, 30</rdf:li><rdf:li>255, 225</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Blue>
+        </rdf:Description>
+        </rdf:RDF>
+        </x:xmpmeta>
+        <?xpacket end="w"?>
+        """
+        let preview = try XMPImporter().preview(data: Data(xml.utf8), suggestedName: "Fallback")
+        let curve = try XCTUnwrap(preview.proposedPreset.patch.advancedToneCurve)
+        XCTAssertEqual(curve.points, [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 1)])
+        XCTAssertEqual(curve.redPoints, [ToneCurvePoint(x: 0, y: 10.0 / 255), ToneCurvePoint(x: 1, y: 245.0 / 255)])
+        XCTAssertEqual(curve.greenPoints, [ToneCurvePoint(x: 0, y: 20.0 / 255), ToneCurvePoint(x: 1, y: 235.0 / 255)])
+        XCTAssertEqual(curve.bluePoints, [ToneCurvePoint(x: 0, y: 30.0 / 255), ToneCurvePoint(x: 1, y: 225.0 / 255)])
+        // .advancedToneCurve is one whole-value field -- four XMP properties
+        // must not inflate nativeFields with duplicate entries.
+        XCTAssertEqual(preview.nativeFields.filter { $0 == .advancedToneCurve }.count, 1)
+    }
+
+    func testMalformedRedChannelIsIsolatedFromOtherChannels() throws {
+        let xml = """
+        <?xpacket begin="\u{FEFF}" id="W5M0MpCehiHzreSzNTczkc9d"?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+          crs:ProcessVersion="15.4">
+          <crs:ToneCurvePV2012Red>
+           <rdf:Seq><rdf:li>not-a-point</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Red>
+          <crs:ToneCurvePV2012Blue>
+           <rdf:Seq><rdf:li>0, 30</rdf:li><rdf:li>255, 225</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Blue>
+        </rdf:Description>
+        </rdf:RDF>
+        </x:xmpmeta>
+        <?xpacket end="w"?>
+        """
+        let preview = try XMPImporter().preview(data: Data(xml.utf8), suggestedName: "Fallback")
+        let curve = try XCTUnwrap(preview.proposedPreset.patch.advancedToneCurve)
+        XCTAssertTrue(curve.isIdentity(for: .red), "A malformed Red channel must not block Blue from importing")
+        XCTAssertEqual(curve.bluePoints, [ToneCurvePoint(x: 0, y: 30.0 / 255), ToneCurvePoint(x: 1, y: 225.0 / 255)])
+        XCTAssertTrue(preview.preservedProperties.contains(.cameraRaw("ToneCurvePV2012Red")))
+        XCTAssertTrue(preview.diagnostics.contains { $0.code == "malformedToneCurve" && $0.propertyID == .cameraRaw("ToneCurvePV2012Red") })
+    }
+
+    func testExportRoundTripsAllFourChannels() throws {
+        // Start from a real import (not a bare `PresetDocument`) so the
+        // preset carries an `xmpEnvelope` with a recognised `ProcessVersion`
+        // -- `XMPExporter.baseDocument(for:)` only reuses that envelope when
+        // one exists; a `.native`-sourced preset with no envelope round-trips
+        // through a fresh, ProcessVersion-less document that the importer
+        // correctly refuses to treat as native (spec §7's own guard against
+        // guessing on an unrecognised process version).
+        let xml = """
+        <?xpacket begin="\u{FEFF}" id="W5M0MpCehiHzreSzNTczkc9d"?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+          crs:ProcessVersion="15.4">
+          <crs:ToneCurvePV2012>
+           <rdf:Seq><rdf:li>0, 0</rdf:li><rdf:li>255, 255</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012>
+          <crs:ToneCurvePV2012Red>
+           <rdf:Seq><rdf:li>0, 25</rdf:li><rdf:li>255, 230</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Red>
+          <crs:ToneCurvePV2012Green>
+           <rdf:Seq><rdf:li>0, 51</rdf:li><rdf:li>255, 204</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Green>
+          <crs:ToneCurvePV2012Blue>
+           <rdf:Seq><rdf:li>0, 76</rdf:li><rdf:li>255, 179</rdf:li></rdf:Seq>
+          </crs:ToneCurvePV2012Blue>
+        </rdf:Description>
+        </rdf:RDF>
+        </x:xmpmeta>
+        <?xpacket end="w"?>
+        """
+        let preview = try XMPImporter().preview(data: Data(xml.utf8), suggestedName: "Fallback")
+        let result = try XMPExporter().export(preview.proposedPreset)
+        let reexported = try XMPImporter().preview(data: result.data, suggestedName: "Fallback")
+        XCTAssertEqual(reexported.proposedPreset.patch.advancedToneCurve, preview.proposedPreset.patch.advancedToneCurve)
+    }
+
+    func testExportOmitsIdentityChannelsButAlwaysWritesComposite() throws {
+        let preview = try XMPImporter().preview(data: try fixture("basic-hsl-curve.xmp"), suggestedName: "Fallback")
+        let result = try XMPExporter().export(preview.proposedPreset)
+        let reparsed = try XMPCodec().parse(result.data)
+        XCTAssertNotNil(reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "ToneCurvePV2012"))
+        XCTAssertNil(reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "ToneCurvePV2012Red"))
+        XCTAssertNil(reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "ToneCurvePV2012Green"))
+        XCTAssertNil(reparsed.property(namespaceURI: XMPNamespace.cameraRaw, localName: "ToneCurvePV2012Blue"))
+    }
+
     // MARK: - Export: preserves unmapped/unknown data (spec §9.4)
 
     func testExportOfXMPImportedPresetPreservesUnknownNestedRDF() throws {

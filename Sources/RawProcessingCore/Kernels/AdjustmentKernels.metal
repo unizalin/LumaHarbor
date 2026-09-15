@@ -46,8 +46,12 @@ namespace {
 extern "C" {
 namespace coreimage {
 
-/// Per-pixel 1D LUT lookup, run once per RGB channel with the same table
-/// (spec §4.3: colour is not touched, only tone).
+/// Per-pixel 1D LUT lookup. `lut` packs three independently-composed tables
+/// into one RGBA8 texture (R = Composite∘Red, G = Composite∘Green,
+/// B = Composite∘Blue -- see `AdvancedToneCurveLUT.buildCombined` and
+/// `AdjustmentPipeline.applyAdvancedToneCurve`), so one kernel pass samples
+/// the same texture three times, once per channel, each reading a different
+/// component (P3: per-channel curves, design spec §6.2/§8 step 4).
 float4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
     float4 pixel = image.sample(image.coord());
     float lastIndex = lutWidth - 1.0;
@@ -62,8 +66,8 @@ float4 advancedToneCurve(sampler image, sampler lut, float lutWidth) {
     float gIn = clamp(pixel.g, 0.0, 1.0);
     float bIn = clamp(pixel.b, 0.0, 1.0);
     float r = lut.sample(lut.transform(float2(rIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.r - rIn);
-    float g = lut.sample(lut.transform(float2(gIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.g - gIn);
-    float b = lut.sample(lut.transform(float2(bIn * lastIndex + 0.5, lutSize.y * 0.5))).r + (pixel.b - bIn);
+    float g = lut.sample(lut.transform(float2(gIn * lastIndex + 0.5, lutSize.y * 0.5))).g + (pixel.g - gIn);
+    float b = lut.sample(lut.transform(float2(bIn * lastIndex + 0.5, lutSize.y * 0.5))).b + (pixel.b - bIn);
     return float4(r, g, b, pixel.a);
 }
 
@@ -166,6 +170,86 @@ float4 hslAdjust(
     // able to pull back. For a neutral band this reconstruction is an exact
     // round-trip, so an input channel above 1.0 comes back out above 1.0.
     return float4(rgbPrime + m, pixel.a);
+}
+
+/// Black & White mixer (P4): collapses each pixel to a single luminance
+/// value, weighted by how much each of the 8 hue bands' `mix` amount applies
+/// to that pixel's own hue -- same triangular falloff weighting as
+/// `hslAdjust` above (kept in sync with `HSLKernelWeights`, same reasoning as
+/// that kernel's own comment), reused here for a different output rather
+/// than duplicated because the *shape* of "how much does this pixel belong to
+/// the red band" is identical; only what happens with that weight differs.
+float4 monochromeMixer(
+    sampler image,
+    float centers0, float centers1, float centers2, float centers3,
+    float centers4, float centers5, float centers6, float centers7,
+    float mix0, float mix1, float mix2, float mix3,
+    float mix4, float mix5, float mix6, float mix7,
+    float halfWidth
+) {
+    float4 pixel = image.sample(image.coord());
+    float maxC = max(pixel.r, max(pixel.g, pixel.b));
+    float minC = min(pixel.r, min(pixel.g, pixel.b));
+    float delta = maxC - minC;
+    // Rec.709 luma -- matches the luminance weighting `applyColorGrading` and
+    // `applySplitToning` already use in Swift, unlike `hslAdjust`'s own
+    // lightness metric `(maxC + minC) * 0.5`, which is a different, cheaper
+    // convention that tool doesn't need to share with a grayscale conversion.
+    float luma = pixel.r * 0.2126 + pixel.g * 0.7152 + pixel.b * 0.0722;
+
+    float mixShift = 0.0;
+    if (delta > 0.0001) {
+        float hueDeg = 0.0;
+        if (maxC == pixel.r) {
+            hueDeg = 60.0 * ci_mod((pixel.g - pixel.b) / delta, 6.0);
+        } else if (maxC == pixel.g) {
+            hueDeg = 60.0 * (((pixel.b - pixel.r) / delta) + 2.0);
+        } else {
+            hueDeg = 60.0 * (((pixel.r - pixel.g) / delta) + 4.0);
+        }
+        if (hueDeg < 0.0) { hueDeg = hueDeg + 360.0; }
+
+        float centers[8] = { centers0, centers1, centers2, centers3, centers4, centers5, centers6, centers7 };
+        float mix[8] = { mix0, mix1, mix2, mix3, mix4, mix5, mix6, mix7 };
+        float totalWeight = 0.0;
+        for (int i = 0; i < 8; i++) {
+            float rawDistance = abs(ci_mod(hueDeg, 360.0) - ci_mod(centers[i], 360.0));
+            float distance = min(rawDistance, 360.0 - rawDistance);
+            float weight = max(0.0, 1.0 - distance / halfWidth);
+            mixShift += weight * mix[i];
+            totalWeight += weight;
+        }
+        if (totalWeight > 1.0) { mixShift /= totalWeight; }
+    }
+    // Achromatic pixels (delta <= epsilon) keep mixShift at 0 -- a neutral
+    // grey has no hue for any band to act on, so it always maps straight to
+    // its own luma, same "no hue means no band applies" rule `hslAdjust`
+    // enforces via its early return.
+
+    // Deliberately not upper-clamped, same extended-range reasoning as
+    // `hslAdjust`'s own final return -- only the physically meaningless
+    // negative-luma case is clamped away.
+    float gray = max(luma * (1.0 + mixShift / 100.0), 0.0);
+    return float4(gray, gray, gray, pixel.a);
+}
+
+/// Professional preview overlay for highlight clipping (red), shadow clipping (blue), and gamut warning (yellow).
+float4 professionalPreviewOverlay(
+    sample_t pixel,
+    float showHighlightClipping,
+    float showShadowClipping,
+    float showGamutWarning
+) {
+    if (showHighlightClipping > 0.5 && (pixel.r >= 0.99 || pixel.g >= 0.99 || pixel.b >= 0.99)) {
+        return float4(1.0, 0.0, 0.0, pixel.a);
+    }
+    if (showShadowClipping > 0.5 && (pixel.r <= 0.01 && pixel.g <= 0.01 && pixel.b <= 0.01)) {
+        return float4(0.0, 0.2, 1.0, pixel.a);
+    }
+    if (showGamutWarning > 0.5 && (pixel.r > 1.0 || pixel.g > 1.0 || pixel.b > 1.0 || pixel.r < 0.0 || pixel.g < 0.0 || pixel.b < 0.0)) {
+        return float4(1.0, 1.0, 0.0, pixel.a);
+    }
+    return pixel;
 }
 
 } // namespace coreimage

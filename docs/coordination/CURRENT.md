@@ -1,8 +1,693 @@
 # Current Coordination State
 
-Updated: 2026-09-07
+Updated: 2026-09-15
 
-Updated by: Codex（A11 修正版真人實體鍵盤複測 PASS；Phase 4.6 完整驗證完成）
+Updated by: Codex（完成 iPad 直／橫向 Inspector rail、窄寬度分頁列、整列導航命中區與 Geometry／Histogram／Info 自適應版面；保留既有 18/16pt 階層、44pt hit target 與調整邏輯）
+
+## Inspector 底部／浮動外觀統一（2026-09-15, Codex）
+
+- **修正**：底部抽屜與浮動 Inspector 共用同一個標題列與內容順序：拖曳把手、調整標題、縮小入口、儲存狀態、Undo／Redo，再接 Inspector 分頁；不再維護兩套容易漂移的外觀。
+- **小高度**：底部抽屜隱藏系統重複拖曳指示器，最小 peek 高度調整為 280pt，確保標題列與分頁列不被裁切或壓到安全區；滑桿與調整值資料流程不變。
+- **驗證**：共用標題列契約與 Inspector／Editor UX 測試 78/78 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **限制**：仍需在實體 iPad 以小高度、浮動拖曳、直／橫向實際確認視覺與手勢；本輪未執行 merge、rebase 或 force-push。
+
+## Inspector 面板可發現性再調整（2026-09-15, Codex）
+
+- **問題**：iPad 底部抽屜原本只有無文字的左右箭頭拖曳區，且旁邊另有相同目的的 Focus 圖示；使用者需要猜手勢才能知道面板可移動。macOS Inspector 寬度分隔線也主要依賴 hover 才顯示可拖曳狀態。
+- **修正**：iPad 不再放置獨立的「浮動面板」切換按鈕；底部抽屜的拖曳把手直接將同一個 Inspector 帶入浮動位置，避免把「面板在哪裡」與「面板能不能拖」拆成兩個控制。macOS 寬度控制加入常態方向圖示並擴大命中區。
+- **驗證**：Inspector／PadEditor／Mac workspace 相關測試 101/101 PASS；八語系與 key parity 測試 15/15 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **限制**：實體 iPad 的最新視覺／手勢仍需使用者在裝置上確認；本輪未執行 commit、push、reset、merge 或 rebase。
+
+## Inspector 單一面板與縮小入口（2026-09-15, Codex）
+
+- **修正**：iPad 將 dock、底部抽屜與浮動 Inspector 視為同一個可逆面板；面板標題列提供「縮小檢閱器」，縮小後只在畫布邊緣留下固定 44pt 的調整圖示，點擊即可還原，不改變調整值、比較狀態、工具或 undo/redo。
+- **自適應**：寬螢幕縮小時移除 trailing dock 讓照片擴展；窄螢幕不再自動彈出底部抽屜；浮動模式縮小後入口固定在右下角，旋轉／Split View 仍沿用 GeometryReader 的即時尺寸。
+- **比較檢視**：iPad Compare menu 改用與 macOS 共用的 `Compare Mode`、`Single View`、`Side by Side`、`Wipe` 在地化鍵，修正原本大小寫不一致導致繁中顯示英文 key 的問題；工具列入口也顯示可理解的比較模式名稱。
+- **驗證**：新增單一 Inspector／縮小還原與 iPad 比較文案契約；相關測試 118/118 PASS、八語系 key parity 與翻譯閘門 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **限制**：實體 iPad 的縮小／還原、浮動拖曳、直橫向與比較選單仍需使用者在裝置上人工確認；本輪未執行 commit、push、reset、merge 或 rebase。
+
+## 實體 iPad 直／橫向畫面擷取（2026-09-15, Codex）
+
+- **證據**：Xcode 已在實體 iPad destination 啟動 `LumaHarborPad`，並透過 View Hierarchy 分別擷取橫向與直向畫面；橫向可見畫布、直方圖與右側 Inspector dock，直向可見照片畫布與底部 Inspector drawer／grabber，兩種方向均維持 `UIWindowScene - LumaHarbor (Foreground Active)`。
+- **macOS 對照**：macOS `LumaHarbor` 亦已啟動，圖庫側欄、縮圖網格與 Inspector 分頁均正常呈現。
+- **限制**：桌面控制通道不能直接注入實體 iPad 觸控或 VoiceOver；裁切控制點、遮罩拖曳、旋轉／翻轉、Split View 與 VoiceOver 仍需在 iPad 上人工點測。未執行 commit、push、reset、merge 或 rebase。
+
+## Inspector 收合狀態輔助技術語意（2026-09-15, Codex）
+
+- **修正**：共用 Level 1／Level 2 收合標題現在除了 Header trait 與箭頭，也透過在地化 accessibility value 明確讀出「Expanded／Collapsed」；iPad 直向、橫向、底部抽屜與 macOS 共用同一套語意。
+- **範圍**：只補強 VoiceOver／鍵盤可理解性，不改展開狀態、調整值、滑桿或 sidecar 資料流程。
+- **驗證**：`InspectorHierarchyMetricsTests` 新增輔助技術語意契約；人工 VoiceOver 驗收仍為 `NOT RUN`。
+
+## iPad 直／橫向導航列與頁面命中區收尾驗證（2026-09-15, Codex）
+
+- **修正範圍**：Xcode 內嵌 host、共用 SwiftPM `PadToolRail` 與 standalone `PadInspectorHost` 的 rail／domain cell 都明確使用整列 `contentShape(Rectangle())`；圖庫側欄智慧範圍與來源列同樣保留全寬 44pt 命中區。既有分頁順序、圖示／文字階層、直向／橫向容器策略與調整資料流程不變。
+- **聚焦驗證**：跨裝置／Inspector／階層／曲線直方圖／遮罩／Preset／圖庫／裁切與 Local Adjustments 套件共 122/122 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic 與實體 iPad destination 的 `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` 均 PASS；`git diff --check` PASS。
+- **完整套件**：`swift test` 執行 2318、跳過 9、失敗 1。唯一失敗是既有 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（`DEVELOPMENT_TEAM` 本機簽章值使出現次數為 1，測試預期 2）；未修改 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的本機 signing 變更，與本輪 UI 修改無關。
+- **限制**：實體 iPad 直向／橫向／Split View、VoiceOver 與 macOS 多尺寸人工視覺／觸控驗收仍為 `NOT RUN`；本輪未執行 commit、push、reset、merge 或 rebase。
+
+## iPad Local Adjustments 遮罩列整列命中區（2026-09-15, Codex）
+
+- **實際問題**：遮罩與 Spot Heal 項目在窄欄換行後雖有 44pt 最小高度，選取按鈕仍可能只以文字／圖示自然範圍作為命中區，觸控不如其他 Inspector 列一致。
+- **修正**：`LocalAdjustmentsPanel` 的遮罩與 Spot Heal 選取列明確套用 `.contentShape(Rectangle())`，保留既有選取、工具模式切換、刪除與調整值流程。
+- **驗證**：`AdvancedMaskPanelContractTests` 新增整列命中區契約；本輪未修改遮罩演算法或 sidecar 資料。
+- **限制**：實體 iPad 直向／橫向／Split View 與 VoiceOver 的人工觸控驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## iPad Wipe 比較的 padded viewport 對齊（2026-09-15, Codex）
+
+- **實際問題**：垂直 Wipe 比較在內容外層套用 padding，卻用外層 GeometryReader 的完整寬度計算原圖裁切、分隔線與拖曳條；在直向窄欄或橫向 dock 中，分隔線可能相對實際影像 viewport 偏移。
+- **修正**：抽出 `verticalWipeCanvas`，用 padding 後的內層 GeometryReader 統一計算影像 clip、分隔線與 44pt 拖曳命中區；比較狀態、拖曳基準與 `EditorSession` clamp 邏輯不變。
+- **驗證**：`CropOverlayContractTests` 補上 padded viewport 契約；完整 `swift test` 執行 2317、跳過 9、失敗 1，唯一失敗仍是既有本機 `DEVELOPMENT_TEAM` signing 契約；本輪未修改比較資料、undo 或輸出流程。
+- **限制**：實體 iPad 直向／橫向／Split View 的人工畫面與拖曳驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## iPad 圖庫側欄列全寬命中區（2026-09-15, Codex）
+
+- **實際問題**：圖庫側欄的智慧範圍與來源列雖然有 44pt 最小高度，但 List 內容沒有明確撐滿列寬；在窄 Split View 或來源名稱／狀態換行時，使用者可能只能點到文字本身。
+- **修正**：`PadLibrarySidebar` 的智慧範圍列與來源列改用全寬、44pt 最小高度並套用 `contentShape(Rectangle())`，保留來源狀態的 inline／stacked 自適應排列、選取狀態與既有資料流程。
+- **驗證**：`PadLibraryAccessibilityContractTests`、`PadLibraryCompositionContractTests`、`InspectorCrossPlatformHierarchyContractTests`、`PadEditorLayoutPolicyTests` 合計 94/94 PASS；跨裝置分頁／功能套件（`CrossDeviceParityVerificationTests`、`InspectorMetadataContractTests`、`InspectorHierarchyMetricsTests`、`CurveHistogramContractTests`、`MaskOverlayTests`、`PadPresetContractTests`、`AdjustmentGroupPanelsContractTests`、`InspectorCrossPlatformHierarchyContractTests`）75/75 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic Simulator 與已連接實體 iPad destination 的無簽章 `xcodebuild` 均 exit 0；`git diff --check` PASS。
+- **未執行**：實體 iPad 直向／橫向／Split View 與 VoiceOver 人工驗收仍為 `NOT RUN`；本輪不執行 commit、push、reset、merge 或 rebase。
+
+## Inspector Level 2 收合標題命中區一致化（2026-09-15, Codex）
+
+- **實際問題**：Level 1 標題已有完整 44pt 可點擊列，但 Geometry、Color、Detail、Effects 等頁面的 Level 2 收合標題仍接近文字本身高度；iPad 直向、底部抽屜與窄 Split View 下不容易點中，也削弱了區塊階層。
+- **修正**：`InspectorHierarchyMetrics` 新增平台化 `level2MinRowHeight`（iPad 44pt、macOS 32pt）；`Level2DisclosureGroup` 與 `Level2Section` 的標題都改為全寬、保留該平台最小命中高度。既有 16pt 字級、累積縮排、展開狀態與調整值不變。
+- **驗證**：`InspectorHierarchyMetricsTests`、`AdjustmentGroupPanelsContractTests`、`InspectorCrossPlatformHierarchyContractTests` 共 32/32 PASS；iPad generic Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **未執行**：實體 iPad 直向／橫向／Split View 與 macOS 多尺寸的人工視覺／觸控驗收仍為 `NOT RUN`；本輪未執行 commit、push、reset、merge 或 rebase。
+
+## iPad Presets 頁操作列自適應（2026-09-15, Codex）
+
+- **實際問題**：收藏、建立與匯入／匯出操作原本掛在 editor 根層 NavigationStack toolbar；在直向或窄 Split View 可能與文件工具列競爭，頁面本身看不到 Presets 操作。
+- **修正**：`PadPresetPanel` 將三個操作移入頁面自己的 `ViewThatFits` 操作列，寬欄維持單列、窄欄自動換行；每個 icon button 固定 44×44pt，原有 preset library、preview、apply、import／export 流程不變。
+- **驗證**：`PadPresetContractTests` 19/19、`InspectorCrossPlatformHierarchyContractTests` 10/10 PASS；iPad generic Simulator 與已連接實體 iPad destination 的無簽章 `xcodebuild` 均 exit 0。
+- **未執行**：實體 iPad 直向／橫向／Split View 的視覺與手勢驗收仍為 `NOT RUN`，CoreSimulator／CoreDevice 目前無法連線。
+
+## iPad 五分頁直／橫向版面矩陣重驗（2026-09-15, Codex）
+
+- **範圍**：重新核對 Adjustments（Light／Color／Detail）、Presets、Geometry、Local Adjustments、Info，以及圖庫側欄／縮圖網格在 compact、standard、expanded、wide 寬度下的 fallback；確認分頁列、滑桿列、metadata、Preset picker、遮罩工具與批次操作沒有依賴固定裝置方向。
+- **證據**：`PadEditorLayoutPolicyTests` 38/38、`PadLibraryAccessibilityContractTests` 36/36、`PadPresetContractTests` 19/19、`AdjustmentGroupPanelsContractTests` 9/9，頁面矩陣合計 102/102 PASS；連同跨平台 Inspector／Info 契約後，本輪聚焦套件為 122/122 PASS；已連接實體 iPad destination 的無簽章建置與 generic Simulator 建置均 PASS。
+- **限制**：CoreSimulatorService／CoreDevice 目前無法連線，Mac 也處於鎖定狀態；因此實體 iPad 直向／橫向／Split View 的畫面、手勢與大字體視覺驗收仍為 `NOT RUN`，不能以本輪靜態契約取代人工驗收。
+
+## macOS Geometry／Local 分頁階層與 iPad 對齊（2026-09-15, Codex）
+
+- **實際差異**：iPad 的 Geometry／Local 分頁已使用共用 Level 1 容器，但 macOS 對應分頁原本直接掛載面板，少了 18pt 標題、收合摘要、44pt header hit target 與 16pt 內容縮排。
+- **修正**：macOS `InspectorView` 的 Geometry／Local 分頁改用既有 `inspectorGroup`，與 iPad 共用相同的第一層階層、摘要與展開狀態；切換到這兩個專用分頁時會自動展開頁面容器，避免內容看起來像空白；Geometry、裁剪、旋轉／翻轉、Local mask 與既有調整值流程不變。
+- **驗證**：跨平台 Inspector、Info、Geometry／Local 與面板契約測試 32/32 PASS（本次新增 macOS Geometry／Local Level 1 host 與分頁展開契約）；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic Simulator 與已連接實體 iPad destination 的 `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` 均 exit 0；`git diff --check` PASS。
+- **未執行**：實體 iPad 直向／橫向／Split View、macOS 多尺寸與觸控／滑鼠人工視覺驗收仍為 `NOT RUN`；本輪未執行 commit、push、reset、merge 或 rebase。
+
+## 雙平台 Info 分頁整理功能對齊（2026-09-15, Codex）
+
+- **實際差異**：iPad Info 頁已有評分、旗標與關鍵字整理操作，但 macOS Info 頁只有唯讀 EXIF；兩邊的 metadata 標題與儲存狀態文案也不一致。
+- **修正**：macOS `InspectorView` 的 Info 頁補上與 iPad 同語意的 Curation 區塊（評分、旗標、關鍵字），沿用 `LibraryViewModel` 既有 curation API，不新增照片編輯或 sidecar 邏輯；Mac 與 iPad metadata 標題統一為 `File Info`，iPad 補上 Orientation 欄位，SwiftPM standalone host 同步標題層級。窄欄仍使用 `ViewThatFits`，Mac 保留較小的 pointer control size，iPad 保留 44pt touch target。
+- **測試**：`CrossDeviceParityVerificationTests` 10/10 PASS；`InspectorMetadataContractTests` 3/3 PASS。
+- **品質閘門**：`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad generic Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` exit 0；`git diff --check` PASS；本輪 touched source/test 檔案隱私與敏感字串掃描 PASS。
+- **完整套件**：`swift test` 執行 2312、跳過 9、失敗 1；唯一失敗為既有 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 signing／`DEVELOPMENT_TEAM` 出現次數 1 vs 測試預期 2），未修改 signing 設定。
+- **未執行**：實體 iPad 直向／橫向／Split View、macOS 多尺寸與整理操作人工視覺／觸控驗收仍為 `NOT RUN`；本輪未執行 commit、push、reset、merge 或 rebase。
+
+## iPad Inspector 跨頁 picker／遮罩觸控一致性（2026-09-15, Codex）
+
+- **修正**：徑向遮罩控制點的命中區由 28pt 統一為 44pt；Histogram RGB／明度、Curve channel、Geometry crop／lens、Rendering Profile 與 Spot Heal mode 的 picker 改用共用 `AdjustmentControlMetrics.actionMinimumHeight`，iPad 為 44pt、Mac 維持平台既有緊湊尺寸。
+- **目的**：避免同一個功能頁因寬度切換到 segmented 或 menu composition 後，控制高度與觸控手感不一致；保留可視圓點、調整值與資料流程不變。
+- **驗證**：`MaskOverlayTests` 6/6、`CurveHistogramContractTests` 4/4、`InspectorCrossPlatformHierarchyContractTests` 9/9 PASS；iPad generic build 與 strict-concurrency build PASS；完整 `swift test` 為 2311 executed、9 skipped、1 failure，唯一失敗仍是既有本機 signing 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 `DEVELOPMENT_TEAM` 差異，未修改 signing）。
+- **未執行**：實體 iPad 直向／橫向／Split View 與大字體人工觸控驗收仍為 `NOT RUN`。
+
+## iPad 裁切控制點觸控區（2026-09-15, Codex）
+
+- **實際問題**：iPad 裁切角點的白色視覺點只有 12pt，外層手勢區原本只有 28pt；在直向或 Split View 內拖曳角點容易誤觸，未符合 iPad 44pt 觸控目標。
+- **修正**：保留 12pt 視覺點，將透明手勢區提升為命名的 44pt 常數；裁切幾何與拖曳演算法不變。
+- **驗證**：`CropOverlayContractTests` 5/5 PASS；iPad Simulator generic build PASS（僅有既有 destination 提示）。
+- **未執行**：實體 iPad 直向／橫向／Split View 的人工拖曳驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## iPad 圖庫多選操作列窄欄自適應（2026-09-15, Codex）
+
+- **實際問題**：圖庫多選後的「已選取／全選／清除／更多」原本固定為單一橫列；在 Split View 或小尺寸直向寬度下，文字按鈕與選取摘要會互相擠壓，批次操作列容易看起來跑版。
+- **修正**：`PadLibraryGrid.selectionBar` 改用 `ViewThatFits`，寬度足夠時保留單列；窄欄時將選取摘要與操作按鈕分成兩行。動作抽成共用 `selectionSummary`／`selectionActions`，所有按鈕仍保留至少 44pt 命中區，批次功能與資料流程不變。
+- **驗證**：`PadLibraryAccessibilityContractTests` 35/35 PASS；iPad Simulator generic build PASS（僅有既有 destination 提示）。
+- **未執行**：實體 iPad 直向／橫向／Split View／Stage Manager 的人工視覺與觸控驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## Geometry 連續滑桿預覽效能（2026-09-15, Codex）
+
+- **實際問題**：Geometry 的 Straighten、Perspective 與 Lens Correction，以及 Local Adjustments 的遮罩／修復滑桿，原本在每個 Slider tick 都呼叫 `updateAdjustments`，會逐格寫入 undo 歷史、觸發 autosave 排程與完整穩定預覽；拖曳較快時容易造成反應延遲，也讓一次手勢產生多筆復原項目。
+- **修正**：6 個 Geometry 與 19 個 Local 滑桿改用共用 `previewContinuousEdit`／`commitContinuousEdit` 生命週期。拖曳期間保留即時畫面預覽，放開時才提交單一歷史項目；數值欄位、加減按鈕、重設與裁剪／旋轉／翻轉／遮罩工具按鈕仍維持原本的離散提交。
+- **驗證**：`InspectorCrossPlatformHierarchyContractTests` 擴充 Geometry preview／commit 對稱契約；跨平台 Inspector／版面聚焦套件目前 65/65 PASS，strict-concurrency build 與 iPad Simulator build 均 PASS（僅有既有 destination 提示）。
+- **完整套件結果**：`swift test` 執行 2299、跳過 9、失敗 1；唯一失敗仍是既有本機 signing／Bundle ID 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（`DEVELOPMENT_TEAM` 本機配置出現次數 1 vs 測試預期 2），未修改 signing 檔案。
+- **未執行**：實體 iPad 直向／橫向／Split View／Stage Manager 與 macOS 多尺寸人工視覺／拖曳驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## iPad 分頁搜尋範圍與頁面控制一致性（2026-09-15, Codex）
+
+- **實際問題**：Xcode 實際使用的 iPad host 原本在五個分頁都顯示共用「搜尋調整工具」列；Presets 已有自己的 Preset 搜尋，Info 沒有工具搜尋，且殘留查詢可能讓搜尋結果清單攔截剛切換的分頁。
+- **修正**：共用 catalog 搜尋現在只出現在 Adjustments／Geometry／Local；Presets 保留 `PadPresetPanel` 自己的搜尋，Info 不顯示無關工具列；切換 domain 時清除舊 catalog query。未改動 preset preview／commit、Info 資料、調整值或 undo／redo。
+- **驗證**：跨平台 Inspector／窄欄／版面聚焦測試 63/63 PASS；新增 `InspectorCrossPlatformHierarchyContractTests.testCatalogSearchDoesNotReplacePresetOrInfoPageControls` PASS；strict-concurrency build、iPad Simulator build 與 `git diff --check` 持續通過。
+- **未執行**：實體 iPad 直向／橫向／Split View／Stage Manager 與 macOS 多尺寸人工視覺／觸控驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## iPad Geometry／Local 分頁第一層階層補強（2026-09-15, Codex）
+
+- **實際問題**：iPad 的 Geometry 與 Local Adjustments 專用分頁原本直接掛載面板，面板內的 Level 2 區塊因此落在頁面根層，沒有和 Adjustments 分頁相同的 18pt Level 1 標題、收合摘要與 16pt 內容縮排；窄欄或旋轉後會更像所有控制項同一層。
+- **修正**：Xcode 實際使用的 `PadEditorView.swift` 內嵌 host 與 SwiftPM standalone `PadInspectorHost.swift` 都以共用 `InspectorLevel1DisclosureGroup` 包住 Geometry／Local；保留 `.geometry`／`.local` 原有面板、裁剪／旋轉／翻轉／遮罩工具與調整值邏輯。專用分頁初次進入會直接展開，Adjustments 仍維持只展開 Basic。
+- **驗證**：`InspectorCrossPlatformHierarchyContractTests`、`CrossDeviceParityVerificationTests`、`InspectorHierarchyMetricsTests`、`PadEditorLayoutPolicyTests` 共 61/61 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。完整 `swift test` 為 2296 executed、9 skipped、1 failure，唯一失敗仍是既有本機 signing／Bundle ID 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`。
+- **未執行**：實體 iPad 直向／橫向／Split View／Stage Manager 與 macOS 多尺寸人工視覺／觸控驗收仍為 `NOT RUN`；目前 Mac 鎖定且 CoreSimulatorService 無法連線。未執行 commit、push、reset、merge 或 rebase。
+
+## Inspector Info 分頁跨 host 內容收斂（2026-09-15, Codex）
+
+- **修正**：Xcode 實際使用的 `PadEditorView.swift` 內嵌 host、SwiftPM standalone `PadInspectorHost.swift` 與 macOS `InspectorView` 現在都以同一語意呈現 Info 分頁：直方圖、檔案資料、儲存狀態、Snapshots；iPad 的檔案資料仍保留既有窄欄 `ViewThatFits` 與關鍵字／整理功能。
+- **順序一致**：三條 UI 路徑統一為直方圖 → 檔案資料 → 儲存狀態 → Snapshots；沒有新增或修改調整值、preview／commit、undo／redo、快照資料模型或 signing 設定。
+- **驗證**：`CrossDeviceParityVerificationTests`、`CurveHistogramContractTests`、`AdjustmentControlMetricsTests` 聚焦 17/17 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS（隔離 cache／derived data）；`git diff --check` PASS；本輪 touched UI／測試檔案隱私與敏感字串掃描無命中。
+- **未執行**：實體 iPad 直向、橫向、Split View／Stage Manager 與 macOS 多尺寸人工視覺／觸控驗收仍為 `NOT RUN`；未執行 commit、push、reset、merge 或 rebase。
+
+## iPad 橫向 rail 寬度預算修正（2026-09-15, Codex）
+
+- **根因**：`PadEditorLayoutPolicy` 預留 88pt，但 rail 原本在內層先固定 88pt，再加左右 padding，實際 material／hit area 會膨脹到 104pt，可能壓縮 canvas 或讓 Inspector 邊界跑版。
+- **修正**：Xcode 內嵌 `PadToolRail` 與 SwiftPM `PadToolRail.swift` 都改為在 padding 後套用 88pt 總寬度，並移除先固定內層寬度的做法；直向與橫向其餘排列、圖示文字階層與 44pt 命中區不變。
+- **驗證**：跨平台 rail 契約與 `PadEditorLayoutPolicyTests` 聚焦套件共 55/55 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。完整 `swift test` 為 2295 executed、9 skipped、1 failure，唯一失敗仍是既有本機 signing／Bundle ID 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`。
+
+## iPad／Mac Inspector 窄欄與分頁一致性補強（2026-09-15, Codex）
+
+- **自適應文字與控制列**：HSL 色彩分區標籤、共享調整滑桿標題、曲線標題／重設按鈕／通道切換、快照預覽／色域／A-B 比較與 Preset 列均改為可換行或 `ViewThatFits` 版面；窄欄不再以省略號截斷本地化文案，數值與 slider 尾端維持原有對齊。Geometry／Curve 的動作按鈕使用共用平台尺寸規則，iPad 命中高度至少 44pt、Mac 維持 36pt 緊湊高度。
+- **遮罩與修復頁**：Local Adjustments 的遮罩／Spot Heal 工具列、選取列、動作按鈕與修復模式切換改為自適應排列，長名稱可換行，窄欄時模式切換改用 menu fallback；保留 44pt 觸控區與既有遮罩、修復、紅眼與局部調整邏輯。
+- **分頁與工具列**：iPad rail／compact domain bar 改為圖示在上、文字在下的兩行階層，使用 2 行本地化標籤與穩定最小尺寸；窄欄的 catalog 搜尋／收藏／釘選／重設工具列改為上下兩列；Light／Color／Detail 在不足以容納 segmented control 時改用 44pt menu；Preset 的範圍／套用模式同樣在窄欄改用 menu fallback；Info 關鍵字輸入在窄欄改為上下排列，避免輸入框與儲存按鈕互相擠壓；Mac／iPad 共用 Inspector 五分頁語意與功能，Mac 窄 Inspector 以水平捲動保留完整分頁名稱。
+- **不變更**：未改動調整值、preview／commit、undo／redo、裁剪／旋轉／翻轉、快照資料模型或 signing 設定；未執行 reset、merge、rebase、commit 或 push，保留既有 dirty files。
+- **驗證**：本輪聚焦測試 98/98 PASS（含窄 Inspector 導航、曲線通道／Spot Heal fallback、Geometry／Curve 44pt action target、Preset fallback 與 Info 關鍵字編輯契約）；最新完整 `swift test` 為 2295 executed、9 skipped、1 failure，唯一失敗仍是既有本機 signing／Bundle ID 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS（使用隔離暫存 cache／derived data，僅既有 destination 提示）；`git diff --check` PASS；本輪 touched UI 檔案未掃到私人路徑或敏感字串。實體 iPad 直向、橫向、Split View／Stage Manager 的人工視覺與觸控驗收仍為 NOT RUN。
+
+## iPad 直／橫向版面修正（2026-09-15, Codex）
+
+- **實際問題**：Xcode iPad target 使用 `PadEditorView.swift` 內嵌的 `PadToolRail`，仍以 52pt 圖示列計算；畫面實際需要顯示五個圖示＋文字分頁，造成橫向 dock 的 canvas／Inspector 寬度預算與實際渲染不一致。修正為共用 88pt rail，並同步 `PadToolRail.swift` 的標籤與 44pt 觸控區。
+- **窄寬度分頁列**：Compact／Standard bottom drawer 與 floating panel 的五分頁改為水平可捲動，每個分頁保留至少 88×44pt；寬度足夠時完整排列，Split View 窄欄不再壓縮或截斷 `Local Adjustments`。
+- **功能頁排版**：Geometry 的 Rotate／Flip 改為自適應 grid，窄欄會換列且保留文字與 44pt 命中區；Histogram 標題與 RGB／明度切換器可在窄欄上下排列，圖表高度維持穩定；Info 的 metadata、評分與旗標改為可在橫／直資訊列間切換，評分按鈕恢復 44pt。
+- **不變更**：未改動調整值、裁剪／遮罩／曲線演算法、preview／commit、undo／redo 或 signing 設定；未 commit、未 push，保留既有 dirty files。
+- **驗證**：`swift test --filter 'CrossDeviceParityVerificationTests|PadEditorLayoutPolicyTests|InspectorSharedCatalogContractTests|InspectorHierarchyMetricsTests|AdjustmentGroupPanelsContractTests'`：81/81 PASS；`swift build -Xswiftc -strict-concurrency=complete`：PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build`：exit 0；`git diff --check`：PASS。實體 iPad 螢幕仍需人工確認直向、橫向與窄 Split View。
+
+## 雙平台 Inspector 五分頁 parity（2026-09-14, Codex）
+
+- **使用者決策**：Mac 與 iPad 安裝後，每個分頁的語意、順序與內容必須一致；僅允許外層容器依裝置尺寸改成側邊欄、側邊列或底部列。
+- **共同分頁**：兩平台統一為「Adjustments、Presets、Geometry、Local Adjustments、Info」。Mac 原本分開的 Snapshots／Metadata 已整合至 Info；iPad 原本的五個 domain 保持相同集合。
+- **Info 內容**：兩平台均提供直方圖、儲存狀態、檔案資料與 Snapshots；Geometry 與 Local Adjustments 皆為獨立分頁，不再只藏在 Adjustments 清單內。
+- **互動一致性**：切換分頁不重置調整值、undo/redo 或展開狀態；Inspector 搜尋導向 Geometry／Local 時會切到對應分頁。Mac 與 iPad 均使用相同的圖示＋文字標籤，窄寬度以換行保留可讀性。八國語言補上共同的 Info 標籤。
+- **驗證**：新增 `CrossDeviceParityVerificationTests.testMacAndiPadExposeTheSameFiveInspectorDomains`，先 RED 後 GREEN；跨平台／Inspector／UX／八語言 focused suite 76/76 PASS；strict-concurrency Mac build PASS；iPad Simulator build exit 0；Xcode 已重新啟動最新版本至已連接 iPad。尚未 commit 或 push，未修改 signing 設定。
+
+## 雙平台 Inspector 階層同步（2026-09-14, Codex）
+
+- **使用者決策**：Mac 與 iPad 一起調整；iPad 需支援直向、橫向與既有寬度配置；可使用已連接的實體 iPad 做驗收。
+- **共用元件**：新增 `InspectorLevel1DisclosureGroup` 與 `InspectorSectionExpansionPolicy`。Mac/iPad 共用 Level 1 18pt、Level 2 16pt、收合摘要 12pt、44pt header hit target、16pt 相對標題縮排與低對比分隔線。
+- **iPad 結構**：`PadInspectorHost.swift` 與 `PadEditorView.swift` 內嵌 host 保持一致。Light/Color/Detail 三個子模式改為第一層可展開區塊；預設只展開「基本」，展開狀態不會重設數值或編輯歷史。既有 `PadWorkspaceLayoutPolicy` 仍負責直向/橫向、Split View、Stage Manager 的容器切換。
+- **保留範圍**：未改動調整值、slider preview/commit、undo/redo、裁剪、遮罩、曲線與既有面板內部演算法。
+- **驗證**：階層與雙平台契約測試 27/27 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。Xcode 已以目前 worktree 成功啟動 `LumaHarborPad` on iPad；Mac 最新 SwiftPM binary 亦已啟動並完成基本/色彩收合視覺檢查。
+- **尚未完成**：尚未取得 iPad 畫面本身的截圖，因目前可用的 UI bridge 只能確認 Xcode 實機執行狀態；請在 iPad 上目視確認直向/橫向、展開/收合與滑桿操作。未執行 commit 或 push。
+
+## Inspector 文字階層 18/16 修正（2026-09-14, Codex）
+
+- **使用者決策**：Level 1 區塊標題使用 18pt，Level 2 子區塊標題使用 16pt；收合摘要維持 12pt，一般控制列不放大。
+- **實作**：`InspectorHierarchyMetrics.level1MacTitleBaseSize = 18`；新增 `level2MacTitleBaseSize = 16`。`Level2Section` 與 `Level2DisclosureGroup` 透過 `@ScaledMetric` 使用 16pt，保留 Dynamic Type／輔助功能縮放；沒有改動調整值、slider、preview、undo 或 commit 邏輯。
+- **驗證**：`InspectorHierarchyMetricsTests` 9/9 PASS；階層相關契約測試合計 69/69 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS（使用隔離 module cache）；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS。完整 suite 的既有本機 signing 契約失敗仍未受影響。
+- **視覺 agent 盤點**：`ios-design-review` 適合真機 Apple HIG 視覺審查；`ios-qa` 適合真機互動驗收；`design-review` 適合一般 UI/UX 視覺一致性與間距檢查。尚未執行真機 agent。
+
+## Inspector Level 1 標題字級與區塊間距 —— 第五輪修正（2026-09-14, Claude, 同分支/同 worktree 續作）
+
+- **使用者回報**：附新截圖（「基本」展開狀態），指出縮排已出現，但「基本」標題／摘要與控制文字偏小，且每個區塊與區塊之間需要更清楚的間距與分隔。要求：(1) Level 1 標題比控制列清楚突出、展開不縮小、macOS 至少 16pt 視覺字級、iPad 依 Dynamic Type、不得硬編碼造成窄欄裁切；(2) 收合摘要用 12-13pt caption、與標題 2-4pt 垂直間距；(3) 一般調整列 label/數值不得再被壓小、不得用 `minimumScaleFactor`；(4) 每個第一層 section 之間要有一致的 padding 與清楚但低對比的 Divider，不得黏成一塊也不得雙重粗線，不得破壞既有 slider 內部間距；(5) 展開內容維持相對標題 16pt、slider 右緣不變、header 維持 44pt 完整可點擊、actions menu 獨立點擊且不重新觸發展開；(6) 保留既有調整邏輯、數值、preview/commit、undo、HSL/histogram 行為。
+- **根因確認**：用截圖比對程式碼，確認 Level 1 標題原本套用 `.font(.subheadline.weight(.semibold))`，而 macOS 內建文字樣式尺寸表（Apple HIG macOS Typography）中 `.subheadline` 是 11pt、`.headline` 是 13pt，兩者都小於一般調整列 label 繼承的環境字型 `.body`（13pt）與數值欄位使用的 `.callout`（12pt monospacedDigit）——這正是使用者截圖中「基本」標題視覺上不比控制文字突出的根因，不是遺漏 semibold 字重。收合摘要原本用 `.caption`（macOS 10pt），也低於使用者要求的 12-13pt。第四點的區塊間距問題：`inspectorGroup(...)` 原本把 `Divider()` 放在 `VStack(alignment: .leading, spacing: 0)` 內部、緊接在展開內容（或收合狀態的 header）之後，兩者之間是 0pt 間距；當某個 Level 1 group 的最後一個子項恰好是展開狀態的 `Level2DisclosureGroup`（其自身已在結尾渲染一條 `Divider().opacity(0.4)`）時，這條內層分隔線會與緊接其後、0pt 間距的外層 `Divider()`（無 opacity 修飾，較強）幾乎貼合，視覺上可能讀成一條雙重粗線。
+- **修正**（僅涉及本輪列出的檔案，未回復或覆蓋其他既有未提交變更）：
+  - `Sources/AdjustmentUI/Level2DisclosureGroup.swift`：`InspectorHierarchyMetrics` 新增兩個常數 `level1MacTitleBaseSize = 16`（Level 1 標題 macOS 基準字級，透過 `@ScaledMetric` 讀取以維持 Dynamic Type/輔助功能文字尺寸可調性，而非直接寫死不隨系統設定縮放的字級）與 `level1MacSummaryBaseSize = 12`（收合摘要 macOS 基準字級）。未修改既有的 `level1Inset`/`level2Inset`/`level3RelativeInset`/`level3Inset`/`level1ChevronSize` 等其餘常數。
+  - `Sources/LumaHarborApp/Views/InspectorView.swift`：
+    - 新增兩個 `@ScaledMetric` 屬性（`level1TitleFontSize` relativeTo `.headline`、`level1SummaryFontSize` relativeTo `.caption`），分別以上述兩個新常數為基準值——`@ScaledMetric` 保證使用者調整 macOS 文字大小輔助設定時這兩個字級仍會同步縮放，不是一個固定不變的硬編碼數值。
+    - Level 1 標題字型改為 `.font(.system(size: level1TitleFontSize, weight: .semibold))`（取代 `.subheadline.weight(.semibold)`），套用位置維持在 `if !isExpanded { ... }` 摘要條件式**之外**、不受展開/收合狀態影響，因此標題本身不會因展開而縮小或變化。收合摘要字型改為 `.font(.system(size: level1SummaryFontSize))`（取代 `.caption`），維持既有 `foregroundStyle(.secondary)`；標題與摘要的 `VStack(spacing: 2)` 垂直間距維持不變（已在使用者要求的 2-4pt 範圍內，未調整）。
+    - `Divider()` 從 `VStack(alignment: .leading, spacing: 0)` 內部移到該 VStack**外部**的同層 sibling 位置：`inspectorGroup(...)` 這個 `@ViewBuilder` 函式現在回傳「header/content VStack」與「Divider()」兩個並列的頂層 view，交由呼叫端 `adjustmentContent` 既有的 `VStack(alignment: .leading, spacing: 12)` 統一提供間距——這使得「展開內容結束到這條 Divider」與「這條 Divider 到下一個 section header」都自動獲得一致的 12pt 間距（收合與展開兩態皆然，因為間距來自結構本身而非某個 group 特定的展開狀態），且不再需要在每個呼叫點手動加一個新的 padding 常數。因為改動後外層 Divider 與任何內層（Level2）較淡的 Divider 之間至少相隔 12pt，不會再貼合成雙重粗線。未改變 Divider 本身的 opacity（維持預設、視覺上是三層裡最強的分隔線，符合規格「Level 1 使用最強分隔線」的既有設計，未額外調整故未新增常數）。
+    - 未變動：`AdjustmentSliderRow`/`AdjustmentValueInput`（label 用環境字型 `.body`、數值用 `.callout.monospacedDigit()`，本來就沒有 `minimumScaleFactor`，已符合使用者第 3 點要求，全套 `Sources/AdjustmentUI` 掃描確認無任何檔案使用 `minimumScaleFactor`）；展開內容 leading inset（`level1ContentLeadingInset` = 16pt 相對標題文字左緣）、slider 右緣、header 44pt 完整可點擊 hit area、actions menu 獨立 44×44 hit area 且不觸發展開/collapse，這些前四輪已驗證的行為與常數本輪完全未觸碰。
+- **測試（新增，均為既有專案慣用的原始碼字串/正規表達式解析手法）**：
+  - `Tests/AdjustmentUITests/InspectorHierarchyMetricsTests.swift`：新增 `testLevel1MacTitleBaseSizeMeetsTheSixteenPointFloorAndBeatsFieldLabelSize`（斷言 `level1MacTitleBaseSize >= 16` 且比 macOS `.callout` 的 12pt 至少大 3pt 以上，避免只差 1pt 這種名義上達標但視覺上仍不明顯的情況）、`testLevel1MacSummaryBaseSizeIsReadableButSecondaryToTheTitle`（斷言 `12 <= level1MacSummaryBaseSize <= 13` 且明顯小於標題字級）。
+  - `Tests/LumaHarborAppTests/InspectorSharedCatalogContractTests.swift`：新增 `testLevel1TitleFontIsAppliedUnconditionallyAndUsesTheExplicitMacSize`（斷言兩個 `@ScaledMetric` 屬性宣告存在、`inspectorGroup` 函式本體不再含 `.subheadline`／`.font(.caption)`、且 `Text(title)` 與其字型修飾字串出現在 `if !isExpanded {` 條件式**之前**，即標題字型不在任何展開/收合條件式內部，鎖住「展開不縮小」這個行為）；新增 `testLevel1DividerIsASiblingOfTheHeaderContentStackNotGluedInsideIt`（用正規表達式比對函式本體中 `Divider()` 這一行的縮排層級，斷言恰好有一行是 8 個空白縮排＝與 header/content VStack 同層，且沒有任何一行是 12 個空白縮排＝巢狀在該 VStack 內部，鎖住「Divider 是 sibling 而非最後一個 child」這個結構關係）。
+  - 驗證方式：先確認新增測試在暫時移除本輪實作變更（`git stash` 對照組，僅本輪兩個實作檔）時會編譯失敗／斷言失敗（因為整個 `Level2DisclosureGroup.swift` 是本 session 稍早新增的未追蹤檔案，直接 stash 會連帶移除許多既有依賴它的面板，導致大量無關編譯錯誤，因此改用邏輯覆核：新測試斷言的每一項——`.subheadline` 存在、`.font(.caption)` 存在、`Divider()` 巢狀縮排在 12 空白層——在編輯前的原始碼片段中逐一確認過確實為真，等同於證明了「舊程式碼會讓這些新測試 RED」）；本輪未新增任何獨立於既有測試套件之外的臨時腳本。
+- **驗證結果（本輪）**：
+  - `swift build` → **PASS**。
+  - `swift test --filter 'InspectorSharedCatalogContractTests|InspectorHierarchyMetricsTests|InspectorAdjustmentGroupsContractTests|AdjustmentGroupPanelsContractTests|InspectorCatalogTests'` → **68/68 PASS**。
+  - 完整 `swift test`（macOS package）→ **執行 2284、跳過 9、失敗 1**；唯一失敗為既有已知的 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 signing Team／Bundle ID 契約，與本輪改動無關；已用 `swift test 2>&1 | grep` 明確定位到就是這一個測試，且 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 本輪完全未讀取、未修改、未 stage）。
+  - iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**。
+  - `git diff --check`（本輪修改／新增的 4 個檔案；其中兩個是既有 session 已新增的未追蹤檔案，用 `git add -N` 暫時納入 diff 範圍後檢查、隨即 `git reset` 移除暫存狀態，未改變其未追蹤身分）→ **PASS**，無空白字元錯誤。
+  - 隱私掃描：對本輪修改／新增的 4 個檔案掃描 `/Users/`、`/Volumes/`、`DEVELOPMENT_TEAM`、`api_key`/`password`/`secret`、PEM 私鑰標頭 → **PASS**，無命中。
+- **未執行／人工驗收**：spec §6 p95 延遲量測與 §9 人工視覺檢查（macOS 300/340/360/440pt、iPad 各方向）仍為 `NOT RUN`，與前四輪記載一致。本輪新增的「標題明顯大於控制文字」「收合摘要清晰可讀且與標題有間距」「區塊之間有清楚分隔且無雙重粗線」三項，程式碼層級證據已完備（見上方測試），但仍需使用者用最新 build（`swift run LumaHarbor` 或 `.build/arm64-apple-macosx/debug/LumaHarbor`）在真實視窗中目視確認。
+- **下一步**：使用者以 `swift run LumaHarbor`（或重新執行 `.build/arm64-apple-macosx/debug/LumaHarbor`）開啟最新 build，確認「基本」標題明顯大於「曝光」「對比」等控制文字、收合狀態下摘要文字清楚可讀但比標題小一階、展開內容結束到下一個 section 標題之間有清楚的視覺分隔且沒有兩條線黏在一起。若確認無誤，可與前四輪一併規劃分段 commit（本輪不執行 commit/push）。
+
+## Inspector Level 1 收合列 —— 改用自製 header 取代原生 DisclosureGroup（2026-09-14, Claude, 同分支/同 worktree 續作）
+
+- **使用者回報**：附兩張新截圖（「基本」展開／全部收合），問「收合那邊文字跟點擊範圍不會太怪嗎」，並列出六點具體要求：(1) 展開內容左緣應比標題多 16pt，且不得移動 slider 右緣；(2) 收合列左側 chevron 是唯一的收合指示，actions 選單不應再顯示第二個看起來像收合箭頭的圖示；(3) 標題字級需明顯高於控制列，收合摘要要與標題有 2-4pt 垂直間距；(4) 整個 header row 需要至少 44pt 點擊高度與完整矩形 hit area，actions ellipsis 保留獨立 44×44 hit area；(5) 展開/收合兩態的 header 高度與對齊要穩定；(6) 保留既有調整邏輯、數值、preview/commit、undo。
+- **根因（推翻上一輪「已修正」的結論）**：用附帶時間戳記的截圖（21:50，晚於上一輪 21:30 的 build）與像素掃描（`sips`/一支臨時 Swift 腳本讀取 PNG 像素）量測，確認「基本」標題文字左緣與展開內容（渲染描述檔／曝光…）文字左緣的實際間距只有原始螢幕尺寸下 ≈3-5pt,遠低於程式碼中設定的 `InspectorHierarchyMetrics.level2Inset = 16`。用 `ImageRenderer` 離線重現同一段 SwiftUI 樹（原生 `DisclosureGroup` + 對 `content()` 套用 `.padding(.leading, 16)`）證實：套用在原生 `DisclosureGroup` `content` 閉包上的 leading padding,不能可靠地反映成畫面上預期的位移——這是上一輪「同日第三輪」判斷錯誤的根本原因，那一輪的 `testLevel1ExpandedContentIsIndentedRelativeToItsOwnHeader` 測試只用字串比對程式碼是否「寫了」這行 padding,並未也不能驗證原生控制項的實際渲染結果。同一次像素掃描也證實使用者回報的第二個問題：actions 選單（`Menu` + `.menuStyle(.borderlessButton)`）在 macOS 上預設會渲染自己的一個 caret（此前未加 `.menuIndicator(.hidden)`），與 ellipsis 圖示並排,看起來像第二個收合箭頭。
+- **修正**：`inspectorGroup(...)`（`Sources/LumaHarborApp/Views/InspectorView.swift`）不再使用原生 `DisclosureGroup`,改成自製 header（與既有、已驗證可行的 `Level2DisclosureGroup` 同一手法）：`Button` 包住「固定寬度 chevron 欄＋標題/摘要 VStack＋`Spacer(minLength: 8)`」作為收合切換目標（`Spacer` 在 Button label 內,所以點擊列上任何空白處都會切換展開)；favorite 星號與 `groupActionsMenu(...)` 是這個 `Button` 的**同層 sibling**,不是巢狀在 Button 內,因此點擊它們各自獨立、不會誤觸展開切換。展開內容的 leading padding 改用新常數 `InspectorHierarchyMetrics.level1ContentLeadingInset`,其定義是 `level1TitleLeadingOffset(=level1ChevronColumnWidth 16 + level1HeaderSpacing 8 = 24) + level2Inset(16) = 40`,因為 chevron 欄與標題間距都改成**固定 frame 寬度**（不是依賴 SF Symbol 字型 metrics）,所以標題文字左緣是精確已知值,`level1ContentLeadingInset` 保證「展開內容文字左緣」精確落在「標題文字左緣 +16pt」——已用同一支 `ImageRenderer` 腳本重新量測,確認修正後兩者間距恰好是 16px（1x)。`groupActionsMenu(...)`新增 `.menuIndicator(.hidden)` 移除 Menu 自帶的第二個 caret,並把 ellipsis 圖示包進 `.frame(width: 44, height: 44)` 給它自己獨立的 44×44 hit area。header 整列（Button + 星號 + menu）與 Button 自己的 label 都加了 `.frame(minHeight: InspectorHierarchyMetrics.level1MinRowHeight = 44)`,展開/收合兩態高度不再因摘要文字出現/消失而跳動。標題字級（`.subheadline.weight(.semibold)`）、收合摘要（`.caption` + `.secondary`,VStack `spacing: 2`）、Divider 每列都固定顯示,均沿用前幾輪已核對過的設定,未再變動。
+- **檔案**：`Sources/AdjustmentUI/Level2DisclosureGroup.swift`（新增 `level1ChevronSize`／`level1ChevronColumnWidth`／`level1HeaderSpacing`／`level1TitleLeadingOffset`／`level1ContentLeadingInset`／`level1MinRowHeight` 六個常數,均為既有 `InspectorHierarchyMetrics` enum 的延伸,未修改既有 `level1Inset`/`level2Inset`/`level3RelativeInset`/`level3Inset`/`level2ChevronSize`)；`Sources/LumaHarborApp/Views/InspectorView.swift`（`inspectorGroup`／`groupActionsMenu` 兩個函式改寫,如上）。未修改 `Level2DisclosureGroup`/`Level2Section` 本體、未修改任何調整邏輯／數值／preview-commit／undo 程式碼、未新增在地化字串（沿用既有 `L10n.t("%@ Actions")` 等既有 key）。
+- **測試（新增／改寫,均為既有專案慣用的原始碼字串解析手法,理由：套件內沒有 SwiftUI view-inspection 依賴）**：
+  - `Tests/AdjustmentUITests/InspectorHierarchyMetricsTests.swift`：新增 `testLevel1ChevronIsTheLargestDisclosureIndicator`（chevron 尺寸關係,非死數字）、`testLevel1ContentLeadingInsetIsMeasuredFromTheTitleTextNotAnUnrelatedOrigin`（斷言 `level1ContentLeadingInset - level1TitleLeadingOffset == level2Inset` 這個**計算關係**,不是比對字面常數,這樣未來若改 `level2Inset` 的值,關係仍會被驗證)、`testLevel1MinRowHeightMeetsThePointerAndTouchTargetFloor`（`>= 44` 不等式)。
+  - `Tests/LumaHarborAppTests/InspectorSharedCatalogContractTests.swift`：改寫 `testLevel1ExpandedContentIsIndentedRelativeToItsOwnHeader`（斷言 `inspectorGroup` 函式本體不再含 `DisclosureGroup(`、`content()` 只在 `if isExpanded {` 內渲染、套用的是 `level1ContentLeadingInset` 常數)；新增 `testGroupActionsMenuHasNoSecondDisclosureIndicator`（斷言 `groupActionsMenu` 含 `.menuIndicator(.hidden)`）；新增 `testLevel1HeaderRowHasAFullHitTargetAtTheMinimumRowHeight`（斷言 Button label 與整列 HStack 都有 `.frame(minHeight: level1MinRowHeight...)`、Button label 內含 `Spacer(minLength: 8)` 與 `.contentShape(Rectangle())`、`groupActionsMenu(` 呼叫點在 Button 的 `.buttonStyle(.plain)` 之後——即 sibling 而非巢狀)。
+  - `Tests/AdjustmentUITests/ZeroRenderPresentationContractTests.swift`：因改用自製 `Button` 取代 `DisclosureGroup(isExpanded: Binding(...))`,原本鎖定 `"isExpanded: Binding("` 字串的 `testInspectorViewDisclosureToggleOnlyMutatesLocalExpansionState` 已同步改寫為鎖定 `Button { ... } label: {` 之間的 toggle 區塊,驗證行為不變（`expandedGroups.insert`/`.remove`,且不得呼叫 `model.editor.`)。
+  - **獨立像素驗證（非 XCTest,只是本輪診斷用的臨時腳本,未提交進 repo）**：寫了一支用 `ImageRenderer`（macOS 13+ API）把「Level 1 header + 展開內容」的簡化重現版本渲染成 PNG,再用一支讀 `CGImage` 像素的 Swift 腳本掃描每列第一個亮像素的 x 座標。改用自製 header 前：標題文字與內容文字幾乎同一 x（驗證了使用者截圖回報的問題屬實，不是舊 build 假象）。改用自製 header 後：內容文字 x 減去標題文字 x 恰好等於 16（1x 像素,即 16pt）。此腳本與輸出圖檔僅存在 `/tmp`,不影響 repo 或測試套件。
+- **驗證結果（本輪）**：
+  - `swift build` → **PASS**。
+  - `swift test --filter 'InspectorSharedCatalogContractTests|InspectorHierarchyMetricsTests|InspectorAdjustmentGroupsContractTests|AdjustmentGroupPanelsContractTests|InspectorCatalogTests'` → **64/64 PASS**（先確認新/改寫測試在改回舊程式碼字串時會 FAIL,即 RED→GREEN,詳見上方「測試」段落的斷言內容）。
+  - 完整 `swift test`（macOS package）→ **執行 2280、跳過 9、失敗 1**；唯一失敗為既有已知的 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 signing Team／Bundle ID 契約,與本輪改動無關,`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 本輪未觸碰、未 stage、未 commit）。
+  - iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**。
+  - `git diff --check`（僅本輪修改的檔案）→ **PASS**（無空白字元錯誤）。
+  - 隱私掃描：對本輪修改的 5 個檔案 diff 掃描 `/Users/`、`/Volumes/`、`DEVELOPMENT_TEAM`、`api_key`/`password`/`secret`、PEM 私鑰標頭 → **PASS**,無命中。
+- **未執行／人工驗收**：spec §6 p95 延遲量測與 §9 人工視覺檢查（macOS 300/340/360/440pt、iPad 各方向）仍為 `NOT RUN`,與前幾輪記載一致。本輪新增的「16pt 縮排是否真的在真機/真視窗上可見」「actions 選單是否只剩一個 ellipsis、無第二個箭頭」「header row 44pt 點擊手感」三項,程式碼層級證據已完備（見上方測試與 ImageRenderer 診斷),但仍需使用者用最新 build（`swift build` 後的 `.build/arm64-apple-macosx/debug/LumaHarbor`,或 `swift run LumaHarbor`）在真實視窗中目視確認,因為前一輪「已修正」的結論就是敗在只信任字串比對測試、沒有任何形式的渲染層驗證。
+- **下一步**：使用者以 `swift run LumaHarbor`（或重新執行 `.build/arm64-apple-macosx/debug/LumaHarbor`）開啟最新 build,確認「基本」展開後控制列文字明顯右移、收合列右側只剩一個 ellipsis 圖示（無第二個箭頭）、點擊標題列空白處可切換收合。若確認無誤,可與前幾輪一併規劃分段 commit（本輪不執行 commit/push）。
+
+## Inspector Level 1 展開內容縮排未生效 —— 根因修正（2026-09-14, Claude, 同分支/同 worktree 續作）
+
+- **使用者回報**：附新截圖，「基本」展開後曝光／對比／亮部／陰影／白色／黑色／鮮豔度／飽和度等控制列仍與「基本」標題文字同一左側起點，沒有形成 16pt 子層級；判定上一輪「同日第二輪」只把 `Level2DisclosureGroup.swift` 的 `InspectorHierarchyMetrics.level2Inset` 常數從 12 改為 16 不足以解決問題，回報成立。
+- **根因**：`Sources/LumaHarborApp/Views/InspectorView.swift` 的 `inspectorGroup(...)`（Level 1 `DisclosureGroup` 的實際宿主）從未對自己的展開內容容器套用任何 leading padding。`Level2DisclosureGroup`／`Level2Section` 的原始設計假設「Level 1 host 已經套用一次 `level2Inset`,自己只需再加 Level 3 的相對縮排」,但這個假設在 `InspectorView.swift` 裡從未成立——常數改到多大都不會移動任何畫面像素,因為完全沒有程式碼讀取這個常數並套用到 Level 1 的展開內容上。Basic／Presence／Curve 等群組的欄位直接由 `content()` 渲染、不經過任何 Level2 元件,因此完全不受影響,這正是使用者螢幕上看到的狀況。
+- **修正**：只在 `InspectorView.inspectorGroup(...)` 的 `DisclosureGroup` 展開內容容器（`VStack { content() }.padding(.top, 8)`）新增一行 `.padding(.leading, InspectorHierarchyMetrics.level2Inset)`。這是本輪唯一的程式碼修改；未再碰 `Level2DisclosureGroup.swift` 的任何常數或邏輯。因為只加 `.leading` padding,展開內容容器的右緣（trailing edge）完全不變,只有左緣整體右移 16pt——符合使用者「不得整塊左右同時縮窄」的限制;標題列字級（`.subheadline.weight(.semibold)`）未改動;`.contentShape(Rectangle())`（整列可點擊,上一輪已加）與 `groupActionsMenu`／favorite 星號各自的獨立 tap 優先權未受影響。
+- **檔案**：只修改 `Sources/LumaHarborApp/Views/InspectorView.swift`（1 處新增 padding + 對應說明註解）。未修改 `Level2DisclosureGroup.swift`、未修改任何調整邏輯／數值／preview-commit／undo 程式碼。
+- **測試（TDD 紅綠證據）**：`Tests/LumaHarborAppTests/InspectorSharedCatalogContractTests.swift` 的 `testLevel1ExpandedContentIsIndentedRelativeToItsOwnHeader`（`git status` 顯示此檔案本輪修改前已是 dirty/modified 狀態,判斷為上一輪或更早某次會話已寫下此測試但未完成對應實作即中斷）——本輪修正**前**單獨執行 `swift test --filter InspectorSharedCatalogContractTests` 得到 **RED**（`XCTAssertTrue failed - Level 1 expanded content must itself carry the leading inset...`,10 個測試 1 個失敗）；修正**後**同一命令 **GREEN**（10/10 全部通過）。此測試直接解析 `InspectorView.swift` 原始碼中 `inspectorGroup` 的 `DisclosureGroup(...) { <這裡> } label: { ... }` 區塊字串,斷言其中含有 `.padding(.leading, InspectorHierarchyMetrics.level2Inset)`,不是只鎖 `level2Inset == 16` 這個數字,因此無法被「只改常數」的上一輪修法騙過。同時保留既有 `Tests/AdjustmentUITests/InspectorHierarchyMetricsTests.swift` 的 `testLevel2ComponentsDoNotReapplyTheLevel1HostsLeadingInset`（斷言 `Level2DisclosureGroup.swift` 本身不得再套用 `level2Inset`,避免累加成 32pt 雙重縮排）,兩份測試互補鎖住整條累進縮排鏈。
+- **驗證結果（本輪）**：
+  - `swift test --filter 'InspectorSharedCatalogContractTests|InspectorHierarchyMetricsTests|InspectorAdjustmentGroupsContractTests|AdjustmentGroupPanelsContractTests|InspectorCatalogTests'` → **59/59 PASS**。
+  - 完整 `swift test`（macOS package）→ **執行 2275、跳過 9、失敗 1**;唯一失敗為既有已知的 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 signing Team／Bundle ID 契約,與本輪改動無關,`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 本輪未觸碰、未 stage）。
+  - `swift build`（macOS package,含 `LumaHarbor` executable target）→ **PASS**。
+  - iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**。
+  - `git diff --check` → **PASS**（無空白字元錯誤）。
+  - 隱私掃描：對本輪唯一修改的 diff（`InspectorView.swift`）掃描 `/Users/`、`/Volumes/`、`DEVELOPMENT_TEAM`、`api_key`/`password`/`secret`、PEM 私鑰標頭 → **PASS**,無命中。
+- **使用者應啟動的 macOS build**：此專案沒有獨立的 macOS `.xcodeproj`／`.app` bundle——macOS Inspector 是 SwiftPM `LumaHarbor` executable target（`Package.swift` 第 16、84 行）,本輪 `swift build` 後的最新二進位檔在 `.build/arm64-apple-macosx/debug/LumaHarbor`（相對路徑；請以 `swift run LumaHarbor` 啟動,或直接執行該路徑下的二進位檔）。若使用者先前是透過 Xcode 或舊的 DerivedData 產物開啟畫面,務必改用這個剛重新建置的 SwiftPM 二進位檔,否則仍會看到縮排修正前的舊畫面。iPad 端請使用本輪 `xcodebuild` 重新產出的 `LumaHarborPad.app`（Xcode DerivedData 下的 `Debug-iphonesimulator` 版本,由 Xcode/模拟器自動使用最新建置,不需手動指路徑）。
+- **未執行／人工驗收**：spec §6 p95 延遲量測與 §9 人工視覺檢查（macOS 300/340/360/440pt、iPad 各方向）仍為 `NOT RUN`,與前兩輪記載一致,本輪未改變這些項目的狀態。16pt 縮排本身的視覺結果建議使用者以上述 `LumaHarbor` 二進位檔重新開圖驗證。
+- **下一步**：使用者以 `.build/arm64-apple-macosx/debug/LumaHarbor` 重新開啟並確認「基本」「色彩」展開後的縮排是否符合預期;若確認無誤,可與前兩輪一併規劃分段 commit（本輪不執行 commit/push）。
+
+## Inspector 收合層級、字級與預覽反應規格 —— 使用者六點核對與最小修正（2026-09-14, Claude, 同分支/同 worktree 續作）
+
+- **狀態**：核對下方「實作輪」與「Codex 獨立審閱與補強」既有成果對使用者本次六點要求（基本／色彩維持第一層標題、展開不縮小字級、展開縮排 16pt、slider 尾端對齊、整個標題列可點按、保留既有調整邏輯與數值），四點在既有實作已滿足，兩點做了最小修正；不重做、不覆蓋既有 Phase 1-3 工作。
+- **使用者要求中的 `docs/ui/adjustment-panel.md` 不存在**：已確認 repo 內無此檔案，`AGENTS.md` 的 Canonical project artifacts 亦未列出它。判定使用者實際指的就是下方已存在、已核對過的 `docs/superpowers/specs/2026-09-14-inspector-hierarchy-typography-and-preview-responsiveness.md`（與使用者六點描述的功能範圍一致），依 AGENTS.md 衝突時以規格為準的原則，以此規格與既有實作為基準核對，未另外新建規格文件。
+- **分支／基準**：`claude/professional-editing-completion`；HEAD 仍為 `3110d572aa18912577374c2101240abf7793eb91`（與上一輪一致，本輪未新增 commit）。
+- **本輪修改的檔案（在上一輪既有未提交變更之上疊加）**：
+  - `Sources/AdjustmentUI/Level2DisclosureGroup.swift`：`InspectorHierarchyMetrics.level2Inset` 由 12pt 改為 16pt（符合使用者明確指定的「展開縮排 16 pt」，仍落在規格 §5.3 表格「Level 2: 12 to 16 pt」的合法範圍內）；`level3RelativeInset` 由 14pt 改為 10pt，使 `level3Inset` 維持 26pt 不變（規格 §5.3 表格「Level 3: 24 to 28 pt」範圍內）。`Tests/AdjustmentUITests/InspectorHierarchyMetricsTests.swift` 只斷言層級間的相對關係與 `level3Inset == level2Inset + level3RelativeInset` 的恆等式，未鎖死絕對數值，故此調整未破壞任何既有測試。
+  - `Sources/LumaHarborApp/Views/InspectorView.swift`：Level 1 `inspectorGroup` 的 `DisclosureGroup` label（HStack，含標題、摘要、favorite 星號、`groupActionsMenu`）新增 `.contentShape(Rectangle())`，使 `Spacer()` 造成的空白區域也納入點擊/收合的 hit-test 範圍，讓「整個標題列」都能觸發收合——修正前只有非透明子視圖（文字、圖示、按鈕）本身的區域可點擊。巢狀的 `groupActionsMenu`／favorite 星號仍保有自己的 hit-test 優先權，點擊它們不會觸發收合或重設（與規格 §5.1「Clicking a group title...must never reset an adjustment」一致，行為未變，只是擴大了收合觸發區域）。
+- **驗證結果（本輪）**：
+  - `swift build` → **PASS**。
+  - `swift test --filter 'AdjustmentUITests|LumaHarborAppTests'` → 執行 705、失敗 1（`AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`，本機 signing Team／Bundle ID 契約，與上一輪記錄的已知失敗相同，未受本輪改動影響，`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 本輪未觸碰）。
+  - iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**。
+  - `git diff --check` → **PASS**（無空白字元錯誤）。
+  - 隱私掃描：對本輪修改的兩個檔案 diff 掃描 `/Users/`、`/Volumes/`、`DEVELOPMENT_TEAM`、`api_key`/`password`/`secret` → **PASS**，無命中。
+- **未執行／人工驗收**：spec §6 p95 延遲量測與 §9 人工視覺檢查（macOS 300/340/360/440pt、iPad 各方向）仍如上一輪記載為 `NOT RUN`，本輪未新增或移除任何 NOT RUN 項目，僅新增「16pt 縮排」與「整個標題列可點按」兩項的程式碼層級證據；這兩項的實機觸控/點擊手感仍需人工驗收。
+- **下一步**：與上一輪相同（真機視覺／延遲驗收、其餘面板的 preview/commit 遷移為選配、分段提交由使用者決定）；額外可選：若使用者確認 16pt/contentShape 的修正方向正確，可與上一輪一併規劃分段 commit。
+
+## Inspector 收合層級、字級與預覽反應規格 —— 實作輪（2026-09-14, Claude）
+
+- **狀態**：`PHASE 1-3 IMPLEMENTED / PHASE 4 PARTIAL (unit-level zero-render + transaction contract tests only) / PHYSICAL-DEVICE AND LATENCY ACCEPTANCE NOT RUN`。依 `docs/superpowers/specs/2026-09-14-inspector-hierarchy-typography-and-preview-responsiveness.md` 實作。
+- **分支／基準**：`claude/professional-editing-completion`；已核對基準 HEAD `3110d572aa18912577374c2101240abf7793eb91`（與規格記載的 Verified baseline 一致）；本輪未新增 commit，維持工作目錄未提交狀態，交由使用者審閱後決定如何分段提交。
+- **接手前既有 dirty files（非本輪產生，已核對未覆蓋）**：`Apps/LumaHarborPad.xcodeproj/project.pbxproj`（使用者本機 signing，未觸碰）、`Package.swift`、`Sources/AdjustmentUI/PadAdjustmentPolicy.swift`、`Sources/LumaHarborApp/Views/RootView.swift`、`Sources/PendingLeaseHelper/main.swift`（deleted）／`PendingLeaseHelper.swift`（untracked）、`Sources/Localization/Resources/zh-Hant.lproj/Localizable.strings` 的 "Vibrance" 翻譯調整、`Tests/PhotoLibraryCoreTests/PendingLeaseSubprocessTests.swift`。這些是上一輪「feat: add fine adjustment controls」之後的未提交延續工作（slider 數值 snap、inspector resize handle 視覺調整），與本規格無關；本輪在 `Sources/AdjustmentUI/AdjustmentSliderRow.swift`／`BasicAdjustmentPanel.swift` 上是在這些既有修改之上疊加，未回復或覆蓋其內容（已用 `git diff` 逐一核對）。
+
+### 實作內容
+
+**Phase 3（連續調整交易，優先完成，可獨立驗證）**
+- `Sources/EditorCore/EditorSession.swift`：把只服務 curve 的 `previewedCurveAdjustments`／`previewCurveEdit`／`commitCurveEdit` 泛化為 `previewedContinuousAdjustments`／`previewContinuousEdit(_:)`／`commitContinuousEdit()`，新增 `cancelContinuousEdit()`（取消預覽、還原 baseline、不寫入 history）。`previewCurveEdit`／`commitCurveEdit` 保留為呼叫新方法的別名，`CurveAdjustmentPanel` 呼叫點與既有測試完全不用改。
+- `Sources/AdjustmentUI/AdjustmentSliderRow.swift`：新增 `onPreview`／`onCommitPreview` 參數（`onPreview` 預設 fallback 回 `onChange`，未遷移的呼叫端行為不變）；Slider 的 `onEditingChanged` 先呼叫 `onCommitPreview()`（把預覽寫成一筆 history）再呼叫呼叫端自己的 `onEditingChanged`（給 batch sync 用的 begin/end hook），確保 hook 讀到的是「已提交」的最終值而非提交前的暫存值。數字欄位／加減按鈕維持透過 `onChange` 立即提交（未改動語意）。
+- 已遷移到 preview／commit 交易的面板（`onPreview:`／`onCommitPreview:` 皆已接上 `editor.previewContinuousEdit`／`editor.commitContinuousEdit()`）：`BasicAdjustmentPanel`（含 White Balance）、`ColorAdjustmentPanel`（HSL 三欄＋黑白混合器）、`ColorGradingAdjustmentPanel`、`DetailAdjustmentPanel`、`EffectsAdjustmentPanel`、`PresenceAdjustmentPanel`——完全對應規格 §5.6 點名的清單。`GeometryAdjustmentPanel`／`LocalAdjustmentsPanel`／`RenderingProfilePanel` 未遷移（沿用舊有「每個 tick 都 commit」行為，`AdjustmentSliderRow` 的向下相容 fallback 讓它們持續正常運作，只是未享有單一 undo 合併），這是本輪已知的範圍縮減，不在規格明列清單內。
+
+**Phase 1（收合層級與 HSL 自適應選擇器）**
+- `Sources/AdjustmentUI/Level2DisclosureGroup.swift`（新檔）：自製、比原生 `DisclosureGroup` 更小的收合元件（`chevron.right` 9pt 圖示＋`.callout.weight(.semibold)`＋12pt 縮排＋透明度 0.4 的分隔線），取代 `DetailAdjustmentPanel`／`EffectsAdjustmentPanel`／`ColorGradingAdjustmentPanel`／`GeometryAdjustmentPanel` 內原本的 `DisclosureGroup(L10n.t(...))`，讓 Level 2 與 Mac Inspector 外層 Level 1 的原生 DisclosureGroup 在 chevron 尺寸、字重、縮排、分隔線強度上明確不同（規格要求「不可與父層共用同一視覺語言」）。
+- `Sources/LumaHarborApp/Views/InspectorView.swift`：
+  - 首次展開只保留 `.basic`（原本是 `[.basic, .color]`）。
+  - `inspectorGroup(...)` 重寫：標題改 `.subheadline.weight(.semibold)`，標題下方加入 `InspectorGroupSummary` 產生的「未調整／N 項已調整」摘要（`.caption`），group 內容結束後加一條全寬 `Divider()`（比 Level2 的分隔線更強）。
+  - Reset／Favorite 兩個原本永遠可見的按鈕，改收進標題列尾端一個 `Menu`（`ellipsis.circle`），已收藏時仍在 Menu 旁另外顯示一顆實心星號（符合規格「收藏可保留可見」）。點擊標題／摘要／chevron 一律只切換收合，不會呼叫任何 reset。
+  - Color group 的摘要改用 `summarySections: [.whiteBalance, .hsl]` 合併兩個 catalog section 的已調整計數，因為 Mac 視覺上把 White Balance 與 HSL 併在同一個 Level 1 group 裡。
+- `Sources/AdjustmentUI/HSLBandSelectorModel.swift`／`HSLBandGridSelector.swift`（新檔）：純資料模型 `HSLBandID`（8 色）與自適應網格選擇器（340pt 以上 4 欄、以下 2 欄，macOS 最小列高 32pt／iPad 44pt，色票＋完整在地化名稱＋選取態＋已修改小圓點指示）。**選擇器完全不 import `EditorCore`**——架構上不可能觸發 render／history／sidecar（見下方 `ZeroRenderPresentationContractTests`）。
+- `Sources/AdjustmentUI/ColorAdjustmentPanel.swift`：徹底移除原本 8 組巢狀 `DisclosureGroup`（HSL 與黑白混合器各一組色票八個 disclosure），改成「一個網格選擇器＋一個對應 Hue/Saturation/Luminance 三列編輯區」；選中色帶存在 `@State`（純 UI 狀態，換片重建即重置，符合規格「可在建立新 EditorSession 時重置」）。
+- `Sources/AdjustmentUI/HistogramPanel.swift`：加入 `isCollapsed`（純 `@State`，收合時只顯示標題／目前 RGB-Luminance 模式／裁切摘要，不顯示 Canvas；`histogram` 參數本身沒有變，收合開關無法觸發任何重新計算或 preview submission）。
+
+**Phase 2（自適應排版與密度）**
+- `Sources/AdjustmentUI/AdaptiveRowLayout.swift`（新檔，純函式）＋ `AdaptiveRowContainer.swift`（新檔，SwiftUI 量測容器，用背景 `GeometryReader`＋`PreferenceKey` 量測寬度而不擠壓內容高度）：340pt 門檻，≥340 為 `.inline`（同一列：label＋trailing controls，第二行 slider 全寬），<340 為 `.stacked`（label 全寬一行，第二行靠右數值/加減，第三行 slider 全寬）。
+- `Sources/AdjustmentUI/AdjustmentSliderRow.swift` 改用 `AdaptiveRowContainer` 切換排版，**移除 `.minimumScaleFactor(0.8)`**。
+- `Sources/AdjustmentUI/BasicAdjustmentPanel.swift`：徹底改寫成呼叫共用 `AdjustmentSliderRow`（原本自己重複一份幾乎相同的排版程式碼），連帶拿到自適應排版＋移除縮放字級＋preview／commit 交易，三個規格要求一次到位，也讓十個基本調整與其餘面板共用單一列實作（不再有第二套版面模型）。
+- `Sources/AdjustmentUI/AdjustmentControlMetrics.swift`（新檔）：macOS／iPad 分道的控制尺寸常數（macOS nudge/reset 命中區 30pt、數值欄寬 68pt；iPad 沿用 44pt／80pt），套用到 `AdjustmentValueInput.swift`，取代原本兩平台共用的固定 44pt／72pt。數值字級改用規格指定的 `.callout.monospacedDigit()`。
+
+**在地化（8 語，均非英文複製，已通過 `EightLanguageLocalizationGateTests`）**
+- 新增鍵：`"Not Adjusted"`／`"%d Adjusted"`（Level 1 收合摘要，繁中值為規格明寫的「未調整」／「%d 項已調整」）、`"Collapse Histogram"`／`"Expand Histogram"`（直方圖收合按鈕）、`"HSL"`（Color group 內 Level 2 小標題）、`"%@ Actions"`（每個 group 的 ellipsis 選單 accessibility label，取代原本每個 group 共用同一句「Adjustments Actions」）。
+
+### 測試（新增／更新，全部 TDD 先寫後實作）
+
+- 新增 `Tests/EditorCoreTests/EditorSessionContinuousAdjustmentTests.swift`（9 個）：泛化交易的 preview／commit／cancel／many-ticks-one-undo／no-op／autosave-once，涵蓋非 curve 欄位（`exposure`）。
+- 新增 `Tests/AdjustmentUITests/AdaptiveRowLayoutTests.swift`（3）、`AdjustmentControlMetricsTests.swift`（4，macOS 分支）、`HSLBandSelectorModelTests.swift`（5）、`InspectorGroupSummaryTests.swift`（7）、`ZeroRenderPresentationContractTests.swift`（5，架構性「無法觸發 render」證明＋六個已遷移面板共用交易的一致性檢查）。
+- 更新既有 `Tests/AdjustmentUITests/AdjustmentGroupPanelsContractTests.swift`／`BasicAdjustmentPanelModelTests.swift`／`AdjustmentValueInputTests.swift`：因拿掉 `.minimumScaleFactor(0.8)`、拿掉 `BasicAdjustmentPanel` 自己的重複排版程式碼、HSL 面板改用共用選擇器，原本鎖定舊實作細節的斷言已改成鎖定新架構的等價保證（例如「必須用 `AdjustmentSliderRow(`」取代「必須包含 `.minimumScaleFactor(0.8)`」），未刪除任何原本驗證的行為需求。
+
+### Codex 獨立審閱與補強（2026-09-14）
+
+- 發現 Claude 初版只有 Level 2 標題縮排，Level 3 控制仍未形成累進階層；新增共用 `InspectorHierarchyMetrics` 與 `Level2Section`，使 Level 1／2／3 固定使用 0／12／26 pt 的累進縮排。Color 的 HSL、Black & White 與 White Balance 均改用相同階層模型；Detail 的 Luminance／Color 降噪改為 Level 3 標題，避免 Level 2 裡再套同一種 Level 2 disclosure。
+- 發現 Mac Color 頂層摘要合併 White Balance 與 HSL，但群組重設只重設 White Balance；已把群組動作改成依完整 section 清單判斷中性狀態並一次重設兩者。
+- 先新增會失敗的 hierarchy／group-reset 契約測試，再完成實作；相關 targeted tests 54/54 PASS，擴大 UI、交易、在地化與零渲染契約組合測試 81/81 PASS。
+
+### 驗證結果（本輪，2026-09-14）
+
+- 完整 `swift test`：**執行 2273、跳過 9、失敗 1**。唯一失敗為既有 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 Debug signing Team／Bundle ID 與公開 repo 契約不符，與本輪改動無關，未修改該檔案或使用者 signing 設定）。
+- Targeted：`swift test --filter 'AdjustmentUITests|EditorCoreTests|LumaHarborAppTests'` → 除同一個已知 signing failure 外全數 PASS。
+- `swift build -Xswiftc -strict-concurrency=complete` → **PASS**（原本 `AdaptiveRowContainer` 的 `PreferenceKey.defaultValue` 觸發一個 Swift 6 mutable-global-state warning，已改成 `static let` 消除）。
+- `swift build`（macOS app/package）→ **PASS**。
+- iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**（`Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift` 是實際被 `.xcodeproj` 編譯到的 inline 版本，已確認它呼叫的 `BasicAdjustmentPanel`／`ColorAdjustmentPanel`／`HistogramPanel` 都是本輪改過的共用元件，外部呼叫介面未變，因此 iPad 自動繼承自適應排版、HSL 選擇器、preview/commit 交易與平台專屬尺寸，未另外修改 iPad 專屬程式碼）。
+- `git diff --check` → **PASS**。
+- 隱私掃描：對本輪實際新增／修改的 Swift 與 `.strings` 檔案（不含使用者的 `.pbxproj`、不含 `CURRENT.md` 本身、不含既有 dirty 的 `PendingLeaseSubprocessTests.swift`）掃描 `/Users/`、`/Volumes/`、`DEVELOPMENT_TEAM`、私鑰標頭、UUID、`api_key`/`password`/`secret` → **PASS**，無命中。
+
+### 效能量測與人工驗收 —— 誠實列為 `NOT RUN`
+
+- **spec §6 全部 p95 延遲預算（滑桿本地回饋 16ms、收合/色帶切換 50ms、tab/domain 切換 100ms、warm RAW 預覽 200ms、直方圖 250ms、連續編輯期間無 >50ms 主執行緒停滯）**：`NOT RUN`。本環境沒有實體 Apple Silicon Mac／iPad 可供操作型延遲測量，也沒有既定的 signpost／test-clock 量測基礎設施；規格 §7 Phase 4 第一項「Add signposts or test-clock instrumentation」本輪未實作（判斷為需要額外設計＋不可在缺乏硬體驗證下貿然接線到 `EditorSession`／`PreviewScheduler` 熱路徑，避免引入未經驗證的效能迴歸），留給下一位有硬體存取權的代理或使用者。
+- **spec §9 人工視覺檢查（macOS 300/340/360/440pt 寬度、iPad portrait/landscape/split view/bottom drawer、Dynamic Type/VoiceOver 實際朗讀）**：`NOT RUN`。本輪只用編譯與單元/契約測試驗證程式碼路徑與資料模型正確，未實際在畫面上看過任何一種寬度或裝置方向下的渲染結果。
+- **spec §9 手動拖曳快慢測試（確認立即回饋、正確最終影像、一步 undo、不跳回 0）**：底層邏輯已由 `EditorSessionContinuousAdjustmentTests` 涵蓋且通過，但實際手指/滑鼠拖曳的手感與畫面同步，`NOT RUN`。
+
+### 已知限制／未完成範圍（誠實揭露，非隱藏）
+
+- `GeometryAdjustmentPanel`／`LocalAdjustmentsPanel`／`RenderingProfilePanel` 的連續控制未遷移到 preview/commit 交易（規格明列清單未包含這三者，`AdjustmentSliderRow` 的向下相容設計讓它們維持舊行為，不會壞掉，只是還沒有單一 undo 合併的效益）。
+- `PadInspectorHost.swift`（P2 交接文件已記載的第二份、未被 `.xcodeproj` 編譯的 iPad Inspector 副本）本輪未單獨檢視或修改；因為它呼叫的仍是同一批共用元件（`BasicAdjustmentPanel`／`ColorAdjustmentPanel`／`HistogramPanel`），介面未變,理論上行為一致，但未實際編譯驗證這份檔案本身（它不在 build phase 內，`swift build`／`xcodebuild` 都不會碰到它，只有直接讀原始碼的 contract test 會查它）。
+- 未新增 signpost／`os_signal` 效能埋點；`InspectorGroupSummary` 對 Curve／Geometry／Local Adjustments 三個 section 的「已調整」計數是粗略的 0/1（不像 Basic/WhiteBalance/HSL/Presence 有精確逐欄位計數）——已在程式碼註解與本節如實說明，非隱藏限制。
+
+### 下一步
+
+1. 有實體 Apple Silicon Mac／iPad 存取權者：依 spec §6 走一次 p95 延遲量測（需要先設計/接上 signpost 或 test-clock instrumentation），並依 spec §9 完成 300/340/360/440pt 與 iPad 各種版面的人工視覺驗收，回填本節而非另開新章節覆蓋本輪自動化證據。
+2. 若要補齊「規格明列清單」以外的 Geometry／Local Adjustments／Rendering Profile 連續控制遷移，可直接比照本輪 Basic/HSL/Presence/Detail/Effects/ColorGrading 的模式（傳入 `onPreview`／`onCommitPreview`），`AdjustmentSliderRow` 介面已就緒,不需要再改動共用元件。
+3. 分段提交：建議依規格 §13「hierarchy / adaptive controls / interactive transactions / measurement evidence」四個獨立 commit 的建議，但由於 Phase 1-3 在本輪互相依賴（HSL 選擇器與 preview/commit 交易共用同一批面板檔案的同一次編輯），實務上可能需要至少兩個 commit（hierarchy+adaptive 一組、transaction 一組），由下一位接手者依實際 diff 決定切法。
+
+## Inspector 收合層級、字級與預覽反應規格（2026-09-14, Codex）
+
+- **狀態**：`SUPERSEDED BY IMPLEMENTATION SECTION ABOVE`。本節保留最初規格基準；目前實作與驗證狀態以上方「實作輪」為準。新增 `docs/superpowers/specs/2026-09-14-inspector-hierarchy-typography-and-preview-responsiveness.md`，把 2026-09-14 驗收畫面中的收合層級不清、窄欄文字被壓縮，以及連續調整反應延遲整理成可實作、可量測的規格。
+- **分支／基準**：`claude/professional-editing-completion`；規格核對時 HEAD 為 `3110d572aa18912577374c2101240abf7793eb91`，相對 `origin/claude/professional-editing-completion` ahead 4。
+- **根因結論**：Mac 外層 `InspectorView` disclosure 再包 `ColorAdjustmentPanel` 的 HSL disclosure，形成兩層相同收合語言；數值列在窄面板仍保留多個大型固定控制區，只能以 `minimumScaleFactor(0.8)` 壓縮標題；基本與 HSL slider 的每個 tick 都會重複寫入 history、刷新 undo、排程 preview／settled render／autosave，雖然 `PreviewScheduler` 已正確丟棄舊結果，前段狀態工作仍可降低。
+- **規格決策**：最初只展開 Basic；收合介面明確分成 Level 1 功能群組、Level 2 子區段、Level 3 編輯控制，三層使用累進縮排、不同字重／分隔線／chevron，禁止父子全部對齊成同一排；頂層收合列加入完整標題與「未調整／N 項已調整」摘要；HSL 改為自適應色帶選擇器加單一三列編輯區，不再用八組巢狀 disclosure；340 pt 以下改用堆疊數值列；Mac 與 iPad 採各自控制尺寸；連續拖曳改成 begin／preview／commit／cancel，一次手勢只產生一筆 history 與一次 autosave。
+- **效能門檻**：數字與滑桿本地回饋 p95 <= 16 ms；收合與色帶切換 p95 <= 50 ms 且零 render request；warm 1600 px RAW 互動預覽 p95 <= 200 ms；直方圖 p95 <= 250 ms；連續手勢恰好一筆 history 與一次 autosave。
+- **最初規格輪修改**：當時只有本規格與此協調文件；其後 Claude 與 Codex 已完成上方記錄的產品程式碼、測試與自動建置驗證。簽章、Git 歷史與遠端狀態仍未由本輪修改；真機驗收維持 `NOT RUN`。
+- **接手約束**：不要建立 GitHub Epic 或 Issue；先依共享讀取協議核對此節與規格。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 是使用者既有本機 signing 變更，不得 stage、修改或提交。
+- **規格撰寫前既有 dirty files**：`Apps/LumaHarborPad.xcodeproj/project.pbxproj`、`Package.swift`、`Sources/AdjustmentUI/AdjustmentSliderRow.swift`、`Sources/AdjustmentUI/BasicAdjustmentPanel.swift`、`Sources/AdjustmentUI/PadAdjustmentPolicy.swift`、`Sources/Localization/Resources/zh-Hant.lproj/Localizable.strings`、`Sources/LumaHarborApp/Views/RootView.swift`、`Sources/PendingLeaseHelper/main.swift`（deleted）、`Sources/PendingLeaseHelper/PendingLeaseHelper.swift`（untracked），以及 `Tests/AdjustmentUITests/AdjustmentGroupPanelsContractTests.swift`、`Tests/AdjustmentUITests/AdjustmentValueInputTests.swift`、`Tests/AdjustmentUITests/BasicAdjustmentPanelModelTests.swift`、`Tests/PhotoLibraryCoreTests/PendingLeaseSubprocessTests.swift`。這些不是本輪規格工作產生，不得覆蓋或回復。
+- **下一步**：依上方實作輪的剩餘事項進行真機視覺與延遲驗收；在量測完成前維持 `NOT RUN`，不得推定通過。
+
+## iPad／Mac 視覺修整與曲線 UX（2026-09-11, Codex → Claude）
+
+- **狀態**：`IMPLEMENTATION COMPLETE / REAL-DEVICE VISUAL QA NOT RUN`。依 `docs/superpowers/specs/2026-09-11-ipad-mac-visual-polish-and-curve-ux.md` 與 `docs/coordination/2026-09-11-visual-polish-curve-ux-claude-handoff.md` 完成本輪修改。
+- **範圍**：輸入欄位視覺層級、slider row、Composite／Red／Green／Blue 曲線任意控制點（含刪除與 undo 語意）、直方圖抗極端尖峰顯示、iPad 11／13 吋自適應版面、無障礙與真機驗收。
+- **協作約束**：保留 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的使用者本機 signing dirty change；未修改、stage 或提交。未使用或關閉任何額外 agent（本輪為單一 Claude session 直接完成，未發現需要獨立 iOS design review／QA agent 介入的阻塞點；真機驗收仍待有實體裝置存取權的人接手，見下方）。
+
+### Claude 實作內容（2026-09-11）
+
+- **`Sources/EditorCore/EditorSession.swift`**：新增 `previewedCurveAdjustments` 欄位與 `previewCurveEdit(_:)`／`commitCurveEdit()` 方法，仿照既有 `previewEyedropper`/`commitEyedropper` 的「預覽不寫入 history，只在手勢結束時 commit 一次」模式。`displayedAdjustments`／`isPreviewContext` 加入此欄位；`open()`/`close()` 也清除它。這是讓 spec §5.1「拖曳控制點時...形成一筆可復原的 compound undo」成立的必要條件——沒有這個改動，`CurveAdjustmentPanel` 原本直接呼叫 `updateAdjustments`，會讓每一個拖曳 tick 都各自變成一筆 Undo 記錄。
+- **`Sources/AdjustmentUI/CurveAdjustmentPanel.swift`**：
+  - `ToneCurveEditorModel` 新增 `deletingPoint(_:at:)`／`canDeletePoint(_:at:)`（端點與少於 3 點時拒絕刪除）與 `insertingAtLargestGap(_:)`（供 VoiceOver「新增控制點」動作，在最大間距中點插入）。
+  - `CurveAdjustmentPanel` 的曲線資料來源改為 `editor.displayedAdjustments`（即時預覽），`onChange` 改呼叫 `previewCurveEdit`，手勢結束呼叫 `commitCurveEdit()` 再呼叫 `endAdjustmentGesture()`。
+  - `ToneCurveGraph` 新增每個控制點獨立的 44×44 pt 命中／VoiceOver 元素（視覺圓點仍維持 12–16pt）、選取狀態放大與白框強化、`contextMenu`（長按／右鍵）刪除非端點控制點、`accessibilityAdjustableAction`（VoiceOver 增減 y 值）、每點 `accessibilityLabel`／`accessibilityValue`（座標百分比）／刪除 action，以及容器層級的「新增控制點」VoiceOver action。既有拖曳／插入手勢邏輯不變，只新增 `selectedIndex` 追蹤與 commit 呼叫。
+- **`Sources/AdjustmentUI/AdjustmentValueInput.swift`**：Reset 按鈕命中區由 30×30 pt 擴大為 44×44 pt（視覺圓形圖示仍是 30pt，只放大 `contentShape`）；輸入欄位新增 `@FocusState` 與聚焦時邊框加粗（1→2pt）＋改色，避免焦點狀態只靠顏色辨識。
+- **8 語在地化**：新增 3 個 key（`Delete Control Point`／`Add Control Point`／`Control point %d of %d`），已在 zh-Hant／zh-Hans／en／ja／ko／de／fr／es 八語 `Localizable.strings` 補齊，且均非英文原樣複製（無需加入 allowlist）。
+- **未修改**：`Sources/AdjustmentUI/HistogramPanel.swift` 與 `Tests/AdjustmentUITests/HistogramPanelTests.swift` 維持 Codex 既有未提交內容不動（已檢視，符合 spec §6 對 log 壓縮／端點內縮／半透明疊圖／clipping 數值／空資料 empty-state 的要求，判斷不需再改）。`Apps/LumaHarborPad.xcodeproj/project.pbxproj`（使用者本機 signing）未觸碰。
+
+### 測試（TDD 補齊）
+
+- 新增 `Tests/AdjustmentUITests/ToneCurveEditorModelTests.swift`：`deletingPoint`／`canDeletePoint`（拒絕端點、拒絕少於兩點、正確刪除中間點）、`insertingAtLargestGap`（取最大間距中點、少於兩點時為 no-op）共 7 個新測試。
+- 新增 `Tests/EditorCoreTests/EditorSessionEditingTests.swift`：`previewCurveEdit`／`commitCurveEdit` 的 5 個新測試，關鍵案例 `testManyPreviewTicksDuringOneGestureStillCommitAsExactlyOneUndoEntry` 直接證明「10 次連續 tick 只產生 1 筆 Undo entry」。
+- `Sources/AdjustmentUI/HistogramPanel.swift`／`HistogramPanelTests.swift` 為 Codex 既有未提交測試，未再變動。
+
+### 驗證結果（本輪，2026-09-11）
+
+- `swift test --filter 'ToneCurveEditorModelTests|HistogramPanelTests|AdjustmentValueInputTests|EditorSessionEditingTests|EightLanguageLocalizationGateTests|LocalizationSmokeTest'`：**PASS**（分別跑過，ToneCurveEditorModelTests 14/14、HistogramPanelTests 4/4、EightLanguageLocalizationGateTests 10/10、LocalizationSmokeTest 17/17、EditorSessionEditingTests 38/38 均 0 failure；`AdjustmentValueInputTests` 邏輯測試未變動，隨完整套件一起跑過）。
+- 完整 `swift test`：**執行 2209、跳過 9、失敗 1**。唯一失敗為 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 signing Team 與契約預期不符，與本輪產品改動無關，屬既有已知狀態，未修改該檔案）。
+- `swift build -Xswiftc -strict-concurrency=complete`：**PASS**。
+- iPad Simulator `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`：**BUILD SUCCEEDED**。
+- `git diff --check`：**PASS**（無空白錯誤）。
+- 隱私掃描：對本輪實際改動的檔案（不含 Codex 既有 dirty 的 Histogram 檔與使用者的 `.pbxproj`）掃描個人帳號／絕對路徑、簽章團隊設定、PEM 標頭與裝置識別碼，**PASS**，無命中。
+
+### 已知限制與 NOT RUN
+
+- **真機視覺驗收：`NOT RUN`**。本環境沒有可用 signing identity 也沒有連接實體裝置操作工具（無螢幕鏡像／觸控模擬工具），無法完成 spec §8「真機人工驗收」的任何一項（M 系列 iPad 11／13 吋四 channel 曲線操作、Undo/Redo、RGB／Luminance 切換、Split View／Stage Manager、Apple Pencil／滑鼠／鍵盤／VoiceOver）。與此工作目錄先前多輪紀錄（見上方「Real-device manual QA attempt」歷史）一致的既有限制，非本輪新增阻塞。
+- **控制點刪除的手勢優先權（`contextMenu` 長按 vs. 父層 `DragGesture(minimumDistance: 0)`）**：邏輯本身（`deletingPoint`／`canDeletePoint`）已通過單元測試，但 SwiftUI 中「父層連續手勢＋子層 `contextMenu` 長按」的實際互動優先權，只能在真機／模擬器上以手指或滑鼠操作驗證，本環境無法驗證，歸入上一條真機視覺驗收 `NOT RUN` 範圍內。
+- VoiceOver 逐點朗讀與 adjustable action 的實際語音行為同樣需要真機 VoiceOver 驗收，`NOT RUN`。
+
+### 下一步
+
+有實體 iPad／Apple silicon Mac 存取權者，依 spec §8 走一次真機驗收：四 channel 曲線任意插入／拖曳／刪除／Undo、RGB／Luminance 切換、數值欄位編輯與重設、橫直向與 Split View／Stage Manager、手指／Apple Pencil／滑鼠／鍵盤／VoiceOver 各一次，並特別確認控制點的長按（iPad）／右鍵（Mac）刪除選單能正確彈出且不被拖曳手勢吃掉。驗收後回填本節的 PASS／FAIL，而非另開新章節覆蓋這次的自動化證據。
+
+## iPad／Mac 直方圖與曲線編輯器顯示修整（2026-09-11, Codex）
+
+- **狀態**：`IMPLEMENTED / VERIFIED`。修正共用 `HistogramPanel` 在高反差 RAW 預覽下因線性最大值比例造成細節被壓扁，以及最後色階可能貼齊 `Canvas` 邊界的問題。
+- **實作**：`Sources/AdjustmentUI/HistogramPanel.swift` 使用非負值清理與 `log1p` 對數壓縮計算繪圖高度；繪圖區固定高度（96–132 pt）、左右端點內縮 1 pt，並加入半透明填色與輪廓線，RGB 與 Luminance 模式共用。
+- **輸入欄位**：`AdjustmentValueInput` 改為固定 88 pt 寬的 plain field、等寬數字、材質背景與細邊框；重設按鈕改為一致的圓形 tint 圖示，避免 iPad 寬欄位拉成整條黑框。
+- **曲線互動**：`ToneCurveEditorModel` 保留中性曲線預設 5 個錨點，但新增控制點插入與命中半徑判定；在曲線空白處點擊會新增控制點，仍維持端點與嚴格 x 順序，不允許重複點。
+- **在地化**：既有 `Drag control point` 提示更新為八語對應的「拖曳或點擊新增控制點」，不增加英文 fallback。
+- **測試**：`HistogramPanelTests` 4/4、`ToneCurveEditorModelTests` 8/8、`AdjustmentValueInputTests` 4/4 PASS；`swift build -Xswiftc -strict-concurrency=complete` PASS；iPad Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **完整套件狀態**：`swift test` 執行 2195、跳過 9、失敗 1；唯一失敗為 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`，因本機 Xcode signing Team 設定與契約預期不同，非本次直方圖修改造成，該本機設定保留未動。
+- **目前工作樹**：除使用者既有的 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 本機簽章變更外，本次 `Sources/AdjustmentUI/HistogramPanel.swift`、`Sources/AdjustmentUI/AdjustmentValueInput.swift`、`Sources/AdjustmentUI/CurveAdjustmentPanel.swift` 與對應測試／本文件皆有未提交變更。
+- **未完成驗收**：實體 iPad 視覺驗收仍需使用已簽署的新建置重新安裝／Run；目前命令列環境沒有可用 signing identity，無法由 Codex 代為安裝真機版本。
+
+## P7：跨裝置驗收與發布準備（2026-09-11, Gemini）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-11-cross-device-verification-and-release-preparation.md` 完成驗收與發布準備：
+  - 跨裝置對等性：`CrossDeviceParityVerificationTests` 驗證 Mac 與 iPad 完整掛載 10 個核心面板，兩平台共享相同之 `InspectorCatalog`、Snapshots 工作流、A/B 比較、8 種 Local Adjustment 遮罩型別與 Sidecar v4 格式。
+  - 效能預算：`LibraryPerformanceBudgetTests` 驗證在 10,000 張照片圖庫中，單頁載入與 deep cursor 分頁耗時遠低於 250ms p95 預算；評分、旗標、關鍵字與檔名複合過濾查詢亦穩定在預算內完成。
+  - 唯讀完整性：`RawImmutabilityVerificationTests` 驗證在調光、快照、評分等整個生命週期中，來源 RAW 檔案之 byte-by-byte SHA-256 雜湊完全不變（100% 唯讀保護）；確認 FAT32 / exFAT 跨檔案系統安全命名與非法字元過濾。
+  - 文件更新：`README.md` 繁體中文使用說明完整更新，加入四通道色調曲線、風格渲染檔、鏡頭校正、局部遮罩（含離線 AI 主體辨識）、去紅眼、透視校正、快照管理與軟體打樣之操作指引。
+  - 發布準備約束：遵照指示與 spec 要求，在實體硬體與外接磁碟設備人工檢核核准前，嚴禁封裝對外發布 ZIP 檔案。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `28dac70`（P6 commit）。
+- **驗證**：`swift test` 全套 **PASS**（2193 tests、9 skipped、0 failures，28.550s）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`swift run LumaHarborDiagnosticsCLI` **PASS**。`git diff --check` **PASS**。隱私掃描 **PASS**（無個人路徑、Team ID、UDID 或私鑰洩漏）。
+- **交接文件**：`docs/coordination/2026-09-11-p7-cross-device-verification-and-release-prep-handoff.md`、`docs/coordination/2026-09-11-gemini-to-codex-handoff.md`。
+- **下一步**：P0~P7 全階段實作完工；等待使用者進行實體硬體與外接磁碟之人工視覺驗收。
+
+## P6：Snapshots、Soft Proof、Professional Preview（2026-09-11, Gemini）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-10-snapshots-soft-proof-and-professional-preview.md` 實作：
+  - 核心模型：`EditSnapshot`、`PhotoSidecar` 升級為 schema v4（落實 `DECISIONS.md` D-006），向下相容 v1/v2/v3。`PhotoLibraryService` 提供快照 CRUD 與 Sidecar-first 持久化。
+  - 渲染層：`ProfessionalPreviewOptions`、`ProfessionalPreviewRenderer`、Metal kernel `professionalPreviewOverlay`。支援高光裁切標記（純紅）、陰影死黑標記（純藍）、色域超出警示（純黃）以及 sRGB / Display P3 / Adobe RGB 色彩空間軟體打樣模擬。預覽選項與匯出管線隔離，不影響匯出品質。
+  - 編輯會話：`EditorSession` 實作快照 CRUD、單一 Compound Undo 交易復原、以及 A/B 比較隔離（不修改歷史與 sidecar）。
+  - UI 與雙平台整合：新增 `SnapshotsPanel`。Mac 端於 `InspectorView` 新增 `.snapshots` tab；iPad 端於 Info domain 面板掛載 `SnapshotsPanel`，並於頂部 Toolbar 的 `compareMenu` 整合快照 A/B 比較切換。
+  - 本地化：8 國語言（`en`, `zh-Hant`, `zh-Hans`, `ja`, `ko`, `de`, `fr`, `es`）完整補齊 22 個新鍵值，`EightLanguageLocalizationGateTests` 10/10 通過。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `3905ec7`（P5 commit）。
+- **驗證**：`swift test` 全套 **PASS**（2184 tests、9 skipped、0 failures，28.636s）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`git diff --check` **PASS**。隱私掃描 **PASS**。
+- **交接文件**：`docs/coordination/2026-09-11-p6-snapshots-soft-proof-handoff.md`。
+- **下一步**：P7「跨裝置驗收與發布準備（Cross-device final verification & release preparation）」。
+
+## P5：Advanced Masks、AI Repair、Perspective（2026-09-11, Gemini）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-10-advanced-masks-ai-repair-and-perspective.md` 實作進階遮罩（Radial、Brush、Luminance Range、Color Range、Subject、Background）、Apple Vision 裝置端前景辨識與確定性 fallback、AI Repair／去紅眼修復演算法、四角透視校正（Perspective Corner Pins）與 Mac/iPad UI 自適應面板。修正 P4 留下的 iPad Inspector 面板未掛載缺口（掛載 Rendering Profile、Presence 與 Color Grading）。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `4cdf40f`。
+- **核心模型**：`LocalAdjustment` 支援新遮罩類型、名稱、反轉與不透明度；`LocalAdjustmentGeometry` 支援筆觸、範圍遮罩、Vision 中繼資料與紅眼瞳孔半徑；`GeometryAdjustments` 支援 `cornerPins` 與四角透視重設。
+- **渲染與 AI**：`LocalAdjustmentRenderer` 支援遮罩反轉與不透明度乘法合成；`GeometryRenderer` 實作 `CIPerspectiveCorrection`；`VisionSegmentationService` 實作離線 Vision 分割與本機 fallback。
+- **驗證**：`swift test` 全套 **PASS**（2165 tests、9 skipped、0 failures）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **BUILD SUCCEEDED**。`git diff --check` **PASS**。隱私掃描 **PASS**。
+- **交接文件**：`docs/coordination/2026-09-11-p5-advanced-masks-ai-repair-perspective-handoff.md`。
+- **下一步**：P6「Snapshot 與專業預覽（Snapshots, Soft Proof, and Professional Preview）」。
+
+## P4：Lens, Presence, Color Grading, Black & White, Rendering Profile（2026-09-10, Claude）
+
+- **狀態**：`DONE_WITH_CONCERNS`。實作鏡頭校正、Presence、Color Grading、Black & White、Rendering Profile、Preset/XMP 與 Mac UI。驗證通過 2150 tests。交接文件：`docs/coordination/2026-09-10-p4-lens-presence-color-grading-handoff.md`。
+
+## P3：Per-channel Tone Curves（2026-09-11, Claude）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依 `docs/superpowers/specs/2026-09-10-per-channel-tone-curves.md` 實作真正獨立的 Composite／Red／Green／Blue 曲線（model、RGBA LUT／Metal kernel、pipeline、XMP、Preset schema v2、Mac/iPad 共用 UI）。P4 以後（Lens/Presence/Color Grading、Mask/AI/Repair、Snapshot/Soft Proof、Cross-device final verification）完全未觸碰。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 P2 完成時的 `acb30d43d75393c77e99c94ef12c1f6c38c95531`；本階段實作提交為 `75c1887`（"feat: add per-channel tone curves (P3)"），本次交接文件與本檔更新緊接其後。工作目錄應保持乾淨。此階段曾在前一個 session 因 token 上限中斷過一次，已於同一 branch 用同一組未提交變更接續完成，過渡用的 `docs/coordination/2026-09-10-p3-token-checkpoint.md` 已在完成後刪除，內容併入下方交接文件。
+- **先寫 spec/plan**：新增 `docs/superpowers/specs/2026-09-10-per-channel-tone-curves.md` 與 `docs/superpowers/plans/2026-09-10-per-channel-tone-curves.md`，先於程式碼撰寫完成。
+- **真正的四曲線**：`AdvancedToneCurve`（`Sources/RawProcessingCore/Model/AdvancedToneCurve.swift`）新增 `redPoints/greenPoints/bluePoints`，各自獨立 sanitise／identity；新增 `ToneCurveChannel` enum 與 `points(for:)/isIdentity(for:)/settingPoints(_:for:)/resetting(_:)`。舊 JSON 缺新 key 時三條 channel 解碼為 identity（v1/v2 sidecar 與 preset 相容）。
+- **RGBA LUT／單一 kernel pass**：`AdvancedToneCurveLUT.buildCombined(compositePoints:channelPoints:)` 合成 Composite∘Channel；`AdjustmentPipeline.applyAdvancedToneCurve` 打包三張合成表進一張 RGBA8 `CIImage`；`AdjustmentKernels.metal` 的 `advancedToneCurve` 三次取樣分別讀 `.r/.g/.b`（原本三次都讀 `.r`，是本階段修正的真實 bug）。
+- **XMP／Preset**：新增 `crs:ToneCurvePV2012Red/Green/Blue` 匯入／匯出（`XMPImportExport.swift`），單一 channel 解析失敗不影響其他三條；匯出時 Composite 一律寫入（相容既有行為），Red/Green/Blue 只在非 identity 時才寫入。`PresetDocument.currentSchemaVersion` 由 1 升為 2，v1 preset 仍可驗證與匯入。
+- **UI**：`CurveAdjustmentPanel` 改用 `RawProcessingCore.ToneCurveChannel`（`.rgb` 更名 `.composite`，沿用既有 "RGB" 標籤字串)；單一 "Reset" 拆成 "Reset Channel"（僅重設當前 channel）與 "Reset All"（重設整條曲線），皆走既有 `updateAdjustments` 單筆 undo 路徑。新增 8 語 `"Reset Channel"` key（"Reset All" 先前已存在於全部 8 語）。
+- **驗證**：`swift test` 全套 **PASS**（2068 executed、9 skipped、0 failures，較 P2 基準 2039 淨增 29 — 略低於本階段 spec 自訂的 +32 目標，判斷為已涵蓋所有真實缺口、不為湊數新增低價值測試，詳見交接文件）。`swift build -Xswiftc -strict-concurrency=complete` **PASS**。iPad Simulator `xcodebuild` **PASS**（`** BUILD SUCCEEDED **`）。`git diff --check` **PASS**。隱私掃描（私人路徑／Team ID／UUID／私鑰）**PASS**，無命中。`Scripts/run-mvp-acceptance.zsh` 與真機人工驗收仍為 **NOT RUN**（沿用歷次 phase 的既有缺口，非本階段造成）。
+- **交接文件**：`docs/coordination/2026-09-10-p3-per-channel-tone-curves-handoff.md`。
+- **下一步**：P4「Lens + Presence + Color Grading」，先寫 `docs/superpowers/specs/2026-09-10-lens-presence-and-color-grading.md` 與對應 plan，再依 TDD 實作。
+
+## P2：Shared Professional Inspector Catalog（2026-09-10, Claude）
+
+- **狀態**：`DONE_WITH_CONCERNS`。依使用者指示，針對 `docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` §7.1／§9／§11.3 第 18-20 條實作 P2（共用 Inspector catalog、搜尋、收藏、smart follow、pin、section／domain reset、兩平台入口收斂）。P3 以後（per-channel curves、Lens/Color/Mask、Snapshot、Cross-device final verification）完全未觸碰。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 P0/P1 完成時的 `0353dfd`；目前驗證 HEAD 為 `37db11d163fd2fe90b974dbc50ae9476fc3ee9e9`（P2 實作提交 `1be261e` 加上本次交接文件提交 `37db11d`）。工作目錄應保持乾淨。
+- **先寫 spec**：新增 `docs/superpowers/specs/2026-09-10-shared-professional-inspector-catalog.md`，列出 8 個 catalog section 的欄位歸屬表、vibrance/saturation 統一決策、工程限制（`.xcodeproj` 固定成員清單）與測試計畫，先於程式碼撰寫完成。
+- **共用 catalog**：新增 `Sources/AdjustmentUI/InspectorCatalog/*`（`InspectorSectionID`、`InspectorPlatform`、`InspectorSectionDescriptor`、`InspectorCatalog`、`InspectorFavoritesStore`、`InspectorSmartFollow`、`InspectorNavigationModel`）。`InspectorCatalog.allSections` 是 `basic／whiteBalance／hsl／curve／detail／effects／geometry／local` 八個 section 的唯一宣告點；`resetting(_:in:)`／`resetting(domain:in:)`／`isNeutral` 為純函式；`search` 依 field ID／同義詞／標題比對；收藏（`InspectorFavoritesModel`）只存裝置本機 `UserDefaults`；Smart Follow（`InspectorSmartFollow.section(for:)`）把既有 `EditorSession.toolMode`（`.crop/.whiteBalance/.linearGradient/.spotHeal`）對應到 section，不新增第二套選取概念；`InspectorNavigationModel` 是兩平台共用的搜尋／收藏／pin／smart-follow 狀態機。
+- **既有型別相容**：`Sources/AdjustmentUI/PadInspectorCoordinator.swift` 的 `PadAdjustSubmodeKinds.light/color/detail` 改為從 `InspectorCatalog` 衍生（computed），`PadInspectorDomain`／`PadAdjustSubmode`／`PadInspectorPresentation` 保留原名與 raw value，既有測試不必改介面。
+- **Mac 接線**：`Sources/LumaHarborApp/Views/InspectorView.swift` 加入搜尋欄、每個 DisclosureGroup 標題列的收藏星號與 section reset 按鈕、header 的 pin 按鈕、Adjustments Actions 選單新增三個 domain reset 項目、`.onChange(of: model.editor.toolMode)` 接 smart follow。既有 7 個 DisclosureGroup 標題與掛載的 panel 型別不變（`InspectorAdjustmentGroupsContractTests`／`EditorWorkflowUXContractTests` 鎖定的字面文字保留）；`MacBasicAdjustmentPanel.toneKinds/whiteBalanceKinds` 改為從 catalog 衍生。
+- **iPad 接線與真實 bug 修正**：`Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift`（inline 版）與獨立但未被 `.xcodeproj` 編譯到的 `PadInspectorHost.swift`（見「已知限制」）都修正：`PadAdjustSubmodeKinds.color` 原本宣告 `basic.temperature／basic.tint` 但 `.color` submode 從未掛載對應 panel——White Balance 滑桿在 iPad 上完全不可達；本次補上 `BasicAdjustmentPanel(kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)`，與 Mac 的 `.color` DisclosureGroup（White Balance + HSL）看齊。同時把 vibrance/saturation 從 iPad 的 Color submode 移到 Light，與 Mac 的 Basic 分組一致（同屬「宣告了但從未渲染」的既有缺口，移動後無使用者可見退化）。`PadEditorView` 新增 `catalogToolbar`（搜尋欄、收藏星號、pin、domain reset，三種呈現方式共用）與 `applyInspectorNavigation(_:)` 橋接函式，把 `InspectorSectionID` 轉成 `inspector.selectDomain／selectAdjustSubmode`。
+- **測試**：新增 65 個測試方法（`InspectorCatalogTests` 28、`InspectorFavoritesStoreTests` 4、`InspectorSmartFollowTests` 5、`InspectorNavigationModelTests` 9、`InspectorSharedCatalogContractTests` 7、`PadCatalogWiringContractTests` 7、`LocalizationKeyParityContractTests` 5），另使 `PadInspectorCoordinatorTests` 淨增 1；完整套件相較 P0/P1 基準淨增 66 個 executed tests。本 repo 首次加入自動化 8 語 key parity 測試。
+- **本地化**：8 語 `Localizable.strings` 各新增 10 個 key（`Search Adjustments`、`Clear Search`、`No matching tools`、`Add to Favorites`、`Remove from Favorites`、`Pin Section`、`Unpin Section`、`Reset Adjust`、`Reset Geometry`、`Reset Local Adjustments`），en／zh-Hant 人工撰寫，其餘 6 語為真實翻譯（非英文直接複製），由新測試驗證 key parity 與 zh-Hant 值非 passthrough。
+- **驗證**：完整 `swift test` → **2039 executed、9 skipped、0 failures**（P0/P1 基準 1973，本輪淨增 66）；`swift build -Xswiftc -strict-concurrency=complete` → **PASS**；`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**；`git diff --check` → **PASS**；`TBD|TODO|FIXME|fatalError|try!` 掃描 → **PASS**；privacy scan（`/Users/`／`/Volumes/`／`DEVELOPMENT_TEAM`／密鑰標頭／UUID）→ **PASS**，無命中。
+- **已知限制／未解決 gap**：
+  - **真機／Simulator 人工視覺驗收本輪 NOT RUN**：本輪新增可見 UI（搜尋欄、收藏星號、pin、reset 按鈕），與 P0/P1 純資料層變更不同，沒有人看過實際渲染結果（窄寬度是否擁擠、VoiceOver 閱讀順序、Dynamic Type 最大字級）。下一次涉及此區域或即將發布前必須安排。
+  - **獨立 `PadInspectorHost.swift`／`PadToolRail.swift` 仍是第二份未被 `.xcodeproj` 編譯的副本**：確認不在 `PBXSourcesBuildPhase` 內，`swift build`／`xcodebuild` 皆不編譯到；因既有 `PadPresetContractTests`／`CurveHistogramContractTests` 會直接讀取 `PadInspectorHost.swift` 原始碼，本輪不刪除，只同步套用相同的 White Balance／vibrance 修正，未加入搜尋／收藏／pin／reset（需要額外傳入 `library`／`batchCoordinator`，超出本輪授權範圍）。下一位碰 iPad Inspector 的人需要明確決定刪除、補齊參數同步維護、或確認 `.swiftpm` 直接開啟是否真的需要這兩個檔案。
+  - `Scripts/run-mvp-acceptance.zsh` 與真機人工驗收沿用 P0/P1 既有 **NOT RUN**，本輪未嘗試關閉。
+- **Next action**：P3「Per-channel tone curves」（`docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` §16 第 3 項，檔案 `2026-09-10-per-channel-tone-curves.md` 尚未存在，須先寫）。詳見 `docs/coordination/2026-09-10-p2-shared-inspector-catalog-handoff.md`。
+
+## P0／P1：Curation Sidecar v3 與 Migration（2026-09-10, Claude）
+
+- **狀態**：`P0 BASELINE PROTECTION COMPLETE / P1 IMPLEMENTATION COMPLETE / CODEX REVIEW COMPLETE`。本輪依使用者指示，針對 `docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` 實作 P0（基準保護測試）與 P1（Sidecar v3、curation migration、SQLite projection、resumable migration、index rebuild recovery、相容性測試），再完成獨立資料保護審查。P2 以後（Shared Inspector Catalog、per-channel curves、Lens/Color/Mask、Snapshot、Cross-device final verification）完全未觸碰。
+- **分支／基準**：`claude/professional-editing-completion`；起始 HEAD 為 `4cd43e5`（`docs: define professional editing completion spec`，其父提交 `1fb3641` 即 spec 記載的驗證基準 `claude/ipad-curve-inspector-polish`）；目前驗證 HEAD 為 `d45d59cc7a818b4f82fb5b3bbf0437e01207becc`。交接文件提交完成後工作目錄應乾淨；不得把其他代理的未提交變更帶入提交。
+- **實作計畫**：新增 `docs/superpowers/plans/2026-09-10-curation-sidecar-v3-and-migration.md`，補齊 spec 的品質閘門缺口（精確 migration 狀態機、資料衝突規則、fixture、API、測試、evidence 格式、rollback、逐檔順序）。
+- **P0（Task 0）**：新增 `Tests/PhotoLibraryCoreTests/SidecarSchemaCompatibilityTests.swift`（v1／v2 sidecar JSON 手工 fixture 解碼契約）與 `Tests/PhotoLibraryCoreTests/CurationDurabilityTests.swift`（先釘住「今天 rebuild 會遺失 SQLite-only curation」的已知缺口，作為 P1 的保護基準，P1 完成後在同一檔案內明確翻轉斷言，而非默默改寫）。
+- **P1 核心模型**：新增 `Sources/PhotoLibraryCore/Model/PhotoCuration.swift`（rating／flag／keywords，keywords 依 normalized 去重並排序）；`Sources/PhotoLibraryCore/Sidecar/PhotoSidecar.swift` 升級 `currentSchemaVersion = 3`，新增 `curation` 欄位與自訂 `Codable`（缺欄位解碼為 `.neutral`，v1/v2 相容不變）。
+- **P1 Migration 狀態機**：新增 `Sources/PhotoLibraryCore/Service/CurationMigration.swift`，純函式 `CurationMigration.decide(...)` 涵蓋五種情境（v3 sidecar 永遠優先／legacy sidecar 無需 migrate／legacy sidecar 需從 SQLite migrate／無 sidecar 無需建立／無 sidecar 需從 SQLite 建立），完全無 I/O，可獨立單元測試。
+- **P1 SQLite 投影**：`Sources/PhotoLibraryCore/Index/PhotoIndexStore.swift` schema 升至 v5，新增 `curation_migration_pending` 欄位（純觀察性、可重建，`ON CONFLICT` 排除同 rating/flag 慣例）、`curationSnapshot(inLibrary:)` 一次性批次查詢與 `setCurationMigrationPending(_:for:)`；`PhotoAsset` 新增 `curationMigrationPending`。
+- **P1 Scan Hydration**：`PhotoLibraryService.performScan` 以新的 `hydrateCurationAndEditState` 取代舊有 `editState`，套用 migration 決策；成功則寫入新 v3 sidecar 並清除 pending，失敗（離線／唯讀／空間不足）則保留舊 SQLite 值並標記 pending，下次掃描自動重試（無需額外重試佇列）。新增 `projectCuration(of:)`，在 `index.upsert(photos:)` 成功「之後」才明確投影 rating／flag／keywords（`photo_keyword` 有 FK 約束，過早呼叫會靜默失敗——本輪過程中實際踩到並修正）。Virtual copy 延續 rating 0／flag none／keywords 空的規則。
+- **P1 Sidecar-first Mutation API**：`PhotoLibraryService` 新增 `curation(for:)`／`setRating(_:for:)`／`setFlag(_:for:)`／`setKeywords(_:for:)`，sidecar 優先寫入、SQLite best-effort 投影，與既有 `saveAdjustments` 同一套容錯模式。同時修正 `saveAdjustments` 原本會把既有 curation 靜默重設為 neutral 的潛在 bug（未帶入 `existing?.curation`）。
+- **UI 接線修正**：`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift` 與 `Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadBatchAdjustmentCoordinator.swift` 原本都直接呼叫 `indexStore.setRating／setFlag／setKeywords`，繞過 sidecar；本輪改為呼叫 `PhotoLibraryService` 的 sidecar-first API，兩平台皆有 source-contract 測試防止回歸。
+- **測試**：新增 `Tests/PhotoLibraryCoreTests/PhotoCurationTests.swift`（8）、`CurationMigrationDecisionTests.swift`（8）、`PhotoLibraryServiceCurationTests.swift`（9）；擴充 `SidecarRepositoryTests.swift`、`SidecarSchemaCompatibilityTests.swift`、`PhotoIndexMigrationTests.swift`、`PhotoIndexQueryTests.swift`、`CurationDurabilityTests.swift`、`VirtualCopyServiceTests.swift`、`Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift`、`Tests/AdjustmentUITests/PadBatchContractTests.swift`。
+- **驗證**：完整 `swift test` → **1973 executed、9 skipped、0 failures**；P0/P1 與多來源失敗復原 focused suite → **51/51 PASS**；`swift build -Xswiftc -strict-concurrency=complete` → **PASS**；`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**；`git diff --check` → **PASS**；changed-production-file 對 `TBD|TODO|FIXME|fatalError|try!` 掃描 → **PASS**；privacy scan 對本輪變更檔案掃描 `/Users/`／`/Volumes/`／`DEVELOPMENT_TEAM`／密鑰標頭 → **PASS**（僅命中既有測試慣用的合成 fixture 路徑，均非真實私人路徑）。
+- **確認未觸碰**：`git diff --stat 4cd43e5 HEAD -- Sources/RawProcessingCore/Model/AdvancedToneCurve.swift Sources/AdjustmentUI/CurveAdjustmentPanel.swift Sources/AdjustmentUI/HistogramPanel.swift` 為空，確認剛合併的 P0 曲線／histogram 基準完全未被本輪改動。
+- **已知限制／未解決 gap**：
+  - Codex 審查已補上未知頂層 JSON 欄位保留、較新 schema 不覆寫、curation decode/keyword invariants，以及 sidecar/index 讀取失敗的 fail-closed 行為；這些修正已由 focused 與完整測試覆蓋。
+  - Scan 在 curation snapshot 讀取失敗時會送 `.failed(.indexUnavailable(...))` 並以 `wasCancelled: true` 的 `.finished` 結束，避免 consumer 等不到 terminal result；此行為由 `MultiSourceFailureRecoveryTests.testIndexWriteFailureDuringAScanIsNeverReportedAsACleanCompletion` 覆蓋。
+  - Snapshot／`EditSnapshot`（spec §6.1 提到與 curation 綁在同一次 schema bump）刻意延後到 P6，已記錄於 `docs/coordination/DECISIONS.md` D-006；P6 開始前必須先讀該決策。
+  - M 系列 iPad／Apple silicon Mac 的人工實機驗收本輪 **NOT RUN**——本輪修改集中在 `PhotoLibraryCore`／`PhotoLibraryService`／兩平台的 curation 呼叫點，沒有變更任何需要新硬體驗收的渲染或裝置專屬邏輯；仍建議在下一次涉及使用者可見流程的變更後安排實機驗收，本輪不宣稱已完成。
+  - 未執行 `Scripts/run-mvp-acceptance.zsh`（需要私人 RAW／APFS／exFAT fixture，本輪未匯出）；記為 **NOT RUN**，非 FAIL。
+- **Next action**：P2（Shared Professional Inspector Catalog，`docs/superpowers/specs/2026-09-10-professional-editing-completion-design.md` §16 第 2 項）為下一個依賴單位；開始前必須先讀本次的 handoff（`docs/coordination/2026-09-10-p0-p1-curation-sidecar-v3-handoff.md`）與本節。不得跳過 P2／P3 直接做 P4／P5。
+
+## 可推版本摘要（2026-09-09）
+
+- **分支／基準**：`codex/open-source-release-prep`，歷史清理後的 Mac 發佈修正提交為 `be5a838`；`main` 與本分支已重寫並推送，另外三個不含私人路徑的遠端分支未變。
+- **本次完成範圍**：Mac App 現在會攜帶 Localization 與 RawProcessingCore 兩個 SwiftPM resource bundle，並從標準 `Contents/Resources` 載入；Release binary 會移除 debug symbols，Metal 以中性暫存來源編譯，封裝前後及 checksum 都會執行 fail-closed 私人路徑掃描。版本提升為 `0.1.0 (2)`。
+- **最新版自動化證據**：完整 `swift test` 為 **1916 tests、9 skipped、0 failures**；全新暫存目錄的 `swift build --configuration release -Xswiftc -strict-concurrency=complete` 為 **PASS**；iPad Release Simulator `xcodebuild`（`CODE_SIGNING_ALLOWED=NO`）為 **BUILD SUCCEEDED**；Mac 發佈契約測試為 **7/7 PASS**。詳細紀錄見 `docs/testing/reports/2026-09-09-professional-editing-phase1.md`。
+- **簽章與隱私**：公開 Xcode 專案不含 Development Team、code-sign identity 或 provisioning profile；Build 2 的 App、ZIP 解壓內容與 checksum 隱私掃描均 PASS，checksum 只記錄檔名。遠端五個 branch 的全歷史掃描已找不到建置者私人路徑；GitHub 舊 SHA 快取仍需由 GitHub Support 執行伺服器端清除。
+- **先前實機／素材證據**：較早版本曾完成 iPad Pro 11-inch (3rd generation) signed Debug build、安裝與啟動，以及 RAW fixture／外接裝置驗收；這些證據不代表 `be5a838` 已完成最新一輪實機 UI 驗收。
+- **Mac 發佈檔**：`dist/LumaHarbor-0.1.0-2.zip`（2,402,115 bytes，SHA-256 `76d5732298a5d719d44600e80d1fa1ad0d643059fbfb6f20a25b606b36834982`）已通過 ZIP 完整性、AppleDouble、解壓後 ad-hoc `codesign --deep --strict`、`arm64` 架構、資源完整性、隱私與 macOS `open` 十秒啟動測試。此產物未使用 Developer ID 簽章或 Apple notarization。
+- **撤回產物**：所有 `0.1.0 (1)` Alpha ZIP 均不得再散布；舊包缺少 SwiftPM resource bundle，且可能保留建置環境資訊。
+- **尚未完成／已知限制**：最新提交仍需在實體 iPad／Mac 驗收視覺、旋轉、Stage Manager、Apple Pencil Pro、真實 RAW 與外接來源工作流；進階 masking、lens profile 與 Phase 2+ 不在本次 Phase 1 gate。自動化通過不等於所有硬體與人工驗收已結案。
+
+## Codex／Claude 輪流開發協議（2026-09-08）
+
+- **Codex 本輪追加完成**：共用 `LibraryBrowserSession` 已接上 rating／flag／keyword／進階條件與 touch Select mode；`PadLibraryGrid` 已接 selection bar、filter sheet 與 VoiceOver selection state。Claude 下一棒改做 scene-level state、實機驗收與剩餘 polish。
+- **方式**：採序列交接，同一時間只允許一個代理修改此 worktree；另一個代理只做審查或等待，不同時寫入相同檔案。
+- **Codex 先做（已完成）**：iPad Phase 1 的 adaptive width policy、workspace state 與 policy／contract tests 已完成；`PadEditorView` 現在透過同一 policy 在 1100 pt 才切 trailing dock，900–1099 pt 維持 bottom drawer。
+- **Claude 後接**：token 恢復後接續 scene-level `PadWorkspaceState` wiring、Stage Manager／旋轉下的 selection 與 scroll preservation、以及實機／手動 UI QA；rating／flag／keyword、篩選、多選與 batch bar 已完成，不要重做。
+- **每次交接必備**：`git status`、修改檔案、測試指令與結果、未完成項目、下一步。未經使用者要求不 push、merge、rebase 或清理其他代理的變更。
+- **目前入口**：`docs/superpowers/specs/2026-09-08-ipad-m-series-ui-ux-optimization-design.md`；Claude CLI 已確認登入，但要等前一個代理完成並交接後才開始修改。
+- **本輪驗證**：`swift test --filter 'PadEditorLayoutPolicyTests|PadLibraryAccessibilityContractTests|PadLibraryCompositionContractTests'` → 72/72 PASS；`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` → BUILD SUCCEEDED。首次未升權建置只受本機 cache sandbox 限制，升權重跑成功。
+- **本輪完整驗證**：完整 `swift test` → 1836 tests、9 skipped、1 failure；唯一 failure 為既有 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier` 的本機 Debug `DEVELOPMENT_TEAM` occurrence contract，與本輪 UI 變更無關。`git diff --check` PASS。
+- **本輪真機驗證**：連線 iPad Pro 11-inch (3rd generation) `<CONNECTED_IPAD_UDID>`；signed Debug build、`devicectl device install app`、`devicectl device process launch --terminate-existing` 全部 PASS。建置只出現 AccentColor／launch configuration 非阻斷 warning，沒有 crash 或安裝失敗。
+- **本輪 Mac 產物**：`Scripts/package-mac-release.sh release` PASS；`dist/LumaHarbor-0.1.0-1.zip` 與 `.zip.sha256` 已產生，ad-hoc app `codesign --verify --deep --strict` PASS，ZIP 無 `._*` AppleDouble 檔案。
+- **Claude 下一單位**：接 `docs/coordination/CLAUDE_IPAD_PHASE1_HANDOFF.md` 的 scene-level state、resize／rotation preservation 與人工 UI QA；policy、`PadLibraryView` 寬度、shared filters、touch Select、batch bar 都已完成，不要重做。
+
+## 最新驗測證據（2026-09-09 00:27, Codex）
+
+- `swift test --filter 'PadEditorLayoutPolicyTests|PadLibraryAccessibilityContractTests|PadLibraryCompositionContractTests|LibraryBrowserSessionTests/testCatalogFiltersReloadThroughTheSharedLibraryQuery|LibraryBrowserSessionTests/testCatalogFilterClearRestoresUnfilteredQuery|LibraryBrowserSessionTests/testTouchSelectionSupportsToggleSelectAllAndClear'` → **78/78 PASS**。
+- `xcodebuild -quiet -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` → **BUILD SUCCEEDED**。
+- 實體 iPad Pro 11-inch (3rd generation) → signed Debug build、安裝、啟動 **PASS**；未修改 signing／Team ID。
+- `Scripts/run-mvp-acceptance.zsh --preflight-only`（明確設定三個私有 fixture 路徑）→ **PASS**；完整 acceptance 的 strict-concurrency build → **PASS**，`RawFixtureTests` → **9/9 PASS**，Sony ARW warm preview 約 143–145 ms。
+- 完整 acceptance 報告：`.build/mvp-acceptance/20260908T162631Z/summary.md`；runner overall 仍為 **FAIL**，原因只有已知 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 Debug `DEVELOPMENT_TEAM` 與公開 repo contract 不一致），不可為了清掉該 failure 改動個人簽章。quick-filter 修正後最新完整 suite 為 **1836/9/1**，未新增 failure。
+- Mac 產物驗證：`dist/LumaHarbor-0.1.0-1.zip` SHA-256 `3cc9140cc671667d121172ebe849a696504ba8c89175cfb6c45e86d304306247`；app code signature valid，ZIP 無 AppleDouble `._*` 檔案。
+- 追加修正：iPad quick Rating／Flag／Edited 不再清除其他 catalog filters；新增 `testQuickFilterUpdatesPreserveTheOtherCatalogFilters` → **PASS**。修正後 generic build、signed device build、安裝與啟動再次 **PASS**。
+- 追加 polish：新增 `AccentColor.colorset` 與 `UILaunchScreen_Generation`，iPad build 不再出現 AccentColor／launch configuration warning；僅保留 Xcode destination discovery 的非阻斷訊息。
+- Claude 02:30 交接：Claude CLI 兩次在前景執行皆無 stdout，超過合理等待後安全中止，未留下任何檔案變更；本輪剩餘 scene-level inspector／filmstrip 互動與人工 UI QA 保留在 handoff，沒有假造 Claude PASS。
+
+## M 系列 iPad Adaptive Pro Workspace Spec（2026-09-08, Codex）
+
+- **狀態**：`SPEC COMPLETE / PHASE 1 IMPLEMENTATION IN PROGRESS`。依使用者核准的 Adaptive Pro Workspace 方向，新增 `docs/superpowers/specs/2026-09-08-ipad-m-series-ui-ux-optimization-design.md`；Phase 1 已開始，先完成 width policy、workspace state model 與 `PadLibraryView` 的 adaptive sidebar 接線，後續由 Claude 依交接文件接續圖庫 curation 與 batch UI。
+- **範圍**：涵蓋圖庫與編輯器，以實際視窗寬度定義 Compact／Standard／Expanded／Wide 四級版面，並規範外接來源、rating／flag／keyword、批次挑片、filmstrip、inspector、Work／Focus、觸控、Apple Pencil、鍵盤／pointer、外接顯示器、無障礙、效能與真機驗收。
+- **建議順序**：先做 Phase 1 adaptive shell 與 iPad curation 接線，再做 Phase 2 editor workspace，最後補 Phase 3 Pencil／keyboard／pointer 與 Wide 外接顯示器。開始開發前需由本規格拆出逐檔 implementation plan。
+
+## 重新驗測（2026-09-08, Codex）
+
+- **自動化 PASS**：最新 focused selection `LibraryQueryWiringTests|EditorWorkflowUXContractTests|EightLanguageLocalizationGateTests|LocalizationSmokeTest|PhotoCatalogMetadataTests|PhotoIndexMigrationTests|PhotoIndexQueryTests|ExportOptionsWiringTests` → 121/121；iPad unsigned simulator `xcodebuild` → `** BUILD SUCCEEDED **`；`git diff --check` → PASS。
+- **Mac UI PASS**：以目前 worktree 的 Debug app 驗證圖庫搜尋（`_DSC1995` 可縮成單張，清除後恢復 81 張）、評分／旗標／調整篩選選單、進階篩選 sheet（格式／相機／鏡頭／關鍵字／拍攝日期）、Workspace 選單、照片右鍵關鍵字編輯 sheet（取消不寫入）。本輪沒有儲存評分、旗標或關鍵字，未改動使用者照片資料。
+- **BLOCKED / NOT RUN**：MVP preflight 因 `Fixtures/Private/Sony-ARW`、`Fixtures/Private/APFS-Test`、`<EXFAT_TEST_DIR>` 均不存在而無法進入完整 acceptance；iPad 目前僅顯示 paired/available，未連接可安裝的實體裝置，因此真機驗收未執行。完整 `swift test` 的既有唯一失敗仍是本機 Debug `DEVELOPMENT_TEAM` 與 `AppIconAssetContractTests` 的環境差異（1824 tests、9 skipped、1 failure），未修改 signing 設定。
+- **結論**：本輪確認自動化與可逆的 Mac UI 路徑正常；不能把缺少 fixture 或未連接 iPad 的 gate 宣稱為 PASS，也不能宣稱 Phase 1–3 或整體產品驗收結案。下一步需提供測試 fixture 並連接 iPad，另在可丟棄的測試資料上驗證 rating／flag／keyword 的實際寫入與重開持久化。
+
+### 外接裝置重測（2026-09-08）
+
+- 外接測試磁碟已掛載，`<EXFAT_TEST_DIR>` 存在，檔案系統為 `exfat`；但該驗收資料夾目前為空，尚不能執行外接 RAW／拔除／權限情境。
+- `Fixtures/Private/Sony-ARW` 與 `Fixtures/Private/APFS-Test` 仍不存在，因此 MVP preflight 現在是 arm64／Xcode 工具 PASS、exFAT 路徑 PASS、Sony RAW 與 APFS 路徑 FAIL。
+- `xcrun devicectl list devices` 與 `simctl` 當下都因 CoreDevice／CoreSimulator XPC service 初始化失敗而無法列出 iPad；這次不能判定為 iPad 未連接，需重啟 Xcode／CoreDevice 後再確認 USB 與信任狀態。
+
+### Fixture 與 iPad 真機重測（2026-09-08）
+
+- 建立未納入 Git 的 `Fixtures/Private/Sony-ARW` 與 `Fixtures/Private/APFS-Test`，各放入一個已下載的真實 Sony `_DSC1946.ARW`；同一檔案複製到 `<EXFAT_TEST_DIR>`。MVP preflight 三個 fixture／儲存條件全數 PASS。
+- iPad `<CONNECTED_IPAD_UDID>` 重新偵測為 `connected`；真機 Debug build、安裝與啟動 `org.lumaharbor.LumaHarborPad` 全數 PASS。建置使用目前本機 Apple Development signing，沒有修改 project signing 設定。
+- MVP acceptance run：strict-concurrency build PASS；`RawFixtureTests` 9/9 PASS（RAW 解碼、metadata、preview、full-resolution export、原檔不變）；full `swift test` 仍為 1824 tests、9 skipped、1 failure，唯一失敗是 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier` 的本機 Debug `DEVELOPMENT_TEAM` contract 差異，因此 runner Overall 仍為 FAIL。
+
+## Editor workflow and library UX optimization spec (2026-09-08, Codex, Phase 3 curation + filter UI unit)
+
+- **狀態**：`PHASE 3 CURATION + FILTER UI / AUTOMATED VERIFICATION PASS`。Claude token 不足後由 Codex 接手；保留 shared worktree 內所有既有未提交變更，沒有 commit、push、merge、rebase，也沒有修改 signing／Team ID／provisioning 設定。
+- **範圍**：完成規格 §7 的第一個可用單位：rating／flag 持久化、keyword 正規化與查詢、rating／flag／has-edits／format／camera／lens／日期的可組合 `LibraryQuery`，Mac cell／filter menu／快捷鍵入口、進階篩選 sheet、關鍵字編輯 sheet，以及批次匯出預設排除 Reject。尚未宣稱完整 Phase 3：關鍵字的 sidecar／同步權威、10k 筆效能驗收與人工 Mac QA 仍待後續。
+- **設計文件**：新增 `docs/superpowers/specs/2026-09-08-library-rating-keyword-filter-design.md`。Schema v4 新增 `photo.rating`、`photo.flag`、`photo.format_normalized` 與 `photo_keyword` 表；rating／flag 屬於 `PhotoID`，掃描 upsert 不會覆寫；virtual copy 目前明確從 0 rating／無 flag／空 keywords 開始。
+- **核心實作**：新增 `Sources/PhotoLibraryCore/Model/PhotoCatalogMetadata.swift`（`PhotoFlag`、`PhotoKeyword`、filter value types），擴充 `PhotoAsset`／`LibraryQuery`；`PhotoIndexStore` 增加 v4 transaction migration、backfill、rating／flag／keyword mutation API、keyword hydration 與 SQL AND-composed filters。空白 keyword 會拒絕，重複 normalized keyword 保留第一次顯示拼法。
+- **Mac 接線**：`LibraryViewModel` 的 visible query 會帶所有 curation／進階 filters；`ThumbnailView` 顯示 rating／flag badge；`LibraryGridView` 提供 rating／flag／edit-state filter menu、進階 filter sheet 與 selected/context-menu keyword editor；`LumaHarborCommands` 提供 `0...5`、`P`／`X`／`U`，並在文字輸入 first responder 時不處理；`BatchExportSheet` 提供明確的「Include rejected photos」選項，預設排除 Reject。
+- **測試**：新增 `Tests/PhotoLibraryCoreTests/PhotoCatalogMetadataTests.swift`（4）；補強 `PhotoIndexMigrationTests` v4 schema／table assertions；新增／補強 `EditorWorkflowUXContractTests`（curation badges、advanced filters、keyword editor、shortcuts、reject export contract）、`LibraryQueryWiringTests`（進階條件與 filename/rating/flag/keyword 組合）與 `ExportOptionsWiringTests`（Reject 預設排除／明確納入）。
+- **已知限制**：`PhotoAsset.keywords` 是 SQLite index cache，不會寫入既有 sidecar；因此 index rebuild 後 keywords 會遺失，這是設計文件明確記錄的後續資料權威問題，不能在本輪假裝已解決。`LibraryQuery.fingerprint` 目前為 opaque value description，尚未升級成跨程序序列化格式。
+- **本輪驗證**：最新 focused selection `LibraryQueryWiringTests|EditorWorkflowUXContractTests|EightLanguageLocalizationGateTests|LocalizationSmokeTest|PhotoCatalogMetadataTests|PhotoIndexMigrationTests|PhotoIndexQueryTests|ExportOptionsWiringTests` → 121/121 PASS；先前 batch/export 專項重跑 15/15 PASS；`swift build` PASS；iPad unsigned simulator `xcodebuild` PASS（`** BUILD SUCCEEDED **`）；8 語系 gate PASS；`git diff --check` PASS；changed-text privacy scan 對本輪新增／修改的 product、localization、tests 與 spec 沒有真實帳號路徑、Team ID、credential 命中（其餘既有測試中的 synthetic `/Users`／`/Volumes` fixture 仍保留）。完整 `swift test` → 1824 tests、9 skipped、1 failure，唯一失敗仍是 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 Debug `DEVELOPMENT_TEAM` 差異），沒有為了測試改動 `project.pbxproj`。
+- **Next action**：Phase 1、2.1、2.2、2.3 與 Phase 3 的 Mac／iPad 人工驗收仍維持 `NOT RUN`；下一個工程單位應處理關鍵字 sidecar／同步權威或效能驗收，不應把目前自動化結果宣稱為整體結案。
+
+## Editor workflow and library UX optimization spec (2026-09-08, Claude, Phase 2.3 — Mac focus workspace)
+
+- **狀態**：`PHASE 2.3 IMPLEMENTATION / AUTOMATED VERIFICATION PASS`。承接上一輪 Phase 2.2（複製/貼上/同步調整）留下的狀態，本輪在同一個 shared worktree（`codex/open-source-release-prep`，單一寫入者）完成規格 §6.3 的 Mac 專注工作區，保留所有既有未提交變更；沒有 commit、push、merge、rebase，也沒有動到 Xcode signing / `DEVELOPMENT_TEAM` / provisioning。**注意**：Phase 1／Phase 2.1／Phase 2.2 自己的 Mac／iPad 人工畫面驗收在本輪開始前仍是 `NOT RUN`（見前幾輪紀錄）；本輪不因此中止，但完成狀態仍不能宣稱 Phase 1 或整個 Phase 2 已整體結案——Phase 2（2.1、2.2、2.3 三個子項）的程式面工作到本輪才全部完成，人工 QA gate 仍全數 `NOT RUN`。
+- **範圍**：只做規格 §6.3「Mac 專注工作區」，沒有觸碰 Phase 3（rating/flag/keyword/篩選），也沒有重構既有 editor/inspector/library 邏輯。
+- **新的純 policy model**：`Sources/LumaHarborApp/Models/WorkspaceLayoutState.swift`（`WorkspaceLayoutState`：`showSidebar`／`showInspector`／`showFilmstrip`／`focusMode`／`inspectorWidth`，加上 `effectiveShowSidebar`／`effectiveShowInspector`／`effectiveShowFilmstrip`、`clampedInspectorWidth(_:)`、`minimumInspectorWidth = 280`／`maximumInspectorWidth = 420`／`defaultInspectorWidth = 300`，以及 `StorageKey` 五把 `@AppStorage` 鍵字串)。跟 `CanvasViewportState`／`EditorSession.compareMode` 同一種「純 UI/session state，從不進照片 sidecar」的既有 pattern：focus mode 只透過三個 `effectiveShow*` 計算屬性隱藏三個 chrome，從不改寫底下各自的 `showSidebar`／`showInspector`／`showFilmstrip` 儲存值本身，所以關閉 focus mode 會精確恢復每個 chrome 各自原本的顯示狀態，不需要額外的「恢復前狀態」bookkeeping。
+- **`Sources/LumaHarborApp/Views/RootView.swift`**：新增五個 `@AppStorage(WorkspaceLayoutState.StorageKey.*)`（`showSidebar`/`showInspector`/`showFilmstrip`/`focusMode`/`inspectorWidth`，預設值與 `WorkspaceLayoutState()` 的預設一致）。`NavigationSplitView` 的 `columnVisibility` 改用計算 `Binding`，讀值走 `layout.effectiveShowSidebar`，寫值時若 `focusMode` 開著就忽略（避免使用者手動拖曳/點擊系統自帶的 sidebar 收合鈕，在 focus mode 底下把 `showSidebar` 的儲存值意外蓋掉）。inspector 是否出現在 `detail` 的 `HStack` 裡改由 `layout.effectiveShowInspector` 決定，寬度改用 `layout.inspectorWidth`（而非寫死的 300）。新增可拖曳的 `inspectorResizeHandle`（蓋在既有 `Divider()` 上、8pt 寬的透明命中區，`DragGesture(minimumDistance: 0)` 以 `baseline - translation.width` 更新寬度，每次更新都經過 `WorkspaceLayoutState.clampedInspectorWidth` clamp，並在 hover 時切換 `NSCursor.resizeLeftRight`）。工具列新增一個清楚可見的 `workspaceMenu`（`Label(L10n.t("Workspace"), systemImage: "sidebar.squares.left")`，內含三個 show `Toggle`、一個 `Divider`、`Distraction-Free Mode` `Toggle`、另一個 `Divider`、一個 clamp 過的 `Slider` 控制 inspector 寬度且在 `!showInspector` 時 disabled）。
+- **`Sources/LumaHarborApp/Views/EditorView.swift`**：新增兩個 `@AppStorage`（`showFilmstrip`／`focusMode`，同一組 `WorkspaceLayoutState.StorageKey`）與 `effectiveShowFilmstrip` 計算屬性；`body` 把原本無條件的 `Divider()` + `FilmstripView().frame(height: 108)` 包進 `if effectiveShowFilmstrip { ... }`，filmstrip 隱藏時不留下對應 `Divider` 造成的空白條。既有 `toolbarContent`（Back to Library、Undo、Redo、Compare 相關的 `CompareButton`／Compare Mode `Picker`）完全沒有改動一行，也沒有讀取 `focusMode`——focus mode 只作用在三個 chrome pane 上，editor 工具列本身永遠可用，直接滿足規格「focus mode 隱藏非必要 chrome，但 Undo、Redo、比較控制與返回圖庫仍可達」。
+- **`Sources/LumaHarborApp/LumaHarborCommands.swift`**：新增同一組四個 `@AppStorage`（`showSidebar`/`showInspector`/`showFilmstrip`/`focusMode`，與 `RootView`/`EditorView` 綁同一把字串鍵，因此三處的開關永遠一致）與一個新的 `CommandMenu(L10n.t("View"))`，內含三個 show `Toggle` 與一個 `Distraction-Free Mode` `Toggle`（掛 `.keyboardShortcut("f", modifiers: [.command, .shift])`——選 `Command+Shift+F` 是因為 `Command+F` 已被 Mac 圖庫 `.searchable` 修飾詞的系統預設鍵盤等效鍵占用，且掃過現有 `LumaHarborCommands.swift`／`EditorView.swift` 所有 `keyboardShortcut` 確認未被其他命令用到；雙修飾鍵保證一般文字欄位打字打到「f」不會誤觸)。這是 SwiftUI `Commands`／menu bar 層級的真實全域快捷鍵，跟既有 `⌘0`/`⌘1`/`⌘+`/`⌘-`/`⌘S`/`⌘E` 等走同一條、已驗證可用的路徑，而不是掛在 toolbar 內 `Menu` 裡（那條路徑的全域鍵盤等效鍵是否可靠未經驗證）。
+- **已知限制／刻意的範圍界線（沒有做，留給下一輪或人工）**：
+  - inspector 寬度目前只有拖曳分隔線與 Workspace 選單裡的 `Slider` 兩種可發現、可調整入口；規格沒有要求鍵盤快捷鍵可以直接設定精確寬度數值，本輪沒有另外加。
+  - Workspace 選單目前只掛在 `RootView` 的 `NavigationSplitView` 工具列（跨 Library grid 與 Editor 兩種畫面都看得到，因為 SwiftUI 的 `.toolbar` 會與更內層 View 自己的 `.toolbar` 合併），沒有另外複製一份到 `LibraryGridView`／`EditorView` 各自的 toolbar 裡；`LumaHarborCommands.swift` 的 `View` 選單則提供選單列層級的等效入口與唯一的鍵盤快捷鍵。
+  - `Distraction-Free Mode` 刻意選了一個新的英文字串/在地化 key，而不是重用既有的、本來就存在但目前程式碼裡完全沒有引用的 `"Focus Mode"` 舊 key——檢查後發現該舊 key 在五種語言（zh-Hans／ja／ko／fr／es）翻譯的是相機/鏡頭的「對焦模式」（optical focus，例如法文 "Mode de mise au point"），語意上和本輪「隱藏 UI chrome 的工作區模式」完全不同，重用會在多數語言顯示錯誤語意；沒有動舊 key 本身，留著給未來真的需要「對焦模式」文案的功能使用。
+  - Mac 人工畫面驗收（Workspace 選單開關互動、三個 chrome 各自顯示/隱藏、focus mode 進入/離開時工具列是否仍可操作、inspector 拖曳手感、280/420 兩端 clamp 手感、View 選單與快捷鍵、深色/暖白主題、App 重啟後是否還原）全部 `NOT RUN`——本輪只完成可程式驗證的部分。
+  - Phase 1／Phase 2.1／Phase 2.2 自己的人工驗收仍是先前各輪紀錄的 `NOT RUN`，本輪沒有新增或減少任何 Phase 1／2.1／2.2 驗收證據。Phase 2 的三個子項（2.1／2.2／2.3）程式面工作到本輪全部完成，但沒有任何一個子項的人工 QA gate 有證據，因此不能宣稱 Phase 2 整體結案。
+- **TDD**：先寫 `Tests/LumaHarborAppTests/WorkspaceLayoutStateTests.swift`（12 個新測試，純 model/policy——預設可見性、focus mode 對三個 chrome 的 effective visibility、focus mode 不改寫底層各自 preference、關閉 focus mode 後精確恢復各自原本狀態、寬度 clamp 的下界/上界/範圍內三種情形、initializer 本身也會 clamp、`Equatable`），這批測試完全不靠字串比對原始碼，是對 `WorkspaceLayoutState` 真正的行為/邏輯斷言。再擴充 `Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift` 新增 8 個 source-contract 測試（`RootView` 五把 `@AppStorage` 鍵、`columnVisibility`／inspector pane 走 `WorkspaceLayoutState`／`effectiveShow*`、inspector 寬度透過 `WorkspaceLayoutState.clampedInspectorWidth` 而非另外土法 clamp、Workspace 選單的三個 show toggle／focus mode toggle／`Slider` 都在、`EditorView` 的 filmstrip 走 `effectiveShowFilmstrip`、editor 工具列的 `toolbarContent` 屬性本體用一個新的 `extractProperty(named:from:)` brace-matching helper單獨抽出來斷言其中含 Back to Library／Undo／Redo／`CompareButton()` 且完全不提 `focusMode`、`LumaHarborCommands.swift` 的 `View` 選單與 `⌘⇧F` 快捷鍵、`WorkspaceLayoutState.swift` 本身不 import `EditorCore`/`PhotoLibraryCore`、不提 `PhotoAdjustments`）。改 `RootView.swift`/`EditorView.swift`/`LumaHarborCommands.swift` 之前，先跑過一次確認新測試全部因符號不存在而編譯失敗或斷言失敗（RED），再套用實作跑到全綠（GREEN）。
+- **驗證**：
+  - `swift test --filter 'EditorWorkflowUXContractTests|WorkspaceLayoutStateTests|EightLanguageLocalizationGateTests|LocalizationSmokeTest'` → PASS，67 tests，0 failures（`EditorWorkflowUXContractTests` 37、`WorkspaceLayoutStateTests` 12、`EightLanguageLocalizationGateTests` 9、`LocalizationSmokeTest` 17；含本輪新增的 20 個測試）。
+  - 完整 `swift test` → 1814 tests executed、9 skipped、**1 failure**：`AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（既有已知本機環境差異——本機 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的 Debug `DEVELOPMENT_TEAM` 是使用者先前在 Xcode 選的真實 Team，Release 仍空字串，測試要求兩者皆空；沒有為了讓測試變綠而改動這個本機 signing 設定）。與先前多輪紀錄一致，非本輪程式碼造成的新回歸；本輪淨新增 20 個測試（1794 → 1814），與 focused-filter 的統計一致。
+  - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -sdk iphonesimulator -configuration Debug -derivedDataPath /private/tmp/lh-derived build CODE_SIGNING_ALLOWED=NO` → `** BUILD SUCCEEDED **`。
+  - `git diff --check` → 乾淨（exit 0）。
+  - 針對本輪實際改動/新增檔案（`Sources/LumaHarborApp/Views/RootView.swift`、`Sources/LumaHarborApp/Views/EditorView.swift`、`Sources/LumaHarborApp/LumaHarborCommands.swift`、`Sources/LumaHarborApp/Models/WorkspaceLayoutState.swift`、8 個 `Localizable.strings`、`Tests/LumaHarborAppTests/WorkspaceLayoutStateTests.swift`、`Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift` 新增部分）做 changed-text 掃描（真實 `/Users/<name>`／`/Volumes/`、`DEVELOPMENT_TEAM`、password/secret/api key、PEM 私鑰標頭），無命中。
+  - 新增在地化字串（`Workspace`／`Show Sidebar`／`Show Inspector`／`Show Filmstrip`／`Distraction-Free Mode`／`Inspector Width`／`Show, hide, or resize workspace panels`／`View`，共 8 把 key）已在 en/zh-Hant/zh-Hans/ja/ko/de/fr/es 八個 `Localizable.strings` 全部補齊，八語 gate（`EightLanguageLocalizationGateTests`）與既有的英文 fallback 掃描（`testUntranslatedKeysOutsideTheAllowlistDoNotSilentlyMatchEnglish`）皆 PASS，沒有把任何新 key 留成英文 fallback。
+- **Next action**：安排 Phase 2.3 的 Mac 人工畫面驗收（Workspace 選單、三個 chrome 顯示/隱藏、focus mode 進入/離開、inspector 拖曳與兩端 clamp、View 選單與 `⌘⇧F`、深色/暖白主題、App 重啟後還原），以及 Phase 1／2.1／2.2 各自積欠的人工驗收——三者目前都是獨立、更早的待辦，且都必須有證據後才能宣稱 Phase 2（或 Phase 1）整體結案。除人工 QA 外，Phase 2 規格範圍內的程式面工作到本輪已全部完成，下一輪可視使用者指示開始 Phase 3（rating/flag/keyword/篩選，需要 schema migration，需獨立設計）。
+
+## Editor workflow and library UX optimization spec (2026-09-08, Claude, Phase 2.2 — Mac copy/paste/sync adjustments)
+
+- **狀態**：`PHASE 2.2 IMPLEMENTATION / AUTOMATED VERIFICATION PASS`。承接上一輪 Phase 2.1（Before/After 比較）留下的狀態，本輪在同一個 shared worktree（`codex/open-source-release-prep`，單一寫入者）完成規格 §6.2 的複製／貼上／同步調整，保留所有既有未提交變更；沒有 commit、push、merge、rebase，也沒有動到 Xcode signing / `DEVELOPMENT_TEAM` / provisioning。**注意**：Phase 1／Phase 2.1 自己的 Mac／iPad 人工畫面驗收在本輪開始前仍是 `NOT RUN`（見上一輪紀錄）；本輪不因此中止，但完成狀態仍不能宣稱 Phase 1 或整個 Phase 2 已整體結案，Phase 2.3（Mac 專注工作區）完全未開始。
+- **範圍**：只做規格 §6.2「複製、貼上與同步調整」，沒有觸碰 §6.3（Mac 專注工作區）或 Phase 3（rating/flag/keyword/篩選）。
+- **UI-only clipboard**：新增 `Sources/LumaHarborApp/Models/AdjustmentClipboard.swift`（`AdjustmentClipboard`：`patch: AdjustmentPatch` + `geometry: GeometryAdjustments?` + `localAdjustments: [LocalAdjustment]?`）。純 UI/記憶體狀態，從不進照片 sidecar，App 結束就消失。
+- **`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`**：新增 `@Published private(set) var adjustmentClipboard`、`@Published var copyIncludesGeometry`／`copyIncludesLocalAdjustments`（預設皆 `false`）。`copyAdjustments()` 用既有 `AdjustmentPatch.modifiedFields(in:)`（與滑桿拖曳批次同步已經在用的同一個「只取和 neutral 不同的欄位」diff）取出目前開啟照片的 global 欄位，Geometry／Local Adjustments 只在對應 toggle 開啟時才寫入 clipboard——避免「整份盲目覆寫」，也避免目標照片自己在其他 global 欄位上的既有編輯被複製過來的 neutral 值蓋掉。`pasteAdjustments()` 呼叫新的 `EditorSession.pasteAdjustments(patch:geometry:localAdjustments:)`。`syncAdjustmentsToSelectedPhotos() async -> BatchAdjustmentTransaction?` 在呼叫前以 `let frozenSelection = selectedPhotoIDs`（同步、無 `await`）凍結目標快照，來源相片本身永遠從自己的同步目標中排除（回報為「略過」），呼叫新的 `BatchAdjustmentSyncService.syncPatch(...)`，把結果寫回既有 `lastBatchTransaction`（因此沿用既有「Undo Batch Sync」選單與 `undoLastBatchTransaction()`，沒有另建第二套復原機制），並用新的 `batchSyncSummaryMessage(succeeded:failed:skipped:)`（跟 `batchUndoSummaryMessage` 同一種 additive-parts 文案慣例）組出 alert 訊息。
+- **`Sources/EditorCore/EditorSession.swift`**：新增 `pasteAdjustments(patch:geometry:localAdjustments:)`，複用 `commitPreset` 同一套「一次動作、一筆 Undo」模式——`PresetApplicator().apply(patch, mode: .merge, context: ...)` 套用 global 欄位（沒被 patch 包含的欄位維持目標照片原值），`geometry`/`localAdjustments` 只在呼叫端傳非 `nil` 時才整個覆蓋，`history.record(...)` 只呼叫一次。
+- **`Sources/PhotoLibraryCore/Batch/BatchAdjustmentSyncService.swift`**：新增 `syncPatch(_:sourcePhotoID:targetPhotoIDs:) async -> BatchAdjustmentTransaction`，是既有以手勢 diff 為準的 `commitGesture` 的「明確動作」版本——同一套 per-target `load → merge(.merge mode) → save` 迴圈、同一個 `targetsInFlight` 保護、同一個 per-target `do/catch`（一個 target 失敗不影響其他 target）、回傳同一個 `BatchAdjustmentTransaction` 型別，因此可以直接被既有 `undo(_:)` 復原，沒有另建第二套復原邏輯。永遠把 `sourcePhotoID` 排除在自己的目標之外，與 `beginGesture` 的防呆一致。
+- **`Sources/LumaHarborApp/Views/InspectorView.swift`**：header 新增一個 `Menu`（label 為「調整動作」＋ `doc.on.doc` 圖示），內含「包含 Geometry」／「包含 Local Adjustments」兩個 `Toggle`、Divider、「複製調整」／「貼上調整」／「同步到所選照片」三個 `Button`；disabled 條件分別對齊「沒有開啟照片」／「沒有已複製內容」／「所選照片少於兩張」。沿用既有 header 的 `.controlSize(.small)` 與 `selectedTab != .adjustments` 停用慣例（跟旁邊的「Reset All」一致）。
+- **已知限制／刻意的範圍界線（沒有做，留給下一輪或人工）**：
+  - **Sync to Selected Photos 只同步 global 欄位**，不同步 Geometry／Local Adjustments，即使 clipboard 裡有包含它們。原因：`BatchAdjustmentSyncService` 現有的安全模型（凍結快照／per-target merge／partial-failure/summary/undo）整套只認得 `AdjustmentPatch` 的 stable field ID；要讓 Geometry／Local Adjustments 也享有同一套批次安全語意，需要幫它們各自設計新的 before/after 快照與 undo 比對邏輯，這是超出本輪「最小接線」範圍的新能力，也不是單純重用既有機制就能做到的事。使用者若要把 Geometry／Local Adjustments 套到別的照片，目前只能逐張開啟後用「貼上調整」。
+  - Copy 的 global 欄位範圍是「和 neutral 不同的欄位」（`AdjustmentPatch.modifiedFields(in:)`），不是「全部 51 個欄位」——這是刻意選擇（見上），與現有滑桿拖曳批次同步的 diff 語意一致，但代價是：如果來源照片某個 global 欄位剛好維持在 neutral（例如使用者想把某欄位「重設」到中性值再複製過去），這個刻意的中性值不會被複製，貼上/同步時不會去重設目標照片對應欄位。
+  - Mac 人工畫面驗收（Menu 開關互動、兩個 Toggle 手感、三個 Button 的 disabled 狀態、alert 摘要文案顯示、深色／暖白主題）全部 `NOT RUN`——本輪只完成可程式驗證的部分。
+  - Phase 2.3（Mac 專注工作區）完全未開始；Phase 1／Phase 2.1 自己的人工驗收仍是上一輪紀錄的 `NOT RUN`，本輪沒有新增或減少任何 Phase 1／2.1 驗收證據。
+- **TDD**：新增 `Tests/EditorCoreTests/EditorSessionPasteAdjustmentsTests.swift`（8 個新測試，涵蓋只套用 patch 欄位／保留未選欄位／geometry 與 local adjustments 的 opt-in 套用與保留／no-op 語意／沒有開啟照片時的 no-op）、`Tests/PhotoLibraryCoreTests/BatchAdjustmentSyncServiceTests.swift` 新增 5 個 `syncPatch` 測試（欄位範圍與保留目標其他欄位／partial failure 不中斷其他 target／排除來源相片／可用既有 `undo(_:)` 復原）、`Tests/LumaHarborAppTests/AdjustmentClipboardWorkflowTests.swift`（新檔，9 個端到端測試，透過真正的 `LibraryViewModel`/`EditorSession` 驗證 copy 預設 global-only／geometry-local opt-in／paste 保留目標未選欄位與單一 undo entry／sync 的 summary、partial failure、compound undo、只選到來源時的 no-op）、`Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift` 新增 3 個 source-contract 測試（Inspector 三個按鈕與兩個 toggle 的接線、`copyAdjustments()` 使用 `modifiedFields(in:)` 而非整份快照、`syncAdjustmentsToSelectedPhotos()` 在 `await` 前就凍結 selection 快照）。先手動確認這些測試在實作前會因符號不存在而編譯失敗（RED），再套用實作跑到全綠（GREEN）。過程中發現「複製全部 51 個欄位」的原始設計會讓目標照片自己的其他 global 編輯被複製過來的 neutral 值覆蓋掉（兩個端到端測試因此先失敗），改為只複製 `modifiedFields(in:)` 差異後修正。
+- **驗證**：
+  - `swift test --filter 'EditorSessionPasteAdjustmentsTests|BatchAdjustmentSyncServiceTests|AdjustmentClipboardWorkflowTests|EightLanguageLocalizationGateTests'` → PASS，46 tests，0 failures。
+  - `swift test --filter 'EditorWorkflowUXContractTests'` → PASS，21 tests，0 failures（含本輪新增 3 個）。
+  - 完整 `swift test` → 1794 tests executed、9 skipped、**1 failure**：`AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（既有已知本機環境差異——本機 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的 Debug `DEVELOPMENT_TEAM` 是使用者先前在 Xcode 選的真實 Team，Release 仍空字串，測試要求兩者皆空；沒有為了讓測試變綠而改動這個本機 signing 設定）。與先前多輪紀錄一致，非本輪程式碼造成的新回歸。
+  - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -sdk iphonesimulator -configuration Debug -derivedDataPath /private/tmp/lh-derived build CODE_SIGNING_ALLOWED=NO` → `** BUILD SUCCEEDED **`。
+  - `git diff --check` → 乾淨（exit 0）。
+  - 針對本輪實際改動/新增檔案（`Sources/EditorCore/EditorSession.swift`、`Sources/PhotoLibraryCore/Batch/BatchAdjustmentSyncService.swift`、`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`、`Sources/LumaHarborApp/Views/InspectorView.swift`、`Sources/LumaHarborApp/Models/AdjustmentClipboard.swift`、8 個 `Localizable.strings`、3 個新／改測試檔）做 changed-text 掃描（真實 `/Users/<name>`／`/Volumes/`、`DEVELOPMENT_TEAM`、password/secret/api key、PEM 私鑰標頭），無命中。
+- **Next action**：安排 Phase 2.2 的 Mac 人工畫面驗收（Menu／Toggle／Button 互動、alert 摘要文案、深色／暖白主題），之後可視需要開始 Phase 2.3（Mac 專注工作區）；若要讓 Sync to Selected Photos 也涵蓋 Geometry／Local Adjustments，需要先設計它們各自的批次安全快照/undo 模型，這是獨立於本輪的新工作。Phase 1／Phase 2.1 自己的人工驗收仍是獨立、更早的待辦，不因本輪而變化。
+
+## Editor workflow and library UX optimization spec (2026-09-08, Claude, Phase 2.1 — Mac Before/After side-by-side and vertical wipe comparison)
+
+- **狀態**：`PHASE 2.1 IMPLEMENTATION / AUTOMATED VERIFICATION PASS`。承接前一輪 Phase 1 第二輪補強留下的狀態，本輪在同一個 shared worktree（`codex/open-source-release-prep`，單一寫入者）完成規格 §6.1 的 Before/After 比較，保留所有既有未提交變更；沒有 commit、push、merge、rebase，也沒有動到 Xcode signing / `DEVELOPMENT_TEAM` / provisioning。**注意**：Phase 1 本身的 Mac／iPad 人工畫面驗收在本輪開始前仍是 `NOT RUN`（見上一輪紀錄）；使用者本輪明確指示只做 Phase 2.1，故本輪不因此中止，但完成狀態仍不能宣稱 Phase 1 或 Phase 2 已整體結案。
+- **範圍**：只做規格 §6.1「Before／After 比較」，沒有觸碰 §6.2（複製/貼上/同步調整）或 §6.3（Mac 專注工作區）。
+- **`Sources/EditorCore/EditorSession.swift`**：新增 `EditorSession.CompareMode`（`.single`／`.sideBySide`／`.verticalWipe`）、`@Published private(set) var compareMode`（預設 `.single`，即既有按住/點擊原圖行為）、`@Published private(set) var wipePosition`（預設 `0.5`，clamp 在 `[minimumWipePosition, maximumWipePosition] = [0.02, 0.98]`）。新增 `setCompareMode(_:)`（切到 `.sideBySide`／`.verticalWipe` 前必須 `canCompareWithOriginal`，切回 `.single` 永遠允許）與 `setWipePosition(_:)`（純 clamp，不做其他事）。兩者都純粹是 UI/view state，從不呼叫 `history.record`、`scheduleAutosave`、`save()`，`open()`/`close()` 都會把兩者重置為預設值（與既有 `toolMode`/`isShowingOriginal` 的重置模式一致）。
+- **`Sources/LumaHarborApp/Views/EditorView.swift`**：`previewArea` 新增比較分支——`toolMode == .adjust && compareMode != .single && canCompareWithOriginal` 時，改渲染新的 `sideBySideCompareView`（`HStack` 左右各半，各自標「原圖」「編輯後」）或 `wipeCompareView`（`edited` 全幅疊 `original`，用 `.mask` 依 `wipePosition` 裁切左側，附可拖曳的分隔線與圓形把手，`DragGesture(minimumDistance: 0)` 直接呼叫 `model.editor.setWipePosition(...)`）；其餘情況（crop／白平衡／漸層／修復工具啟用中，或 `compareMode == .single`）維持原本的單張影像 + overlay `ZStack` 完全不變。兩個比較版面都不各自套用 `scaleEffect`/`offset`——原本包住單張影像 `ZStack` 的 `.frame/.scaleEffect(viewport.scale)/.offset(viewport.offset)/.gesture/.simultaneousGesture/.onAppear/.onChange` 整組往外提升到包住 `if/else` 分支的 `Group`，讓兩種比較版面與既有單張顯示共用同一個 `CanvasViewportState`／`viewportTransform`、同一套 Fit／zoom-ladder／pan-clamp／Space-drag／雙擊路徑，沒有另建第二份座標數學。既有「按住顯示原圖、點擊固定原圖」的 `CompareButton` 完全沒改內部邏輯，只多加了 `|| model.editor.compareMode != .single` 到它的 `.disabled(...)`，避免和並排/wipe 模式同時生效互相打架。工具列新增一個 `Picker`（`.pickerStyle(.menu)`），三個選項對應三種 `CompareMode`，`.disabled(!model.editor.canCompareWithOriginal)` 與既有 `CompareButton` 用同一個 gate。左上角原本「Original」浮動標籤加上 `model.editor.compareMode == .single` 條件，避免和比較版面自己的標籤重複。
+- **Localization**：八語 `Localizable.strings` 都新增 4 個 key（`"Compare Mode"`／`"Single View"`／`"Side by Side"`／`"Wipe"`），沿用既有的「新 key 直接附加在檔案尾端」慣例；`"Original"`／`"Edited"` 兩個 key 是既有 key（`"Edited"` 原本用在 iPad 縮圖的「已編輯」a11y label，語意相容，直接重用，沒有新增）。
+- **TDD**：先寫 `Tests/EditorCoreTests/EditorSessionCompareModeTests.swift`（10 個新測試：預設值、`setCompareMode`／`setWipePosition` 的 gate 與 clamp、非破壞式契約——不改 `adjustments`／`canUndo`／`saveState`、`open()`/`close()` 重置）與 `Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift` 新增的 6 個 source-contract 測試，在改 `EditorSession.swift`/`EditorView.swift` 之前先手動暫時還原成上一輪內容跑過一次，確認全部因為符號不存在而編譯失敗（RED），再套用實作跑到全綠（GREEN）——過程與結果見下方「驗證」。
+- **已知限制（沒有動，留給下一輪或人工）**：
+  - 並排/wipe 模式共用「單一 `viewport` transform 套在整個比較版面外層」的簡化模型——如果編輯後的照片有 committed crop（幾何裁切），`original`（`neutral` adjustments 渲染、未裁切）與 `edited`（已裁切）兩張圖的像素尺寸/長寬比可能不同，此時兩側視覺上不會像素級對齊，但不會 crash，且分割線/縮放/平移仍然一致地作用在兩張圖各自的 aspect-fit 框內。規格沒有明確要求裁切後的像素級對齊，本輪不視為缺陷，留待日後如有需要再處理。
+  - 視窗 resize 時的 Fit 重新計算（既有的 `.onChange(of: imageFrame.size)`）只掛在共用的外層 `Group` 上，並排/wipe 模式本身沒有各自的 `onChange` 鉤子；因為 `imageFrame` 一律用 `displayedImage`（即 `edited`）算，resize 時仍會正確重新觸發 `prepareViewport`，這點已用單元/原始碼層級驗證，但視覺上的 resize 行為本輪仍是 `NOT RUN`（見下方）。
+  - Mac 人工畫面驗收（1280×800／1728×1117、深色／暖白主題、並排/wipe 兩種版面、拖曳分隔線手感、三種比較模式互相切換）全部 `NOT RUN`——本輪只完成可程式驗證的部分。
+  - Phase 2.2（複製/貼上/同步調整）、Phase 2.3（Mac 專注工作區）完全未開始。
+  - Phase 1 自己的 Mac／iPad 人工畫面驗收仍是上一輪紀錄的 `NOT RUN`，本輪沒有新增或減少任何 Phase 1 驗收證據。
+- **驗證**：
+  - `swift test --filter 'EditorWorkflowUXContractTests|EditorSessionCompareModeTests|EditorSessionEditingTests|EightLanguageLocalizationGateTests'` → PASS，68 tests，0 failures（`EditorWorkflowUXContractTests` 16、`EditorSessionCompareModeTests` 10 個全新、`EditorSessionEditingTests` 33、`EightLanguageLocalizationGateTests` 9）。
+  - 完整 `swift test` → 1768 tests executed、9 skipped、**1 failure**：`AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（既有已知本機環境差異——本機 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的 Debug `DEVELOPMENT_TEAM` 是使用者先前在 Xcode 選的真實 Team，Release 仍空字串，測試要求兩者皆空；沒有為了讓測試變綠而改動這個本機 signing 設定）。與先前多輪紀錄一致，非本輪程式碼造成的新回歸。
+  - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -sdk iphonesimulator -configuration Debug -derivedDataPath /private/tmp/lh-derived build CODE_SIGNING_ALLOWED=NO` → `** BUILD SUCCEEDED **`。
+  - `git diff --check` → 乾淨（exit 0）。
+  - 針對本輪實際改動/新增檔案（`Sources/EditorCore/EditorSession.swift`、`Sources/LumaHarborApp/Views/EditorView.swift`、8 個 `Localizable.strings`、`Tests/EditorCoreTests/EditorSessionCompareModeTests.swift`、`Tests/LumaHarborAppTests/EditorWorkflowUXContractTests.swift`）做 changed-text 掃描（真實 `/Users/<name>`／`/Volumes/`、`DEVELOPMENT_TEAM`、password/secret/api key、PEM 私鑰標頭），無命中。
+- **Next action**：安排並排/wipe 兩種版面的 Mac 人工畫面驗收（含拖曳分隔線手感、resize 行為、深色/暖白主題），之後可視需要開始 Phase 2.2（複製/貼上/同步調整）；Phase 1 自己的人工驗收仍是獨立、更早的待辦，不因本輪而變化。
+
+## Editor workflow and library UX optimization spec (2026-09-08, Claude, Phase 1 second round — Mac viewport shortcuts, Mac library query wiring, iPad Save to Files)
+
+- **狀態**：`PHASE 1 SECOND ROUND / AUTOMATED VERIFICATION PASS`。承接 Codex 首輪實作留下的「尚待補強」三項，本輪在同一個 shared worktree（`codex/open-source-release-prep`，單一寫入者）完成並保留所有既有未提交變更；沒有 commit、push、merge、rebase，也沒有動到 Xcode signing / DEVELOPMENT_TEAM / provisioning。
+- **範圍 1／Mac canvas 縮放與平移**：`Sources/LumaHarborApp/Models/CanvasViewportState.swift` 新增 `zoomSteps`／`steppedScale(from:direction:)`（10/25/50/100/200/400/800% 階梯，兩端 clamp）。`Sources/LumaHarborApp/Views/EditorView.swift` 為既有 Fit／100%／縮小／放大工具列按鈕加上 `⌘0`／`⌘1`／`⌘-`／`⌘+`；縮小/放大改走階梯縮放而非連續倍率。新增 `SpatialTapGesture(count: 2)` 雙擊在 Fit 與 100% 間切換，以點擊位置為 100% 中心。新增 `isSpaceKeyDown`（由 **local** `NSEvent.addLocalMonitorForEvents` 追蹤，不消耗事件、不影響文字欄位打空白鍵，也不是 global event tap／Accessibility 權限）；pan 手勢現在要求同時符合 `toolMode == .adjust` 與 Space 按住。既有 pan/zoom clamp 與 crop/eyedropper/linear/spot overlay 共用的 `viewportTransform`／`AspectFitRect` 座標路徑未變動。
+- **範圍 2／Mac 圖庫搜尋排序分頁**：`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift` 把 `visiblePhotos` 從 Swift 端手刻的 `precomposedStringWithCanonicalMapping`／`localizedCaseInsensitiveContains`／自訂 sort comparator，改成透過 `PhotoLibraryService.indexStore.page(matching:after:limit:)` 走既有 `LibraryQuery`／`PhotoIndexStore` 的 SQL filename search（Unicode normalization、`%`／`_` escape）與 `ORDER BY`/tie-break 語意（與 iPad `LibraryBrowserSession` 共用同一份 SQL 契約，沒有另建第二套）。`searchText` 變更走 250ms debounce，`sort`／`photos`（含掃描批次與 edit badge 更新）變更立即重查；用 `visibleQueryGeneration` 世代守門避免舊查詢覆蓋新查詢。現有可見多選（`selectAllVisible`／`selectRange`／`Command+A`／`Command`/`Shift`-click）與批次操作列都改讀新的 `visiblePhotos`，行為未變。目前查詢會把當前 library 逐頁抓完（每頁 200 筆、用真正的 keyset cursor loop),而非 Mac 端無限捲動分頁 UI — Mac 圖庫本身仍是一次呈現整個 library，這點不在本輪範圍內（見「尚待補強」）。
+- **範圍 3／iPad Save to Files**：`Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift` 在既有 `Export`→`ShareLink`／`Save to Photos` 之外，加入 SwiftUI `.fileExporter(isPresented:document:contentType:defaultFilename:onCompletion:)`，透過新的 private `ExportedPhotoFileDocument: FileDocument`（只包 `fileWrapper(configuration:)` 讀回 `exportFullResolution()` 已經產生的檔案，不重新編碼、不重覆呼叫 `PhotoExporter`）。取消（`CocoaError.userCancelled`）不顯示失敗 alert；其他錯誤顯示可本地化的 `Couldn't save to Files`/`Try again.`。八語 `Localizable.strings` 新增 `"Save to Files"`／`"Couldn't save to Files"` 兩把 key。
+- **已知限制（沒有動）**：iPad target 的 `NSPhotoLibraryAddUsageDescription` 已透過 `Apps/LumaHarborPad.xcodeproj` 的 `INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription`（Debug／Release 兩處）宣告一份英文文案，但規格 §5.5.4 要求的八語 `InfoPlist.strings`（per-locale 系統權限文案）本輪**沒有**新增 —— 這需要在 `.xcodeproj` 建立新的 `PBXVariantGroup`／`knownRegions` 擴充，手改 `project.pbxproj` 這個已經是本機 signing 髒檔的檔案風險偏高，且不在使用者這輪明確列出的三項範圍內，留給下一輪配合實際 Xcode 操作處理。
+- **驗證**：
+  - `swift test --filter 'EditorWorkflowUXContractTests|LibraryQueryWiringTests|PadEditorExportContractTests|EightLanguageLocalizationGateTests'` → PASS，29 tests，0 failures（含本輪新增的 viewport ladder／雙擊／Space-pan source-contract tests、5 個對真實 SQLite index 跑的 `LibraryQueryWiringTests` 行為測試，涵蓋搜尋過濾、`%`/`_` literal escaping、排序、debounce 下的 stale-query 丟棄、換 library 後重查、以及 iPad `fileExporter`/取消 contract tests）。
+  - 完整 `swift test` → 1752 tests executed、9 skipped、**1 failure**：`AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（既有已知本機環境差異 —— 本機 `Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的 Debug `DEVELOPMENT_TEAM` 目前是使用者自己先前在 Xcode 選的真實 Team，Release 仍是空字串，測試要求兩者皆空；沒有為了讓測試變綠而改動這個本機 signing 設定，符合 AGENTS.md 規則）。這與先前多輪紀錄的已知環境差異一致，不是本輪程式碼造成的新回歸。
+  - `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -sdk iphonesimulator -configuration Debug -derivedDataPath /private/tmp/lh-derived build CODE_SIGNING_ALLOWED=NO` → `** BUILD SUCCEEDED **`。
+  - `git diff --check` → 乾淨（exit 0）。
+  - 針對本輪實際改動檔案（不含既有髒檔）做 changed-text 掃描，未發現真實 `/Users/<name>`／`/Volumes/` 路徑、`DEVELOPMENT_TEAM` 字面值、API key、密碼、secret 或 provisioning 內容。
+- **尚待補強（本輪未做，留給下一輪或人工）**：
+  - Mac／iPad 人工畫面驗收（規格 §11.2：1280×800／1728×1117 視窗、深色／暖白主題、100%／400% canvas、雙擊、Space+drag、Mac 圖庫搜尋/排序/密度/多選操作列、iPad 11"/13" Photos／Files／分享三種輸出、外接來源拔除/權限拒絕/分享取消/輸出中斷）全部 `NOT RUN`——本輪只完成可程式驗證的部分,不能宣稱 Phase 1 完整結案。
+  - 規格 §5.3.4 的 10,000 筆 synthetic index、p95 查詢延遲效能驗收 `NOT RUN`（本輪查詢改走真正 SQL page API，但 Mac 端目前仍一次抓完整個 library 的所有頁，沒有做無限捲動式分頁 UI；效能驗收需要另外的 fixture 與量測環境）。
+  - iPad `NSPhotoLibraryAddUsageDescription` 的八語 `InfoPlist.strings` 本地化（見上方「已知限制」）。
+  - Phase 2／Phase 3 完全未開始，維持既有規格文件範圍。
+- **Next action**：安排 Mac／iPad 人工畫面驗收（依規格 §11.2 清單逐項跑),並視需要規劃 iPad InfoPlist.strings 八語在地化與 10k-photo 效能驗收環境。除此之外可視為本輪三項「尚待補強」的程式面工作已完成。
+
+## Editor workflow and library UX optimization spec (2026-09-08, Codex, Phase 1 implementation)
+
+- **狀態**：`PHASE 1 INITIAL IMPLEMENTATION / AUTOMATED VERIFICATION PASS`。新增 `docs/superpowers/specs/2026-09-08-editor-workflow-ux-optimization.md`，並完成第一輪產品接線；尚未做 Mac 人工畫面驗收或 iPad 真機驗收。
+- **Phase 1 範圍**：Mac inspector 改為「調整／Preset／資訊」、Mac Fit／100%／縮放／平移與 overlay 共用座標、Mac 圖庫搜尋／排序／密度／可見多選，以及 iPad 單張完整解析度 Photos／Files／system share 輸出。
+- **後續範圍**：Phase 2 固定 before／after wipe、複製／貼上／同步調整與 Mac focus workspace；Phase 3 固定 rating、flag、keyword 與進階篩選，但兩者不納入下一輪 Phase 1 實作。
+- **現況依據**：Mac 目前 inspector 為單一長 ScrollView、預覽只有 fit、圖庫多選藏在 Command-click；共用 library query、批次同步、完整匯出核心與 iPad 搜尋／排序／密度／pinch zoom 已存在，規格要求優先重用，不另建平行資料語意。
+- **已完成**：Mac Inspector 分頁與 disclosure group、Mac Basic／Color 欄位分組、Mac canvas viewport state（Fit／100%／縮放／平移／clamp）、Mac 圖庫搜尋／四種排序／三段密度／可見多選與 Cmd／Shift／全選／清除入口、iPad `PhotoExporter` 全尺寸 JPEG、ShareLink、Photos 寫入與 Photos usage description。
+- **Git／ownership**：本輪修改只集中在 UX 相關 View／ViewModel、iPad exporter 接線、localization、contract tests 與文件；保留先前對話留下的 Preset 安全強化、README、封裝 script 與 Xcode local signing dirty files，不將它們視為本輪功能變更。
+- **Dedupe**：嘗試以 GitHub open issues 搜尋 `editor workflow zoom inspector library iPad export`，但目前環境無法連線 `api.github.com`，因此 duplicate check 為 `SKIPPED`，不是零重複。
+- **驗證**：`swift test --filter 'EditorWorkflowUXContractTests|PadEditorExportContractTests|EightLanguageLocalizationGateTests'` PASS（18 tests）；`xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -sdk iphonesimulator -configuration Debug -derivedDataPath /private/tmp/lh-derived build CODE_SIGNING_ALLOWED=NO` PASS；完整 `swift test` 為 1741 tests、9 skipped、僅 1 failure，失敗是既有 `AppIconAssetContractTests` 對本機 Debug signing Team 設定仍要求兩個空 Team 欄位，未改動該使用者本機設定。
+- **尚待補強**：Mac viewport 的 Command 快捷鍵與雙擊／Space pan、完整共用 LibraryQuery 分頁查詢接線、Mac／iPad 實機畫面驗收、iPad Files 明確 fileExporter（目前由 system ShareLink 提供 Save to Files 目的地）、Phase 2／3 功能。
+- **Next action**：先跑完整 `swift test` 與 `git diff --check`，再安排 Mac／iPad 人工驗收；不要把目前結果稱為 Phase 1 完整結案或 production release。
 
 ## App icon, Mac/iPad usage, and small-group artifact (2026-09-07, Codex + Claude)
 
@@ -1158,3 +1843,26 @@ A1 is now genuinely `PASS` against current HEAD (`1012238`, product commit `bb63
 ### Next action
 
 The iPad UI/UX state-feedback polish branch is ready for merge/landing review from a product, automated-test, and user-reported real-device QA perspective. Before merging, preserve or discard the local signing-only `project.pbxproj` dirty state deliberately; do not include it in the landing commit by accident.
+## iPad A/B 垂直擦拭線觸控區（2026-09-15, Codex）
+
+- **問題**：垂直 A/B 比較線視覺寬度只有 2pt，直接將該線設為手勢來源，在 iPad 直向與 Split View 中很難精準拖曳。
+- **修正**：保留 2pt 白色分隔線，另加透明 44pt 觸控帶；拖曳改以每次手勢起點加 `translation.width` 換算畫布比例，避免把觸控帶內的局部座標誤當成整個畫布座標；未改變比較狀態模型。
+- **驗證**：`CropOverlayContractTests` 6/6 PASS（含 44pt 命中區與起點／translation 座標契約）；實機觸控驗收尚未執行（需要解鎖 Mac 並連接可用的 iPad/Simulator）。
+- **Git 安全**：本輪未執行 commit、push、reset、merge 或 rebase。
+## iPad Local 遮罩／修復畫布 overlay 對等（2026-09-15, Codex）
+
+- **問題**：iPad Local 面板可以建立線性漸層與 Spot Heal，但 `PadEditorView` 只掛載徑向遮罩與筆刷 overlay，新增的項目無法在畫布拖曳定位或調整尺寸。
+- **修正**：`AdjustmentUI` 新增觸控導向的 `LinearGradientMaskOverlayView` 與 `SpotHealMaskOverlayView`；iPad 畫布依 `toolMode` 掛載四種可互動 Local overlay。資料仍透過 `EditorSession.updateAdjustments`，不另建 iPad 模型。
+- **觸控**：兩種新 overlay 的視覺控制點維持小尺寸，手勢表面固定為 44pt；直向、橫向與 Split View 使用同一套 image frame 座標轉換。
+- **驗證**：`InspectorCrossPlatformHierarchyContractTests` 7/7 PASS；iPad generic build PASS；strict concurrency build PASS；完整 `swift test` 為 2305 executed、9 skipped、1 failure，唯一失敗仍是既有本機 signing 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 `DEVELOPMENT_TEAM` 差異，未修改 signing）。`git diff --check` 與敏感資訊掃描 PASS。實機觸控驗收仍是 `NOT RUN`。
+## iPad Inspector／圖庫列觸控高度一致性（2026-09-15, Codex）
+
+- **問題**：Inspector 搜尋列在空白狀態沒有固定觸控高度；圖庫 smart scope／來源列依賴 List 預設列高，大字體或窄欄時容易變成難以點擊的細列。
+- **修正**：搜尋列、寬版調整子模式 picker、smart scope 與來源列都明確保留至少 44pt 高度；不改變資料或導航行為。
+- **驗證**：`InspectorCrossPlatformHierarchyContractTests` 8/8 PASS；`PadLibraryAccessibilityContractTests` 36/36 PASS；iPad generic build 與 strict-concurrency build PASS；完整 `swift test` 為 2307 executed、9 skipped、1 failure，唯一失敗仍是既有本機 signing 契約 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（本機 `DEVELOPMENT_TEAM` 差異，未修改 signing）。`git diff --check` 與敏感資訊掃描 PASS。實機大字體與旋轉驗收仍是 `NOT RUN`。
+
+## iPad 導航工具列整列命中區（2026-09-15, Codex）
+
+- **問題**：垂直工具列與底部／浮動分頁列雖然保留固定尺寸，窄直向與 Split View 下的多行標籤仍可能只把文字／圖示自然範圍當成命中區，造成點擊位置不一致。
+- **修正**：Xcode 內嵌 host、共用 `PadToolRail.swift` 與 SwiftPM standalone host 的穩定 rail/domain cell 都加上 `.contentShape(Rectangle())`；不改變分頁選擇、編輯值或版面尺寸。
+- **驗證**：`InspectorCrossPlatformHierarchyContractTests` 新增整列命中區契約；實機觸控與旋轉驗收仍是 `NOT RUN`。

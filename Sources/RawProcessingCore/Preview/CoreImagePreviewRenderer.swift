@@ -29,7 +29,8 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         let decodeRequest = RawDecodeRequest(
             url: request.url,
             quality: request.decodeQuality,
-            whiteBalance: parameters.whiteBalance
+            whiteBalance: parameters.whiteBalance,
+            lensCorrection: request.adjustments.lensCorrection
         )
 
         // Spec §11: never decode, hash or encode on the main thread.
@@ -47,9 +48,10 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
             let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
             let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
             let withLocalAdjustments = LocalAdjustmentRenderer.apply(request.adjustments.localAdjustments, to: withGeometry)
+            let withPreviewOptions = ProfessionalPreviewRenderer.apply(request.previewOptions, to: withLocalAdjustments)
 
             try Task.checkCancellation()
-            let cgImage = try renderService.makeCGImage(withLocalAdjustments)
+            let cgImage = try renderService.makeCGImage(withPreviewOptions)
 
             return PreviewImage(
                 cgImage: cgImage,

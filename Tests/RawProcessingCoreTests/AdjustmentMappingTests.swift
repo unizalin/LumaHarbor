@@ -241,4 +241,66 @@ final class AdjustmentMappingTests: XCTestCase {
         XCTAssertTrue(parameters.isContrastIdentity)
         XCTAssertEqual(parameters, AdjustmentMapping.renderParameters(for: .neutral))
     }
+
+    // MARK: - P4: Presence, Color Grading, Monochrome, Rendering Profile, Lens Correction
+
+    func testPresenceIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.presence = PresenceAdjustments(texture: 20, clarity: -10, dehaze: 30)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.presence, adjustments.presence)
+        XCTAssertFalse(parameters.isPresenceIdentity)
+    }
+
+    func testNeutralPresenceIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isPresenceIdentity)
+    }
+
+    func testColorGradingIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.colorGrading.shadows = ColorGradeBand(hue: 220, saturation: 20, luminance: -5)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.colorGrading, adjustments.colorGrading)
+        XCTAssertFalse(parameters.isColorGradingIdentity)
+    }
+
+    func testNeutralColorGradingIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isColorGradingIdentity)
+    }
+
+    func testMonochromeIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.monochrome = MonochromeAdjustments(isEnabled: true, red: 40)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.monochrome, adjustments.monochrome)
+        XCTAssertFalse(parameters.isMonochromeIdentity)
+    }
+
+    func testNeutralMonochromeIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isMonochromeIdentity)
+    }
+
+    func testRenderingProfileIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: 70)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.renderingProfile, adjustments.renderingProfile)
+        XCTAssertFalse(parameters.isRenderingProfileIdentity)
+    }
+
+    func testNeutralRenderingProfileIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isRenderingProfileIdentity)
+    }
+
+    func testLensCorrectionIsCarriedThroughUnchanged() {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.lensCorrection = LensCorrectionAdjustments(mode: .manual, distortionAmount: 25)
+        let parameters = AdjustmentMapping.renderParameters(for: adjustments)
+        XCTAssertEqual(parameters.lensCorrection, adjustments.lensCorrection)
+        XCTAssertFalse(parameters.isLensCorrectionIdentity)
+    }
+
+    func testNeutralLensCorrectionIsIdentity() {
+        XCTAssertTrue(AdjustmentMapping.renderParameters(for: .neutral).isLensCorrectionIdentity)
+    }
 }

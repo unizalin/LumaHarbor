@@ -1,6 +1,7 @@
 import EditorCore
 import Foundation
 import PhotoLibraryCore
+import PresetCore
 import RawProcessingCore
 
 /// Everything the iPad app needs, wired exactly once at launch (Task 6) —
@@ -24,8 +25,15 @@ final class PadAppServices {
     let libraryService: PhotoLibraryService
     let documentStore: PhotoDocumentStore
     let thumbnailProvider: ThumbnailProvider
+    let exporter: PhotoExporter
     let library: PadLibraryModel
     let editor: PadEditorModel
+    let batchCoordinator: PadBatchAdjustmentCoordinator
+    /// The single "My Presets" file-backed repository for this device.
+    /// Shared by PadPresetLibrary; never re-created per view.
+    let myPresetsRepository: FilePresetRepository
+    /// Platform-neutral preset catalogue; wires built-in + My Presets.
+    let presetLibrary: PadPresetLibrary
     /// Injected so `PadLibrarySettingsView` (Task 7 Step 5) can be handed
     /// the exact same store this instance used to resolve its initial
     /// cache budget, rather than each independently defaulting to
@@ -65,6 +73,12 @@ final class PadAppServices {
             byteBudget: PadThumbnailCacheBudget.resolvingPersisted(userDefaults).rawValue
         )
 
+        let libraryModel = PadLibraryModel(dependencies: .live(service: libraryService))
+        let batchCoordinator = PadBatchAdjustmentCoordinator(
+            library: libraryModel,
+            libraryService: libraryService
+        )
+
         // Deliberately not `PhotoDocumentEditorDependencies.live(applicationSupportURL:)`
         // -- that convenience mints its *own* private `PhotoDocumentStore`,
         // which would leave the library side (below) with no way to reach
@@ -84,7 +98,23 @@ final class PadAppServices {
                 let access = try ScopedFolderAccess(resolving: data)
                 return ResolvedSecurityScope(resource: access, isStale: access.isStale)
             },
-            makeBookmark: { url in try SecurityScopedBookmark.makeBookmarkData(for: url) }
+            makeBookmark: { url in try SecurityScopedBookmark.makeBookmarkData(for: url) },
+            onBeginAdjustmentGesture: { [weak batchCoordinator] baseline in
+                Task { @MainActor in
+                    await batchCoordinator?.beginGesture(baseline: baseline)
+                }
+            },
+            onEndAdjustmentGesture: { [weak batchCoordinator] after in
+                Task { @MainActor in await batchCoordinator?.endGesture(after: after) }
+            }
+        )
+
+        let myPresetsRepository = FilePresetRepository(
+            scope: .myPresets(rootURL: locations.presetsDirectoryURL)
+        )
+        let presetLibrary = PadPresetLibrary(
+            builtInRepository: BuiltInPresetRepository(),
+            myPresetsRepository: myPresetsRepository
         )
 
         self.locations = locations
@@ -93,8 +123,13 @@ final class PadAppServices {
         self.thumbnailProvider = ThumbnailProvider(
             cache: thumbnailCache, decoder: decoder, renderService: renderService
         )
-        self.library = PadLibraryModel(dependencies: .live(service: libraryService))
+        self.exporter = PhotoExporter(decoder: decoder, renderService: renderService)
+        self.library = libraryModel
         self.editor = PadEditorModel(dependencies: editorDependencies)
+        self.batchCoordinator = batchCoordinator
+        self.batchCoordinator.attach(editor: self.editor)
+        self.myPresetsRepository = myPresetsRepository
+        self.presetLibrary = presetLibrary
         self.userDefaults = userDefaults
     }
 

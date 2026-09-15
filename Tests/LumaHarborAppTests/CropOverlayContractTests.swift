@@ -48,6 +48,42 @@ final class CropOverlayContractTests: XCTestCase {
         XCTAssertTrue(source.contains("DragGesture"))
     }
 
+    func testIPadCropHandlesKeepA44PointTouchTarget() throws {
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+
+        XCTAssertTrue(
+            source.contains("private static let handleHitAreaSize: CGFloat = 44"),
+            "the iPad crop overlay must name its 44pt touch-target constant"
+        )
+        XCTAssertTrue(
+            source.contains(".frame(width: Self.handleHitAreaSize, height: Self.handleHitAreaSize)"),
+            "the iPad crop handle gesture surface must use the 44pt target"
+        )
+    }
+
+    func testIPadVerticalWipeKeepsA44PointTouchTarget() throws {
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+
+        XCTAssertTrue(
+            source.contains(".frame(width: 44)") &&
+                source.contains(".frame(maxHeight: .infinity)"),
+            "the iPad vertical-wipe divider must expose a 44pt touch target"
+        )
+        XCTAssertTrue(
+            source.contains("value.translation.width / wipeProxy.size.width"),
+            "the expanded touch target must translate from the divider's starting position"
+        )
+        XCTAssertTrue(
+            source.contains("wipeDragStartPosition") && source.contains(".onEnded { _ in"),
+            "the wipe gesture must capture and clear its starting position per drag"
+        )
+        XCTAssertTrue(
+            source.contains("private var verticalWipeCanvas: some View") &&
+                source.contains("GeometryReader { wipeProxy in"),
+            "the wipe divider must calculate its geometry from the padded viewport, not the outer canvas"
+        )
+    }
+
     func testEveryNewCropSourceFileExists() throws {
         for path in [
             "Sources/LumaHarborApp/Views/AspectFitRect.swift",

@@ -3,12 +3,15 @@ import Foundation
 
 /// Where the ten basic adjustments live relative to the canvas for a
 /// given available size — see `PadEditorLayoutPolicy`.
-public enum PadInspectorPresentation: Equatable, Sendable {
-    /// A persistent 320pt panel trailing the canvas, side by side.
+public enum PadInspectorPresentation: String, Equatable, Sendable {
+    /// A persistent responsive panel trailing the canvas, side by side.
     case trailingDock
     /// A bottom sheet the user can drag between a collapsed peek, medium,
     /// and large detent, over the canvas.
     case bottomDrawer
+    /// A detached, draggable floating panel — activated in focus mode so the
+    /// canvas can fill the available space while the inspector stays reachable.
+    case floating
 }
 
 /// Which of the two adaptive workspace layouts `PadEditorView` currently
@@ -29,6 +32,142 @@ public enum PadWorkspaceMode: Equatable, Sendable {
     case focus
 }
 
+/// Which navigation surface the library can afford at a given window width.
+/// The primary grid remains visible in every profile; only secondary columns
+/// change presentation as the window narrows.
+public enum PadLibrarySidebarPresentation: Equatable, Sendable {
+    case overlay
+    case persistent
+    case persistentWithDetails
+}
+
+/// Width-driven layout profiles shared by the iPad library and editor.
+/// These are based on the view's available width, not the physical device or
+/// orientation, so Stage Manager and Split View use the same deterministic
+/// policy as full-screen layouts.
+public enum PadWorkspaceWidthProfile: Equatable, Sendable {
+    case compact
+    case standard
+    case expanded
+    case wide
+}
+
+/// The complete adaptive workspace decision for one available width.
+public struct PadWorkspaceLayout: Equatable, Sendable {
+    public let profile: PadWorkspaceWidthProfile
+    public let librarySidebar: PadLibrarySidebarPresentation
+    public let editorInspector: PadInspectorPresentation
+    public let showsDetailsColumn: Bool
+    public let showsFilmstrip: Bool
+
+    public init(
+        profile: PadWorkspaceWidthProfile,
+        librarySidebar: PadLibrarySidebarPresentation,
+        editorInspector: PadInspectorPresentation,
+        showsDetailsColumn: Bool,
+        showsFilmstrip: Bool
+    ) {
+        self.profile = profile
+        self.librarySidebar = librarySidebar
+        self.editorInspector = editorInspector
+        self.showsDetailsColumn = showsDetailsColumn
+        self.showsFilmstrip = showsFilmstrip
+    }
+}
+
+/// Inspector sections are presentation state, not photo-editing state.
+public enum PadWorkspaceInspectorTab: Equatable, Sendable {
+    case adjustments
+    case presets
+    case info
+}
+
+/// Scene-scoped iPad workspace preferences. None of these values belong in a
+/// RAW sidecar or an `EditorSession` undo stack.
+public struct PadWorkspaceState: Equatable, Sendable {
+    public var isSidebarVisible: Bool
+    public var inspectorTab: PadWorkspaceInspectorTab
+    public var isFilmstripVisible: Bool
+    public var usesLeftHandedLayout: Bool
+
+    public init(
+        isSidebarVisible: Bool,
+        inspectorTab: PadWorkspaceInspectorTab,
+        isFilmstripVisible: Bool,
+        usesLeftHandedLayout: Bool
+    ) {
+        self.isSidebarVisible = isSidebarVisible
+        self.inspectorTab = inspectorTab
+        self.isFilmstripVisible = isFilmstripVisible
+        self.usesLeftHandedLayout = usesLeftHandedLayout
+    }
+
+    public static let initial = PadWorkspaceState(
+        isSidebarVisible: true,
+        inspectorTab: .adjustments,
+        isFilmstripVisible: true,
+        usesLeftHandedLayout: false
+    )
+}
+
+/// Converts available width into a stable layout profile and its secondary
+/// surfaces. Keeping this pure lets the iPad UI and tests share one contract.
+public enum PadWorkspaceLayoutPolicy {
+    public static let compactMaximumWidth: CGFloat = 700
+    public static let expandedMinimumWidth: CGFloat = 1_100
+    public static let wideMinimumWidth: CGFloat = 1_360
+
+    public static func profile(forWidth width: CGFloat) -> PadWorkspaceWidthProfile {
+        switch width {
+        case ..<compactMaximumWidth:
+            return .compact
+        case ..<expandedMinimumWidth:
+            return .standard
+        case ..<wideMinimumWidth:
+            return .expanded
+        default:
+            return .wide
+        }
+    }
+
+    public static func layout(forWidth width: CGFloat) -> PadWorkspaceLayout {
+        switch profile(forWidth: width) {
+        case .compact:
+            return PadWorkspaceLayout(
+                profile: .compact,
+                librarySidebar: .overlay,
+                editorInspector: .bottomDrawer,
+                showsDetailsColumn: false,
+                showsFilmstrip: false
+            )
+        case .standard:
+            return PadWorkspaceLayout(
+                profile: .standard,
+                librarySidebar: .overlay,
+                editorInspector: .bottomDrawer,
+                showsDetailsColumn: false,
+                showsFilmstrip: false
+            )
+        case .expanded:
+            return PadWorkspaceLayout(
+                profile: .expanded,
+                librarySidebar: .persistent,
+                editorInspector: .trailingDock,
+                showsDetailsColumn: false,
+                showsFilmstrip: true
+            )
+        case .wide:
+            return PadWorkspaceLayout(
+                profile: .wide,
+                librarySidebar: .persistentWithDetails,
+                editorInspector: .trailingDock,
+                showsDetailsColumn: true,
+                showsFilmstrip: true
+            )
+        }
+    }
+}
+
 /// Chooses where the adjustment controls should live for a given
 /// available size.
 ///
@@ -39,16 +178,148 @@ public enum PadWorkspaceMode: Equatable, Sendable {
 /// device, or simulating rotation. `PadEditorView` is the only thing that
 /// turns this into an actual container.
 public enum PadEditorLayoutPolicy {
-    /// The width, in points, at or above which a landscape-or-wider
-    /// canvas gets a persistent trailing dock instead of a bottom drawer.
-    public static let trailingDockMinimumWidth: CGFloat = 900
+    /// The fixed width occupied by the leading tool rail in work mode.
+    /// This is a control budget, not a device-specific measurement. It must
+    /// match the labelled five-item rail used by both iPad source paths;
+    /// keeping the budget smaller than the rendered rail causes the canvas
+    /// and trailing inspector to overlap at the landscape boundary.
+    public static let toolRailWidth: CGFloat = 88
+
+    /// The two separators around the canvas/dock boundary in work mode.
+    public static let layoutSeparators: CGFloat = 2
+
+    /// The smallest canvas width that keeps the image useful while a dock is
+    /// visible. Narrower containers use the bottom drawer instead.
+    public static let minimumCanvasWidth: CGFloat = 640
+
+    /// The smallest inspector width that keeps the search bar, action icons,
+    /// and numeric controls usable without truncation.
+    public static let minimumInspectorWidth: CGFloat = 360
+
+    /// The largest inspector width used by the persistent dock. Extra space
+    /// belongs to the canvas rather than making every control row oversized.
+    public static let maximumInspectorWidth: CGFloat = 440
+
+    /// The legacy floating-panel clamp keeps at least this much of the
+    /// Inspector reachable after a drag or a resize.
+    public static let floatingPanelMinimumVisibleEdge: CGFloat = 44
+
+    /// The movable Inspector keeps the wide bottom-drawer treatment when it
+    /// leaves the bottom edge. It must not collapse to the narrow trailing
+    /// dock width just because its position changed.
+    public static let movableInspectorHorizontalInset: CGFloat = 24
+    public static let movableInspectorMaximumWidth: CGFloat = 960
+    public static let movableInspectorMinimumHeight: CGFloat = 280
+    public static let movableInspectorMaximumHeight: CGFloat = 720
+    public static let movableInspectorDismissDragThreshold: CGFloat = 100
+
+    public static func floatingPanelWidth(for size: CGSize) -> CGFloat {
+        let availableWidth = max(0, size.width - (2 * floatingPanelMinimumVisibleEdge))
+        return min(maximumInspectorWidth, max(minimumInspectorWidth, availableWidth))
+    }
+
+    /// Width for the single Inspector surface while it is being moved over
+    /// the canvas. This is intentionally wider than `floatingPanelWidth`:
+    /// moving the bottom drawer changes only its origin, never its editing
+    /// layout or readable control width.
+    public static func movableInspectorWidth(for size: CGSize) -> CGFloat {
+        let availableWidth = max(0, size.width - (2 * movableInspectorHorizontalInset))
+        return min(movableInspectorMaximumWidth, max(minimumInspectorWidth, availableWidth))
+    }
+
+    /// Bounds the single compact Inspector surface so portrait and Split View
+    /// keep a useful canvas while the Inspector body remains scrollable. The
+    /// minimum is intentionally below a typical iPad height; when a container
+    /// is smaller still, the clamp policy keeps the header reachable.
+    public static func movableInspectorHeight(for size: CGSize) -> CGFloat {
+        let availableHeight = max(0, size.height - (2 * movableInspectorHorizontalInset))
+        return min(
+            movableInspectorMaximumHeight,
+            max(movableInspectorMinimumHeight, availableHeight)
+        )
+    }
+
+    /// A downward gesture on the compact Inspector header is an intentional
+    /// dismissal only when it is long enough and predominantly vertical. This
+    /// keeps a short adjustment-panel drag or a horizontal repositioning drag
+    /// from unexpectedly hiding the Inspector.
+    public static func shouldDismissMovableInspector(for translation: CGSize) -> Bool {
+        translation.height >= movableInspectorDismissDragThreshold
+            && translation.height >= abs(translation.width)
+    }
+
+    /// Places a compact Inspector at the bottom center before its stored
+    /// document-scoped offset is applied. Keeping this origin pure lets the
+    /// same geometry be reused for first display, rotation, and Split View
+    /// re-clamping without knowing anything about SwiftUI containers.
+    public static func movableInspectorOrigin(
+        for size: CGSize,
+        panelSize: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: max(movableInspectorHorizontalInset, (size.width - panelSize.width) / 2),
+            y: max(movableInspectorHorizontalInset, size.height - panelSize.height - movableInspectorHorizontalInset)
+        )
+    }
+
+    /// The width, in points, at or above which the Expanded profile gets a
+    /// persistent trailing dock instead of a bottom drawer.
+    public static let trailingDockMinimumWidth = PadWorkspaceLayoutPolicy.expandedMinimumWidth
+
+    /// A measured editor layout for one container size. The optional widths
+    /// make the bottom-drawer decision explicit: there is no hidden dock
+    /// width to accidentally apply while the inspector is presented as a
+    /// sheet.
+    public struct LayoutPlan: Equatable, Sendable {
+        public let presentation: PadInspectorPresentation
+        public let inspectorWidth: CGFloat?
+        public let canvasWidth: CGFloat?
+
+        public init(
+            presentation: PadInspectorPresentation,
+            inspectorWidth: CGFloat?,
+            canvasWidth: CGFloat?
+        ) {
+            self.presentation = presentation
+            self.inspectorWidth = inspectorWidth
+            self.canvasWidth = canvasWidth
+        }
+    }
+
+    /// Calculates the complete work-mode geometry from the actual container
+    /// size reported by `GeometryReader`. Keeping this pure makes rotation,
+    /// Split View, Stage Manager and window resizing deterministic and
+    /// directly testable without a live view hierarchy.
+    public static func plan(for size: CGSize) -> LayoutPlan {
+        let presentation = self.presentation(forWidth: size.width, height: size.height)
+        guard presentation == .trailingDock else {
+            return LayoutPlan(presentation: presentation, inspectorWidth: nil, canvasWidth: nil)
+        }
+
+        let inspectorWidth = min(
+            maximumInspectorWidth,
+            max(
+                minimumInspectorWidth,
+                size.width - toolRailWidth - layoutSeparators - minimumCanvasWidth
+            )
+        )
+        let canvasWidth = max(
+            minimumCanvasWidth,
+            size.width - toolRailWidth - layoutSeparators - inspectorWidth
+        )
+        return LayoutPlan(
+            presentation: presentation,
+            inspectorWidth: inspectorWidth,
+            canvasWidth: canvasWidth
+        )
+    }
 
     /// - Parameters:
     ///   - width: The available width, in points, of the space the
     ///     canvas and its controls together have to fill.
     ///   - height: The available height, in points, of that same space.
     public static func presentation(forWidth width: CGFloat, height: CGFloat) -> PadInspectorPresentation {
-        width >= height && width >= trailingDockMinimumWidth ? .trailingDock : .bottomDrawer
+        PadWorkspaceLayoutPolicy.layout(forWidth: width).editorInspector
     }
 }
 
@@ -85,6 +356,20 @@ public enum PadBottomDrawerPolicy {
     ) -> PadDrawerPresentation {
         mode == .work && inspectorPresentation == .bottomDrawer ? .presented : .dismissed
     }
+}
+
+/// Visual constants for the iPad bottom drawer. Keeping these values outside
+/// the view makes the portrait presentation easy to verify without a live
+/// sheet and prevents the surface treatment from drifting between hosts.
+public enum PadBottomDrawerMetrics {
+    /// The initial peek keeps the unified Inspector header and domain bar
+    /// entirely inside the sheet. A smaller detent would clip the save row or
+    /// place it beneath the system drag indicator on portrait iPad.
+    public static let peekHeight: CGFloat = 280
+
+    /// A slightly softened corner keeps the drawer distinct from the canvas
+    /// without turning it into a floating card.
+    public static let cornerRadius: CGFloat = 22
 }
 
 // MARK: - Floating panel position clamping

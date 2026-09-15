@@ -71,4 +71,68 @@ final class AdvancedToneCurveLUTTests: XCTestCase {
         XCTAssertEqual(curve, [0.25])
         XCTAssertTrue(curve.allSatisfy(\.isFinite))
     }
+
+    // MARK: - buildCombined (P3: composite ∘ channel)
+
+    func testBuildCombinedWithEmptyChannelEqualsCompositeAlone() {
+        let compositePoints = [
+            ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 0.5, y: 0.25), ToneCurvePoint(x: 1, y: 1)
+        ]
+        let compositeAlone = AdvancedToneCurveLUT.build(from: compositePoints, resolution: 256)
+        let combined = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: compositePoints, channelPoints: [], resolution: 256
+        )
+        XCTAssertEqual(combined, compositeAlone)
+    }
+
+    func testBuildCombinedWithEmptyCompositeEqualsChannelAlone() {
+        let channelPoints = [
+            ToneCurvePoint(x: 0, y: 0.1), ToneCurvePoint(x: 0.5, y: 0.6), ToneCurvePoint(x: 1, y: 0.9)
+        ]
+        let channelAlone = AdvancedToneCurveLUT.build(from: channelPoints, resolution: 256)
+        let combined = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: [], channelPoints: channelPoints, resolution: 256
+        )
+        XCTAssertEqual(combined, channelAlone)
+    }
+
+    func testBuildCombinedComposesBothCurves() {
+        // Composite maps 0->0, 1->0.5 (halves everything). Channel maps
+        // 0->0, 1->1 identity-shaped but offset: 0.5->0.2. Composing at
+        // input 1.0 goes through composite (-> 0.5) then channel(0.5) ~= 0.2.
+        let compositePoints = [ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 1, y: 0.5)]
+        let channelPoints = [
+            ToneCurvePoint(x: 0, y: 0), ToneCurvePoint(x: 0.5, y: 0.2), ToneCurvePoint(x: 1, y: 1)
+        ]
+        let combined = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: compositePoints, channelPoints: channelPoints, resolution: 256
+        )
+        XCTAssertEqual(combined.last!, 0.2, accuracy: 0.02)
+    }
+
+    func testBuildCombinedIsMonotonicNonDecreasing() {
+        let compositePoints = [
+            ToneCurvePoint(x: 0, y: 0.4), ToneCurvePoint(x: 0.4, y: 0.1),
+            ToneCurvePoint(x: 0.8, y: 0.9), ToneCurvePoint(x: 1, y: 0.5)
+        ]
+        let channelPoints = [
+            ToneCurvePoint(x: 0, y: 0.6), ToneCurvePoint(x: 0.3, y: 0.05),
+            ToneCurvePoint(x: 0.7, y: 0.95), ToneCurvePoint(x: 1, y: 0.4)
+        ]
+        let combined = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: compositePoints, channelPoints: channelPoints, resolution: 256
+        )
+        for i in 1..<combined.count {
+            XCTAssertGreaterThanOrEqual(combined[i], combined[i - 1], "combined LUT must be non-decreasing at \(i)")
+        }
+    }
+
+    func testBuildCombinedClampedToZeroOne() {
+        let compositePoints = [ToneCurvePoint(x: 0, y: -5), ToneCurvePoint(x: 1, y: 5)]
+        let channelPoints = [ToneCurvePoint(x: 0, y: -5), ToneCurvePoint(x: 1, y: 5)]
+        let combined = AdvancedToneCurveLUT.buildCombined(
+            compositePoints: compositePoints, channelPoints: channelPoints, resolution: 256
+        )
+        XCTAssertTrue(combined.allSatisfy { $0 >= 0 && $0 <= 1 })
+    }
 }

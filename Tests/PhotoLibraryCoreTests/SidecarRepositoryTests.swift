@@ -65,6 +65,24 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         XCTAssertNil(loaded)
     }
 
+    func testSidecarRoundTripsCuration() throws {
+        let sidecar = makeSidecar().updating(curation: PhotoCuration(
+            rating: 4,
+            flag: .pick,
+            keywords: [PhotoKeyword(normalized: "dog", displayValue: "Dog")]
+        ))
+        try repository.write(sidecar: sidecar)
+
+        let loaded = try XCTUnwrap(try repository.loadSidecar(for: sidecar.photoID))
+        XCTAssertEqual(loaded.curation.rating, 4)
+        XCTAssertEqual(loaded.curation.flag, .pick)
+        XCTAssertEqual(loaded.curation.keywords.map(\.displayValue), ["Dog"])
+    }
+
+    func testNewSidecarDefaultsToNeutralCuration() throws {
+        XCTAssertEqual(makeSidecar().curation, .neutral)
+    }
+
     func testSidecarJSONMatchesTheDocumentedShape() throws {
         let sidecar = makeSidecar()
         try repository.write(sidecar: sidecar)
@@ -75,7 +93,7 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         // Spec §8.2's field list.
         for key in [
             "schemaVersion", "photoID", "sourceRelativePath", "sourceFingerprint",
-            "decoder", "adjustments", "createdAt", "modifiedAt"
+            "decoder", "adjustments", "curation", "createdAt", "modifiedAt"
         ] {
             XCTAssertNotNil(object[key], "Missing \(key)")
         }
@@ -182,6 +200,60 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
 
         XCTAssertThrowsError(try repository.loadSidecar(for: photoID))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testWriteRefusesToReplaceAnExistingNewerSchemaSidecar() throws {
+        let photoID = PhotoID()
+        let url = repository.sidecarURL(for: photoID)
+        try writeFile(
+            LegacySidecarFixture.newerSchemaJSON(photoID: photoID, schemaVersion: 99),
+            at: url
+        )
+        let bytesBeforeWrite = try Data(contentsOf: url)
+
+        XCTAssertThrowsError(try repository.write(sidecar: makeSidecar(photoID: photoID))) { error in
+            guard case SidecarError.unsupportedSchemaVersion(let found, let supported) = error else {
+                return XCTFail("Expected .unsupportedSchemaVersion, got \(error)")
+            }
+            XCTAssertEqual(found, 99)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: url), bytesBeforeWrite)
+    }
+
+    func testWritePreservesUnknownTopLevelFieldsFromAnExistingSidecar() throws {
+        let photoID = PhotoID()
+        let url = repository.sidecarURL(for: photoID)
+        let json = """
+        {
+          "schemaVersion": 2,
+          "photoID": "\(photoID.rawValue.uuidString)",
+          "sourceRelativePath": "Trip/DSC0001.ARW",
+          "sourceFingerprint": { "fileSize": 100, "edgeDigest": "abc" },
+          "decoder": { "kind": "coreImage", "version": "system-default" },
+          "adjustments": {},
+          "createdAt": "2026-08-13T00:00:00Z",
+          "modifiedAt": "2026-08-13T00:00:00Z",
+          "thirdPartyState": { "opaque": "keep-me", "revision": 7 }
+        }
+        """
+        try writeFile(Data(json.utf8), at: url)
+
+        var migrated = try XCTUnwrap(try repository.loadSidecar(for: photoID))
+        migrated.schemaVersion = PhotoSidecar.currentSchemaVersion
+        migrated.curation = PhotoCuration(rating: 4)
+        try repository.write(sidecar: migrated)
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        let thirdPartyState = try XCTUnwrap(object["thirdPartyState"] as? [String: Any])
+        XCTAssertEqual(thirdPartyState["opaque"] as? String, "keep-me")
+        XCTAssertEqual(thirdPartyState["revision"] as? Int, 7)
+        XCTAssertEqual(object["schemaVersion"] as? Int, PhotoSidecar.currentSchemaVersion)
+        let curation = try XCTUnwrap(object["curation"] as? [String: Any])
+        XCTAssertEqual(curation["rating"] as? Int, 4)
     }
 
     func testANewerManifestIsRefused() throws {

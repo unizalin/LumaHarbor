@@ -28,6 +28,8 @@ import UIKit
 /// store" contract).
 struct PadThumbnailCell: View {
     let photo: PhotoAsset
+    let isBatchSelected: Bool
+    let isSelectionMode: Bool
     /// Whether this photo's *source* is currently reachable -- `true` for
     /// every App-copy photo (always local by construction), or the
     /// resolved `LibraryFolder.isOnline` for everything else.
@@ -38,6 +40,10 @@ struct PadThumbnailCell: View {
     /// (e.g. "Offline", "Read-only", "Needs Access").
     let sourceStatusMessage: String?
     let provider: ThumbnailProvider
+    /// Compact presentation used by the editor filmstrip. It keeps the same
+    /// cache and offline semantics as the library grid while using a stable
+    /// 72pt thumbnail slot.
+    var compact: Bool = false
     /// Resolves the file this cell should decode from, lazily -- called
     /// only once the cell is actually visible and has no cached bytes
     /// already, not precomputed for every row up front.
@@ -54,7 +60,7 @@ struct PadThumbnailCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             thumbnail
-                .frame(height: 150)
+                .frame(height: compact ? 72 : 150)
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .topTrailing) {
                     if photo.hasEdits {
@@ -63,6 +69,17 @@ struct PadThumbnailCell: View {
                             .padding(4)
                             .background(.thinMaterial, in: Circle())
                             .padding(4)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if isSelectionMode {
+                        Image(systemName: isBatchSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(.black.opacity(0.45), in: Circle())
+                            .padding(6)
                     }
                 }
 
@@ -82,6 +99,7 @@ struct PadThumbnailCell: View {
         .frame(minWidth: 44, minHeight: 44)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(isSelectionMode && isBatchSelected ? L10n.t("selected") : ""))
         .task(id: photo.id) {
             await provider.withVisiblePin(photoID: photo.id) {
                 await load()
@@ -183,6 +201,9 @@ struct PadThumbnailCell: View {
         }
         if photo.hasEdits {
             components.append(L10n.t("Edited"))
+        }
+        if isSelectionMode && isBatchSelected {
+            components.append(L10n.t("selected"))
         }
         return components.joined(separator: ", ")
     }

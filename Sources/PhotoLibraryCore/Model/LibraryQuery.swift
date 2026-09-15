@@ -24,11 +24,45 @@ public struct LibraryQuery: Sendable, Equatable {
     public var scope: LibraryScope
     public var filenameSearch: String?
     public var sort: PhotoSort
+    public var rating: PhotoRatingFilter?
+    public var flag: PhotoFlag?
+    public var hasEdits: Bool?
+    public var format: String?
+    public var camera: String?
+    public var lens: String?
+    public var captureDate: PhotoDateRange?
+    public var keyword: String?
 
-    public init(scope: LibraryScope, filenameSearch: String? = nil, sort: PhotoSort) {
+    public init(
+        scope: LibraryScope,
+        filenameSearch: String? = nil,
+        sort: PhotoSort,
+        rating: PhotoRatingFilter? = nil,
+        flag: PhotoFlag? = nil,
+        hasEdits: Bool? = nil,
+        format: String? = nil,
+        camera: String? = nil,
+        lens: String? = nil,
+        captureDate: PhotoDateRange? = nil,
+        keyword: String? = nil
+    ) {
         self.scope = scope
         self.filenameSearch = filenameSearch
         self.sort = sort
+        self.rating = rating
+        self.flag = flag
+        self.hasEdits = hasEdits
+        self.format = format
+        self.camera = camera
+        self.lens = lens
+        self.captureDate = captureDate
+        self.keyword = keyword
+    }
+
+    /// Stable, human-independent identity for query coordination and stale
+    /// result rejection. The value is intentionally opaque to UI callers.
+    public var fingerprint: String {
+        String(describing: self)
     }
 }
 
@@ -98,4 +132,8 @@ public enum LibraryQueryError: Error, Equatable, Sendable {
     /// to sort by, so this shape is rejected rather than silently written
     /// as a contradictory row.
     case missingEditDate
+    case invalidRating(Int)
+    /// Empty or whitespace-only keyword input is invalid rather than silently
+    /// turning into a query or mutation that matches every photo.
+    case invalidKeyword
 }
