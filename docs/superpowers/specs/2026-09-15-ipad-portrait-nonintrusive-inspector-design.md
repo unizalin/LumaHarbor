@@ -1,7 +1,7 @@
 # iPad 直向非侵入式 Inspector 設計規格
 
 - 日期：2026-09-15
-- 狀態：使用者已核准方向，待書面規格複核
+- 狀態：使用者已核准方向，實作完成；實機視覺驗收待執行
 - 目標平台：iPadOS 17+
 - 基準分支：`codex/open-source-release-prep`
 - 關聯規格：`2026-09-09-unified-adaptive-professional-inspector-design.md`

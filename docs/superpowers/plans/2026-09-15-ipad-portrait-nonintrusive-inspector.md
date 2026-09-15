@@ -1,5 +1,7 @@
 # iPad 直向非侵入式 Inspector Implementation Plan
 
+> **執行狀態：已完成**（產品提交 `20f739d4ba6040c6d2e8d1f1c128820e835ec80a`；實機視覺驗收記為 `NOT RUN`）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 讓 iPad 直向編輯器可以完全收起 Inspector，以不改變畫布版面的側邊圓形按鈕或上方入口重新開啟，並修正五項 domain 在窄版面只顯示一項的問題。
@@ -28,7 +30,7 @@
 - Consumes: `PadWorkspaceMode`、`PadInspectorPresentation` 與 coordinator 的 `isInspectorVisible` 值。
 - Produces: `PadBottomDrawerPolicy.presentation(mode:inspectorPresentation:isInspectorVisible:) -> PadDrawerPresentation` 與 `PadBottomDrawerPolicy.shouldShowLauncher(mode:inspectorPresentation:isInspectorVisible:) -> Bool`。
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 在 `PadEditorLayoutPolicyTests` 的 `PadBottomDrawerPolicy` 區段加入：
 
@@ -76,13 +78,13 @@ func testLauncherAppearsOnlyForHiddenCompactInspector() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter 'PadEditorLayoutPolicyTests/testBottomDrawerIsDismissedWhenInspectorIsHidden|PadEditorLayoutPolicyTests/testLauncherAppearsOnlyForHiddenCompactInspector'`
 
 Expected: FAIL because the policy has no visibility-aware overload or launcher predicate.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 在 `PadBottomDrawerPolicy` 中把現有方法改成帶預設值的 visibility-aware signature，並加入 launcher predicate：
 
@@ -108,13 +110,13 @@ public static func shouldShowLauncher(
 
 保留原有呼叫點的預設參數，讓既有 policy tests 與其他 caller 不需同時改寫。
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `swift test --filter 'PadEditorLayoutPolicyTests/testBottomDrawerIsDismissedWhenInspectorIsHidden|PadEditorLayoutPolicyTests/testLauncherAppearsOnlyForHiddenCompactInspector|PadEditorLayoutPolicyTests'`
 
 Expected: 新增案例與既有 `PadEditorLayoutPolicyTests` 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/AdjustmentUI/PadEditorLayoutPolicy.swift Tests/AdjustmentUITests/PadEditorLayoutPolicyTests.swift
@@ -132,7 +134,7 @@ git commit -m "feat: model dismissible portrait inspector"
 - Consumes: 既有五項 `PadInspectorDomain` 順序與 `PadInspectorCoordinator.selectDomain(_:)`。
 - Produces: inline 與 standalone host 都使用同一個可容納五項的 compact domain bar，保留 44 pt 命中高度與 selected accessibility trait。
 
-- [ ] **Step 1: Write the failing contract tests**
+- [x] **Step 1: Write the failing contract tests**
 
 建立 `PadPortraitInspectorContractTests.swift`，以現有 source-contract 路徑載入兩份 host，加入：
 
@@ -168,13 +170,13 @@ final class PadPortraitInspectorContractTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter PadPortraitInspectorContractTests`
 
 Expected: FAIL because neither compact bar uses a `GeometryReader`-based equal-width layout.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 在兩份 host 的 `compactDomainBar` 將 `HStack` 內容改為可測量寬度的等寬配置，使用下列結構（兩份保持相同）：
 
@@ -215,13 +217,13 @@ private var compactDomainBar: some View {
 
 `PadEditorView.swift` 的 inline host 與 `PadInspectorHost.swift` 的 standalone host 都必須保留五項相同順序；不要把 domain bar 重新拆成另一個調整資料來源。
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `swift test --filter 'PadPortraitInspectorContractTests|PadToolRailContractTests|PadPresetContractTests'`
 
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadInspectorHost.swift Tests/AdjustmentUITests/PadPortraitInspectorContractTests.swift
@@ -238,7 +240,7 @@ git commit -m "fix: show all portrait inspector domains"
 - Consumes: `PadBottomDrawerPolicy.presentation(...)`、`shouldShowLauncher(...)`、`PadInspectorCoordinator.isInspectorVisible`。
 - Produces: `inspectorToggle`、`inspectorLauncher`、`shouldShowInspectorLauncher`、`setInspectorVisible(_:)`；上方與側邊入口開啟同一個 `isDrawerPresented` sheet。
 
-- [ ] **Step 1: Write the failing contract tests**
+- [x] **Step 1: Write the failing contract tests**
 
 在 `PadPortraitInspectorContractTests` 加入：
 
@@ -247,7 +249,7 @@ func testEditorExposesBothInspectorEntrypointsAndDismissibleSheet() throws {
     let source = try Self.load("PadEditorView.swift")
     XCTAssertTrue(source.contains("inspectorLauncher"))
     XCTAssertTrue(source.contains("inspectorToggle"))
-    XCTAssertTrue(source.contains("L10n.t(\"Show Adjustments\")"))
+    XCTAssertTrue(source.contains("L10n.t(\"Show Inspector\")"))
     XCTAssertTrue(source.contains("interactiveDismissDisabled(false)"))
     XCTAssertTrue(source.contains("PadBottomDrawerPolicy.shouldShowLauncher"))
     XCTAssertTrue(source.contains("overlay(alignment: .trailing)"))
@@ -257,17 +259,17 @@ func testInspectorLauncherUsesA44PointCircularHitTarget() throws {
     let source = try Self.load("PadEditorView.swift")
     XCTAssertTrue(source.contains("frame(width: 44, height: 44)"))
     XCTAssertTrue(source.contains("Circle()"))
-    XCTAssertTrue(source.contains("Drag to move this panel.") || source.contains("Open the adjustment tools."))
+    XCTAssertTrue(source.contains("Show, hide, or resize workspace panels"))
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter PadPortraitInspectorContractTests`
 
 Expected: FAIL because the editor currently has no side launcher, no visibility-aware sheet binding, and disables interactive dismissal.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 1. 在 toolbar 內加入 `inspectorToggle`，按鈕只更新 coordinator visibility：
 
@@ -349,7 +351,7 @@ private var inspectorToggle: some View {
         Image(systemName: "slider.horizontal.3")
     }
     .disabled(!isBottomDrawerPresentation)
-    .accessibilityLabel(Text(L10n.t(inspector.isInspectorVisible ? "Hide Adjustments" : "Show Adjustments")))
+    .accessibilityLabel(Text(L10n.t(inspector.isInspectorVisible ? "Hide Inspector" : "Show Inspector")))
 }
 
 private var inspectorLauncher: some View {
@@ -362,20 +364,20 @@ private var inspectorLauncher: some View {
             .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
     }
     .buttonStyle(.plain)
-    .accessibilityLabel(Text(L10n.t("Show Adjustments")))
-    .accessibilityHint(Text(L10n.t("Open the adjustment tools.")))
+    .accessibilityLabel(Text(L10n.t("Show Inspector")))
+    .accessibilityHint(Text(L10n.t("Show, hide, or resize workspace panels")))
 }
 ```
 
 上方按鈕在 trailing dock 仍 disabled，避免宣稱可以隱藏實際未接 visibility 的 dock；窄版則完整支援開關。若 sheet 被手勢關閉，`onChange` 會讓 launcher 出現；再次點擊任一入口只會重新使用既有 sheet。
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `swift test --filter 'PadPortraitInspectorContractTests|PadEditorLayoutPolicyTests|PadToolRailContractTests'`
 
 Expected: 全部 PASS，且沒有 editor state 相關 failure。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift Tests/AdjustmentUITests/PadPortraitInspectorContractTests.swift
@@ -392,43 +394,43 @@ git commit -m "feat: add nonintrusive portrait inspector launcher"
 - Consumes: Tasks 1–3 的 policy、domain bar 與 editor composition。
 - Produces: 可重現的 focused tests、完整 Swift tests、generic iOS build 與明確的人工驗收狀態。
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run: `swift test --filter 'PadPortraitInspectorContractTests|PadEditorLayoutPolicyTests|PadToolRailContractTests|PadInspectorCoordinatorTests|PadPresetContractTests'`
 
 Expected: PASS，且測試報告中的 skip／failure 都被明確記錄。
 
-- [ ] **Step 2: Run complete Swift tests**
+- [x] **Step 2: Run complete Swift tests**
 
 Run: `swift test`
 
 Expected: 完整 suite 完成；既有環境差異需分開標示，不得把未執行或既有 failure 說成 PASS。
 
-- [ ] **Step 3: Run generic iOS build**
+- [x] **Step 3: Run generic iOS build**
 
 Run: `xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build`
 
 Expected: `** BUILD SUCCEEDED **`；不得因本次驗證修改 `project.pbxproj` 的 signing 設定。
 
-- [ ] **Step 4: Run diff and source checks**
+- [x] **Step 4: Run diff and source checks**
 
 Run: `git diff --check`; `rg -n 'DEVELOPMENT_TEAM|/Users/|/Volumes/|bookmark' docs/superpowers/plans/2026-09-15-ipad-portrait-nonintrusive-inspector.md docs/superpowers/specs/2026-09-15-ipad-portrait-nonintrusive-inspector-design.md`
 
 Expected: `git diff --check` 無輸出；新增文件不含私人路徑、Team ID 或 bookmark 資料。
 
-- [ ] **Step 5: Record manual visual QA honestly**
+- [x] **Step 5: Record manual visual QA honestly**
 
 在可操作 iPad 上驗證：直向收起不遮照片；側邊與上方入口都能開啟；五項 domain 同時可見；medium／large 拖曳及向下關閉不改變調整；旋轉與 Stage Manager resize 保留 domain、zoom、undo。若本環境無法操作實機，將各項記為 `NOT RUN`，不以 source contract 取代。
 
-- [ ] **Step 6: Commit verification notes only if needed**
+- [x] **Step 6: Commit verification notes only if needed**
 
 若需要更新驗證紀錄，僅加入與本次變更相關的 repository-relative evidence；不要 stage `Apps/LumaHarborPad.xcodeproj/project.pbxproj`。
 
 ## Self-review checklist
 
-- [ ] 五個 domain、launcher、sheet dismissal 與畫布不占位都有對應 task。
-- [ ] 每個 production change 都先有明確 RED test，再做最小 GREEN implementation。
-- [ ] `PadBottomDrawerPolicy` 的新參數有預設值，既有 caller 與 tests 保持型別一致。
-- [ ] inline 與 standalone host 的 domain bar 都有同步修改，不會只修到其中一個 build path。
-- [ ] 上方入口在 trailing dock 不宣稱能隱藏未接線的 dock；Compact／Standard 才負責 sheet 開關。
-- [ ] 不會提交既有 Xcode signing-only dirty file。
+- [x] 五個 domain、launcher、sheet dismissal 與畫布不占位都有對應 task。
+- [x] 每個 production change 都先有明確 RED test，再做最小 GREEN implementation。
+- [x] `PadBottomDrawerPolicy` 的新參數有預設值，既有 caller 與 tests 保持型別一致。
+- [x] inline 與 standalone host 的 domain bar 都有同步修改，不會只修到其中一個 build path。
+- [x] 上方入口在 trailing dock 不宣稱能隱藏未接線的 dock；Compact／Standard 才負責 sheet 開關。
+- [x] 不會提交既有 Xcode signing-only dirty file。
