@@ -220,9 +220,23 @@ public enum PadDrawerPresentation: Equatable, Sendable {
 public enum PadBottomDrawerPolicy {
     public static func presentation(
         mode: PadWorkspaceMode,
-        inspectorPresentation: PadInspectorPresentation
+        inspectorPresentation: PadInspectorPresentation,
+        isInspectorVisible: Bool = true
     ) -> PadDrawerPresentation {
-        mode == .work && inspectorPresentation == .bottomDrawer ? .presented : .dismissed
+        mode == .work && inspectorPresentation == .bottomDrawer && isInspectorVisible
+            ? .presented
+            : .dismissed
+    }
+
+    /// Returns whether a compact/standard editor should expose its
+    /// non-invasive side launcher. The launcher is only useful in work mode
+    /// when the bottom drawer is the active host and the drawer is closed.
+    public static func shouldShowLauncher(
+        mode: PadWorkspaceMode,
+        inspectorPresentation: PadInspectorPresentation,
+        isInspectorVisible: Bool
+    ) -> Bool {
+        mode == .work && inspectorPresentation == .bottomDrawer && !isInspectorVisible
     }
 }
 

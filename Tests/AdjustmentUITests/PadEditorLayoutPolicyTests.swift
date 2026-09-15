@@ -275,6 +275,48 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(afterReturningToWork, .presented)
     }
 
+    func testBottomDrawerIsDismissedWhenInspectorIsHidden() {
+        XCTAssertEqual(
+            PadBottomDrawerPolicy.presentation(
+                mode: .work,
+                inspectorPresentation: .bottomDrawer,
+                isInspectorVisible: false
+            ),
+            .dismissed
+        )
+    }
+
+    func testLauncherAppearsOnlyForHiddenCompactInspector() {
+        XCTAssertTrue(
+            PadBottomDrawerPolicy.shouldShowLauncher(
+                mode: .work,
+                inspectorPresentation: .bottomDrawer,
+                isInspectorVisible: false
+            )
+        )
+        XCTAssertFalse(
+            PadBottomDrawerPolicy.shouldShowLauncher(
+                mode: .work,
+                inspectorPresentation: .bottomDrawer,
+                isInspectorVisible: true
+            )
+        )
+        XCTAssertFalse(
+            PadBottomDrawerPolicy.shouldShowLauncher(
+                mode: .focus,
+                inspectorPresentation: .bottomDrawer,
+                isInspectorVisible: false
+            )
+        )
+        XCTAssertFalse(
+            PadBottomDrawerPolicy.shouldShowLauncher(
+                mode: .work,
+                inspectorPresentation: .trailingDock,
+                isInspectorVisible: false
+            )
+        )
+    }
+
     // MARK: - PadFloatingPanelLayout.clampedOffset (Codex round-2 review)
 
     private let sampleAvailableSize = CGSize(width: 1_180, height: 820)
