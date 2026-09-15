@@ -4,6 +4,14 @@ Updated: 2026-09-15
 
 Updated by: Codex（iPad 直向非侵入式 Inspector）
 
+## 調整數值微調按鈕回復（2026-09-15, Codex）
+
+- **狀態**：已完成，產品／測試提交 `565f08b`（分支 `codex/open-source-release-prep`）。修正直向 Inspector 變更後遺失的 `− / 數值 / ＋ / 重設` 控制；根因是目前分支未包含先前獨立的 fine-adjustment 實作，不是使用者操作問題。
+- **本輪修改**：`AdjustmentValueInput` 恢復 44×44 點擊區、圓形 `−`／`＋` 微調按鈕與可本地化的 VoiceOver 標籤；`PadAdjustmentPolicy.adjusted` 負責步進、精度、範圍 clamp 與 signed-zero 保護；Basic／Color／Detail／Effects／Geometry／Local 共用列均傳遞對應 step，八語系補齊 Increase／Decrease。
+- **驗證**：`swift test --filter 'AdjustmentValueInputTests|AdjustmentGroupPanelsContractTests|PadPortraitInspectorContractTests|PadEditorLayoutPolicyTests'` → **58/58 PASS**；iPad generic `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` → **PASS**；`git diff --check` → **PASS**。
+- **完整套件驗證**：`swift test` → 1929 tests、9 skipped、1 failure；唯一 failure 仍是未提交本機 signing-only `project.pbxproj` 的 `DEVELOPMENT_TEAM` 與公開專案契約不一致，沒有修改或提交該檔案。
+- **實機驗收**：本輪尚未在實體 iPad 重新安裝與操作，仍為 **NOT RUN**；重新建置目前分支後，應確認每個調整列都可點 `−`／`＋`，並在上下限停止，不遮擋照片。
+
 ## iPad 直向非侵入式 Inspector（2026-09-15, Codex）
 
 - **狀態**：實作完成；已驗證產品提交 `81c00fc`（分支 `codex/open-source-release-prep`）。直向 Compact／Standard 的 Inspector 可完全收起，畫布不預留面板空間；收起後顯示 safe-area 內 44×44 圓形 launcher，並保留上方工具列入口。
