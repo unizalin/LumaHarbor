@@ -60,6 +60,7 @@ public struct GeometryAdjustmentPanel: View {
                     value: editor.adjustments.geometry.straightenDegrees,
                     range: GeometryAdjustments.straightenRange,
                     fractionDigits: 1,
+                    step: 0.1,
                     onChange: { newValue in editor.updateAdjustments { $0.geometry.straightenDegrees = newValue } },
                     onReset: { editor.updateAdjustments { $0.geometry = $0.geometry.resettingStraighten() } }
                 )

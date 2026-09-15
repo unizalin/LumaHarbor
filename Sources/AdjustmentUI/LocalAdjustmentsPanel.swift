@@ -158,6 +158,7 @@ public struct LocalAdjustmentsPanel: View {
                     value: gradient.adjustments.exposure ?? 0,
                     range: -5...5,
                     fractionDigits: 2,
+                    step: 0.01,
                     onChange: { newValue in
                         editor.updateAdjustments { adjustments in
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == gradient.id }) else { return }
@@ -257,6 +258,7 @@ public struct LocalAdjustmentsPanel: View {
                     value: heal.geometry.radius,
                     range: 0.01...0.3,
                     fractionDigits: 2,
+                    step: 0.01,
                     onChange: { newValue in
                         editor.updateAdjustments { adjustments in
                             guard let index = adjustments.localAdjustments.firstIndex(where: { $0.id == heal.id }) else { return }

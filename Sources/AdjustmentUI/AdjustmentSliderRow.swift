@@ -12,6 +12,8 @@ struct AdjustmentSliderRow: View {
     let value: Double
     let range: ClosedRange<Double>
     let fractionDigits: Int
+    /// Fine-grained increment shared by the numeric nudge buttons and slider.
+    var step: Double = 1
     let onChange: (Double) -> Void
     let onReset: () -> Void
     /// Reports drag start (`true`) / drag end (`false`) -- distinct from
@@ -33,10 +35,11 @@ struct AdjustmentSliderRow: View {
                         value: .init(get: { value }, set: onChange),
                         range: range,
                         fractionDigits: fractionDigits,
+                        step: step,
                         onReset: onReset
                     )
                 }
-                Slider(value: Binding(get: { value }, set: onChange), in: range, onEditingChanged: onEditingChanged)
+                Slider(value: Binding(get: { value }, set: onChange), in: range, step: step, onEditingChanged: onEditingChanged)
                     .accessibilityLabel(Text(label))
                     .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))
             }

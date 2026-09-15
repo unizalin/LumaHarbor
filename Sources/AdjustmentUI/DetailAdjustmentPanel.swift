@@ -24,6 +24,7 @@ public struct DetailAdjustmentPanel: View {
             AdjustmentSliderRow(
                 label: L10n.t("Radius"), value: editor.adjustments.sharpening.radius,
                 range: 0.5...3.0, fractionDigits: 1,
+                step: 0.1,
                 onChange: { newValue in editor.updateAdjustments { $0.sharpening.radius = newValue } },
                 onReset: { editor.updateAdjustments { $0.sharpening.radius = Sharpening.neutral.radius } }
             )

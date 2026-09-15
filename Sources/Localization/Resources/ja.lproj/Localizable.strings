@@ -349,6 +349,8 @@
 "Reset All Adjustments" = "すべての調整をリセット";
 "Reset All" = "すべてリセット";
 "Reset" = "リセット";
+"Decrease" = "減少";
+"Increase" = "増加";
 "Retry saving." = "保存を再試行してください。";
 "Saturation" = "彩度";
 "Save Adjustments" = "調整を保存";

@@ -29,4 +29,20 @@ public enum PadAdjustmentPolicy {
     public static func formatted(_ value: Double, fractionDigits: Int) -> String {
         String(format: "%.*f", max(0, fractionDigits), value)
     }
+
+    /// Applies a small, deterministic nudge while respecting the editor's
+    /// range and the precision shown in the inspector.
+    public static func adjusted(
+        _ value: Double,
+        by delta: Double,
+        range: ClosedRange<Double>,
+        fractionDigits: Int
+    ) -> Double {
+        guard delta.isFinite else { return clamp(value, to: range) }
+        let candidate = clamp(value + delta, to: range)
+        let scale = pow(10.0, Double(max(0, fractionDigits)))
+        let rounded = (candidate * scale).rounded() / scale
+        // Avoid exposing a signed zero after a decrement crosses zero.
+        return clamp(rounded == 0 ? 0 : rounded, to: range)
+    }
 }
