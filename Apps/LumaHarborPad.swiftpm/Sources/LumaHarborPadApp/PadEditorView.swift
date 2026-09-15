@@ -1027,27 +1027,34 @@ private struct PadInspectorHost: View {
     ]
 
     private var compactDomainBar: some View {
-        HStack(spacing: 0) {
-            ForEach(Self.domainBarItems) { item in
-                let isSelected = inspector.activeDomain == item.id
-                Button {
-                    inspector.selectDomain(item.id)
-                } label: {
-                    Image(systemName: item.symbol)
-                        .imageScale(.medium)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
+        GeometryReader { proxy in
+            let spacing: CGFloat = 8
+            let availableWidth = max(0, proxy.size.width - spacing * CGFloat(Self.domainBarItems.count - 1))
+            let itemWidth = max(44, availableWidth / CGFloat(Self.domainBarItems.count))
+
+            HStack(spacing: spacing) {
+                ForEach(Self.domainBarItems) { item in
+                    let isSelected = inspector.activeDomain == item.id
+                    Button {
+                        inspector.selectDomain(item.id)
+                    } label: {
+                        Image(systemName: item.symbol)
+                            .imageScale(.medium)
+                            .frame(width: itemWidth, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .background(
+                        isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .accessibilityLabel(Text(L10n.t(item.labelKey)))
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                .background(
-                    isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .accessibilityLabel(Text(L10n.t(item.labelKey)))
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
+            .frame(width: proxy.size.width)
         }
+        .frame(height: 52)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
     }
