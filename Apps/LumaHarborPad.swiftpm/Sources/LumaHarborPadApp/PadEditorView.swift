@@ -148,7 +148,10 @@ struct PadEditorView: View {
                     // A user swipe-down dismisses the sheet by changing its
                     // binding. Do not clear visibility when a width/mode
                     // transition dismisses it for a different presentation.
-                    if isBottomDrawerPresentation && !presented && inspector.isInspectorVisible {
+                    if workspaceState.workspaceMode == .work,
+                       isBottomDrawerPresentation,
+                       !presented,
+                       inspector.isInspectorVisible {
                         inspector.isInspectorVisible = false
                     }
                 }

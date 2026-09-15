@@ -46,6 +46,22 @@ final class PadPortraitInspectorContractTests: XCTestCase {
         XCTAssertTrue(source.contains("Show, hide, or resize workspace panels"))
     }
 
+    func testSheetDismissalOnlyClearsVisibilityForWorkMode() throws {
+        let source = try Self.load("PadEditorView.swift")
+        guard let start = source.range(of: ".onChange(of: isDrawerPresented)") else {
+            return XCTFail("PadEditorView.swift must observe sheet dismissal")
+        }
+        let dismissalTail = source[start.lowerBound...]
+        guard let end = dismissalTail.range(of: "\n                }\n        }") else {
+            return XCTFail("PadEditorView.swift must keep the dismissal handler bounded")
+        }
+        let dismissalBlock = dismissalTail[..<end.lowerBound]
+        XCTAssertTrue(
+            dismissalBlock.contains("workspaceState.workspaceMode == .work"),
+            "focus-mode policy dismissal must preserve inspector visibility"
+        )
+    }
+
     func testInlineHostHasAllFiveDomainEntries() throws {
         let source = try Self.load("PadEditorView.swift")
         for key in [".adjust", ".preset", ".geometry", ".local", ".info"] {
