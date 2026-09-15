@@ -1,6 +1,6 @@
 # iPad 直向非侵入式 Inspector Implementation Plan
 
-> **執行狀態：已完成**（產品提交 `20f739d4ba6040c6d2e8d1f1c128820e835ec80a`；實機視覺驗收記為 `NOT RUN`）
+> **執行狀態：已完成**（產品提交 `fc98573`；實機視覺驗收記為 `NOT RUN`）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
