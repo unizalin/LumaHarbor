@@ -2,7 +2,15 @@
 
 Updated: 2026-09-16
 
-Updated by: Codex（完成五份使用者提供 Lightroom XMP 的實檔驗測，修正限定式巢狀 RDF 匯出後結構漂移）
+Updated by: Codex（完成 Lightroom XMP 視覺還原與廣泛相容設計；本輪只修改文件，未改產品程式碼）
+
+## Lightroom XMP 視覺還原與廣泛相容設計（2026-09-16, Codex）
+
+- **規格**：新增 `docs/superpowers/specs/2026-09-16-lightroom-xmp-visual-parity-design.md`，同時涵蓋兩個已確認目標：先讓五份實際 XMP 在 Mac／iPad 高度接近 Lightroom，再擴充到一般 Process 2012 標準開發預設。
+- **邊界**：相容狀態固定為 native／approximate／preserved／rejected；不承諾與 Adobe 逐像素一致，不逆向專有 Profile、AI mask 或 `CompressedSettings`，但未知 RDF 必須繼續語意保存。
+- **驗收**：規格要求同一 RAW 的 Lightroom neutral／preset 與 LumaHarbor neutral／preset 參考矩陣、相對效果量測、人工目視、Mac／iPad 共用 patch 與真實 Adobe smoke test。
+- **下一步**：先撰寫只涵蓋 P0 的 implementation plan；P0 建立 capability manifest、私有 fixture 注入、reference matrix 與視覺比較工具，不改任何照片渲染結果。
+- **驗證狀態**：`SPEC ONLY`；本輪未修改、建置或測試產品程式碼。
 
 ## Lightroom XMP 限定式巢狀 RDF round-trip（2026-09-16, Codex）
 
