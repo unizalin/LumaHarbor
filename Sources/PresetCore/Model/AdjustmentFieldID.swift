@@ -84,3 +84,52 @@ public enum AdjustmentFieldID: String, CaseIterable, Codable, Hashable, Sendable
     case renderingProfile
     case lensCorrection
 }
+
+extension AdjustmentFieldID {
+    /// The capability family used by the XMP manifest and import summary.
+    public var xmpFeatureID: XMPFeatureID {
+        switch self {
+        case .basicExposure, .basicContrast, .basicHighlights, .basicShadows,
+             .basicWhites, .basicBlacks, .basicVibrance, .basicSaturation:
+            return .basic
+        case .basicTemperature, .basicTint:
+            return .whiteBalance
+        case .presenceTexture, .presenceClarity, .presenceDehaze:
+            return .presence
+        case .advancedToneCurve:
+            return .toneCurve
+        case .hslRedHue, .hslRedSaturation, .hslRedLuminance,
+             .hslOrangeHue, .hslOrangeSaturation, .hslOrangeLuminance,
+             .hslYellowHue, .hslYellowSaturation, .hslYellowLuminance,
+             .hslGreenHue, .hslGreenSaturation, .hslGreenLuminance,
+             .hslAquaHue, .hslAquaSaturation, .hslAquaLuminance,
+             .hslBlueHue, .hslBlueSaturation, .hslBlueLuminance,
+             .hslPurpleHue, .hslPurpleSaturation, .hslPurpleLuminance,
+             .hslMagentaHue, .hslMagentaSaturation, .hslMagentaLuminance:
+            return .hsl
+        case .splitToningShadowHue, .splitToningShadowSaturation,
+             .splitToningHighlightHue, .splitToningHighlightSaturation,
+             .splitToningBalance:
+            return .splitToning
+        case .sharpeningAmount, .sharpeningRadius, .sharpeningDetail,
+             .sharpeningMasking:
+            return .sharpening
+        case .noiseReductionLuminanceAmount, .noiseReductionLuminanceDetail,
+             .noiseReductionColorAmount, .noiseReductionColorDetail:
+            return .noiseReduction
+        case .vignetteAmount, .vignetteMidpoint, .vignetteRoundness,
+             .vignetteFeather:
+            return .vignette
+        case .grainAmount, .grainSize, .grainRoughness:
+            return .grain
+        case .colorGrading:
+            return .colorGrading
+        case .monochrome:
+            return .monochrome
+        case .renderingProfile:
+            return .renderingProfile
+        case .lensCorrection:
+            return .lensCorrection
+        }
+    }
+}
