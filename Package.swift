@@ -98,6 +98,10 @@ let package = Package(
         // same runner `LumaHarborDiagnosticsRunnerTests` already exercises.
         .executableTarget(name: "LumaHarborDiagnosticsCLI", dependencies: ["LumaHarborApp"]),
 
+        // macOS diagnostic command for comparing Lightroom and LumaHarbor
+        // reference renders. It is intentionally not a shipping product.
+        .executableTarget(name: "LumaHarborReferenceCompare", dependencies: ["RawProcessingCore"]),
+
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
         .testTarget(
             name: "PresetCoreTests",
