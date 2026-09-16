@@ -57,3 +57,10 @@ This file is append-only. When a decision is replaced, retain the original entry
 - Decision: `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md` is the single cross-agent protocol for startup reading order, source precedence, evidence labels, privacy scanning, Git safety, and handoff output. `AGENTS.md` remains the stable project-rule entrypoint; `CLAUDE.md` imports it; `GEMINI.md` is an entrypoint that does not define a second rule set.
 - Reason: Separate agent-specific instructions caused inconsistent baselines, duplicated reading protocols, and a risk that an agent would treat a stale handoff or partial spec as the current product state.
 - Impact: Every agent must begin with the same Git/status snapshot and shared documents. The former Gemini protocol remains only as a compatibility reference. Any future change to the shared workflow must update the shared protocol and this append-only decision log together.
+
+## D-009 — `origin/main` is the sole integrated baseline; agent branches are task-scoped
+
+- Date: 2026-09-16
+- Decision: Codex、Claude 與 Gemini 的新工作都從當時最新的 `origin/main` 建立獨立短期 branch/worktree，分別使用 `codex/<task>`、`claude/<task>`、`gemini/<task>`。不再以 `*-latest`、`*-current` 或任何長期代理分支表示最新版，也不把所有歷史 branch 強制移動到 `main`。
+- Reason: 多個長期代理分支與舊 worktree 會讓 branch 名稱看起來像不同最新版，且歷史重寫後 SHA 無法只靠名稱或日期判斷。單一整合基準加上 task-scoped worktree 能保留差異、避免覆蓋 dirty files，並讓三個代理使用同一個起點。
+- Impact: `origin/main` 是唯一正式版本；舊 branch/worktree 只作為 snapshot 或未整合工作保留。開始新任務前必須遵循 `docs/coordination/SHARED_GIT_WORKFLOW.md`；更新、整合或清理既有 branch/worktree 仍需先保全獨有內容並取得使用者明確授權。

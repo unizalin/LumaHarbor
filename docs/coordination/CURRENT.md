@@ -2,7 +2,16 @@
 
 Updated: 2026-09-16
 
-Updated by: Codex（完成 Lightroom XMP 視覺還原 P0 基線；未改變既有照片渲染順序）
+Updated by: Codex（補充 Codex／Claude／Gemini 共用 Git 工作流程；產品驗證基線不變）
+
+## 跨代理共用 Git 基線（2026-09-16, Codex）
+
+- **唯一正式版本**：`origin/main`，目前產品驗證基線為 `ab2dc86cd59540708cff05acf3ae0ffb1699be1f`。代理 branch/worktree 是 task workspace，不代表另一個最新版。
+- **共用流程**：Codex、Claude、Gemini 的新任務都從當時最新 `origin/main` 建立獨立短期 branch/worktree，依寫入者使用 `codex/<task>`、`claude/<task>`、`gemini/<task>`；完整規則見 `docs/coordination/SHARED_GIT_WORKFLOW.md`。
+- **本次文件工作**：`codex/shared-git-workflow` 從上述基線建立，只修改 coordination 與代理入口 Markdown；不修改產品程式碼、測試、Xcode 專案或本機 signing。
+- **舊工作區**：既有 branch/worktree 暫時保留為 snapshot；有未提交內容者不得覆蓋或移除。新任務不得直接沿用名稱看似較新的舊 worktree。
+- **驗證邊界**：本次為 coordination-only 文件更新，不重新宣稱產品 build、test 或真機 gate；產品驗證狀態沿用下方已記錄證據。
+- **下一步**：完成 Markdown 連結、格式與隱私檢查後提交文件變更；push、merge 與舊 branch/worktree 清理仍需使用者明確授權。
 
 ## Lightroom XMP 視覺還原與廣泛相容 P0 基線（2026-09-16, Codex）
 

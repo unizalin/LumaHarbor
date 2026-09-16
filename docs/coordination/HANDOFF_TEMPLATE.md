@@ -8,11 +8,13 @@ State exactly one of: `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `IN_PROGRESS`.
 
 ## Git state
 
+- Record the writing agent and worktree owner.
 - Record the source branch.
 - Record the full HEAD commit SHA.
-- Record the base branch.
+- Record the base branch and exact base SHA; new tasks should normally use the then-current `origin/main`.
 - Record ahead and behind counts.
 - State whether the branch has an upstream.
+- State whether the branch/worktree is task-scoped, a preserved snapshot, or the integrated `main` baseline.
 - State explicitly whether push, merge, or rebase occurred.
 
 ## Changes

@@ -24,7 +24,7 @@
 - 只有收到明確的實作指示後，才可修改原始碼、測試或文件。
 - `push`、force-push、merge、rebase、刪除 branch/worktree、重置工作樹與發布操作，都需要使用者明確授權；不能由「開始工作」或「請檢查」推定授權。
 - 不建立 GitHub Issue、Epic、PR、branch 或 worktree，除非使用者明確要求。
-- 不讀取或輸出 `.codex/`、`.claude/` 的登入資料、聊天記錄、快取、內部狀態資料庫或其他認證資料。
+- 不讀取或輸出 `.codex/`、`.claude/`、`.gemini/` 的登入資料、聊天記錄、快取、內部狀態資料庫或其他認證資料。
 
 ## 3. 必讀順序
 
@@ -51,8 +51,9 @@ git log --oneline -8
 2. `CLAUDE.md`（若存在，確認它只匯入 `AGENTS.md`，不得形成第二套規則）
 3. `GEMINI.md`（若存在，視為入口提示，不得覆蓋 `AGENTS.md`）
 4. `docs/coordination/SHARED_AGENT_READ_PROTOCOL.md`
-5. `docs/coordination/CURRENT.md`
-6. `docs/coordination/DECISIONS.md`
+5. `docs/coordination/SHARED_GIT_WORKFLOW.md`
+6. `docs/coordination/CURRENT.md`
+7. `docs/coordination/DECISIONS.md`
 
 將第 3.1 節的 Git 快照與 `CURRENT.md` 比對。若 branch、dirty files、worktree owner 或 source-of-truth 不一致，就停止寫入並回報 `NEEDS_CONTEXT`。若 HEAD 只是晚於 `CURRENT.md` 所記錄的產品基準，先檢查差異是否只包含 coordination-only 文件；確認沒有產品程式碼、測試或設定變更後，才可繼續。
 
@@ -90,7 +91,11 @@ git log --oneline -8
 
 ## 5. 多代理協作規則
 
+- `origin/main` 是唯一整合版與所有新任務的正式起點；代理 branch 不是另一個最新版。
 - Codex、Claude、Gemini 同時修改時，使用不同 branch 與 worktree。
+- 新任務從最新 `origin/main` 建立短期 branch，依寫入者使用 `codex/<task>`、`claude/<task>` 或 `gemini/<task>`。
+- 不建立或延續 `*-latest`、`*-current` 類型的長期代理分支，也不把所有舊 branch 強制改指向 `main`。
+- 既有 branch 落後時先依 `SHARED_GIT_WORKFLOW.md` 比較差異；未經使用者明確授權，不得 merge、rebase、reset 或 force-push。
 - 同一個檔案同一時間只指定一個寫入者；其他代理只能 review-only。
 - 不覆蓋、回復、搬移或刪除另一代理或使用者尚未提交的變更。
 - 交接前更新 `CURRENT.md`、使用 `HANDOFF_TEMPLATE.md`，並記錄 branch、完整 HEAD、base、改動檔案、測試、skip/not-run、dirty files、風險與一個明確下一步。
@@ -147,7 +152,7 @@ git log --oneline -8
 以下提示詞可直接交給 Codex、Claude 或 Gemini；它只授權讀取，不授權實作：
 
 ```text
-請以唯讀模式審查 LumaHarbor，先讀取 AGENTS.md、CLAUDE.md（若有）、GEMINI.md（若有）、docs/coordination/SHARED_AGENT_READ_PROTOCOL.md、CURRENT.md 與 DECISIONS.md。
+請以唯讀模式審查 LumaHarbor，先讀取 AGENTS.md、CLAUDE.md（若有）、GEMINI.md（若有）、docs/coordination/SHARED_AGENT_READ_PROTOCOL.md、SHARED_GIT_WORKFLOW.md、CURRENT.md 與 DECISIONS.md。
 
 先回報 git branch、完整 HEAD、status、worktree 與最近 commit；若與 CURRENT.md 不一致，停止並輸出 NEEDS_CONTEXT。
 接著依 CURRENT.md 的 Next action 讀取對應 spec、plan、handoff、report，再核對程式碼與測試。
