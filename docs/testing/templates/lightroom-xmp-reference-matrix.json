@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "fixtureID": "fixture-a",
+      "rawID": "raw-a",
+      "lrNeutralID": "fixture-a-lr-neutral",
+      "lrPresetID": "fixture-a-lr-preset",
+      "lhNeutralID": "fixture-a-lh-neutral",
+      "lhPresetID": "fixture-a-lh-preset",
+      "profile": "record-after-reference-export",
+      "processVersion": "record-after-reference-export",
+      "colorSpace": "sRGB",
+      "bitDepth": 16,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "fixtureID": "fixture-b",
+      "rawID": "raw-b",
+      "lrNeutralID": "fixture-b-lr-neutral",
+      "lrPresetID": "fixture-b-lr-preset",
+      "lhNeutralID": "fixture-b-lh-neutral",
+      "lhPresetID": "fixture-b-lh-preset",
+      "profile": "record-after-reference-export",
+      "processVersion": "record-after-reference-export",
+      "colorSpace": "sRGB",
+      "bitDepth": 16,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "fixtureID": "fixture-c",
+      "rawID": "raw-c",
+      "lrNeutralID": "fixture-c-lr-neutral",
+      "lrPresetID": "fixture-c-lr-preset",
+      "lhNeutralID": "fixture-c-lh-neutral",
+      "lhPresetID": "fixture-c-lh-preset",
+      "profile": "record-after-reference-export",
+      "processVersion": "record-after-reference-export",
+      "colorSpace": "sRGB",
+      "bitDepth": 16,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "fixtureID": "fixture-d",
+      "rawID": "raw-d",
+      "lrNeutralID": "fixture-d-lr-neutral",
+      "lrPresetID": "fixture-d-lr-preset",
+      "lhNeutralID": "fixture-d-lh-neutral",
+      "lhPresetID": "fixture-d-lh-preset",
+      "profile": "record-after-reference-export",
+      "processVersion": "record-after-reference-export",
+      "colorSpace": "sRGB",
+      "bitDepth": 16,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "fixtureID": "fixture-e",
+      "rawID": "raw-e",
+      "lrNeutralID": "fixture-e-lr-neutral",
+      "lrPresetID": "fixture-e-lr-preset",
+      "lhNeutralID": "fixture-e-lh-neutral",
+      "lhPresetID": "fixture-e-lh-preset",
+      "profile": "record-after-reference-export",
+      "processVersion": "record-after-reference-export",
+      "colorSpace": "sRGB",
+      "bitDepth": 16,
+      "width": 0,
+      "height": 0
+    }
+  ]
+}
