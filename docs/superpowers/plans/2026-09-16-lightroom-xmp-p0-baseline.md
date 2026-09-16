@@ -90,7 +90,7 @@ git commit -m "feat: add XMP capability manifest"
 **Interfaces:**
 - `LightroomXMPFixtureSupport.load()` reads `LUMAHARBOR_LR_XMP_FIXTURE_DIR`, enumerates only regular files whose extension is `.xmp`, sorts by filename, and returns `(id: String, data: Data)` without returning a path.
 - Missing or empty environment input throws a support error; the XCTest caller converts that exact error to `XCTSkip`. Malformed files fail the test without echoing source content or path.
-- `Scripts/run-lr-xmp-fixture-baseline.zsh` runs `swift test --filter LightroomXMPFixtureTests`, accepts an optional output path under a caller-provided temporary directory, and writes only fixture count, capability counts, diagnostics count, and pass/skip/fail status.
+- `Scripts/run-lr-xmp-fixture-baseline.zsh` runs `swift test --filter LightroomXMPFixtureTests` and writes only fixture count, preview status, and pass/skip/fail status; capability and diagnostics counts are recorded by the P0 handoff report.
 
 - [ ] **Step 1: Write the failing test**
 

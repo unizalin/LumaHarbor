@@ -2,7 +2,16 @@
 
 Updated: 2026-09-16
 
-Updated by: Codex（完成 Lightroom XMP 視覺還原與廣泛相容設計；本輪只修改文件，未改產品程式碼）
+Updated by: Codex（完成 Lightroom XMP 視覺還原 P0 基線；未改變既有照片渲染順序）
+
+## Lightroom XMP 視覺還原與廣泛相容 P0 基線（2026-09-16, Codex）
+
+- **狀態**：`DONE_WITH_LIMITS`。P0 已建立 capability manifest、私有 fixture 注入、五案例 reference matrix、純值效果比較指標與 macOS `LumaHarborReferenceCompare` 診斷命令；既有照片渲染順序、調整值與 XMP 套用語意未改動。
+- **能力範圍**：10 個啟用中的 feature／compatibility capability、55 個 namespace-qualified Camera Raw property ID；未知 RDF 仍保留，後續可在 native／approximate／preserved／rejected 邊界內擴充。
+- **驗證**：P0 聚焦測試 12 executed、1 skipped、0 failures；完整 strict-concurrency `swift test` 2348 executed、10 skipped、0 failures；strict-concurrency build PASS；reference matrix validator PASS；`git diff --check` PASS。私人 corpus 的 5/5 preview 驗證只在本機注入，未進 repository。
+- **參照限制**：Lightroom／Adobe Camera Raw neutral／preset 參照影像尚未匯出，五案例的像素效果比較、人工目視與 Adobe smoke test 為 `NOT RUN`；macOS／iPad 真機視覺驗收也不在本純資料 P0 內。
+- **交接文件**：`docs/superpowers/specs/2026-09-16-lightroom-xmp-visual-parity-design.md`、`docs/superpowers/plans/2026-09-16-lightroom-xmp-p0-baseline.md`、`docs/testing/reports/2026-09-16-lightroom-xmp-p0-baseline.md`。
+- **下一步**：依 `docs/testing/lightroom-xmp-reference-matrix.md` 取得五案例 Lightroom 參照輸出，再開始 P1 renderer／importer 可觀測驗收；不先承諾逐像素等同 Adobe。
 
 ## Lightroom XMP 視覺還原與廣泛相容設計（2026-09-16, Codex）
 
