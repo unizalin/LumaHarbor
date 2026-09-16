@@ -1,8 +1,18 @@
 # Current Coordination State
 
-Updated: 2026-09-16
+Updated: 2026-09-17
 
-Updated by: Codex（補充 Codex／Claude／Gemini 共用 Git 工作流程；產品驗證基線不變）
+Updated by: Codex（跨裝置 Workspace 與 iPhone 行動編輯器設計；產品驗證基線不變）
+
+## 跨裝置 Workspace 與 iPhone 行動編輯器設計（2026-09-17, Codex）
+
+- **狀態**：`SPEC ONLY`。使用者已確認採用 iPhone「行動編輯器」方案，而非完整桌面版縮小或純 Companion；本輪不修改產品程式碼、測試、Xcode target 或 bundle 設定。
+- **分支**：`codex/universal-mobile-workspace-spec`，從 `origin/main` `f694308723d8cae98db10dd4416d66f72ffb58a2` 建立；唯一寫入者為 Codex。
+- **規格**：`docs/superpowers/specs/2026-09-17-cross-device-workspace-and-iphone-editor-design.md`。Mac 保留桌面工作站殼層，iPad 保留依可用寬度切換的單一 Inspector，iPhone 使用全螢幕畫布、底部功能入口與單一工具工作區。
+- **架構決定**：iPhone 與 iPad 使用同一個 Universal iOS App、共用服務與資料層；加入手機前先消除 iPad `PadInspectorHost`／`PadToolRail` 雙份來源，並將共享 Inspector 內容移入 `AdjustmentUI`。
+- **手機首版邊界**：Light／Color／Detail、Preset、初始 Geometry、Info、單張比較與輸出可編輯；既有 Local Adjustments 必須渲染並完整保存，但首版僅顯示唯讀摘要；批次與完整遮罩編輯延後。
+- **驗證狀態**：規格 placeholder、模糊分支與範圍自我檢查 PASS；引用檔案存在、尾端空白與隱私掃描 PASS；`git diff --check` 在 stage 後執行。產品 build、測試、模擬器與真機均為 `NOT RUN`，因本輪為設計文件工作。
+- **下一步**：等待使用者審閱規格；確認後先為 Phase 0「iPad Inspector 來源整併」撰寫獨立 implementation plan，不直接開始手機 UI 實作。
 
 ## 跨代理共用 Git 基線（2026-09-16, Codex）
 

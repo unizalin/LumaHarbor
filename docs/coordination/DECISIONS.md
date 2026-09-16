@@ -64,3 +64,10 @@ This file is append-only. When a decision is replaced, retain the original entry
 - Decision: Codex、Claude 與 Gemini 的新工作都從當時最新的 `origin/main` 建立獨立短期 branch/worktree，分別使用 `codex/<task>`、`claude/<task>`、`gemini/<task>`。不再以 `*-latest`、`*-current` 或任何長期代理分支表示最新版，也不把所有歷史 branch 強制移動到 `main`。
 - Reason: 多個長期代理分支與舊 worktree 會讓 branch 名稱看起來像不同最新版，且歷史重寫後 SHA 無法只靠名稱或日期判斷。單一整合基準加上 task-scoped worktree 能保留差異、避免覆蓋 dirty files，並讓三個代理使用同一個起點。
 - Impact: `origin/main` 是唯一正式版本；舊 branch/worktree 只作為 snapshot 或未整合工作保留。開始新任務前必須遵循 `docs/coordination/SHARED_GIT_WORKFLOW.md`；更新、整合或清理既有 branch/worktree 仍需先保全獨有內容並取得使用者明確授權。
+
+## D-010 — iPhone joins the universal iOS app through a dedicated mobile shell
+
+- Date: 2026-09-17
+- Decision: iPhone 與 iPad 使用同一個 Universal iOS App、服務與資料層。iPhone 首版採行動編輯器範圍，以全螢幕畫布和單一工具工作區呈現共享 Inspector 內容；不建立第三份調整實作，也不把 iPad 可移動浮動面板縮到手機。既有 Local Adjustments 在 iPhone 必須渲染並保存，但首版僅顯示唯讀摘要。
+- Reason: 共用核心已能承載手機，但現有 iPad Inspector 尚有 standalone／inlined 雙份來源。先整併來源並共享 Inspector composition，可避免三平台在欄位、狀態與調整行為上漂移；手機另用符合有限畫面與單手觸控的殼層，才能保留照片作為主要內容。
+- Impact: 實作依 `docs/superpowers/specs/2026-09-17-cross-device-workspace-and-iphone-editor-design.md` 分成獨立 Phase。Phase 0 必須先完成 iPad 來源整併；後續才可啟用 phone device family。Mac、iPad、iPhone 共用 catalog、editing state 與資料契約，但可使用不同平台容器與密度。
