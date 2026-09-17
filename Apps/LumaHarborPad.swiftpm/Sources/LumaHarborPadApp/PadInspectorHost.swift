@@ -5,20 +5,19 @@ import PresetCore
 import RawProcessingCore
 import SwiftUI
 
-/// Routes the inspector panel to the correct content for the active
-/// `PadInspectorDomain`. The Adjust and Preset domains are fully wired.
+/// Routes the inspector panel to the correct content for the active domain.
+/// The Adjust and Preset domains are fully wired. Never holds a second copy
+/// of `PhotoAdjustments`.
 ///
-/// `editor` passes through to each panel unchanged — this host never holds a
-/// second copy of `PhotoAdjustments` and never touches undo/redo or autosave.
-///
-/// `showsDomainBar` controls whether a compact horizontal domain-selection
-/// bar is shown at the top of the host. Pass `true` for Compact/Standard
-/// presentations (bottom drawer, floating panel) where the vertical
-/// `PadToolRail` is absent.
+/// `showsDomainBar`: pass `true` for bottom-drawer / floating-panel
+/// presentations where the vertical `PadToolRail` is absent.
 struct PadInspectorHost: View {
     @ObservedObject var inspector: PadInspectorCoordinator
+    @ObservedObject var navigation: InspectorNavigationModel
     @ObservedObject var editor: EditorSession
     @ObservedObject var presetLibrary: PadPresetLibrary
+    @ObservedObject var library: PadLibraryModel
+    @ObservedObject var batchCoordinator: PadBatchAdjustmentCoordinator
     let showsDomainBar: Bool
     // Adjustments starts with only Basic open. Dedicated Geometry and Local
     // pages are already inside their own first-level host, so they open with
@@ -33,34 +32,61 @@ struct PadInspectorHost: View {
                 compactDomainBar
                 Divider()
             }
-            switch inspector.activeDomain {
-            case .adjust:
-                adjustPanel
-            case .preset:
-                PadPresetPanel(editor: editor, presetLibrary: presetLibrary)
-            case .geometry:
-                ScrollView {
-                    domainSection(
-                        .geometry,
-                        titleKey: "Geometry"
-                    ) {
-                        GeometryAdjustmentPanel(editor: editor)
-                    }
-                    .padding()
-                }
-            case .local:
-                ScrollView {
-                    domainSection(
-                        .local,
-                        titleKey: "Local Adjustments"
-                    ) {
-                        LocalAdjustmentsPanel(editor: editor)
-                    }
-                    .padding()
-                }
-            case .info:
-                infoPanel
+            if showsCatalogNavigation {
+                catalogToolbar
+                Divider()
             }
+            if showsCatalogNavigation,
+               !navigation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                searchResultsList
+            } else {
+                switch inspector.activeDomain {
+                case .adjust:
+                    adjustPanel
+                case .preset:
+                    PadPresetPanel(editor: editor, presetLibrary: presetLibrary)
+                case .geometry:
+                    ScrollView {
+                        domainSection(
+                            .geometry,
+                            titleKey: "Geometry"
+                        ) {
+                            GeometryAdjustmentPanel(editor: editor)
+                        }
+                        .padding()
+                    }
+                case .local:
+                    ScrollView {
+                        domainSection(
+                            .local,
+                            titleKey: "Local Adjustments"
+                        ) {
+                            LocalAdjustmentsPanel(editor: editor)
+                        }
+                        .padding()
+                    }
+                case .info:
+                    infoPanel
+                }
+            }
+        }
+        .onChange(of: inspector.activeDomain) { _, _ in
+            // A domain switch is an explicit navigation action. Do not leave
+            // an old catalog query intercepting the newly selected page; the
+            // Preset page owns its own search field and Info has none.
+            navigation.clearSearch()
+        }
+    }
+
+    /// The shared catalog only describes editable adjustment domains. Presets
+    /// and Info have their own page-specific controls and must not inherit a
+    /// misleading "Search Adjustments" field or catalog result list.
+    private var showsCatalogNavigation: Bool {
+        switch inspector.activeDomain {
+        case .adjust, .geometry, .local:
+            return true
+        case .preset, .info:
+            return false
         }
     }
 
@@ -90,7 +116,149 @@ struct PadInspectorHost: View {
         )
     }
 
-    // MARK: - Compact domain bar (Compact/Standard layouts)
+    // MARK: - Shared catalog toolbar (search, favorite, pin, reset)
+
+    /// P2: the same search/favorite/pin/reset affordances Mac's
+    /// `InspectorView` exposes, all driven by the shared `InspectorCatalog`/
+    /// `InspectorNavigationModel` -- no iPad-only reimplementation.
+    /// `currentSectionID`/`currentResetDomain` are `nil` for the Preset and
+    /// Info domains, which are not part of the field catalog: favorite/reset
+    /// simply hide rather than show a control with nothing to act on.
+    private var catalogToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                catalogSearchField
+                Spacer(minLength: 4)
+                catalogToolbarActions
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                catalogSearchField
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Spacer(minLength: 0)
+                    catalogToolbarActions
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
+    private var catalogSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(L10n.t("Search Adjustments"), text: $navigation.searchQuery)
+                .textFieldStyle(.plain)
+            if !navigation.searchQuery.isEmpty {
+                Button {
+                    navigation.clearSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel(Text(L10n.t("Clear Search")))
+            }
+        }
+        .frame(minHeight: 44)
+    }
+
+    @ViewBuilder
+    private var catalogToolbarActions: some View {
+        if let sectionID = currentSectionID {
+            Button {
+                navigation.toggleFavorite(sectionID)
+            } label: {
+                Image(systemName: navigation.isFavorite(sectionID) ? "star.fill" : "star")
+                    .foregroundStyle(navigation.isFavorite(sectionID) ? .yellow : .secondary)
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(Text(navigation.isFavorite(sectionID) ? L10n.t("Remove from Favorites") : L10n.t("Add to Favorites")))
+        }
+        Button {
+            navigation.togglePin()
+        } label: {
+            Image(systemName: navigation.isPinned ? "pin.fill" : "pin")
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(Text(navigation.isPinned ? L10n.t("Unpin Section") : L10n.t("Pin Section")))
+        .accessibilityAddTraits(navigation.isPinned ? .isSelected : [])
+        if let domain = currentResetDomain {
+            Button {
+                editor.updateAdjustments { adjustments in
+                    adjustments = InspectorCatalog.resetting(domain: domain, in: adjustments)
+                }
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .disabled(editor.photo == nil || InspectorCatalog.isNeutral(domain: domain, in: editor.adjustments))
+            .accessibilityLabel(Text(L10n.t("Reset")))
+        }
+    }
+
+    /// A representative catalog section for the currently active
+    /// domain/submode, used only for the favorite star (reset uses the whole
+    /// domain, not one section). `nil` for Preset/Info, which the shared
+    /// catalog does not cover.
+    private var currentSectionID: InspectorSectionID? {
+        switch inspector.activeDomain {
+        case .adjust:
+            switch inspector.adjustSubmode {
+            case .light: return .basic
+            case .color: return .whiteBalance
+            case .detail: return .detail
+            }
+        case .geometry: return .geometry
+        case .local: return .local
+        case .preset, .info: return nil
+        }
+    }
+
+    private var currentResetDomain: PadInspectorDomain? {
+        switch inspector.activeDomain {
+        case .adjust, .geometry, .local: return inspector.activeDomain
+        case .preset, .info: return nil
+        }
+    }
+
+    private var searchResultsList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                let results = navigation.searchResults
+                if results.isEmpty {
+                    Text(L10n.t("No matching tools"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding()
+                } else {
+                    ForEach(results) { section in
+                        Button {
+                            navigation.select(section.id)
+                            navigation.clearSearch()
+                        } label: {
+                            HStack {
+                                Image(systemName: section.symbol)
+                                Text(L10n.t(section.titleKey))
+                                Spacer()
+                                if navigation.isFavorite(section.id) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundStyle(.yellow)
+                                }
+                            }
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+
+    // MARK: Compact domain bar
 
     private struct DomainBarItem: Identifiable {
         let id: PadInspectorDomain
@@ -142,7 +310,7 @@ struct PadInspectorHost: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Adjust domain
+    // MARK: Adjust domain
 
     @ViewBuilder
     private var adjustPanel: some View {
@@ -192,10 +360,14 @@ struct PadInspectorHost: View {
         .frame(minHeight: 44, alignment: .leading)
     }
 
-    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md`): field
-    /// vocabulary comes from the shared `InspectorCatalog`, matching the
-    /// inlined `PadInspectorHost` in `PadEditorView.swift` and Mac's
-    /// `InspectorView`.
+    /// P2 (`2026-09-10-shared-professional-inspector-catalog.md` §2): field
+    /// vocabulary for every submode comes from `InspectorCatalog`, the same
+    /// declaration point Mac's `InspectorView` reads. The `.color` case now
+    /// also mounts the White Balance panel -- previously
+    /// `PadAdjustSubmodeKinds.color` declared `basic.temperature`/
+    /// `basic.tint` in its vocabulary but no panel ever rendered them; this
+    /// closes that gap and brings iPad to parity with Mac's `.color`
+    /// `DisclosureGroup` (White Balance + HSL together).
     @ViewBuilder
     private var adjustContent: some View {
         switch inspector.adjustSubmode {
@@ -262,23 +434,30 @@ struct PadInspectorHost: View {
         )
     }
 
-    // Keep the standalone SwiftPM host semantically aligned with the Xcode
-    // host and macOS Inspector: histogram, file data, save state, snapshots.
+    // MARK: Info domain
+
+    @ViewBuilder
     private var infoPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HistogramPanel(histogram: editor.histogram)
+                PadHistogramBlock(histogram: editor.histogram)
                 Divider()
                 if let photo = editor.photo {
-                    PadStandaloneMetadataBlock(snapshot: EditorMetadataSnapshot(photo: photo))
+                    let curationPhoto = library.photos.first(where: { $0.id == photo.id }) ?? photo
+                    PadMetadataBlock(
+                        snapshot: EditorMetadataSnapshot(photo: curationPhoto),
+                        photo: curationPhoto,
+                        batchCoordinator: batchCoordinator
+                    )
                 } else {
                     Text(L10n.t("Photo not yet loaded."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
+                        .padding()
                 }
                 Divider()
-                PadStandaloneSaveStateBlock(saveState: editor.saveState)
+                PadSaveStateBlock(saveState: editor.saveState)
                 Divider()
                 if editor.photo != nil {
                     SnapshotsPanel(editor: editor)
@@ -288,7 +467,7 @@ struct PadInspectorHost: View {
         }
     }
 
-    // MARK: - Unavailable placeholder
+    // MARK: Unavailable placeholder
 
     private func unavailablePlaceholder(domain: String, symbol: String, note: String) -> some View {
         VStack(spacing: 16) {
@@ -308,83 +487,5 @@ struct PadInspectorHost: View {
         .padding()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("\(domain): \(note)"))
-    }
-}
-
-private struct PadStandaloneSaveStateBlock: View {
-    let saveState: SaveState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L10n.t("Save State"))
-                .font(.subheadline.weight(.semibold))
-            switch saveState {
-            case .unchanged, .saved:
-                Label(L10n.t("Saved"), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
-            case .pending:
-                Label(L10n.t("Unsaved changes"), systemImage: "clock")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            case .saving:
-                Label(L10n.t("Saving…"), systemImage: "arrow.clockwise")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            case .failed(let message):
-                Label(L10n.t("Save failed"), systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct PadStandaloneMetadataBlock: View {
-    let snapshot: EditorMetadataSnapshot
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(L10n.t("File Info"))
-                .font(.subheadline.weight(.semibold))
-            row(L10n.t("Filename"), snapshot.filename)
-            row(L10n.t("Format"), snapshot.formatDescription)
-            row(L10n.t("Dimensions"), snapshot.pixelDimensions)
-            row(L10n.t("File Size"), snapshot.fileSizeDescription)
-            row(L10n.t("Camera"), snapshot.cameraDescription)
-            row(L10n.t("Lens"), snapshot.lensDescription)
-            row(L10n.t("Focal Length"), snapshot.focalLengthDescription)
-            row(L10n.t("Aperture"), snapshot.apertureDescription)
-            row(L10n.t("Shutter Speed"), snapshot.shutterSpeedDescription)
-            row(L10n.t("ISO"), snapshot.isoDescription)
-            row(L10n.t("Capture Date"), snapshot.captureDateDescription)
-            row(L10n.t("Orientation"), snapshot.orientationDescription)
-        }
-    }
-
-    private func row(_ label: String, _ value: String?) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 8) {
-                Text(label)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 96, alignment: .leading)
-                Text(value ?? "—")
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .foregroundStyle(.secondary)
-                Text(value ?? "—")
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .font(.caption)
     }
 }

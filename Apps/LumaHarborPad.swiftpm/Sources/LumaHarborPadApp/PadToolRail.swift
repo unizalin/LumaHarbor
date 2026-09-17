@@ -2,25 +2,16 @@ import AdjustmentUI
 import Localization
 import SwiftUI
 
+/// button. Axis-agnostic: `.vertical` for the leading-edge rail in work mode,
+/// `.horizontal` for a compact domain bar. Carries no local state.
 /// A five-item tool rail that exposes every `PadInspectorDomain` as a tappable
-/// button.  The rail is axis-agnostic: pass `.vertical` for Expanded/Wide
-/// profiles where it sits on the leading edge of the canvas, or `.horizontal`
-/// for Compact/Standard profiles where it appears as a bottom domain bar.
-///
-/// Selection is owned entirely by the caller through `selection`; this view
-/// carries no local state and never calls `EditorSession`.
+/// button. Axis-agnostic: `.vertical` for the leading-edge rail in work mode,
+/// `.horizontal` for a compact domain bar. Carries no local state.
+/// button. Axis-agnostic: `.vertical` for the leading-edge rail in work mode,
+/// `.horizontal` for a compact domain bar. Carries no local state.
 struct PadToolRail: View {
-
-    // MARK: - Public interface
-
     @Binding var selection: PadInspectorDomain
-
-    /// Layout axis.  `.vertical` stacks buttons in a column; `.horizontal`
-    /// arranges them in a row.  The caller decides which to use based on its
-    /// size class or geometry — this view never inspects device name or orientation.
     var axis: Axis = .vertical
-
-    // MARK: - Private model
 
     private struct RailItem: Identifiable {
         let id: PadInspectorDomain
@@ -36,8 +27,6 @@ struct PadToolRail: View {
         RailItem(id: .info,     symbol: "info.circle",         labelKey: "Info"),
     ]
 
-    // MARK: - Body
-
     var body: some View {
         Group {
             if axis == .vertical {
@@ -52,14 +41,11 @@ struct PadToolRail: View {
             }
         }
         .padding(axis == .vertical ? .vertical : .horizontal, 8)
-        // The layout policy reserves 88pt for the complete rail. Apply that
-        // width after the rail's padding so the material and hit areas stay
-        // inside the same budget instead of rendering at 104pt.
+        // Keep the rendered rail, including its horizontal padding, inside
+        // the 88pt budget used by PadEditorLayoutPolicy.
         .frame(width: axis == .vertical ? 88 : nil)
         .background(.thickMaterial)
     }
-
-    // MARK: - Button factory
 
     private func railButton(_ item: RailItem) -> some View {
         let isSelected = selection == item.id
@@ -76,6 +62,8 @@ struct PadToolRail: View {
                     .multilineTextAlignment(.center)
             }
             .frame(minWidth: 64, minHeight: 44)
+            // Keep the whole stable rail cell tappable, including the
+            // wrapped-label area in portrait and Split View layouts.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

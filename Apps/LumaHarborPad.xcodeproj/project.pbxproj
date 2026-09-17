@@ -29,6 +29,8 @@
 		120000000000000000000010 /* PadPresetLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000010 /* PadPresetLibrary.swift */; };
 		120000000000000000000011 /* PadInspectorCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000011 /* PadInspectorCoordinator.swift */; };
 		120000000000000000000012 /* PadBatchAdjustmentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000012 /* PadBatchAdjustmentCoordinator.swift */; };
+		120000000000000000000013 /* PadToolRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000013 /* PadToolRail.swift */; };
+		120000000000000000000014 /* PadInspectorHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000014 /* PadInspectorHost.swift */; };
 		120000000000000000000105 /* PresetCore in Frameworks */ = {isa = PBXBuildFile; productRef = 12A000000000000000000005 /* PresetCore */; };
 /* End PBXBuildFile section */
 
@@ -51,6 +53,8 @@
 		121000000000000000000010 /* PadPresetLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadPresetLibrary.swift; sourceTree = "<group>"; };
 		121000000000000000000011 /* PadInspectorCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadInspectorCoordinator.swift; sourceTree = "<group>"; };
 		121000000000000000000012 /* PadBatchAdjustmentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadBatchAdjustmentCoordinator.swift; sourceTree = "<group>"; };
+		121000000000000000000013 /* PadToolRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadToolRail.swift; sourceTree = "<group>"; };
+		121000000000000000000014 /* PadInspectorHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadInspectorHost.swift; sourceTree = "<group>"; };
 		121000000000000000000100 /* LumaHarborPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumaHarborPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -98,6 +102,8 @@
 				121000000000000000000010 /* PadPresetLibrary.swift */,
 				121000000000000000000011 /* PadInspectorCoordinator.swift */,
 				121000000000000000000012 /* PadBatchAdjustmentCoordinator.swift */,
+				121000000000000000000013 /* PadToolRail.swift */,
+				121000000000000000000014 /* PadInspectorHost.swift */,
 				12100000000000000000000E /* Assets.xcassets */,
 			);
 			path = LumaHarborPad.swiftpm/Sources/LumaHarborPadApp;
@@ -208,6 +214,8 @@
 				120000000000000000000010 /* PadPresetLibrary.swift in Sources */,
 				120000000000000000000011 /* PadInspectorCoordinator.swift in Sources */,
 				120000000000000000000012 /* PadBatchAdjustmentCoordinator.swift in Sources */,
+				120000000000000000000013 /* PadToolRail.swift in Sources */,
+				120000000000000000000014 /* PadInspectorHost.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
