@@ -9,7 +9,7 @@ Updated by: Codex（Phase 0 iPad Inspector 來源整併完成；產品驗證基�
 - **狀態**：`DONE_WITH_LIMITS`。已完成 canonical source 整併、inactive workspace state 清理、`PadEditorView` focused component 拆分與回歸驗證；SwiftPM App Playground manifest 的 `AppleProductTypes` 只能在其 host 內解析，命令列 standalone build 已記錄為環境限制。
 - **分支**：`codex/universal-mobile-workspace-spec`，基於 `origin/main` `f694308723d8cae98db10dd4416d66f72ffb58a2`；本 worktree 唯一寫入者為 Codex。
 - **計畫／報告**：`docs/superpowers/plans/2026-09-17-ipad-inspector-source-consolidation.md`、`docs/testing/reports/2026-09-17-ipad-inspector-source-consolidation.md`。
-- **提交**：`81e03ab`、`4cd5267`、`3148ea1`、`2078907`；未 push、merge、rebase 或改寫 `origin/main`。
+- **提交**：`81e03ab`、`4cd5267`、`3148ea1`、`2078907`、`f7a1d30`；未 push、merge、rebase 或改寫 `origin/main`。
 - **執行邊界**：本計畫不加入 iPhone shell、不改 Mac workspace、不改 rendering／XMP／sidecar／undo；Phase 1 SharedInspectorContent、Phase 2 universal iOS shell、Phase 3 iPhone editor 仍各自需要獨立 plan。
 - **驗證**：`swift test` 2,349 executed、10 skipped、0 failures；根套件 strict-concurrency build PASS；unsigned generic iOS Simulator Xcode build PASS；focused Inspector suite 162/162 PASS。
 - **下一步**：另立 Phase 1 `SharedInspectorContent` implementation plan；實體 iPad 視覺／手勢、VoiceOver、Dynamic Type 與 iPhone 仍不得由本輪結果代替。

@@ -56,6 +56,7 @@
 - `4cd5267` `refactor: consolidate ipad inspector sources`
 - `3148ea1` `refactor: remove inactive ipad workspace state`
 - `2078907` `refactor: split ipad editor into focused views`
+- `f7a1d30` `docs: record ipad inspector consolidation verification`
 
 尚未執行 push、merge、rebase 或改寫 `origin/main`。
 
