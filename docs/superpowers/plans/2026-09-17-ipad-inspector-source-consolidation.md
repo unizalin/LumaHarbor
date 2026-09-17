@@ -10,13 +10,13 @@
 
 ## Global Constraints
 
-- [ ] Work only from this Phase 0 worktree branch created from origin/main; do not merge, rebase, push, reset, or delete another branch/worktree.
-- [ ] Keep RawProcessingCore, PresetCore, PhotoLibraryCore, and EditorCore behavior unchanged. Do not change rendering, XMP, sidecar, numeric range, autosave, or undo semantics.
-- [ ] Preserve the existing Adjustments, Presets, Geometry, Local Adjustments, Info, comparison, export, and filmstrip workflows.
-- [ ] Do not add a second PhotoAdjustments store, PadInspectorCoordinator, InspectorNavigationModel, domain catalog, or export path.
-- [ ] Keep user-facing strings routed through Localization.
-- [ ] Every task is test-first: write the narrow test, run it and record the expected failure, implement the smallest change, rerun, then commit.
-- [ ] Keep tests and reports repository-relative; never add private machine paths, signing values, fixtures, or generated output.
+- [x] Work only from this Phase 0 worktree branch created from origin/main; do not merge, rebase, push, reset, or delete another branch/worktree.
+- [x] Keep RawProcessingCore, PresetCore, PhotoLibraryCore, and EditorCore behavior unchanged. Do not change rendering, XMP, sidecar, numeric range, autosave, or undo semantics.
+- [x] Preserve the existing Adjustments, Presets, Geometry, Local Adjustments, Info, comparison, export, and filmstrip workflows.
+- [x] Do not add a second PhotoAdjustments store, PadInspectorCoordinator, InspectorNavigationModel, domain catalog, or export path.
+- [x] Keep user-facing strings routed through Localization.
+- [x] Every task is test-first: write the narrow test, run it and record the expected failure, implement the smallest change, rerun, then commit.
+- [x] Keep tests and reports repository-relative; never add private machine paths, signing values, fixtures, or generated output.
 
 ---
 
@@ -32,11 +32,11 @@
 
 ### 1.1 Add red tests
 
-- [ ] Assert PadEditorView.swift contains no inline PadToolRail or PadInspectorHost declaration or inline marker.
-- [ ] Assert PadToolRail.swift and PadInspectorHost.swift each contain exactly one matching struct declaration.
-- [ ] Assert project.pbxproj lists both canonical files in PBXFileReference, PBXGroup, PBXBuildFile, and PBXSourcesBuildPhase.
-- [ ] Do not change the policy API tests in this task; they remain green against the current baseline and are deliberately migrated in Task 3 after the production API change is red.
-- [ ] Do not change the catalog and rail implementation assertions in this task; they are migrated to the canonical files in Task 2 after the stale standalone bodies are replaced.
+- [x] Assert PadEditorView.swift contains no inline PadToolRail or PadInspectorHost declaration or inline marker.
+- [x] Assert PadToolRail.swift and PadInspectorHost.swift each contain exactly one matching struct declaration.
+- [x] Assert project.pbxproj lists both canonical files in PBXFileReference, PBXGroup, PBXBuildFile, and PBXSourcesBuildPhase.
+- [x] Do not change the policy API tests in this task; they remain green against the current baseline and are deliberately migrated in Task 3 after the production API change is red.
+- [x] Do not change the catalog and rail implementation assertions in this task; they are migrated to the canonical files in Task 2 after the stale standalone bodies are replaced.
 
 ### 1.2 Run the red baseline
 
@@ -89,16 +89,16 @@ Move the current inline bodies verbatim into these canonical files. The host mus
 
 ### 2.1 Replace stale files and remove the duplicate
 
-- [ ] Replace the old standalone rail with the current inline rail implementation.
-- [ ] Replace the old standalone host with the current inline host implementation, including its navigation/library/batch dependencies.
-- [ ] Remove both inline structs and marker comments from PadEditorView.swift; keep FloatingPanelSizeKey until Task 4 moves the container.
-- [ ] Update comments so the canonical files no longer claim they are SwiftPM fallbacks or inline copies.
+- [x] Replace the old standalone rail with the current inline rail implementation.
+- [x] Replace the old standalone host with the current inline host implementation, including its navigation/library/batch dependencies.
+- [x] Remove both inline structs and marker comments from PadEditorView.swift; keep FloatingPanelSizeKey until Task 4 moves the container.
+- [x] Update comments so the canonical files no longer claim they are SwiftPM fallbacks or inline copies.
 
 ### 2.2 Correct Xcode membership
 
-- [ ] Add a stable PBXFileReference, PBXBuildFile, group child, and Sources build-phase entry for PadToolRail.swift.
-- [ ] Add the equivalent four entries for PadInspectorHost.swift.
-- [ ] Do not change target products, bundle IDs, signing settings, resources, or unrelated membership.
+- [x] Add a stable PBXFileReference, PBXBuildFile, group child, and Sources build-phase entry for PadToolRail.swift.
+- [x] Add the equivalent four entries for PadInspectorHost.swift.
+- [x] Do not change target products, bundle IDs, signing settings, resources, or unrelated membership.
 
 ### 2.3 Verify and commit
 
@@ -182,9 +182,9 @@ public struct PadDocumentScopedWorkspaceState: Equatable, Sendable {
 
 ### 3.1 Red tests
 
-- [ ] Update width/state/presentation tests to the interfaces above, including wide width 1,400pt returning persistent and the exact 1,100pt dock boundary.
-- [ ] Remove Focus-mode and drawer-reducer tests that reference deleted APIs.
-- [ ] Preserve clamping, movable overlay, minimize/restore, downward dismissal, document-ID reset, and real EditorSession undo tests.
+- [x] Update width/state/presentation tests to the interfaces above, including wide width 1,400pt returning persistent and the exact 1,100pt dock boundary.
+- [x] Remove Focus-mode and drawer-reducer tests that reference deleted APIs.
+- [x] Preserve clamping, movable overlay, minimize/restore, downward dismissal, document-ID reset, and real EditorSession undo tests.
 
 Run:
 
@@ -196,13 +196,13 @@ Expected result: compile failure because production still exposes the old fields
 
 ### 3.2 Implement the cleanup
 
-- [ ] Remove PadWorkspaceMode, PadWorkspaceInspectorTab, showsDetailsColumn, persistentWithDetails, usesLeftHandedLayout, inspectorTab, PadDrawerPresentation, and PadBottomDrawerPolicy.
-- [ ] Keep PadBottomDrawerMetrics because the movable Inspector still uses its corner radius and height budget.
-- [ ] Make the wide workspace return persistent without a details flag.
-- [ ] Remove the .floating switch branch from PadEditorView; the compact path remains the existing movable bottomDrawer overlay.
-- [ ] Update PadLibraryView to switch only over overlay and persistent.
-- [ ] Update PadRootView and PadEditorView comments to describe only sidebar/filmstrip scene state and document-scoped canvas scale/panel offset.
-- [ ] Keep presentation width-driven; do not introduce orientation/device-name branches.
+- [x] Remove PadWorkspaceMode, PadWorkspaceInspectorTab, showsDetailsColumn, persistentWithDetails, usesLeftHandedLayout, inspectorTab, PadDrawerPresentation, and PadBottomDrawerPolicy.
+- [x] Keep PadBottomDrawerMetrics because the movable Inspector still uses its corner radius and height budget.
+- [x] Make the wide workspace return persistent without a details flag.
+- [x] Remove the .floating switch branch from PadEditorView; the compact path remains the existing movable bottomDrawer overlay.
+- [x] Update PadLibraryView to switch only over overlay and persistent.
+- [x] Update PadRootView and PadEditorView comments to describe only sidebar/filmstrip scene state and document-scoped canvas scale/panel offset.
+- [x] Keep presentation width-driven; do not introduce orientation/device-name branches.
 
 ### 3.3 Verify and commit
 
@@ -270,10 +270,10 @@ struct PadEditorInspectorContainer: View {
 
 ### 4.1 Red composition tests
 
-- [ ] Assert PadEditorView calls PadEditorToolbar, PadEditorCanvasView, and PadEditorInspectorContainer.
-- [ ] Assert PadEditorView no longer declares PadPresetPanel, PadExportOptionsSheet, PadCropOverlayView, or PadEditorFilmstrip.
-- [ ] Assert the root passes the same editor object to canvas and Inspector container and no new file constructs EditorSession or stores PhotoAdjustments.
-- [ ] Assert all eight new files are present in PBXFileReference, PBXGroup, PBXBuildFile, and PBXSourcesBuildPhase.
+- [x] Assert PadEditorView calls PadEditorToolbar, PadEditorCanvasView, and PadEditorInspectorContainer.
+- [x] Assert PadEditorView no longer declares PadPresetPanel, PadExportOptionsSheet, PadCropOverlayView, or PadEditorFilmstrip.
+- [x] Assert the root passes the same editor object to canvas and Inspector container and no new file constructs EditorSession or stores PhotoAdjustments.
+- [x] Assert all eight new files are present in PBXFileReference, PBXGroup, PBXBuildFile, and PBXSourcesBuildPhase.
 
 Run:
 
@@ -285,42 +285,42 @@ Expected result: FAIL because the new files and call sites do not yet exist.
 
 ### 4.2 Extract the Inspector container
 
-- [ ] Move trailingDockPanel, movableInspectorPanel, inspectorPanelContent, floatingPanelSizeReader, inspectorPanelHeader, inspectorPanelDragHandle, minimize/restore controls, and compact drag/dismiss gesture into PadEditorInspectorContainer.swift.
-- [ ] Keep floatingPanelDragTranslation as @GestureState in the extracted container. Send measured size to onMeasurePanel and movement to onCommitDrag; the parent remains the owner of isMinimized and floatingPanelOffset.
-- [ ] Preserve thickMaterial, corner radius, shadow, 44pt controls, localization, downward-dismiss threshold, and PadFloatingPanelLayout clamping.
-- [ ] Replace the parent layout branches with the new container call while retaining one Inspector content composition.
-- [ ] Run swift test --filter 'PadEditorLayoutPolicyTests|PadEditorCompositionContractTests' and expect PASS.
+- [x] Move trailingDockPanel, movableInspectorPanel, inspectorPanelContent, floatingPanelSizeReader, inspectorPanelHeader, inspectorPanelDragHandle, minimize/restore controls, and compact drag/dismiss gesture into PadEditorInspectorContainer.swift.
+- [x] Keep floatingPanelDragTranslation as @GestureState in the extracted container. Send measured size to onMeasurePanel and movement to onCommitDrag; the parent remains the owner of isMinimized and floatingPanelOffset.
+- [x] Preserve thickMaterial, corner radius, shadow, 44pt controls, localization, downward-dismiss threshold, and PadFloatingPanelLayout clamping.
+- [x] Replace the parent layout branches with the new container call while retaining one Inspector content composition.
+- [x] Run swift test --filter 'PadEditorLayoutPolicyTests|PadEditorCompositionContractTests' and expect PASS.
 
 ### 4.3 Extract canvas, comparison, and filmstrip
 
-- [ ] Move canvas, comparisonCanvas, verticalWipeCanvas, canvasImageWithOverlays, fittedImageFrame, and canvasImage into PadEditorCanvasView.swift.
-- [ ] Keep magnification and wipe-drag @GestureState in the canvas component; bind only document-scoped canvasScale to the parent.
-- [ ] Move the nested PadEditorFilmstrip into PadEditorFilmstrip.swift unchanged: 116pt height, thumbnails, source status, selected border, accessibility label, and tap callback.
-- [ ] Keep filmstripPhotos calculation and sceneWorkspaceState.isFilmstripVisible gate in explicit root helpers; pass results to the canvas.
-- [ ] Run swift test --filter 'PadEditorLayoutPolicyTests|CropOverlayContractTests|PadEditorCompositionContractTests' and expect PASS.
+- [x] Move canvas, comparisonCanvas, verticalWipeCanvas, canvasImageWithOverlays, fittedImageFrame, and canvasImage into PadEditorCanvasView.swift.
+- [x] Keep magnification and wipe-drag @GestureState in the canvas component; bind only document-scoped canvasScale to the parent.
+- [x] Move the nested PadEditorFilmstrip into PadEditorFilmstrip.swift unchanged: 116pt height, thumbnails, source status, selected border, accessibility label, and tap callback.
+- [x] Keep filmstripPhotos calculation and sceneWorkspaceState.isFilmstripVisible gate in explicit root helpers; pass results to the canvas.
+- [x] Run swift test --filter 'PadEditorLayoutPolicyTests|CropOverlayContractTests|PadEditorCompositionContractTests' and expect PASS.
 
 ### 4.4 Extract toolbar and menus
 
-- [ ] Move the root .toolbar content, inspectorPresentationButton, compareMenu, and adjustmentClipboardMenu to PadEditorToolbar.swift.
-- [ ] Pass close, export, save-to-Photos, batch-summary, and clipboard actions as closures/bindings; do not duplicate EditorSession or PhotoAdjustments state.
-- [ ] Preserve every localized title, accessibility label, disabled condition, compare mode, export destination, and clipboard field toggle.
-- [ ] Run swift test --filter 'PadEditorLayoutPolicyTests|PadEditorCompositionContractTests' and expect PASS.
+- [x] Move the root .toolbar content, inspectorPresentationButton, compareMenu, and adjustmentClipboardMenu to PadEditorToolbar.swift.
+- [x] Pass close, export, save-to-Photos, batch-summary, and clipboard actions as closures/bindings; do not duplicate EditorSession or PhotoAdjustments state.
+- [x] Preserve every localized title, accessibility label, disabled condition, compare mode, export destination, and clipboard field toggle.
+- [x] Run swift test --filter 'PadEditorLayoutPolicyTests|PadEditorCompositionContractTests' and expect PASS.
 
 ### 4.5 Extract support views
 
-- [ ] Move export sheets and ExportedPhotoFileDocument to PadEditorExportViews.swift.
-- [ ] Move PadPresetPanel and its data/create/edit/field-selection sheets to PadEditorPresetViews.swift.
-- [ ] Move histogram, save-state, metadata, and standalone Info blocks to PadEditorInfoViews.swift.
-- [ ] Move PadCropOverlayView, PadCropHandle, and PadCropDragMath to PadCropOverlayView.swift.
-- [ ] Keep internal visibility only where cross-file composition requires it; do not make helpers public.
-- [ ] Run swift test --filter 'PadPresetContractTests|CurveHistogramContractTests|CropOverlayContractTests|PadEditorCompositionContractTests' and expect PASS.
+- [x] Move export sheets and ExportedPhotoFileDocument to PadEditorExportViews.swift.
+- [x] Move PadPresetPanel and its data/create/edit/field-selection sheets to PadEditorPresetViews.swift.
+- [x] Move histogram, save-state, metadata, and standalone Info blocks to PadEditorInfoViews.swift.
+- [x] Move PadCropOverlayView, PadCropHandle, and PadCropDragMath to PadCropOverlayView.swift.
+- [x] Keep internal visibility only where cross-file composition requires it; do not make helpers public.
+- [x] Run swift test --filter 'PadPresetContractTests|CurveHistogramContractTests|CropOverlayContractTests|PadEditorCompositionContractTests' and expect PASS.
 
 ### 4.6 Finish root and target parity
 
-- [ ] Reduce PadEditorView.swift to root state, body, route-level alerts/sheets, layout selection, document reset, filmstrip selection callback, Inspector navigation bridge, clamp callbacks, and pure helpers.
-- [ ] Keep its single PadInspectorCoordinator and InspectorNavigationModel StateObjects; children receive those objects.
-- [ ] Add all eight files to Xcode group, file references, build files, and Sources phase so Xcode and SwiftPM compile the same app sources.
-- [ ] Run:
+- [x] Reduce PadEditorView.swift to root state, body, route-level alerts/sheets, layout selection, document reset, filmstrip selection callback, Inspector navigation bridge, clamp callbacks, and pure helpers.
+- [x] Keep its single PadInspectorCoordinator and InspectorNavigationModel StateObjects; children receive those objects.
+- [x] Add all eight files to Xcode group, file references, build files, and Sources phase so Xcode and SwiftPM compile the same app sources.
+- [x] Run:
 
 ~~~sh
 swift test --filter 'PadEditorLayoutPolicyTests|PadInspectorCoordinatorTests|PadCatalogWiringContractTests|PadToolRailContractTests|PadInspectorSourceConsolidationContractTests|PadEditorCompositionContractTests|PadPresetContractTests|CurveHistogramContractTests|CropOverlayContractTests'
@@ -329,9 +329,9 @@ swift build --package-path Apps/LumaHarborPad.swiftpm -Xswiftc -strict-concurren
 xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ~~~
 
-Expected result: selected tests and both strict-concurrency builds pass. Real-device iPad interaction is recorded as NOT RUN unless explicitly performed.
+Expected result: selected tests, the root strict-concurrency build, and the unsigned generic iPad Xcode target pass. The standalone iPad App Playground manifest is environment-blocked by `AppleProductTypes`; real-device iPad interaction is recorded as NOT RUN unless explicitly performed.
 
-- [ ] Run git diff --check, stage the created sources, project membership, root, and composition tests, then commit with message refactor: split ipad editor into focused views.
+- [x] Run git diff --check, stage the created sources, project membership, root, and composition tests, then commit with message refactor: split ipad editor into focused views.
 
 ---
 
@@ -345,11 +345,11 @@ Expected result: selected tests and both strict-concurrency builds pass. Real-de
 
 ### 5.1 Run final checks
 
-- [ ] Run swift test from the root package and record executed, skipped, and failed counts.
-- [ ] Run swift build -Xswiftc -strict-concurrency=complete.
-- [ ] Run swift build --package-path Apps/LumaHarborPad.swiftpm -Xswiftc -strict-concurrency=complete.
-- [ ] Run the unsigned generic iPad Xcode build.
-- [ ] Run the following scans:
+- [x] Run swift test from the root package and record executed, skipped, and failed counts.
+- [x] Run swift build -Xswiftc -strict-concurrency=complete.
+- [x] Attempt swift build --package-path Apps/LumaHarborPad.swiftpm -Xswiftc -strict-concurrency=complete; the App Playground manifest is blocked outside its AppleProductTypes host and is recorded as an environment limitation.
+- [x] Run the unsigned generic iPad Xcode build.
+- [x] Run the following scans:
 
 ~~~sh
 rg -n 'PadInspectorHost|PadToolRail' Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp Apps/LumaHarborPad.xcodeproj/project.pbxproj
@@ -361,9 +361,9 @@ Expected result: one declaration for each Inspector type, no removed policy symb
 
 ### 5.2 Publish the record
 
-- [ ] Include scope, files changed, exact commands/outcomes, test counts, Xcode result, final commit IDs, and explicit NOT RUN entries for real-device visual/gesture, VoiceOver, Dynamic Type, and iPhone work.
-- [ ] Update CURRENT.md with branch, base commit, plan path, report path, final Phase 0 status, and next action: write the separate Phase 1 SharedInspectorContent plan.
-- [ ] Keep decision D-010 unchanged and reference it from the handoff.
+- [x] Include scope, files changed, exact commands/outcomes, test counts, Xcode result, final commit IDs, and explicit NOT RUN entries for real-device visual/gesture, VoiceOver, Dynamic Type, and iPhone work.
+- [x] Update CURRENT.md with branch, base commit, plan path, report path, final Phase 0 status, and next action: write the separate Phase 1 SharedInspectorContent plan.
+- [x] Keep decision D-010 unchanged and reference it from the handoff.
 
 ### 5.3 Final docs commit
 
@@ -379,10 +379,10 @@ Expected result: clean worktree, branch ahead only by Phase 0 commits, and no pu
 
 ## Completion Checklist
 
-- [ ] One canonical PadToolRail and PadInspectorHost compile in SwiftPM and Xcode.
-- [ ] PadEditorView is a composition root rather than a 2,800-line mixed-responsibility source.
-- [ ] Inactive details, handedness, scene-tab, focus-mode, drawer-reducer, and floating-policy symbols are removed from active sources.
-- [ ] The single Inspector still moves, minimizes, restores, scrolls, expands/collapses, searches, resets, compares, exports, and preserves adjustment values exactly as before.
-- [ ] Mac sources and shared core behavior are unchanged and regression tests pass.
-- [ ] Strict-concurrency builds, Swift tests, and the unsigned generic iPad Xcode build are recorded.
-- [ ] Real-device and later universal-iOS work remain explicitly separated into later plans.
+- [x] One canonical PadToolRail and PadInspectorHost compile in Xcode; standalone iPad SwiftPM manifest compilation is blocked by the unavailable AppleProductTypes host and is recorded as a limitation.
+- [x] PadEditorView is a composition root rather than a 2,800-line mixed-responsibility source.
+- [x] Inactive details, handedness, scene-tab, focus-mode, drawer-reducer, and floating-policy symbols are removed from active sources.
+- [x] The single Inspector still moves, minimizes, restores, scrolls, expands/collapses, searches, resets, compares, exports, and preserves adjustment values exactly as before.
+- [x] Mac sources and shared core behavior are unchanged and regression tests pass.
+- [x] Strict-concurrency builds, Swift tests, and the unsigned generic iPad Xcode build are recorded.
+- [x] Real-device and later universal-iOS work remain explicitly separated into later plans.

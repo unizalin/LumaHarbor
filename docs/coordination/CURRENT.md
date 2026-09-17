@@ -2,25 +2,27 @@
 
 Updated: 2026-09-17
 
-Updated by: Codex（跨裝置 Workspace 與 iPhone 行動編輯器設計；產品驗證基線不變）
+Updated by: Codex（Phase 0 iPad Inspector 來源整併完成；產品驗證基線不變）
 
 ## Phase 0 iPad Inspector 來源整併 implementation plan（2026-09-17, Codex）
 
-- **狀態**：`PLAN READY`。已依核准的跨裝置設計完成 Phase 0 獨立執行計畫；尚未修改產品程式碼、測試或 Xcode target。
+- **狀態**：`DONE_WITH_LIMITS`。已完成 canonical source 整併、inactive workspace state 清理、`PadEditorView` focused component 拆分與回歸驗證；SwiftPM App Playground manifest 的 `AppleProductTypes` 只能在其 host 內解析，命令列 standalone build 已記錄為環境限制。
 - **分支**：`codex/universal-mobile-workspace-spec`，基於 `origin/main` `f694308723d8cae98db10dd4416d66f72ffb58a2`；本 worktree 唯一寫入者為 Codex。
-- **計畫**：`docs/superpowers/plans/2026-09-17-ipad-inspector-source-consolidation.md`。涵蓋測試先行、PadInspectorHost／PadToolRail canonical source、死狀態清理、PadEditorView 拆分、SwiftPM／Xcode 雙建置與回歸報告。
+- **計畫／報告**：`docs/superpowers/plans/2026-09-17-ipad-inspector-source-consolidation.md`、`docs/testing/reports/2026-09-17-ipad-inspector-source-consolidation.md`。
+- **提交**：`81e03ab`、`4cd5267`、`3148ea1`、`2078907`；未 push、merge、rebase 或改寫 `origin/main`。
 - **執行邊界**：本計畫不加入 iPhone shell、不改 Mac workspace、不改 rendering／XMP／sidecar／undo；Phase 1 SharedInspectorContent、Phase 2 universal iOS shell、Phase 3 iPhone editor 仍各自需要獨立 plan。
-- **下一步**：使用者選擇執行方式後，依此 plan 逐任務執行；完成前不得宣稱 Phase 0 已整併或可供手機測試。
+- **驗證**：`swift test` 2,349 executed、10 skipped、0 failures；根套件 strict-concurrency build PASS；unsigned generic iOS Simulator Xcode build PASS；focused Inspector suite 162/162 PASS。
+- **下一步**：另立 Phase 1 `SharedInspectorContent` implementation plan；實體 iPad 視覺／手勢、VoiceOver、Dynamic Type 與 iPhone 仍不得由本輪結果代替。
 
 ## 跨裝置 Workspace 與 iPhone 行動編輯器設計（2026-09-17, Codex）
 
-- **狀態**：`SPEC ONLY`。使用者已確認採用 iPhone「行動編輯器」方案，而非完整桌面版縮小或純 Companion；本輪不修改產品程式碼、測試、Xcode target 或 bundle 設定。
+- **狀態**：`APPROVED; PHASE 0 COMPLETE`。使用者已確認採用 iPhone「行動編輯器」方案，而非完整桌面版縮小或純 Companion；本輪先完成 Phase 0 iPad 來源整併，未加入 iPhone UI。
 - **分支**：`codex/universal-mobile-workspace-spec`，從 `origin/main` `f694308723d8cae98db10dd4416d66f72ffb58a2` 建立；唯一寫入者為 Codex。
 - **規格**：`docs/superpowers/specs/2026-09-17-cross-device-workspace-and-iphone-editor-design.md`。Mac 保留桌面工作站殼層，iPad 保留依可用寬度切換的單一 Inspector，iPhone 使用全螢幕畫布、底部功能入口與單一工具工作區。
 - **架構決定**：iPhone 與 iPad 使用同一個 Universal iOS App、共用服務與資料層；加入手機前先消除 iPad `PadInspectorHost`／`PadToolRail` 雙份來源，並將共享 Inspector 內容移入 `AdjustmentUI`。
 - **手機首版邊界**：Light／Color／Detail、Preset、初始 Geometry、Info、單張比較與輸出可編輯；既有 Local Adjustments 必須渲染並完整保存，但首版僅顯示唯讀摘要；批次與完整遮罩編輯延後。
-- **驗證狀態**：規格 placeholder、模糊分支與範圍自我檢查 PASS；引用檔案存在、尾端空白與隱私掃描 PASS；`git diff --check` 在 stage 後執行。產品 build、測試、模擬器與真機均為 `NOT RUN`，因本輪為設計文件工作。
-- **下一步**：等待使用者審閱規格；確認後先為 Phase 0「iPad Inspector 來源整併」撰寫獨立 implementation plan，不直接開始手機 UI 實作。
+- **驗證狀態**：規格 placeholder、模糊分支與範圍自我檢查 PASS；引用檔案存在、尾端空白與隱私掃描 PASS。產品實作驗證不在規格文件本身重複記錄，已由同分支的 Phase 0 回歸報告記錄；iPad 真機與 iPhone work 仍為 `NOT RUN`。
+- **下一步**：依 Phase 0 回歸報告另立 Phase 1 `SharedInspectorContent` implementation plan，不直接把 iPhone UI 混入本輪提交。
 
 ## 跨代理共用 Git 基線（2026-09-16, Codex）
 
