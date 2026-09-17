@@ -132,8 +132,6 @@ struct PadLibraryView: View {
             return false
         case .persistent:
             return true
-        case .persistentWithDetails:
-            return true
         }
     }
 

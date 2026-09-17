@@ -9,12 +9,8 @@ import XCTest
 /// SwiftUI dependency, so every case here is a plain value comparison —
 /// no view hierarchy, no live device, no rotation simulation needed.
 ///
-/// Also carries the `PadWorkspaceMode` undo-invariant tests (see below,
-/// after the layout-policy cases) in this same class — deliberately, so
-/// `swift test --filter 'PadEditorLayoutPolicyTests|EditorSessionEditingTests'`
-/// (the plan's own required verification command) actually exercises
-/// them, rather than them living under a differently-named class that
-/// filter would silently miss.
+/// EditorSession undo invariants remain covered by the dedicated
+/// `EditorSessionEditingTests` suite; this class owns only layout policy.
 @MainActor
 final class PadEditorLayoutPolicyTests: XCTestCase {
 
@@ -54,7 +50,7 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         )
     }
 
-    func testCompactInspectorMovesWithoutChangingWorkspaceMode() throws {
+    func testCompactInspectorMovesWithoutChangingDocumentState() throws {
         let source = try Self.padEditorViewSource()
         XCTAssertFalse(source.contains("isDrawerDismissedByUser"))
         XCTAssertFalse(source.contains("moveDrawerToFocus(with:"))
@@ -62,16 +58,16 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("inspectorPanelDragHandle"), "the compact Inspector should move through its own header")
         XCTAssertTrue(source.contains("DragGesture(minimumDistance: 8)"))
         XCTAssertTrue(source.contains(#"L10n.t("Drag to move this panel.")"#), "the Inspector must expose the drag affordance in visible or accessibility text")
-        XCTAssertFalse(source.contains("workspaceState.workspaceMode = .focus"), "moving the Inspector must not enter a second workspace mode")
+        XCTAssertTrue(source.contains("workspaceState.floatingPanelOffset"), "moving the Inspector must update only its document-scoped position")
         XCTAssertFalse(source.contains(".interactiveDismissDisabled(true)"))
     }
 
     func testCompactDomainBarKeepsInactiveLabelsReadable() throws {
-        let source = try Self.padEditorViewSource()
+        let source = try Self.padToolRailSource()
 
         XCTAssertTrue(source.contains("Text(L10n.t(item.labelKey))"))
         XCTAssertTrue(
-            source.contains("isSelected ? Color.accentColor : Color.primary"),
+            source.contains("isSelected ? Color.accentColor : Color.secondary"),
             "inactive domain labels must remain readable on the dark Inspector surface"
         )
     }
@@ -165,13 +161,11 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         let compact = PadWorkspaceLayoutPolicy.layout(forWidth: 600)
         XCTAssertEqual(compact.librarySidebar, .overlay)
         XCTAssertEqual(compact.editorInspector, .bottomDrawer)
-        XCTAssertFalse(compact.showsDetailsColumn)
         XCTAssertFalse(compact.showsFilmstrip)
 
         let standard = PadWorkspaceLayoutPolicy.layout(forWidth: 900)
         XCTAssertEqual(standard.librarySidebar, .overlay)
         XCTAssertEqual(standard.editorInspector, .bottomDrawer)
-        XCTAssertFalse(standard.showsDetailsColumn)
         XCTAssertFalse(standard.showsFilmstrip)
 
         let expanded = PadWorkspaceLayoutPolicy.layout(forWidth: 1_180)
@@ -180,8 +174,7 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertTrue(expanded.showsFilmstrip)
 
         let wide = PadWorkspaceLayoutPolicy.layout(forWidth: 1_400)
-        XCTAssertEqual(wide.librarySidebar, .persistentWithDetails)
-        XCTAssertTrue(wide.showsDetailsColumn)
+        XCTAssertEqual(wide.librarySidebar, .persistent)
         XCTAssertTrue(wide.showsFilmstrip)
     }
 
@@ -193,16 +186,12 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
     func testWorkspaceStateContainsOnlyPresentationPreferences() {
         let state = PadWorkspaceState(
             isSidebarVisible: false,
-            inspectorTab: .info,
-            isFilmstripVisible: true,
-            usesLeftHandedLayout: true
+            isFilmstripVisible: true
         )
 
         XCTAssertFalse(state.isSidebarVisible)
-        XCTAssertEqual(state.inspectorTab, .info)
         XCTAssertTrue(state.isFilmstripVisible)
-        XCTAssertTrue(state.usesLeftHandedLayout)
-        XCTAssertEqual(PadWorkspaceState.initial.inspectorTab, .adjustments)
+        XCTAssertTrue(PadWorkspaceState.initial.isSidebarVisible)
     }
 
     // MARK: - The 1,100pt width boundary, in landscape
@@ -359,135 +348,6 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(PadEditorLayoutPolicy.presentation(forWidth: 0, height: 0), .bottomDrawer)
     }
 
-    // MARK: - PadWorkspaceMode: switching never touches EditorSession
-    //
-    // `PadWorkspaceMode.work`/`.focus` is pure presentation state — the
-    // type has no import of, or any other coupling to, `EditorCore` at
-    // all (see its declaration), so switching between its two cases can
-    // never call an editor API by construction, not merely by convention.
-    // These cases prove the invariant that matters on the `EditorSession`
-    // side of that boundary: reassigning a `PadWorkspaceMode` value back
-    // and forth leaves a real session's undo stack and adjustments
-    // completely untouched, and — immediately afterward, using the exact
-    // same session — that a single real edit still produces exactly one
-    // undo entry, exactly as `EditorSessionEditingTests
-    // .testOneAdjustmentCreatesOneUndoEntry` establishes independently.
-
-    private func makeOpenedEditor() -> EditorSession {
-        let editor = EditorSession()
-        let photo = PhotoAsset(
-            id: PhotoID(),
-            libraryID: LibraryID(),
-            relativePath: "fixture.ARW",
-            fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "fixture"),
-            status: .ready
-        )
-        editor.open(
-            photo: photo,
-            sourceURL: URL(fileURLWithPath: "/fixture.ARW"),
-            adjustments: .neutral,
-            isReadOnly: false
-        )
-        return editor
-    }
-
-    func testSwitchingWorkspaceModeNeverChangesUndoStateAndASingleAdjustmentStillProducesExactlyOneUndo() {
-        let editor = makeOpenedEditor()
-        // A prior edit, so `canUndo`/`adjustments` starts non-trivial —
-        // proving the mode switch leaves an *already dirty* session alone
-        // is a stronger claim than only proving it on a fresh, neutral one.
-        editor.setAdjustment(.contrast, to: 8)
-        let canUndoBeforeSwitch = editor.canUndo
-        let canRedoBeforeSwitch = editor.canRedo
-        let adjustmentsBeforeSwitch = editor.adjustments
-
-        // The switch itself: work -> focus -> work. Nothing here is an
-        // EditorSession call -- `PadWorkspaceMode` cannot reach `editor`
-        // even if this test tried to make it.
-        var mode = PadWorkspaceMode.work
-        mode = .focus
-        mode = .work
-        XCTAssertEqual(mode, .work)
-
-        XCTAssertEqual(editor.canUndo, canUndoBeforeSwitch, "switching workspace mode must never change undo availability")
-        XCTAssertEqual(editor.canRedo, canRedoBeforeSwitch, "switching workspace mode must never change redo availability")
-        XCTAssertEqual(editor.adjustments, adjustmentsBeforeSwitch, "switching workspace mode must never change the current adjustments")
-
-        // The same session, immediately after: one real edit still
-        // produces exactly one additional undo step -- a single `undo()`
-        // call fully reverts it back to the pre-adjustment state.
-        editor.setAdjustment(.exposure, to: 1.25)
-        XCTAssertEqual(editor.adjustments.exposure, 1.25)
-        XCTAssertTrue(editor.canUndo)
-
-        editor.undo()
-        XCTAssertEqual(editor.adjustments, adjustmentsBeforeSwitch, "one undo must fully revert the one edit made after switching modes")
-        XCTAssertEqual(editor.canUndo, canUndoBeforeSwitch)
-    }
-
-    func testWorkspaceModeSwitchingDuringAnActiveFocusSessionStillLeavesUndoStateAlone() {
-        let editor = makeOpenedEditor()
-        editor.setAdjustment(.exposure, to: 0.5)
-        editor.setAdjustment(.contrast, to: 10)
-        let canUndoBefore = editor.canUndo
-        let adjustmentsBefore = editor.adjustments
-
-        // Several toggles in a row, as a user flipping back and forth
-        // between work and focus repeatedly might do.
-        var mode = PadWorkspaceMode.work
-        for _ in 0..<5 {
-            mode = mode == .work ? .focus : .work
-        }
-
-        XCTAssertEqual(editor.canUndo, canUndoBefore)
-        XCTAssertEqual(editor.adjustments, adjustmentsBefore)
-        _ = mode
-    }
-
-    // MARK: - PadBottomDrawerPolicy (Codex round-2 review)
-    //
-    // The bottom drawer's real `@State` binding is driven entirely by
-    // this reducer -- these cases are exactly the presentation-state
-    // matrix `PadEditorView` needs to get right: which combinations of
-    // mode and inspector presentation must show the drawer, and which
-    // must not.
-
-    func testDrawerIsPresentedInWorkModeWithBottomDrawerPresentation() {
-        XCTAssertEqual(
-            PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .bottomDrawer),
-            .presented
-        )
-    }
-
-    func testDrawerIsDismissedInWorkModeWithTrailingDockPresentation() {
-        XCTAssertEqual(
-            PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .trailingDock),
-            .dismissed
-        )
-    }
-
-    func testDrawerIsDismissedInFocusModeRegardlessOfInspectorPresentation() {
-        XCTAssertEqual(
-            PadBottomDrawerPolicy.presentation(mode: .focus, inspectorPresentation: .bottomDrawer),
-            .dismissed,
-            "focus mode must reliably close the drawer even on a narrow window where the drawer would otherwise apply"
-        )
-        XCTAssertEqual(
-            PadBottomDrawerPolicy.presentation(mode: .focus, inspectorPresentation: .trailingDock),
-            .dismissed
-        )
-    }
-
-    func testDrawerReopensReturningToWorkModeWhileStillNarrow() {
-        // focus -> work, inspector presentation unchanged (still narrow):
-        // must come back to `.presented`, not stay dismissed just because
-        // it was dismissed a moment ago.
-        let whileFocused = PadBottomDrawerPolicy.presentation(mode: .focus, inspectorPresentation: .bottomDrawer)
-        XCTAssertEqual(whileFocused, .dismissed)
-        let afterReturningToWork = PadBottomDrawerPolicy.presentation(mode: .work, inspectorPresentation: .bottomDrawer)
-        XCTAssertEqual(afterReturningToWork, .presented)
-    }
-
     private static let repositoryRootURL: URL = {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // PadEditorLayoutPolicyTests.swift
@@ -499,6 +359,14 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         try String(
             contentsOf: repositoryRootURL
                 .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"),
+            encoding: .utf8
+        )
+    }
+
+    private static func padToolRailSource() throws -> String {
+        try String(
+            contentsOf: repositoryRootURL
+                .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadToolRail.swift"),
             encoding: .utf8
         )
     }
@@ -652,7 +520,6 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
 
     func testStateResetsToInitialWhenTheOpenDocumentChanges() {
         let dirty = PadDocumentScopedWorkspaceState(
-            workspaceMode: .focus,
             canvasScale: 3.5,
             floatingPanelOffset: CGSize(width: 120, height: -40)
         )
@@ -670,14 +537,14 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
     }
 
     func testStateIsUntouchedWhenClosingToNoDocument() {
-        let dirty = PadDocumentScopedWorkspaceState(workspaceMode: .focus, canvasScale: 2, floatingPanelOffset: CGSize(width: 10, height: 10))
+        let dirty = PadDocumentScopedWorkspaceState(canvasScale: 2, floatingPanelOffset: CGSize(width: 10, height: 10))
         let id = UUID()
         let result = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(dirty, previousDocumentID: id, currentDocumentID: nil)
         XCTAssertEqual(result, dirty, "closing tears the view down on its own -- this policy must not also reset state that's about to be discarded anyway")
     }
 
     func testStateIsUntouchedWhenTheDocumentIDIsUnchanged() {
-        let dirty = PadDocumentScopedWorkspaceState(workspaceMode: .focus, canvasScale: 2.2, floatingPanelOffset: CGSize(width: 5, height: 5))
+        let dirty = PadDocumentScopedWorkspaceState(canvasScale: 2.2, floatingPanelOffset: CGSize(width: 5, height: 5))
         let id = UUID()
         let result = PadDocumentScopedWorkspacePolicy.resettingIfNeeded(dirty, previousDocumentID: id, currentDocumentID: id)
         XCTAssertEqual(result, dirty)

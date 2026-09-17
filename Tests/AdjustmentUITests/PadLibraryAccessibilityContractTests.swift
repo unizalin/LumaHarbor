@@ -483,7 +483,6 @@ final class PadLibraryAccessibilityContractTests: XCTestCase {
         guard viewSource.contains(".sheet(isPresented: $isSidebarPresented)"),
               viewSource.contains("private var sidebarSheet"),
               viewSource.contains("case .persistent:"),
-              viewSource.contains("case .persistentWithDetails:"),
               viewSource.contains("showsOperationOverlay: true"),
               viewSource.contains("showsOperationOverlay: false") else {
             return XCTFail("PadLibraryView must wire showsOperationOverlay differently for overlay and persistent layouts")

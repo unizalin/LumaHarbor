@@ -52,4 +52,30 @@ final class PadInspectorSourceConsolidationContractTests: XCTestCase {
             XCTAssertTrue(project.contains("\(fileName) in Sources"), "missing PBXSourcesBuildPhase entry for \(fileName)")
         }
     }
+
+    func testDeadWorkspacePolicySymbolsAreAbsentFromActiveSources() throws {
+        let activeSourcePaths = [
+            "Sources/AdjustmentUI/PadEditorLayoutPolicy.swift",
+            "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift",
+            "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadLibraryView.swift",
+            "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadRootView.swift"
+        ]
+        let combinedSource = try activeSourcePaths
+            .map(source)
+            .joined(separator: "\n")
+
+        for symbol in [
+            "PadWorkspaceMode",
+            "PadWorkspaceInspectorTab",
+            "showsDetailsColumn",
+            "persistentWithDetails",
+            "usesLeftHandedLayout",
+            "inspectorTab",
+            "PadBottomDrawerPolicy",
+            "PadDrawerPresentation",
+            "case .floating"
+        ] {
+            XCTAssertFalse(combinedSource.contains(symbol), "inactive workspace policy symbol remains: \(symbol)")
+        }
+    }
 }

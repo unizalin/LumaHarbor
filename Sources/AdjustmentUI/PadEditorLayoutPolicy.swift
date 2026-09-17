@@ -9,27 +9,6 @@ public enum PadInspectorPresentation: String, Equatable, Sendable {
     /// A bottom sheet the user can drag between a collapsed peek, medium,
     /// and large detent, over the canvas.
     case bottomDrawer
-    /// A detached, draggable floating panel — activated in focus mode so the
-    /// canvas can fill the available space while the inspector stays reachable.
-    case floating
-}
-
-/// Which of the two adaptive workspace layouts `PadEditorView` currently
-/// shows.
-///
-/// Deliberately has no relationship to `EditorSession`, `AdjustmentDefinition`,
-/// or any other editing state: switching between these two cases is pure
-/// presentation state (which container the same controls render inside),
-/// never a reason to call an adjustment, undo/redo, open, or close API. A
-/// view holding this as `@State` can toggle it freely without touching the
-/// photo, its edits, its zoom, or its undo stack at all.
-public enum PadWorkspaceMode: Equatable, Sendable {
-    /// The default: adjustments live in a docked panel or drawer
-    /// alongside/below the canvas.
-    case work
-    /// The canvas fills the available space; adjustments become a
-    /// draggable floating panel over it.
-    case focus
 }
 
 /// Which navigation surface the library can afford at a given window width.
@@ -38,7 +17,6 @@ public enum PadWorkspaceMode: Equatable, Sendable {
 public enum PadLibrarySidebarPresentation: Equatable, Sendable {
     case overlay
     case persistent
-    case persistentWithDetails
 }
 
 /// Width-driven layout profiles shared by the iPad library and editor.
@@ -57,56 +35,38 @@ public struct PadWorkspaceLayout: Equatable, Sendable {
     public let profile: PadWorkspaceWidthProfile
     public let librarySidebar: PadLibrarySidebarPresentation
     public let editorInspector: PadInspectorPresentation
-    public let showsDetailsColumn: Bool
     public let showsFilmstrip: Bool
 
     public init(
         profile: PadWorkspaceWidthProfile,
         librarySidebar: PadLibrarySidebarPresentation,
         editorInspector: PadInspectorPresentation,
-        showsDetailsColumn: Bool,
         showsFilmstrip: Bool
     ) {
         self.profile = profile
         self.librarySidebar = librarySidebar
         self.editorInspector = editorInspector
-        self.showsDetailsColumn = showsDetailsColumn
         self.showsFilmstrip = showsFilmstrip
     }
-}
-
-/// Inspector sections are presentation state, not photo-editing state.
-public enum PadWorkspaceInspectorTab: Equatable, Sendable {
-    case adjustments
-    case presets
-    case info
 }
 
 /// Scene-scoped iPad workspace preferences. None of these values belong in a
 /// RAW sidecar or an `EditorSession` undo stack.
 public struct PadWorkspaceState: Equatable, Sendable {
     public var isSidebarVisible: Bool
-    public var inspectorTab: PadWorkspaceInspectorTab
     public var isFilmstripVisible: Bool
-    public var usesLeftHandedLayout: Bool
 
     public init(
         isSidebarVisible: Bool,
-        inspectorTab: PadWorkspaceInspectorTab,
-        isFilmstripVisible: Bool,
-        usesLeftHandedLayout: Bool
+        isFilmstripVisible: Bool
     ) {
         self.isSidebarVisible = isSidebarVisible
-        self.inspectorTab = inspectorTab
         self.isFilmstripVisible = isFilmstripVisible
-        self.usesLeftHandedLayout = usesLeftHandedLayout
     }
 
     public static let initial = PadWorkspaceState(
         isSidebarVisible: true,
-        inspectorTab: .adjustments,
-        isFilmstripVisible: true,
-        usesLeftHandedLayout: false
+        isFilmstripVisible: true
     )
 }
 
@@ -137,7 +97,6 @@ public enum PadWorkspaceLayoutPolicy {
                 profile: .compact,
                 librarySidebar: .overlay,
                 editorInspector: .bottomDrawer,
-                showsDetailsColumn: false,
                 showsFilmstrip: false
             )
         case .standard:
@@ -145,7 +104,6 @@ public enum PadWorkspaceLayoutPolicy {
                 profile: .standard,
                 librarySidebar: .overlay,
                 editorInspector: .bottomDrawer,
-                showsDetailsColumn: false,
                 showsFilmstrip: false
             )
         case .expanded:
@@ -153,15 +111,13 @@ public enum PadWorkspaceLayoutPolicy {
                 profile: .expanded,
                 librarySidebar: .persistent,
                 editorInspector: .trailingDock,
-                showsDetailsColumn: false,
                 showsFilmstrip: true
             )
         case .wide:
             return PadWorkspaceLayout(
                 profile: .wide,
-                librarySidebar: .persistentWithDetails,
+                librarySidebar: .persistent,
                 editorInspector: .trailingDock,
-                showsDetailsColumn: true,
                 showsFilmstrip: true
             )
         }
@@ -323,41 +279,6 @@ public enum PadEditorLayoutPolicy {
     }
 }
 
-// MARK: - Bottom drawer presentation state
-
-/// Whether the work-mode bottom drawer sheet should currently be shown.
-///
-/// Kept as an explicit, named state rather than a bare `Bool` so a
-/// `PadEditorView` call site reads as "what should the drawer be doing"
-/// rather than an unlabeled boolean — and so `PadBottomDrawerPolicy`'s
-/// signature can't be satisfied by accidentally passing the wrong flag.
-public enum PadDrawerPresentation: Equatable, Sendable {
-    case presented
-    case dismissed
-}
-
-/// Decides whether the bottom drawer sheet should be presented, from the
-/// same two facts `PadEditorView` already has on hand every time either
-/// one changes: the current workspace mode and the current inspector
-/// presentation (`PadEditorLayoutPolicy`'s own output).
-///
-/// This is the reducer the drawer's real, toggleable `@State` binding is
-/// driven from — never a `.sheet(isPresented: .constant(true))`, which
-/// can't be told to close (work → focus), can't reliably reopen once
-/// dismissed (focus → work while still narrow), and stays attached to
-/// whichever `switch` branch it was written inside, so a presentation
-/// change that swaps branches (bottomDrawer → trailingDock) tears the
-/// sheet's view identity down mid-presentation instead of dismissing it
-/// through SwiftUI's own transition.
-public enum PadBottomDrawerPolicy {
-    public static func presentation(
-        mode: PadWorkspaceMode,
-        inspectorPresentation: PadInspectorPresentation
-    ) -> PadDrawerPresentation {
-        mode == .work && inspectorPresentation == .bottomDrawer ? .presented : .dismissed
-    }
-}
-
 /// Visual constants for the iPad bottom drawer. Keeping these values outside
 /// the view makes the portrait presentation easy to verify without a live
 /// sheet and prevents the surface treatment from drifting between hosts.
@@ -460,19 +381,17 @@ public enum PadFloatingPanelLayout {
 /// (adjustments, undo/redo, autosave) lives in `EditorSession` and is
 /// untouched by anything here.
 public struct PadDocumentScopedWorkspaceState: Equatable, Sendable {
-    public var workspaceMode: PadWorkspaceMode
     public var canvasScale: CGFloat
     public var floatingPanelOffset: CGSize
 
-    public init(workspaceMode: PadWorkspaceMode, canvasScale: CGFloat, floatingPanelOffset: CGSize) {
-        self.workspaceMode = workspaceMode
+    public init(canvasScale: CGFloat, floatingPanelOffset: CGSize) {
         self.canvasScale = canvasScale
         self.floatingPanelOffset = floatingPanelOffset
     }
 
     /// What every one of these three should be for a document that was
     /// just opened, or that this state is being reset for.
-    public static let initial = PadDocumentScopedWorkspaceState(workspaceMode: .work, canvasScale: 1, floatingPanelOffset: .zero)
+    public static let initial = PadDocumentScopedWorkspaceState(canvasScale: 1, floatingPanelOffset: .zero)
 }
 
 /// Decides whether `PadDocumentScopedWorkspaceState` must reset to

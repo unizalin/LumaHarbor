@@ -145,7 +145,7 @@ final class PadLibraryCompositionContractTests: XCTestCase {
             "PadLibraryView must derive its layout from the shared available-width policy"
         )
         XCTAssertTrue(
-            source.contains("case .overlay:") && source.contains("case .persistent:") && source.contains("case .persistentWithDetails:"),
+            source.contains("case .overlay:") && source.contains("case .persistent:"),
             "PadLibraryView must handle overlay and persistent sidebar profiles explicitly"
         )
         XCTAssertFalse(

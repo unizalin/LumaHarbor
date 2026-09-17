@@ -12,8 +12,8 @@ struct PadRootView: View {
     @State private var isRelinking = false
     @State private var isShowingSettings = false
 
-    /// Scene-scoped presentation preferences (sidebar visibility, inspector
-    /// tab, filmstrip, handedness) -- never an adjustment, undo entry, or
+    /// Scene-scoped presentation preferences (sidebar visibility and
+    /// filmstrip) -- never an adjustment, undo entry, or
     /// sidecar write. Held here, at the top of the scene, rather than inside
     /// `PadLibraryView`/`PadEditorView` themselves, so it survives the route
     /// switch between library and editor: `content` below recreates whichever

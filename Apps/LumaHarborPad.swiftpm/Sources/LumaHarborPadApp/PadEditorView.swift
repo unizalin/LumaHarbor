@@ -19,7 +19,7 @@ import UniformTypeIdentifiers
 /// where the same controls render, never what document is open or what state
 /// it holds.
 ///
-/// `workspaceState` (mode, canvas zoom, floating-panel offset) is
+/// `workspaceState` (canvas zoom, floating-panel offset) is
 /// deliberately scoped to *one specific document*, not to this view's own
 /// lifetime: `PadEditorView` is not recreated when `model.document` changes
 /// from one document to another (`PadRootView` keeps showing the same
@@ -37,10 +37,7 @@ struct PadEditorView: View {
     @ObservedObject private var presetLibrary: PadPresetLibrary
     @Binding private var sceneWorkspaceState: PadWorkspaceState
 
-    /// Document-scoped presentation preferences and floating-panel position.
-    /// The Inspector never changes `workspaceMode`; the existing field stays
-    /// in the shared state model for compatibility with other workspace
-    /// consumers.
+    /// Document-scoped canvas scale and floating-panel position.
     @State private var workspaceState = PadDocumentScopedWorkspaceState.initial
 
     /// Owns all inspector presentation state (active domain, Adjust submode,
@@ -473,7 +470,7 @@ struct PadEditorView: View {
                         trailingDockPanel(width: plan.inspectorWidth ?? PadEditorLayoutPolicy.minimumInspectorWidth)
                     }
                 }
-            case .bottomDrawer, .floating:
+            case .bottomDrawer:
                 canvas(for: size)
                 if !isInspectorMinimized {
                     movableInspectorPanel(for: size)

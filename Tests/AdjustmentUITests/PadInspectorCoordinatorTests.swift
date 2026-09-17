@@ -141,32 +141,27 @@ final class PadInspectorCoordinatorTests: XCTestCase {
 
     // MARK: - Inspector presentation contract
 
-    func testAllThreePresentationCasesExist() {
+    func testAllTwoPresentationCasesExist() {
         // Compile-time exhaustive switch — adding or removing a case without updating
         // this switch will produce a compiler error, catching the contract break early.
         func exhaustive(_ p: PadInspectorPresentation) {
             switch p {
             case .trailingDock: break
             case .bottomDrawer: break
-            case .floating:     break
             }
         }
         exhaustive(.trailingDock)
         exhaustive(.bottomDrawer)
-        exhaustive(.floating)
     }
 
     func testPresentationRawValues() {
         XCTAssertEqual(PadInspectorPresentation.trailingDock.rawValue, "trailingDock")
         XCTAssertEqual(PadInspectorPresentation.bottomDrawer.rawValue, "bottomDrawer")
-        XCTAssertEqual(PadInspectorPresentation.floating.rawValue, "floating")
     }
 
     func testPresentationEquality() {
         XCTAssertEqual(PadInspectorPresentation.trailingDock, .trailingDock)
         XCTAssertNotEqual(PadInspectorPresentation.trailingDock, .bottomDrawer)
-        XCTAssertNotEqual(PadInspectorPresentation.trailingDock, .floating)
-        XCTAssertNotEqual(PadInspectorPresentation.bottomDrawer, .floating)
     }
 
     // MARK: - Non-overlap invariant
