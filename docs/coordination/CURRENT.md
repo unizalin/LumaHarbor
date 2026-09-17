@@ -4,6 +4,14 @@ Updated: 2026-09-17
 
 Updated by: Codex（跨裝置 Workspace 與 iPhone 行動編輯器設計；產品驗證基線不變）
 
+## Phase 0 iPad Inspector 來源整併 implementation plan（2026-09-17, Codex）
+
+- **狀態**：`PLAN READY`。已依核准的跨裝置設計完成 Phase 0 獨立執行計畫；尚未修改產品程式碼、測試或 Xcode target。
+- **分支**：`codex/universal-mobile-workspace-spec`，基於 `origin/main` `f694308723d8cae98db10dd4416d66f72ffb58a2`；本 worktree 唯一寫入者為 Codex。
+- **計畫**：`docs/superpowers/plans/2026-09-17-ipad-inspector-source-consolidation.md`。涵蓋測試先行、PadInspectorHost／PadToolRail canonical source、死狀態清理、PadEditorView 拆分、SwiftPM／Xcode 雙建置與回歸報告。
+- **執行邊界**：本計畫不加入 iPhone shell、不改 Mac workspace、不改 rendering／XMP／sidecar／undo；Phase 1 SharedInspectorContent、Phase 2 universal iOS shell、Phase 3 iPhone editor 仍各自需要獨立 plan。
+- **下一步**：使用者選擇執行方式後，依此 plan 逐任務執行；完成前不得宣稱 Phase 0 已整併或可供手機測試。
+
 ## 跨裝置 Workspace 與 iPhone 行動編輯器設計（2026-09-17, Codex）
 
 - **狀態**：`SPEC ONLY`。使用者已確認採用 iPhone「行動編輯器」方案，而非完整桌面版縮小或純 Companion；本輪不修改產品程式碼、測試、Xcode target 或 bundle 設定。
