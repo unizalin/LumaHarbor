@@ -24,10 +24,21 @@ final class CrossDeviceParityVerificationTests: XCTestCase {
     }
 
     private static func padEditorSource() throws -> String {
-        try String(
-            contentsOf: Self.repositoryRootURL.appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"),
-            encoding: .utf8
-        )
+        let directory = Self.repositoryRootURL
+            .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp", isDirectory: true)
+        return try [
+            "PadEditorView.swift",
+            "PadEditorToolbar.swift",
+            "PadEditorCanvasView.swift",
+            "PadEditorInspectorContainer.swift",
+            "PadEditorFilmstrip.swift",
+            "PadEditorPresetViews.swift",
+            "PadEditorInfoViews.swift",
+            "PadInspectorHost.swift",
+            "PadToolRail.swift"
+        ].map { filename in
+            try String(contentsOf: directory.appendingPathComponent(filename), encoding: .utf8)
+        }.joined(separator: "\n")
     }
 
     private static func padInspectorHostSource() throws -> String {
@@ -102,8 +113,6 @@ final class CrossDeviceParityVerificationTests: XCTestCase {
         XCTAssertTrue(macSource.contains("SaveStatePanel(state:"))
         XCTAssertTrue(padSource.contains("PadSaveStateBlock(saveState:"))
         XCTAssertTrue(padSource.contains("PadMetadataBlock("))
-        XCTAssertTrue(padHostSource.contains("PadStandaloneSaveStateBlock(saveState:"))
-        XCTAssertTrue(padHostSource.contains("PadStandaloneMetadataBlock(snapshot:"))
         XCTAssertTrue(macSource.contains("Label(tab.title, systemImage: tab.symbol)"))
         for source in [padSource, padHostSource] {
             XCTAssertTrue(source.contains("Image(systemName: item.symbol)"), "iPad domain tabs must keep a visible icon")

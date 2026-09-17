@@ -39,9 +39,9 @@ final class CurveHistogramContractTests: XCTestCase {
 
     func testPadInfoDomainUsesTheSharedHistogramInsteadOfAPlaceholder() throws {
         let host = try source("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadInspectorHost.swift")
-        let inlinedHost = try source("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+        let inlinedHost = try source("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorInfoViews.swift")
 
-        XCTAssertTrue(host.contains("HistogramPanel(histogram: editor.histogram)"))
+        XCTAssertTrue(host.contains("PadHistogramBlock(histogram: editor.histogram)"))
         XCTAssertFalse(host.contains("EXIF metadata and histogram are not yet wired."))
         XCTAssertTrue(inlinedHost.contains("HistogramPanel(histogram: histogram)"))
     }

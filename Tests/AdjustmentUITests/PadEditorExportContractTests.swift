@@ -16,6 +16,15 @@ final class PadEditorExportContractTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
+    private static func loadEditorCompositionSource() throws -> String {
+        try [
+            "PadEditorView.swift",
+            "PadEditorToolbar.swift",
+            "PadEditorCanvasView.swift",
+            "PadEditorFilmstrip.swift"
+        ].map { try loadSource($0) }.joined(separator: "\n")
+    }
+
     func testPadServicesOwnsTheFullResolutionExporter() throws {
         let source = try Self.loadSource("PadAppServices.swift")
 
@@ -84,7 +93,7 @@ final class PadEditorExportContractTests: XCTestCase {
     }
 
     func testEditorWiresCompareModesToCanvasAndToolbar() throws {
-        let source = try Self.loadSource("PadEditorView.swift")
+        let source = try Self.loadEditorCompositionSource()
         XCTAssertTrue(source.contains("setCompareMode(.single)"))
         XCTAssertTrue(source.contains("setCompareMode(.sideBySide)"))
         XCTAssertTrue(source.contains("setCompareMode(.verticalWipe)"))
@@ -93,7 +102,7 @@ final class PadEditorExportContractTests: XCTestCase {
     }
 
     func testEditorWiresLibraryFilmstripWithoutDuplicatingPhotoData() throws {
-        let source = try Self.loadSource("PadEditorView.swift")
+        let source = try Self.loadEditorCompositionSource()
         XCTAssertTrue(source.contains("PadEditorFilmstrip"))
         XCTAssertTrue(source.contains("library.photos"))
         XCTAssertTrue(source.contains("library.openAsset(for: photo)"))

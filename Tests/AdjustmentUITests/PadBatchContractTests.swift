@@ -53,7 +53,7 @@ final class PadBatchContractTests: XCTestCase {
     }
 
     func testInfoDomainExposesDurableCurationControls() throws {
-        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorInfoViews.swift")
         XCTAssertTrue(source.contains("setRating"))
         XCTAssertTrue(source.contains("setFlag"))
         XCTAssertTrue(source.contains("setKeywords"))

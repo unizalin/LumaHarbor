@@ -31,6 +31,14 @@
 		120000000000000000000012 /* PadBatchAdjustmentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000012 /* PadBatchAdjustmentCoordinator.swift */; };
 		120000000000000000000013 /* PadToolRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000013 /* PadToolRail.swift */; };
 		120000000000000000000014 /* PadInspectorHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000014 /* PadInspectorHost.swift */; };
+		120000000000000000000015 /* PadEditorToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000015 /* PadEditorToolbar.swift */; };
+		120000000000000000000016 /* PadEditorCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000016 /* PadEditorCanvasView.swift */; };
+		120000000000000000000017 /* PadEditorFilmstrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000017 /* PadEditorFilmstrip.swift */; };
+		120000000000000000000018 /* PadEditorInspectorContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000018 /* PadEditorInspectorContainer.swift */; };
+		120000000000000000000019 /* PadEditorExportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 121000000000000000000019 /* PadEditorExportViews.swift */; };
+		12000000000000000000001A /* PadEditorPresetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000001A /* PadEditorPresetViews.swift */; };
+		12000000000000000000001B /* PadEditorInfoViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000001B /* PadEditorInfoViews.swift */; };
+		12000000000000000000001C /* PadCropOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12100000000000000000001C /* PadCropOverlayView.swift */; };
 		120000000000000000000105 /* PresetCore in Frameworks */ = {isa = PBXBuildFile; productRef = 12A000000000000000000005 /* PresetCore */; };
 /* End PBXBuildFile section */
 
@@ -55,6 +63,14 @@
 		121000000000000000000012 /* PadBatchAdjustmentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadBatchAdjustmentCoordinator.swift; sourceTree = "<group>"; };
 		121000000000000000000013 /* PadToolRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadToolRail.swift; sourceTree = "<group>"; };
 		121000000000000000000014 /* PadInspectorHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadInspectorHost.swift; sourceTree = "<group>"; };
+		121000000000000000000015 /* PadEditorToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorToolbar.swift; sourceTree = "<group>"; };
+		121000000000000000000016 /* PadEditorCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorCanvasView.swift; sourceTree = "<group>"; };
+		121000000000000000000017 /* PadEditorFilmstrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorFilmstrip.swift; sourceTree = "<group>"; };
+		121000000000000000000018 /* PadEditorInspectorContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorInspectorContainer.swift; sourceTree = "<group>"; };
+		121000000000000000000019 /* PadEditorExportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorExportViews.swift; sourceTree = "<group>"; };
+		12100000000000000000001A /* PadEditorPresetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorPresetViews.swift; sourceTree = "<group>"; };
+		12100000000000000000001B /* PadEditorInfoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadEditorInfoViews.swift; sourceTree = "<group>"; };
+		12100000000000000000001C /* PadCropOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PadCropOverlayView.swift; sourceTree = "<group>"; };
 		121000000000000000000100 /* LumaHarborPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumaHarborPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -104,6 +120,14 @@
 				121000000000000000000012 /* PadBatchAdjustmentCoordinator.swift */,
 				121000000000000000000013 /* PadToolRail.swift */,
 				121000000000000000000014 /* PadInspectorHost.swift */,
+				121000000000000000000015 /* PadEditorToolbar.swift */,
+				121000000000000000000016 /* PadEditorCanvasView.swift */,
+				121000000000000000000017 /* PadEditorFilmstrip.swift */,
+				121000000000000000000018 /* PadEditorInspectorContainer.swift */,
+				121000000000000000000019 /* PadEditorExportViews.swift */,
+				12100000000000000000001A /* PadEditorPresetViews.swift */,
+				12100000000000000000001B /* PadEditorInfoViews.swift */,
+				12100000000000000000001C /* PadCropOverlayView.swift */,
 				12100000000000000000000E /* Assets.xcassets */,
 			);
 			path = LumaHarborPad.swiftpm/Sources/LumaHarborPadApp;
@@ -216,6 +240,14 @@
 				120000000000000000000012 /* PadBatchAdjustmentCoordinator.swift in Sources */,
 				120000000000000000000013 /* PadToolRail.swift in Sources */,
 				120000000000000000000014 /* PadInspectorHost.swift in Sources */,
+				120000000000000000000015 /* PadEditorToolbar.swift in Sources */,
+				120000000000000000000016 /* PadEditorCanvasView.swift in Sources */,
+				120000000000000000000017 /* PadEditorFilmstrip.swift in Sources */,
+				120000000000000000000018 /* PadEditorInspectorContainer.swift in Sources */,
+				120000000000000000000019 /* PadEditorExportViews.swift in Sources */,
+				12000000000000000000001A /* PadEditorPresetViews.swift in Sources */,
+				12000000000000000000001B /* PadEditorInfoViews.swift in Sources */,
+				12000000000000000000001C /* PadCropOverlayView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

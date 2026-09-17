@@ -229,7 +229,8 @@ final class PadLibraryCompositionContractTests: XCTestCase {
     /// decode-in-progress state keeps its own distinct, already-shipped
     /// `Decoding RAW…` copy rather than being folded into a generic spinner.
     func testPadEditorUsesSaveFailedCopyAndRawSafetyHint() throws {
-        let source = try String(contentsOf: Self.padAppSourceURL("PadEditorView.swift"), encoding: .utf8)
+        let source = try String(contentsOf: Self.padAppSourceURL("PadEditorInspectorContainer.swift"), encoding: .utf8)
+            + String(contentsOf: Self.padAppSourceURL("PadEditorCanvasView.swift"), encoding: .utf8)
 
         XCTAssertTrue(source.contains("L10n.t(\"Save failed\")"))
         XCTAssertFalse(source.contains("L10n.t(\"Not saved\")"))

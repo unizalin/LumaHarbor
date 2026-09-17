@@ -69,7 +69,7 @@ final class MaskOverlayTests: XCTestCase {
             encoding: .utf8
         )
         let padView = try String(
-            contentsOf: root.appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"),
+            contentsOf: root.appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorCanvasView.swift"),
             encoding: .utf8
         )
 

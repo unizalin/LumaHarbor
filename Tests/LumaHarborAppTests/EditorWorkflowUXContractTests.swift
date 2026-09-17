@@ -253,7 +253,7 @@ final class EditorWorkflowUXContractTests: XCTestCase {
     }
 
     func testPadCompareMenuUsesLocalizedVisibleModeNames() throws {
-        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorToolbar.swift")
 
         XCTAssertTrue(source.contains(#"Label(L10n.t("Compare Mode")"#))
         XCTAssertTrue(source.contains(#"L10n.t("Single View")"#))

@@ -28,19 +28,19 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         let source = try Self.padEditorViewSource()
         XCTAssertFalse(source.contains(".sheet(isPresented: $isDrawerPresented"))
         XCTAssertFalse(source.contains(".presentationDetents"))
-        XCTAssertTrue(source.contains("movableInspectorPanel(for: size)"))
-        XCTAssertTrue(source.contains(".frame(maxHeight: PadEditorLayoutPolicy.movableInspectorHeight(for: size))"))
+        XCTAssertTrue(source.contains("PadEditorInspectorContainer"))
+        XCTAssertTrue(source.contains(".frame(maxHeight: PadEditorLayoutPolicy.movableInspectorHeight(for: availableSize))"))
         XCTAssertTrue(source.contains("ScrollView"), "the compact Inspector must scroll inside its bounded overlay")
     }
 
     func testDockAndMovableInspectorShareOneContentComposition() throws {
         let source = try Self.padEditorViewSource()
         XCTAssertTrue(source.contains("private var inspectorPanelHeader: some View"))
-        XCTAssertTrue(source.contains("private var inspectorPanelContent: some View"))
-        XCTAssertTrue(source.contains("trailingDockPanel(width:") && source.contains("movableInspectorPanel(for:"))
+        XCTAssertTrue(source.contains("private func inspectorPanelContent(showsDomainBar: Bool)"))
+        XCTAssertTrue(source.contains("presentation: .trailingDock") && source.contains("presentation: .bottomDrawer"))
         XCTAssertGreaterThanOrEqual(
             source.components(separatedBy: "inspectorPanelContent").count - 1,
-            3,
+            2,
             "the trailing dock and movable overlay must render one shared Inspector surface"
         )
         XCTAssertEqual(
@@ -111,7 +111,7 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("isInspectorMinimized"))
         XCTAssertTrue(source.contains("minimizeInspector()"))
         XCTAssertTrue(source.contains("restoreInspector()"))
-        XCTAssertTrue(source.contains("inspectorRestoreTile"))
+        XCTAssertTrue(source.contains("private var restoreTile: some View"))
         XCTAssertTrue(source.contains(#"L10n.t("Minimize Inspector")"#))
         XCTAssertTrue(source.contains(#"L10n.t("Show Inspector")"#))
         XCTAssertTrue(
@@ -124,7 +124,6 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
     func testAdjustmentToolbarEntryReopensTheSingleInspectorPopup() throws {
         let source = try Self.padEditorViewSource()
 
-        XCTAssertTrue(source.contains("private var inspectorPresentationButton: some View"))
         XCTAssertTrue(source.contains("private func presentInspectorFromToolbar()"))
         XCTAssertFalse(source.contains("presentBottomDrawer()"))
         XCTAssertTrue(source.contains(#"Label(L10n.t("Adjustments"), systemImage: "slider.horizontal.3")"#))
@@ -141,8 +140,8 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
         XCTAssertFalse(source.contains("workspaceModeToggle"), "Focus must be entered by dragging the Inspector, not a competing toolbar toggle")
         XCTAssertTrue(source.contains("ZStack(alignment: .topLeading)"), "floating coordinates must be based on a visible top-leading origin")
         XCTAssertTrue(source.contains(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)"), "the minimized restore tile must remain reachable without affecting floating coordinates")
-        XCTAssertTrue(source.contains("movableInspectorWidth(for: size)"), "moving the panel must preserve the bottom-drawer width")
-        XCTAssertTrue(source.contains("movableInspectorOrigin(for: size)"), "the overlay must start from an adaptive bottom-centered origin")
+        XCTAssertTrue(source.contains("movableInspectorWidth(for: availableSize)"), "moving the panel must preserve the bottom-drawer width")
+        XCTAssertTrue(source.contains("PadEditorLayoutPolicy.movableInspectorOrigin("), "the overlay must start from an adaptive bottom-centered origin")
         XCTAssertFalse(source.contains("focusLayout(for:"), "the compact Inspector must not have a separate Focus-mode rendering path")
     }
 
@@ -356,11 +355,17 @@ final class PadEditorLayoutPolicyTests: XCTestCase {
     }()
 
     private static func padEditorViewSource() throws -> String {
-        try String(
-            contentsOf: repositoryRootURL
-                .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"),
-            encoding: .utf8
-        )
+        let directory = repositoryRootURL
+            .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp", isDirectory: true)
+        return try [
+            "PadEditorView.swift",
+            "PadEditorToolbar.swift",
+            "PadEditorCanvasView.swift",
+            "PadEditorInspectorContainer.swift",
+            "PadInspectorHost.swift"
+        ].map { filename in
+            try String(contentsOf: directory.appendingPathComponent(filename), encoding: .utf8)
+        }.joined(separator: "\n")
     }
 
     private static func padToolRailSource() throws -> String {

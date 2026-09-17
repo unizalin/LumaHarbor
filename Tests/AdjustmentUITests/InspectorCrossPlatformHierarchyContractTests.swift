@@ -11,7 +11,6 @@ final class InspectorCrossPlatformHierarchyContractTests: XCTestCase {
 
     private static let iPadHostPaths = [
         "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadInspectorHost.swift",
-        "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift",
     ]
 
     func testBothIPadHostsUseTheSharedLevel1Hierarchy() throws {
@@ -82,7 +81,7 @@ final class InspectorCrossPlatformHierarchyContractTests: XCTestCase {
     func testCatalogSearchDoesNotReplacePresetOrInfoPageControls() throws {
         let source = try String(
             contentsOf: Self.repositoryRootURL.appendingPathComponent(
-                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"
+                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadInspectorHost.swift"
             ),
             encoding: .utf8
         )
@@ -158,7 +157,7 @@ final class InspectorCrossPlatformHierarchyContractTests: XCTestCase {
     func testIPadCanvasMountsEveryInteractiveLocalMaskOverlay() throws {
         let source = try String(
             contentsOf: Self.repositoryRootURL.appendingPathComponent(
-                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"
+                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorCanvasView.swift"
             ),
             encoding: .utf8
         )
@@ -188,7 +187,7 @@ final class InspectorCrossPlatformHierarchyContractTests: XCTestCase {
     func testIPadInspectorToolbarControlsKeepStableTouchHeights() throws {
         let source = try String(
             contentsOf: Self.repositoryRootURL.appendingPathComponent(
-                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"
+                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadInspectorHost.swift"
             ),
             encoding: .utf8
         )
@@ -210,12 +209,6 @@ final class InspectorCrossPlatformHierarchyContractTests: XCTestCase {
     }
 
     func testIPadDomainNavigationUsesTheWholeStableCellAsTheHitArea() throws {
-        let editorSource = try String(
-            contentsOf: Self.repositoryRootURL.appendingPathComponent(
-                "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift"
-            ),
-            encoding: .utf8
-        )
         let railSource = try String(
             contentsOf: Self.repositoryRootURL.appendingPathComponent(
                 "Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadToolRail.swift"
@@ -229,23 +222,14 @@ final class InspectorCrossPlatformHierarchyContractTests: XCTestCase {
             encoding: .utf8
         )
 
-        guard let editorRailFrame = editorSource.range(of: ".frame(minWidth: 64, minHeight: 44)") else {
-            XCTFail("the Xcode host's vertical rail must declare a 44pt cell")
-            return
-        }
-        let editorRailAfterFrame = String(editorSource[editorRailFrame.upperBound...].prefix(260))
+        XCTAssertTrue(railSource.contains(".frame(minWidth: 64, minHeight: 44)"))
         XCTAssertTrue(
-            editorRailAfterFrame.contains(".contentShape(Rectangle())"),
-            "the Xcode host's vertical rail must make the full 44pt cell tappable"
+            railSource.contains(".contentShape(Rectangle())"),
+            "the canonical iPad rail must make the full 44pt cell tappable"
         )
         XCTAssertTrue(
-            railSource.contains(".frame(minWidth: 64, minHeight: 44)\n            .contentShape(Rectangle())"),
-            "the shared SwiftPM rail must make the full 44pt cell tappable"
-        )
-        XCTAssertTrue(
-            editorSource.contains(".frame(minWidth: 88, minHeight: 52)\n                        .contentShape(Rectangle())") &&
                 standaloneHostSource.contains(".frame(minWidth: 88, minHeight: 52)\n                        .contentShape(Rectangle())"),
-            "compact domain bars must make their full label cell tappable on both hosts"
+            "the compact domain bar must make its full label cell tappable"
         )
     }
 

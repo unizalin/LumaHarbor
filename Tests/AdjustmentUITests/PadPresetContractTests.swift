@@ -21,6 +21,10 @@ final class PadPresetContractTests: XCTestCase {
         try String(contentsOf: padAppSourceURL.appendingPathComponent(filename), encoding: .utf8)
     }
 
+    private static func loadPresetViewSource() throws -> String {
+        try loadAppSource("PadEditorPresetViews.swift")
+    }
+
     // MARK: - Package.swift: PresetCore dependency
 
     func testIPadPackageIncludesPresetCoreProduct() throws {
@@ -120,7 +124,7 @@ final class PadPresetContractTests: XCTestCase {
     }
 
     func testPresetPanelCallsCommitPreset() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
         XCTAssertTrue(
             source.contains("editor.commitPreset("),
             "Applying a preset must call editor.commitPreset for one-undo-step contract"
@@ -128,19 +132,19 @@ final class PadPresetContractTests: XCTestCase {
     }
 
     func testPresetPanelCallsPreviewAndCancelPreview() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
         XCTAssertTrue(source.contains("editor.previewPreset("), "must call previewPreset on tap")
         XCTAssertTrue(source.contains("editor.cancelPresetPreview()"), "must cancel preview on disappear / row change")
     }
 
     func testMergeAndReplaceModeExposed() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
         XCTAssertTrue(source.contains("PresetApplicationMode.merge"), "Merge mode must be accessible")
         XCTAssertTrue(source.contains("PresetApplicationMode.replace"), "Replace mode must be accessible")
     }
 
     func testPresetPickersKeepStableIPadTouchHeightInBothCompositions() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
 
         XCTAssertGreaterThanOrEqual(
             source.components(separatedBy: ".pickerStyle(.segmented)\n            .frame(minHeight: 44)").count - 1,
@@ -150,7 +154,7 @@ final class PadPresetContractTests: XCTestCase {
     }
 
     func testPresetActionsStayVisibleInsideThePageOnNarrowIPadLayouts() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
 
         XCTAssertTrue(
             source.contains("private var presetActionBar: some View") &&
@@ -165,13 +169,13 @@ final class PadPresetContractTests: XCTestCase {
     }
 
     func testPresetPanelHasExplicitApplyButton() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
         // The Apply button must be distinct from the tap-to-preview gesture
         XCTAssertTrue(source.contains("L10n.t(\"Apply\")"), "Apply button label must use L10n")
     }
 
     func testPresetPanelExposesImportExportAndEditingActions() throws {
-        let source = try Self.loadAppSource("PadEditorView.swift")
+        let source = try Self.loadPresetViewSource()
         for required in [
             "Import preset files", "Restore backup", "Export backup",
             "PadPresetCreateSheet", "PadPresetEditSheet", "exportPreset("

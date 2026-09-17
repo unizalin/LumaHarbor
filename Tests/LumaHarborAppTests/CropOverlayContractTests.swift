@@ -49,7 +49,7 @@ final class CropOverlayContractTests: XCTestCase {
     }
 
     func testIPadCropHandlesKeepA44PointTouchTarget() throws {
-        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadCropOverlayView.swift")
 
         XCTAssertTrue(
             source.contains("private static let handleHitAreaSize: CGFloat = 44"),
@@ -62,7 +62,7 @@ final class CropOverlayContractTests: XCTestCase {
     }
 
     func testIPadVerticalWipeKeepsA44PointTouchTarget() throws {
-        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorCanvasView.swift")
 
         XCTAssertTrue(
             source.contains(".frame(width: 44)") &&
