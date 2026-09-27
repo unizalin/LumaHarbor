@@ -110,7 +110,7 @@ let package = Package(
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
         .testTarget(
             name: "PresetCoreTests",
-            dependencies: ["PresetCore", "RawProcessingCore"],
+            dependencies: ["PresetCore", "RawProcessingCore", "PhotoLibraryCore"],
             resources: [.copy("Fixtures/XMP")]
         ),
         .testTarget(

@@ -240,6 +240,9 @@ final class ReferenceCompareProcessTests: XCTestCase {
             candidates = [URL(fileURLWithPath: override)]
         } else {
             candidates = [
+                Bundle(for: ReferenceCompareProcessTests.self).bundleURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("LumaHarborReferenceCompare"),
                 repoRoot.appendingPathComponent(".build/arm64-apple-macosx/debug/LumaHarborReferenceCompare"),
                 repoRoot.appendingPathComponent(".build/debug/LumaHarborReferenceCompare")
             ]
