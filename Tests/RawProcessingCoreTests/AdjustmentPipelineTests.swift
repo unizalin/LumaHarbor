@@ -406,6 +406,68 @@ final class AdjustmentPipelineTests: XCTestCase {
         XCTAssertNotEqual(fullScaleBytes, downsampledBytes)
     }
 
+    func testGrainPreviewApproximatesDownsampledFullResolutionRender() throws {
+        let sourceSize = CGSize(width: 32, height: 32)
+        let previewScale = 0.25
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(origin: .zero, size: sourceSize))
+        let previewSource = source.transformed(by: CGAffineTransform(scaleX: previewScale, y: previewScale))
+
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.grain = Grain(amount: 100, size: 25, roughness: 50)
+
+        let fullResolution = pipeline.apply(adjustments, to: source, scaleFactor: 1)
+        let preview = pipeline.apply(adjustments, to: previewSource, scaleFactor: previewScale)
+        let downsample = CIFilter.lanczosScaleTransform()
+        downsample.inputImage = fullResolution
+        downsample.scale = Float(previewScale)
+        downsample.aspectRatio = 1
+
+        let renderer = ImageRenderService()
+        let downsampledFullBytes = try rgbaBytes(renderer.makeCGImage(try XCTUnwrap(downsample.outputImage)))
+        let previewBytes = try rgbaBytes(renderer.makeCGImage(preview))
+        XCTAssertEqual(downsampledFullBytes.count, previewBytes.count)
+
+        var totalAbsoluteDifference = 0
+        for (fullByte, previewByte) in zip(downsampledFullBytes, previewBytes) {
+            totalAbsoluteDifference += abs(Int(fullByte) - Int(previewByte))
+        }
+        let meanAbsoluteDifference = Double(totalAbsoluteDifference) / Double(downsampledFullBytes.count)
+        XCTAssertLessThan(
+            meanAbsoluteDifference,
+            12,
+            "Preview Grain should retain the full-resolution effect after downsampling"
+        )
+    }
+
+    func testGrainRenderIsDeterministicForSameInputs() throws {
+        let source = makeSourceImage(red: 0.5, green: 0.5, blue: 0.5)
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.grain = Grain(amount: 80, size: 40, roughness: 60)
+
+        let renderer = ImageRenderService()
+        let first = try rgbaBytes(renderer.makeCGImage(pipeline.apply(adjustments, to: source, scaleFactor: 0.25)))
+        let second = try rgbaBytes(renderer.makeCGImage(pipeline.apply(adjustments, to: source, scaleFactor: 0.25)))
+
+        XCTAssertEqual(first, second, "Grain must not jump when a preview is redrawn")
+    }
+
+    private func rgbaBytes(_ image: CGImage) throws -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: image.width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return bytes
+    }
+
     // MARK: - Split toning
 
     func testZeroSaturationSplitToningStaysAPassthroughWhateverTheHues() {

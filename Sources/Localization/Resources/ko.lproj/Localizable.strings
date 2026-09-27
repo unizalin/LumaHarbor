@@ -719,3 +719,15 @@
 "Collapsed" = "접힘";
 "HSL" = "HSL(색조/채도/광도)";
 "%@ Actions" = "%@ 작업";
+"Render Diagnostics" = "렌더링 진단";
+"Rendering Mode" = "렌더링 모드";
+"LumaHarbor Native" = "LumaHarbor 네이티브";
+"Lightroom-compatible v1" = "Lightroom 호환 v1";
+"White Balance" = "화이트 밸런스";
+"As Shot" = "촬영 시 값";
+"Adjusted" = "조정됨";
+"Requested Camera Profile" = "요청한 카메라 프로필";
+"Resolved Profile" = "확정된 프로필";
+"Profile Preserved, Not Applied" = "프로필 보존됨, 적용 안 함";
+"Approximate fallback" = "근사 대체";
+"Fallback" = "대체";

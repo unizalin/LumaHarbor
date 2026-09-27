@@ -81,13 +81,13 @@ test -d "$LUMAHARBOR_EXFAT_TEST_DIR"
 選定一張本輪會在 iPad 編輯的 Sony `.ARW`，在 Mac 上執行：
 
 ```bash
-shasum -a 256 "$LUMAHARBOR_RAW_FIXTURE_DIR/_DSC1896.ARW"
+shasum -a 256 "$LUMAHARBOR_RAW_FIXTURE_FILE"
 diskutil info "$LUMAHARBOR_EXFAT_TEST_DIR" | rg 'File System Personality|Volume Name|Protocol'
 ```
 
 通過條件：
 
-- 報告只記 `_DSC1896.ARW`、SHA-256 與安全 fixture 代號；
+- 報告只記安全 fixture 代號與「checksum 前後一致」；私人檔名與 digest 不寫入 Git；
 - `diskutil` 顯示預期的 exFAT filesystem；
 - 不把完整 fixture 或 volume 路徑貼入報告。
 
@@ -206,7 +206,7 @@ git status --short --branch
 
 ### V2.5 Sony `.ARW` 編輯、autosave、重開與 checksum
 
-1. 在 Mac 記錄 `_DSC1896.ARW` 的 SHA-256，並把同一原檔放在本次已加入的來源中。
+1. 在 Mac 記錄本次私人 RAW 樣本的 SHA-256，並把同一原檔放在本次已加入的來源中；檔名與 digest 僅留在本機證據。
 2. 從 iPad 圖庫打開該 Sony `.ARW`。
 3. 依序改動十項既有調整：Exposure、Contrast、Highlights、Shadows、Whites、Blacks、Temperature、Tint、Vibrance、Saturation。
 4. 不按另存新檔，返回圖庫，等待 autosave 完成。

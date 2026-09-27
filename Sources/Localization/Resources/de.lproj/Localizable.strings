@@ -719,3 +719,15 @@
 "Collapsed" = "Eingeklappt";
 "HSL" = "HSL (Farbton/Sättigung/Luminanz)";
 "%@ Actions" = "%@-Aktionen";
+"Render Diagnostics" = "Renderdiagnose";
+"Rendering Mode" = "Render-Modus";
+"LumaHarbor Native" = "LumaHarbor nativ";
+"Lightroom-compatible v1" = "Lightroom-kompatibel v1";
+"White Balance" = "Weißabgleich";
+"As Shot" = "Wie aufgenommen";
+"Adjusted" = "Angepasst";
+"Requested Camera Profile" = "Angefordertes Kameraprofil";
+"Resolved Profile" = "Aufgelöstes Profil";
+"Profile Preserved, Not Applied" = "Profil erhalten, nicht angewendet";
+"Approximate fallback" = "Ungefähre Ausweichlösung";
+"Fallback" = "Ausweichlösung";

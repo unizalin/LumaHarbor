@@ -447,7 +447,8 @@ struct PadInspectorHost: View {
                     PadMetadataBlock(
                         snapshot: EditorMetadataSnapshot(photo: curationPhoto),
                         photo: curationPhoto,
-                        batchCoordinator: batchCoordinator
+                        batchCoordinator: batchCoordinator,
+                        recipe: editor.latestRawRenderRecipe
                     )
                 } else {
                     Text(L10n.t("Photo not yet loaded."))

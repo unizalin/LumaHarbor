@@ -1435,6 +1435,7 @@ public actor PhotoLibraryService {
         } catch {
             manifest = LibraryManifest(libraryID: libraryID)
         }
+        _ = manifest.migrateRawRenderingCompatibilityIfNeeded()
 
         // Phase 3 Task 3.5: a snapshot, taken once, of every virtual copy
         // record this manifest already knows about, keyed by whatever it
@@ -2007,10 +2008,18 @@ public actor PhotoLibraryService {
                 relativePath: file.relativePath,
                 fingerprint: fingerprint,
                 lastSeenAt: Date(),
-                needsConfirmation: needsConfirmation
+                needsConfirmation: needsConfirmation,
+                rawRenderingCompatibility: records.first(where: { $0.photoID == photoID })?
+                    .effectiveRawRenderingCompatibility ?? Self.defaultRawRenderingCompatibility(for: url)
             )
             return .success(asset, record, decision)
         }
+    }
+
+    private static func defaultRawRenderingCompatibility(for url: URL) -> RawRenderingCompatibility {
+        CoreImageRawDecoder.candidateFileExtensions.contains(url.pathExtension.lowercased())
+            ? .adobeProcess2012V1
+            : .native
     }
 
     /// Explicitly projects a scan-hydrated asset's resolved curation into
@@ -2206,7 +2215,13 @@ public actor PhotoLibraryService {
         }
         let repository = FileSidecarRepository(libraryRootURL: folder.rootURL)
         do {
-            return try repository.loadSidecar(for: photo.id)?.adjustments ?? .neutral
+            if let sidecar = try repository.loadSidecar(for: photo.id) {
+                return sidecar.adjustments
+            }
+            let policy = try repository.loadManifest()?
+                .record(for: photo.id)?
+                .effectiveRawRenderingCompatibility ?? .native
+            return .neutral(using: policy)
         } catch let error as SidecarError {
             throw LibraryError.sidecar(error)
         }
@@ -2447,8 +2462,16 @@ public actor PhotoLibraryService {
             variantName: name
         )
 
+        var sourceAdjustments = PhotoAdjustments.neutral
         do {
-            let sourceAdjustments = try repository.loadSidecar(for: photo.id)?.adjustments ?? .neutral
+            if let sourceSidecar = try repository.loadSidecar(for: photo.id) {
+                sourceAdjustments = sourceSidecar.adjustments
+            } else {
+                let policy = try repository.loadManifest()?
+                    .record(for: photo.id)?
+                    .effectiveRawRenderingCompatibility ?? .native
+                sourceAdjustments = .neutral(using: policy)
+            }
             let sidecar = PhotoSidecar(
                 photoID: copyID,
                 sourceRelativePath: photo.relativePath,
@@ -2477,7 +2500,8 @@ public actor PhotoLibraryService {
                 fingerprint: photo.fingerprint,
                 lastSeenAt: now,
                 variantOf: photo.id,
-                variantName: name
+                variantName: name,
+                rawRenderingCompatibility: sourceAdjustments.rawRenderingCompatibility
             ))
             try? repository.write(manifest: manifest)
         }

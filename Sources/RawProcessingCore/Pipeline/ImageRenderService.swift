@@ -53,14 +53,24 @@ public final class ImageRenderService: @unchecked Sendable {
         CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     private let context: CIContext
+    private let preferMetal: Bool
+    public let workingColorSpaceID: String
+    public let outputTransformID: String
 
     /// Uses the default Metal device when one exists. Falling back to the CPU
     /// context keeps unit tests runnable on machines without a usable GPU
     /// (headless CI, for instance) instead of crashing at init.
-    public init(preferMetal: Bool = true) {
+    public init(preferMetal: Bool = true, recipe: ResolvedRawRenderRecipe? = nil) {
+        self.preferMetal = preferMetal
+        self.workingColorSpaceID = recipe?.workingColorSpaceID
+            ?? RawWorkingColorSpaceID.nativeExtendedLinearSRGBV1.rawValue
+        self.outputTransformID = recipe?.outputTransformID
+            ?? RawOutputTransformID.displaySRGBV1.rawValue
+        let workingColorSpace = RawColorSpaceCatalog.workingColorSpace(for: workingColorSpaceID)
+        let outputColorSpace = RawColorSpaceCatalog.outputColorSpace(for: outputTransformID)
         let options: [CIContextOption: Any] = [
-            .workingColorSpace: Self.workingColorSpace,
-            .outputColorSpace: Self.outputColorSpace,
+            .workingColorSpace: workingColorSpace,
+            .outputColorSpace: outputColorSpace,
             .cacheIntermediates: false
         ]
         if preferMetal, let device = MTLCreateSystemDefaultDevice() {
@@ -68,6 +78,20 @@ public final class ImageRenderService: @unchecked Sendable {
         } else {
             self.context = CIContext(options: options)
         }
+    }
+
+    /// Source and ABI compatibility for callers compiled against the
+    /// pre-recipe initializer.
+    public convenience init(preferMetal: Bool) {
+        self.init(preferMetal: preferMetal, recipe: nil)
+    }
+
+    /// Creates a service with the same device preference but the recipe's
+    /// versioned color-space configuration. This keeps the injected service
+    /// used by tests and callers while ensuring preview/export do not infer a
+    /// different transform from their call site.
+    public func configured(for recipe: ResolvedRawRenderRecipe) -> ImageRenderService {
+        ImageRenderService(preferMetal: preferMetal, recipe: recipe)
     }
 
     public func makeCGImage(_ image: CIImage) throws -> CGImage {
@@ -79,7 +103,7 @@ public final class ImageRenderService: @unchecked Sendable {
             image,
             from: extent,
             format: .RGBA8,
-            colorSpace: Self.outputColorSpace
+            colorSpace: RawColorSpaceCatalog.outputColorSpace(for: outputTransformID)
         ) else {
             throw ImageRenderError.renderFailed
         }
@@ -96,7 +120,7 @@ public final class ImageRenderService: @unchecked Sendable {
         ]
         guard let data = context.jpegRepresentation(
             of: image,
-            colorSpace: Self.outputColorSpace,
+            colorSpace: RawColorSpaceCatalog.outputColorSpace(for: outputTransformID),
             options: options
         ) else {
             throw ImageRenderError.encodingFailed
@@ -118,7 +142,7 @@ public final class ImageRenderService: @unchecked Sendable {
             try context.writeJPEGRepresentation(
                 of: image,
                 to: url,
-                colorSpace: Self.outputColorSpace,
+                colorSpace: RawColorSpaceCatalog.outputColorSpace(for: outputTransformID),
                 options: options
             )
         } catch {
@@ -153,10 +177,30 @@ public final class ImageRenderService: @unchecked Sendable {
         }
 
         let pixelFormat: CIFormat = format.supportsBitDepthChoice ? bitDepth.pixelFormat : .RGBA8
-        guard let cgImage = context.createCGImage(
-            image, from: image.extent, format: pixelFormat, colorSpace: Self.outputColorSpace
+        guard let renderedImage = context.createCGImage(
+            image,
+            from: image.extent,
+            format: pixelFormat,
+            colorSpace: RawColorSpaceCatalog.outputColorSpace(for: outputTransformID)
         ) else {
             throw ImageRenderError.renderFailed
+        }
+
+        // Lightroom's 16-bit reference TIFFs are RGB, not RGBA. Core Image's
+        // RGBA16 render format is intentionally used above to preserve the
+        // existing render path, then the TIFF-only container conversion drops
+        // the synthetic alpha channel without changing colour values.
+        let cgImage: CGImage
+        if format == .tiff {
+            guard let rgbImage = Self.rgbImageWithoutAlpha(
+                renderedImage,
+                colorSpace: RawColorSpaceCatalog.outputColorSpace(for: outputTransformID)
+            ) else {
+                throw ImageRenderError.renderFailed
+            }
+            cgImage = rgbImage
+        } else {
+            cgImage = renderedImage
         }
 
         guard let destination = CGImageDestinationCreateWithURL(
@@ -189,6 +233,44 @@ public final class ImageRenderService: @unchecked Sendable {
     static func clampQuality(_ quality: Double) -> Double {
         guard quality.isFinite else { return 0.9 }
         return min(max(quality, 0), 1)
+    }
+
+    private static func rgbImageWithoutAlpha(
+        _ image: CGImage,
+        colorSpace: CGColorSpace
+    ) -> CGImage? {
+        guard image.bitsPerComponent == 8 || image.bitsPerComponent == 16 else { return nil }
+
+        let bytesPerSample = image.bitsPerComponent / 8
+        // `noneSkipLast` keeps a native 4-sample row layout that Core
+        // Graphics accepts for both 8- and 16-bit contexts, while explicitly
+        // marking the fourth sample as padding rather than an alpha channel.
+        // ImageIO therefore writes an RGB TIFF without resampling the three
+        // colour channels into a different precision.
+        let bytesPerRow = image.width * 4 * bytesPerSample
+        var bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
+        if image.bitsPerComponent == 16 {
+            bitmapInfo |= CGBitmapInfo.byteOrder16Big.rawValue
+        }
+
+        guard let bitmapContext = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: image.bitsPerComponent,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return nil
+        }
+
+        bitmapContext.interpolationQuality = .none
+        bitmapContext.draw(
+            image,
+            in: CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        )
+        return bitmapContext.makeImage()
     }
 
     /// Spec §10: "disk full" must be reported as itself, not as a generic

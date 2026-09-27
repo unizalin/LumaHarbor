@@ -102,6 +102,11 @@ let package = Package(
         // reference renders. It is intentionally not a shipping product.
         .executableTarget(name: "LumaHarborReferenceCompare", dependencies: ["RawProcessingCore"]),
 
+        // Developer-only profile calibration command. It reads private paired
+        // references through environment-provided paths and emits sanitized
+        // coefficients/metrics only; it is never part of the shipping app.
+        .executableTarget(name: "LumaHarborProfileCalibrate", dependencies: ["RawProcessingCore"]),
+
         .testTarget(name: "RawProcessingCoreTests", dependencies: ["RawProcessingCore"]),
         .testTarget(
             name: "PresetCoreTests",

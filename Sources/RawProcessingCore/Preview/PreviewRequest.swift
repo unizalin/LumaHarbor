@@ -18,6 +18,9 @@ public enum PreviewQuality: Int, Comparable, Sendable, CaseIterable {
     case interactive = 0
     /// Full-precision decode, issued once input settles.
     case high = 1
+    /// Native-resolution decode for parity checks and clients that need the
+    /// exact export recipe without writing an output file.
+    case full = 2
 
     public static func < (lhs: PreviewQuality, rhs: PreviewQuality) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -47,6 +50,7 @@ public struct PreviewRequest: Sendable {
     public var targetPixelDimension: Int
     public var quality: PreviewQuality
     public var previewOptions: ProfessionalPreviewOptions
+    public var cameraProfileRequest: RawCameraProfileRequest?
 
     public init(
         subject: PreviewSubject,
@@ -54,7 +58,8 @@ public struct PreviewRequest: Sendable {
         adjustments: PhotoAdjustments,
         targetPixelDimension: Int,
         quality: PreviewQuality,
-        previewOptions: ProfessionalPreviewOptions = .standard
+        previewOptions: ProfessionalPreviewOptions = .standard,
+        cameraProfileRequest: RawCameraProfileRequest? = nil
     ) {
         self.subject = subject
         self.url = url
@@ -62,6 +67,7 @@ public struct PreviewRequest: Sendable {
         self.targetPixelDimension = targetPixelDimension
         self.quality = quality
         self.previewOptions = previewOptions
+        self.cameraProfileRequest = cameraProfileRequest
     }
 
     public var decodeQuality: DecodeQuality {
@@ -70,6 +76,8 @@ public struct PreviewRequest: Sendable {
             return .interactive(maximumPixelDimension: targetPixelDimension)
         case .high:
             return .highQuality(maximumPixelDimension: targetPixelDimension)
+        case .full:
+            return .full
         }
     }
 }
@@ -83,11 +91,18 @@ public struct PreviewImage: @unchecked Sendable {
     /// keeping this optional with a default is what lets every existing
     /// `PreviewImage(cgImage:pixelSize:)` call site stay source-compatible.
     public let whiteBalanceBaseline: RawWhiteBalanceBaseline?
+    public let rawRenderRecipe: ResolvedRawRenderRecipe?
 
-    public init(cgImage: CGImage, pixelSize: CGSize, whiteBalanceBaseline: RawWhiteBalanceBaseline? = nil) {
+    public init(
+        cgImage: CGImage,
+        pixelSize: CGSize,
+        whiteBalanceBaseline: RawWhiteBalanceBaseline? = nil,
+        rawRenderRecipe: ResolvedRawRenderRecipe? = nil
+    ) {
         self.cgImage = cgImage
         self.pixelSize = pixelSize
         self.whiteBalanceBaseline = whiteBalanceBaseline
+        self.rawRenderRecipe = rawRenderRecipe
     }
 }
 

@@ -32,7 +32,13 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     public var colorGrading: ColorGradingAdjustments
     public var monochrome: MonochromeAdjustments
     public var renderingProfile: RenderingProfileSelection
+    /// The requested Adobe Camera Raw profile, kept separate from the
+    /// app-owned creative rendering profile.
+    public var rawCameraProfile: RawCameraProfileSelection
     public var lensCorrection: LensCorrectionAdjustments
+    /// Identifies the versioned renderer policy required by an imported edit.
+    /// Native edits stay on the existing path; older sidecars decode as native.
+    public var rawRenderingCompatibility: RawRenderingCompatibility
 
     public init(
         exposure: Double = 0,
@@ -58,7 +64,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         colorGrading: ColorGradingAdjustments = .neutral,
         monochrome: MonochromeAdjustments = .neutral,
         renderingProfile: RenderingProfileSelection = .neutral,
-        lensCorrection: LensCorrectionAdjustments = .neutral
+        rawCameraProfile: RawCameraProfileSelection = RawCameraProfileSelection(),
+        lensCorrection: LensCorrectionAdjustments = .neutral,
+        rawRenderingCompatibility: RawRenderingCompatibility = .native
     ) {
         self.exposure = AdjustmentCatalog.definition(for: .exposure).clamp(exposure)
         self.temperature = AdjustmentCatalog.definition(for: .temperature).clamp(temperature)
@@ -83,13 +91,30 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.colorGrading = colorGrading
         self.monochrome = monochrome
         self.renderingProfile = renderingProfile
+        self.rawCameraProfile = rawCameraProfile
         self.lensCorrection = lensCorrection
+        self.rawRenderingCompatibility = rawRenderingCompatibility
     }
 
-    /// All sliders at their documented default — the "no edit applied" state.
+    /// All sliders at their documented default with the native rendering policy.
     public static let neutral = PhotoAdjustments()
 
-    public var isNeutral: Bool { self == .neutral }
+    /// All sliders at their documented default under the requested baseline policy.
+    public static func neutral(using policy: RawRenderingCompatibility) -> Self {
+        Self(rawRenderingCompatibility: policy)
+    }
+
+    /// True when an editable adjustment differs from its documented default.
+    /// The source rendering policy remains part of the full value identity, but
+    /// is not itself a user edit or a dirty-state signal.
+    public var hasUserAdjustments: Bool {
+        var valueWithoutPolicy = self
+        valueWithoutPolicy.rawRenderingCompatibility = .native
+        return valueWithoutPolicy != .neutral
+    }
+
+    /// Retained for source compatibility with existing edit-state callers.
+    public var isNeutral: Bool { !hasUserAdjustments }
 
     public subscript(kind: AdjustmentKind) -> Double {
         get {
@@ -145,7 +170,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
             grain: grain, geometry: geometry, localAdjustments: localAdjustments,
             presence: presence, colorGrading: colorGrading, monochrome: monochrome,
-            renderingProfile: renderingProfile, lensCorrection: lensCorrection
+            renderingProfile: renderingProfile, rawCameraProfile: rawCameraProfile,
+            lensCorrection: lensCorrection,
+            rawRenderingCompatibility: rawRenderingCompatibility
         )
     }
 
@@ -165,6 +192,8 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         case geometry
         case localAdjustments
         case presence, colorGrading, monochrome, renderingProfile, lensCorrection
+        case rawCameraProfile
+        case rawRenderingCompatibility
     }
 
     /// Missing keys fall back to the catalogue default and out-of-range values
@@ -206,7 +235,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.colorGrading = try container.decodeIfPresent(ColorGradingAdjustments.self, forKey: .colorGrading) ?? .neutral
         self.monochrome = try container.decodeIfPresent(MonochromeAdjustments.self, forKey: .monochrome) ?? .neutral
         self.renderingProfile = try container.decodeIfPresent(RenderingProfileSelection.self, forKey: .renderingProfile) ?? .neutral
+        self.rawCameraProfile = try container.decodeIfPresent(RawCameraProfileSelection.self, forKey: .rawCameraProfile) ?? RawCameraProfileSelection()
         self.lensCorrection = try container.decodeIfPresent(LensCorrectionAdjustments.self, forKey: .lensCorrection) ?? .neutral
+        self.rawRenderingCompatibility = try container.decodeIfPresent(RawRenderingCompatibility.self, forKey: .rawRenderingCompatibility) ?? .native
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -236,6 +267,8 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(colorGrading, forKey: .colorGrading)
         try container.encode(monochrome, forKey: .monochrome)
         try container.encode(renderingProfile, forKey: .renderingProfile)
+        try container.encode(rawCameraProfile, forKey: .rawCameraProfile)
         try container.encode(lensCorrection, forKey: .lensCorrection)
+        try container.encode(rawRenderingCompatibility, forKey: .rawRenderingCompatibility)
     }
 }

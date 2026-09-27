@@ -82,21 +82,31 @@ public struct PresetApplicator: Sendable {
         context: PresetApplicationContext,
         temperatureIsAbsoluteKelvin: Bool = false
     ) -> PresetApplicationResult {
-        var result = mode == .replace ? PhotoAdjustments.neutral : current
+        // An Adobe packet with no applicable leaves is a true no-op, including
+        // replace mode. Native replace retains its historical empty-patch
+        // reset behaviour below.
+        if temperatureIsAbsoluteKelvin, patch.isEmpty {
+            return PresetApplicationResult(adjustments: current)
+        }
+
+        var result = mode == .replace
+            ? .neutral(using: current.rawRenderingCompatibility)
+            : current
         var diagnostics: [PresetDiagnostic] = []
+        var didApplyAdobeLeaf = false
 
         if let basic = patch.basic {
-            if let value = basic.exposure { result[.exposure] = value }
-            if let value = basic.contrast { result[.contrast] = value }
-            if let value = basic.highlights { result[.highlights] = value }
-            if let value = basic.shadows { result[.shadows] = value }
-            if let value = basic.whites { result[.whites] = value }
-            if let value = basic.blacks { result[.blacks] = value }
-            if let value = basic.vibrance { result[.vibrance] = value }
-            if let value = basic.saturation { result[.saturation] = value }
+            if let value = basic.exposure { result[.exposure] = value; didApplyAdobeLeaf = true }
+            if let value = basic.contrast { result[.contrast] = value; didApplyAdobeLeaf = true }
+            if let value = basic.highlights { result[.highlights] = value; didApplyAdobeLeaf = true }
+            if let value = basic.shadows { result[.shadows] = value; didApplyAdobeLeaf = true }
+            if let value = basic.whites { result[.whites] = value; didApplyAdobeLeaf = true }
+            if let value = basic.blacks { result[.blacks] = value; didApplyAdobeLeaf = true }
+            if let value = basic.vibrance { result[.vibrance] = value; didApplyAdobeLeaf = true }
+            if let value = basic.saturation { result[.saturation] = value; didApplyAdobeLeaf = true }
 
             if let value = basic.temperature {
-                applyContextual(
+                didApplyAdobeLeaf = applyContextual(
                     field: .basicTemperature,
                     rawValue: value,
                     baseline: context.baselineTemperatureKelvin,
@@ -105,10 +115,10 @@ public struct PresetApplicator: Sendable {
                     kind: .temperature,
                     to: &result,
                     diagnostics: &diagnostics
-                )
+                ) || didApplyAdobeLeaf
             }
             if let value = basic.tint {
-                applyContextual(
+                didApplyAdobeLeaf = applyContextual(
                     field: .basicTint,
                     rawValue: value,
                     baseline: context.baselineTint,
@@ -117,12 +127,13 @@ public struct PresetApplicator: Sendable {
                     kind: .tint,
                     to: &result,
                     diagnostics: &diagnostics
-                )
+                ) || didApplyAdobeLeaf
             }
         }
 
         if let curve = patch.advancedToneCurve {
             result.advancedToneCurve = curve
+            didApplyAdobeLeaf = true
         }
 
         if let hsl = patch.hsl {
@@ -134,6 +145,7 @@ public struct PresetApplicator: Sendable {
             apply(hsl.blue, to: &result.hsl.blue)
             apply(hsl.purple, to: &result.hsl.purple)
             apply(hsl.magenta, to: &result.hsl.magenta)
+            didApplyAdobeLeaf = !hsl.isEmpty || didApplyAdobeLeaf
         }
 
         if let splitToning = patch.splitToning {
@@ -142,6 +154,7 @@ public struct PresetApplicator: Sendable {
             if let value = splitToning.highlightHue { result.splitToning.highlightHue = value }
             if let value = splitToning.highlightSaturation { result.splitToning.highlightSaturation = value }
             if let value = splitToning.balance { result.splitToning.balance = value }
+            didApplyAdobeLeaf = !splitToning.isEmpty || didApplyAdobeLeaf
         }
 
         if let sharpening = patch.sharpening {
@@ -149,6 +162,7 @@ public struct PresetApplicator: Sendable {
             if let value = sharpening.radius { result.sharpening.radius = value }
             if let value = sharpening.detail { result.sharpening.detail = value }
             if let value = sharpening.masking { result.sharpening.masking = value }
+            didApplyAdobeLeaf = !sharpening.isEmpty || didApplyAdobeLeaf
         }
 
         if let noiseReduction = patch.noiseReduction {
@@ -156,6 +170,7 @@ public struct PresetApplicator: Sendable {
             if let value = noiseReduction.luminanceDetail { result.noiseReduction.luminanceDetail = value }
             if let value = noiseReduction.colorAmount { result.noiseReduction.colorAmount = value }
             if let value = noiseReduction.colorDetail { result.noiseReduction.colorDetail = value }
+            didApplyAdobeLeaf = !noiseReduction.isEmpty || didApplyAdobeLeaf
         }
 
         if let vignette = patch.vignette {
@@ -163,34 +178,69 @@ public struct PresetApplicator: Sendable {
             if let value = vignette.midpoint { result.vignette.midpoint = value }
             if let value = vignette.roundness { result.vignette.roundness = value }
             if let value = vignette.feather { result.vignette.feather = value }
+            didApplyAdobeLeaf = !vignette.isEmpty || didApplyAdobeLeaf
         }
 
         if let grain = patch.grain {
             if let value = grain.amount { result.grain.amount = value }
             if let value = grain.size { result.grain.size = value }
             if let value = grain.roughness { result.grain.roughness = value }
+            didApplyAdobeLeaf = !grain.isEmpty || didApplyAdobeLeaf
         }
 
         if let presence = patch.presence {
             if let value = presence.texture { result.presence.texture = value }
             if let value = presence.clarity { result.presence.clarity = value }
             if let value = presence.dehaze { result.presence.dehaze = value }
+            didApplyAdobeLeaf = !presence.isEmpty || didApplyAdobeLeaf
         }
 
         if let colorGrading = patch.colorGrading {
             result.colorGrading = colorGrading
+            didApplyAdobeLeaf = true
         }
 
         if let monochrome = patch.monochrome {
             result.monochrome = monochrome
+            didApplyAdobeLeaf = true
         }
 
         if let renderingProfile = patch.renderingProfile {
             result.renderingProfile = renderingProfile
+            didApplyAdobeLeaf = true
+        }
+
+        if let rawCameraProfile = patch.rawCameraProfile {
+            result.rawCameraProfile = rawCameraProfile
+            didApplyAdobeLeaf = true
+            if temperatureIsAbsoluteKelvin, let requestedName = rawCameraProfile.requestedName {
+                diagnostics.append(PresetDiagnostic(
+                    severity: .warning,
+                    code: "profilePreservedNotApplied",
+                    field: .rawCameraProfile,
+                    detail: requestedName
+                ))
+            }
         }
 
         if let lensCorrection = patch.lensCorrection {
             result.lensCorrection = lensCorrection
+            didApplyAdobeLeaf = true
+        }
+
+        // Adobe XMP selects the Process 2012 v1 baseline only when it applies
+        // a leaf. A packet whose contextual leaves were all skipped remains a
+        // true no-op. An explicit lens field is itself an intentional
+        // rendering-policy choice, even when its value equals the native default.
+        if temperatureIsAbsoluteKelvin, didApplyAdobeLeaf {
+            result.rawRenderingCompatibility = .adobeProcess2012V1
+            // Lightroom's Process 2012 baseline enables its vendor lens
+            // correction unless the XMP explicitly carries
+            // LensProfileEnable="0". Preserve that explicit off value while
+            // giving packets that omit the property the same default.
+            if patch.lensCorrection == nil {
+                result.lensCorrection = LensCorrectionAdjustments(mode: .automatic)
+            }
         }
 
         return PresetApplicationResult(adjustments: result, diagnostics: diagnostics)
@@ -218,10 +268,10 @@ public struct PresetApplicator: Sendable {
         kind: AdjustmentKind,
         to result: inout PhotoAdjustments,
         diagnostics: inout [PresetDiagnostic]
-    ) {
+    ) -> Bool {
         guard isAbsolute else {
             result[kind] = rawValue
-            return
+            return true
         }
         guard let baseline else {
             diagnostics.append(PresetDiagnostic(
@@ -230,7 +280,7 @@ public struct PresetApplicator: Sendable {
                 field: field,
                 detail: "requested=\(rawValue)"
             ))
-            return
+            return false
         }
         let converted = (rawValue - baseline) / span
         let clamped = AdjustmentCatalog.definition(for: kind).clamp(converted)
@@ -243,5 +293,6 @@ public struct PresetApplicator: Sendable {
                 detail: "requested=\(rawValue) converted=\(converted) clamped=\(clamped)"
             ))
         }
+        return true
     }
 }

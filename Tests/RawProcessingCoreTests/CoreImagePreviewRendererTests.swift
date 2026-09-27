@@ -33,7 +33,66 @@ private struct BaselineReportingDecoder: RawDecoding {
     }
 }
 
+private final class RequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequest: RawDecodeRequest?
+
+    var request: RawDecodeRequest? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequest
+    }
+
+    func record(_ request: RawDecodeRequest) {
+        lock.lock()
+        storedRequest = request
+        lock.unlock()
+    }
+}
+
+private struct RecordingDecoder: RawDecoding {
+    let identifier = DecoderIdentifier(kind: "recording", version: "test")
+    let recorder: RequestRecorder
+
+    func supportsFile(at url: URL) -> Bool { true }
+
+    func readMetadata(at url: URL) throws -> RawMetadata {
+        RawMetadata(pixelWidth: 4, pixelHeight: 4)
+    }
+
+    func decode(_ request: RawDecodeRequest) throws -> DecodedRawImage {
+        recorder.record(request)
+        let size = CGSize(width: 4, height: 4)
+        return DecodedRawImage(
+            image: CIImage(color: CIColor(red: 0.4, green: 0.5, blue: 0.6)).cropped(to: CGRect(origin: .zero, size: size)),
+            nativePixelSize: size,
+            decodedPixelSize: size,
+            baselineTemperature: 5_500,
+            baselineTint: 0,
+            metadata: RawMetadata(pixelWidth: 4, pixelHeight: 4)
+        )
+    }
+}
+
 final class CoreImagePreviewRendererTests: XCTestCase {
+    func testPreviewCarriesRenderingCompatibilityIntoDecodeRequest() async throws {
+        let recorder = RequestRecorder()
+        let renderer = CoreImagePreviewRenderer(decoder: RecordingDecoder(recorder: recorder))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.rawRenderingCompatibility = .adobeProcess2012
+        let request = PreviewRequest(
+            subject: PreviewSubject(UUID()),
+            url: URL(fileURLWithPath: "/tmp/lumaharbor-test.ARW"),
+            adjustments: adjustments,
+            targetPixelDimension: 256,
+            quality: .interactive
+        )
+
+        _ = try await renderer.render(request)
+
+        XCTAssertEqual(recorder.request?.rawRenderingCompatibility, .adobeProcess2012)
+    }
+
     func testRenderedPreviewCarriesTheDecodersWhiteBalanceBaseline() async throws {
         let renderer = CoreImagePreviewRenderer(
             decoder: BaselineReportingDecoder(baselineTemperature: 5_200, baselineTint: -4)

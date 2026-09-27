@@ -11,7 +11,26 @@ import Foundation
 /// White balance is already baked in by the decoder (see `CoreImageRawDecoder`),
 /// so this type covers exposure, tone and colour.
 public struct AdjustmentPipeline: Sendable {
-    public init() {}
+    private let cameraProfileRenderer: any CameraProfileRendering
+    private let cameraProfileFallbacks: [CameraProfileFallback]
+
+    public init() {
+        self.cameraProfileRenderer = CameraProfileRenderer()
+        self.cameraProfileFallbacks = AdobeCompatibleProfileFallbacksV1.all
+    }
+
+    public init(cameraProfileRenderer: any CameraProfileRendering) {
+        self.cameraProfileRenderer = cameraProfileRenderer
+        self.cameraProfileFallbacks = AdobeCompatibleProfileFallbacksV1.all
+    }
+
+    public init(
+        cameraProfileRenderer: any CameraProfileRendering,
+        cameraProfileFallbacks: [CameraProfileFallback]
+    ) {
+        self.cameraProfileRenderer = cameraProfileRenderer
+        self.cameraProfileFallbacks = cameraProfileFallbacks
+    }
 
     /// Applies the chain to an already-decoded image.
     ///
@@ -23,18 +42,36 @@ public struct AdjustmentPipeline: Sendable {
     ///   from the source RAW's native pixel size (1 for a full-resolution
     ///   export decode, `<1` for a downsampled interactive/preview decode —
     ///   see `CoreImageRawDecoder.scaleFactor`). Spec §7 Gate B3: sharpening
-    ///   and grain are defined against `1`, so a downsampled preview scales
-    ///   their pixel-radius knobs down by the same factor rather than
-    ///   applying the same absolute radius the full-resolution export would,
-    ///   which would otherwise read as visibly tighter/finer in preview than
-    ///   in the exported file. Export always passes `1`, so exported output
-    ///   is unaffected by this parameter's existence.
-    public func apply(_ adjustments: PhotoAdjustments, to image: CIImage, scaleFactor: Double = 1) -> CIImage {
-        apply(AdjustmentMapping.renderParameters(for: adjustments), to: image, scaleFactor: scaleFactor)
+    ///   scales its pixel-radius knob for a downsampled preview, while Grain
+    ///   is generated in source coordinates and then mapped by this factor.
+    ///   Export always passes `1`, so exported output is unaffected by this
+    ///   parameter's existence.
+    public func apply(
+        _ adjustments: PhotoAdjustments,
+        to image: CIImage,
+        recipe: ResolvedRawRenderRecipe? = nil,
+        scaleFactor: Double = 1
+    ) -> CIImage {
+        apply(AdjustmentMapping.renderParameters(for: adjustments), to: image, recipe: recipe, scaleFactor: scaleFactor)
     }
 
-    public func apply(_ parameters: RenderParameters, to image: CIImage, scaleFactor: Double = 1) -> CIImage {
+    public func apply(
+        _ parameters: RenderParameters,
+        to image: CIImage,
+        recipe: ResolvedRawRenderRecipe? = nil,
+        scaleFactor: Double = 1
+    ) -> CIImage {
         var working = image
+
+        // Camera profile fallbacks belong to the decoded RAW's colour stage:
+        // after CIRAWFilter has applied As Shot white balance, but before any
+        // user exposure/basic tone control can hide a profile mismatch.
+        if let recipe,
+           recipe.effectivePolicy == .adobeProcess2012V1,
+           let fallbackID = recipe.cameraProfile.fallbackID,
+           let fallback = cameraProfileFallbacks.first(where: { $0.id == fallbackID }) {
+            working = (try? cameraProfileRenderer.apply(fallback, to: working, recipe: recipe)) ?? working
+        }
 
         // 0. Lens correction, manual/bundled-profile modes only (design spec
         // §8 step 2; .automatic instead runs inside CoreImageRawDecoder --
@@ -208,23 +245,24 @@ public struct AdjustmentPipeline: Sendable {
         let noise = CIFilter.randomGenerator()
         guard var noiseImage = noise.outputImage else { return image }
 
-        // size 0...100 -> blur radius 0...4 at scaleFactor 1 (spec §7 Gate
-        // B3); identical noise blurred more reads as larger grain clumps.
-        // Scaling the radius down with the image keeps a downsampled preview
-        // from showing visibly coarser clumps than the full-resolution
-        // export will actually have. This does not fully solve
-        // resolution-dependence for grain: the *unblurred* random noise
-        // texture underneath is generated at one sample per decoded pixel,
-        // so its base frequency is still tied to decode resolution the same
-        // way a sensor's own pixel-level noise is -- fixing that would mean
-        // generating grain at a fixed physical frequency independent of
-        // decode size, which is a larger change than this radius fix covers.
-        let blurRadius = (grain.size / 100) * 4 * scaleFactor
+        // Grain size is defined in source-image pixels. Blur the procedural
+        // noise in that coordinate space before mapping it into the decoded
+        // image; otherwise CIRandomGenerator produces one independent sample
+        // per decoded pixel and previews become visibly coarser than exports.
+        let sourceToDecodeScale = scaleFactor.isFinite && scaleFactor > 0 ? scaleFactor : 1
+        let blurRadius = (grain.size / 100) * 4
         if blurRadius > 0 {
             let blur = CIFilter.gaussianBlur()
             blur.inputImage = noiseImage
             blur.radius = Float(blurRadius)
             noiseImage = blur.outputImage ?? noiseImage
+        }
+
+        if sourceToDecodeScale != 1 {
+            noiseImage = noiseImage.transformed(by: CGAffineTransform(
+                scaleX: sourceToDecodeScale,
+                y: sourceToDecodeScale
+            ))
         }
 
         // Recentre the (0...1 per channel, high-frequency) random noise around
@@ -471,13 +509,16 @@ public struct AdjustmentPipeline: Sendable {
     private static func applyAdvancedToneCurve(_ curve: AdvancedToneCurve, to image: CIImage) -> CIImage {
         guard let kernel = advancedToneCurveKernel else { return image }
         let redTable = AdvancedToneCurveLUT.buildCombined(
-            compositePoints: curve.points, channelPoints: curve.redPoints, resolution: 256
+            compositePoints: curve.points, channelPoints: curve.redPoints,
+            parametric: curve.parametric, resolution: 256
         )
         let greenTable = AdvancedToneCurveLUT.buildCombined(
-            compositePoints: curve.points, channelPoints: curve.greenPoints, resolution: 256
+            compositePoints: curve.points, channelPoints: curve.greenPoints,
+            parametric: curve.parametric, resolution: 256
         )
         let blueTable = AdvancedToneCurveLUT.buildCombined(
-            compositePoints: curve.points, channelPoints: curve.bluePoints, resolution: 256
+            compositePoints: curve.points, channelPoints: curve.bluePoints,
+            parametric: curve.parametric, resolution: 256
         )
         guard let lutImage = Self.makeLUTImage(red: redTable, green: greenTable, blue: blueTable) else { return image }
         let extent = image.extent

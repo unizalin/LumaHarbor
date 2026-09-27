@@ -26,17 +26,30 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         try Task.checkCancellation()
 
         let parameters = AdjustmentMapping.renderParameters(for: request.adjustments)
+        let recipe = RawRenderRecipeResolver().resolve(
+            RawRenderRecipeInput(
+                policy: request.adjustments.rawRenderingCompatibility,
+                quality: request.decodeQuality,
+                whiteBalance: parameters.whiteBalance,
+                lensCorrection: request.adjustments.lensCorrection,
+                cameraProfileRequest: request.cameraProfileRequest
+            ),
+            capabilities: RawDecoderCapabilities(decoderIdentifier: decoder.identifier)
+        )
         let decodeRequest = RawDecodeRequest(
             url: request.url,
             quality: request.decodeQuality,
             whiteBalance: parameters.whiteBalance,
-            lensCorrection: request.adjustments.lensCorrection
+            lensCorrection: request.adjustments.lensCorrection,
+            rawRenderingCompatibility: request.adjustments.rawRenderingCompatibility,
+            cameraProfileRequest: request.cameraProfileRequest,
+            rawRenderRecipe: recipe
         )
 
         // Spec §11: never decode, hash or encode on the main thread.
         let decoder = self.decoder
         let pipeline = self.pipeline
-        let renderService = self.renderService
+        let renderService = self.renderService.configured(for: recipe)
 
         return try await runOffActor(
             priority: request.quality == .interactive ? .userInitiated : .utility
@@ -45,7 +58,12 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
             let decoded = try decoder.decode(decodeRequest)
 
             try Task.checkCancellation()
-            let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
+            let adjusted = pipeline.apply(
+                parameters,
+                to: decoded.image,
+                recipe: decoded.rawRenderRecipe ?? recipe,
+                scaleFactor: decoded.scaleFactor
+            )
             let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
             let withLocalAdjustments = LocalAdjustmentRenderer.apply(request.adjustments.localAdjustments, to: withGeometry)
             let withPreviewOptions = ProfessionalPreviewRenderer.apply(request.previewOptions, to: withLocalAdjustments)
@@ -59,7 +77,8 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                 whiteBalanceBaseline: RawWhiteBalanceBaseline(
                     temperatureKelvin: decoded.baselineTemperature,
                     tint: decoded.baselineTint
-                )
+                ),
+                rawRenderRecipe: decoded.rawRenderRecipe ?? recipe
             )
         }
     }

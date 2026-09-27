@@ -25,7 +25,9 @@ final class ExportOptionsWiringTests: AppViewModelTestCase {
         let model = await makeModel(services: services, libraryID: library.id)
         let photo = try XCTUnwrap(model.photos.first)
         model.requestSelectPhoto(photo.id)
-        await waitUntilAppCondition("the photo to open") { await model.selectedPhotoID == photo.id }
+        await waitUntilAppCondition("the photo to open") {
+            await MainActor.run { model.editor.photo?.id == photo.id }
+        }
 
         var options = MacExportOptions.default
         options.namingTemplate = .originalFilenameWithSequence
@@ -57,6 +59,28 @@ final class ExportOptionsWiringTests: AppViewModelTestCase {
             .sorted { $0.request.baseFilename < $1.request.baseFilename }
             .map(\.request.baseFilename)
         XCTAssertEqual(filenames, ["A_001", "B_002", "C_003"])
+    }
+
+    func testBatchExportForwardsTheSavedRawCameraProfileRequest() async throws {
+        try seedPhotos(["A.ARW"])
+        let services = try makeServices(decoder: SucceedingRawDecoder())
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+        model.requestSelectPhoto(photo.id)
+        await waitUntilAppCondition("the photo to open") {
+            await MainActor.run { model.editor.photo?.id == photo.id }
+        }
+        model.editor.updateAdjustments {
+            $0.rawCameraProfile = RawCameraProfileSelection(requestedName: "Adobe Color")
+        }
+
+        model.startBatchExport(to: try destinationDirectory(), options: .default)
+        await waitUntilAppCondition("the batch export to finish") { await !model.isBatchExporting }
+
+        let request = try XCTUnwrap(model.batchExportItems.first?.request)
+        XCTAssertEqual(request.cameraProfileRequest?.sourceName, "Adobe Color")
     }
 
     func testBatchExportExcludesRejectedPhotosUnlessExplicitlyIncluded() async throws {

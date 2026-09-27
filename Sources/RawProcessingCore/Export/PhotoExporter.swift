@@ -31,6 +31,7 @@ public struct ExportRequest: Sendable {
     /// every export before this field existed (design spec §6.11; roadmap
     /// Phase 5 Task 5.2).
     public var watermark: Watermark?
+    public var cameraProfileRequest: RawCameraProfileRequest?
 
     public init(
         sourceURL: URL,
@@ -45,7 +46,8 @@ public struct ExportRequest: Sendable {
         dpi: Double? = nil,
         exifRetentionPolicy: ExifRetentionPolicy = .preserveAll,
         collisionPolicy: ExportCollisionPolicy = .increment,
-        watermark: Watermark? = nil
+        watermark: Watermark? = nil,
+        cameraProfileRequest: RawCameraProfileRequest? = nil
     ) {
         self.sourceURL = sourceURL
         self.adjustments = adjustments
@@ -60,6 +62,7 @@ public struct ExportRequest: Sendable {
         self.exifRetentionPolicy = exifRetentionPolicy
         self.watermark = watermark
         self.collisionPolicy = collisionPolicy
+        self.cameraProfileRequest = cameraProfileRequest
     }
 }
 
@@ -67,11 +70,18 @@ public struct ExportOutcome: Sendable, Equatable {
     public let url: URL
     public let pixelSize: CGSize
     public let byteCount: Int64
+    public let rawRenderRecipe: ResolvedRawRenderRecipe?
 
-    public init(url: URL, pixelSize: CGSize, byteCount: Int64) {
+    public init(
+        url: URL,
+        pixelSize: CGSize,
+        byteCount: Int64,
+        rawRenderRecipe: ResolvedRawRenderRecipe? = nil
+    ) {
         self.url = url
         self.pixelSize = pixelSize
         self.byteCount = byteCount
+        self.rawRenderRecipe = rawRenderRecipe
     }
 }
 
@@ -221,7 +231,7 @@ public actor PhotoExporter {
         )
 
         do {
-            try await renderToDisk(request, temporaryURL: temporaryURL)
+            let recipe = try await renderToDisk(request, temporaryURL: temporaryURL)
             try checkCancellation(cleaningUp: temporaryURL)
 
             let attributes = try? fileManager.attributesOfItem(atPath: temporaryURL.path)
@@ -246,7 +256,12 @@ public actor PhotoExporter {
             try checkCancellation(cleaningUp: temporaryURL)
 
             try fileManager.moveItem(at: temporaryURL, to: finalURL)
-            return ExportOutcome(url: finalURL, pixelSize: pixelSize, byteCount: byteCount)
+            return ExportOutcome(
+                url: finalURL,
+                pixelSize: pixelSize,
+                byteCount: byteCount,
+                rawRenderRecipe: recipe
+            )
         } catch {
             try? fileManager.removeItem(at: temporaryURL)
             throw Self.mapError(error)
@@ -255,17 +270,39 @@ public actor PhotoExporter {
 
     // MARK: - Private
 
-    private func renderToDisk(_ request: ExportRequest, temporaryURL: URL) async throws {
+    private func renderToDisk(
+        _ request: ExportRequest,
+        temporaryURL: URL
+    ) async throws -> ResolvedRawRenderRecipe {
         let parameters = AdjustmentMapping.renderParameters(for: request.adjustments)
+        var recipe = RawRenderRecipeResolver().resolve(
+            RawRenderRecipeInput(
+                policy: request.adjustments.rawRenderingCompatibility,
+                quality: .full,
+                whiteBalance: parameters.whiteBalance,
+                lensCorrection: request.adjustments.lensCorrection,
+                cameraProfileRequest: request.cameraProfileRequest
+            ),
+            capabilities: RawDecoderCapabilities(decoderIdentifier: decoder.identifier)
+        )
+        if request.format == .tiff, request.bitDepth == .sixteenBit {
+            recipe = recipe.replacingOutputTransform(
+                RawOutputTransformID.referenceTIFFSRGB16V1.rawValue
+            )
+        }
         let decodeRequest = RawDecodeRequest(
             url: request.sourceURL,
             quality: .full,
             whiteBalance: parameters.whiteBalance,
-            lensCorrection: request.adjustments.lensCorrection
+            lensCorrection: request.adjustments.lensCorrection,
+            rawRenderingCompatibility: request.adjustments.rawRenderingCompatibility,
+            cameraProfileRequest: request.cameraProfileRequest,
+            rawRenderRecipe: recipe
         )
         let decoder = self.decoder
         let pipeline = self.pipeline
-        let renderService = self.renderService
+        let renderService = self.renderService.configured(for: recipe)
+        let resolvedRecipe = recipe
         let format = request.format
         let quality = request.quality
         let bitDepth = request.bitDepth
@@ -285,7 +322,12 @@ public actor PhotoExporter {
             let decoded = try decoder.decode(decodeRequest)
 
             try Task.checkCancellation()
-            let adjusted = pipeline.apply(parameters, to: decoded.image, scaleFactor: decoded.scaleFactor)
+            let adjusted = pipeline.apply(
+                parameters,
+                to: decoded.image,
+                recipe: decoded.rawRenderRecipe ?? resolvedRecipe,
+                scaleFactor: decoded.scaleFactor
+            )
             let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
             // Local adjustments (Phase 4 Task 4.2) run after geometry, same
             // as the preview path (`CoreImagePreviewRenderer`) and for the
@@ -328,6 +370,7 @@ public actor PhotoExporter {
                 exifProperties: exifProperties
             )
         }
+        return recipe
     }
 
     private func fullResolutionPixelSize(of url: URL) async throws -> CGSize {

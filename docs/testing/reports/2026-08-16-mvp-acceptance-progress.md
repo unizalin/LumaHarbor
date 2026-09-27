@@ -15,7 +15,7 @@
 
 ## 測試用資料
 
-- `Fixtures/Private/APFS-Test`：6 張 fixture 副本（來自 `Fixtures/Private/Sony-ARW`）
+- 私人 APFS fixture：6 張副本（來源與路徑僅留在本機證據）
 - `<EXFAT_FIXTURE_DIR>`：11 張（6 張同上 + 5 張從使用者相機記憶卡 `<CAMERA_CARD_DIR>` 額外複製，**都是複製，原始檔／記憶卡沒動過**）
 
 ## Gate D／E／F 進度
@@ -33,7 +33,7 @@
   - 加入資料夾成功、縮圖增量出現、拉滑桿有反應（延遲跟 APFS 一樣，屬於同一個已知效能問題，非 exFAT 特有）、完全關閉 App 重開後滑桿數值有保留。**4 項行為跟 APFS 完全一致**。
   - 過程中另外踩到一個 Xcode 操作雷：scheme 選單預設停在 `LumaHarbor-Package`（umbrella scheme），按 Run 只會 build 不會真的啟動 App，跟筆記原本記的「只按到 Build 沒按到 Run」是不同根因但同一種症狀（Build Succeeded、沒有 Running）。改選 `LumaHarbor` scheme，或改用 `swift run LumaHarbor` 可繞開。
 
-- **改名 relink**（Gate E 第 6 項，2026-08-17 補測，用 `Fixtures/Private/APFS-Test`）：關閉 App→Finder 改名資料夾→重開 App，下方自動跳出 **Reconnect** 提示，點下去後確認：之前調過參數的照片調整值還在、沒有變成重複的 library 項目。**通過**。
+- **改名 relink**（Gate E 第 6 項，2026-08-17 補測，用私人 APFS fixture）：關閉 App→Finder 改名資料夾→重開 App，下方自動跳出 **Reconnect** 提示，點下去後確認：之前調過參數的照片調整值還在、沒有變成重複的 library 項目。**通過**。
 
 - **刪除本機 SQLite/cache 重建**（Gate E 第 5 項，2026-08-17 補測）：關閉 App→刪除 `~/Library/Application Support/LumaHarbor/library.sqlite`（含 `-wal`/`-shm`）與 `cache/thumbnails/`、`cache/previews/`（保留 `bookmarks/` 未動）→重開 App。App 自動重新掃描、縮圖重新生成，之前調過參數的照片調整值還在（未回報有重複或對不起來的照片）。**通過**。
 
@@ -58,10 +58,10 @@
 
 ## 發現的問題（P1，損壞 RAW 顯示偽成功，Gate E 第 10 項，2026-08-17 新發現，尚未修）
 
-**測試素材**：`Fixtures/Private/Corrupt-Test/`，3 張複製檔（原始檔未動）——`_DSC1896-good.ARW`、`_DSC1897-good.ARW` 正常；`_DSC1898-corrupt.ARW` 用 `head -c 2048` 截斷成 2KB，不是合法 ARW 結構。另外預先放了一個內容是無效 JSON 的 sidecar `.lumaharbor/edits/BAD-SIDECAR-DEADBEEF.json`。
+**測試素材**：未追蹤私人 corrupt fixture，3 張複製檔（原始檔未動）——私人樣本 A／B 正常；私人樣本 C 用 `head -c 2048` 截斷成 2KB，不是合法 ARW 結構。另外預先放了一個內容是無效 JSON 的 synthetic sidecar。
 
 **現象**：
-- 點開損壞的 `_DSC1898-corrupt.ARW`（在使用者操作裡對應「98」）時，畫面**完全沒有任何錯誤提示**，安靜地顯示跟前一張（97）相同的圖——即舊預覽畫面沒有被替換，看起來像是成功解碼，但其實是解碼失敗後 UI 沒有更新或沒有清空舊畫面。**這違反 Gate E 的核心通過條件之一：「不能顯示偽成功」**（規格原本這句是寫在唯讀情境，但同一原則適用於任何失敗情境）。
+- 點開損壞的私人樣本 C（在使用者操作裡對應第三張）時，畫面**完全沒有任何錯誤提示**，安靜地顯示跟前一張相同的圖——即舊預覽畫面沒有被替換，看起來像是成功解碼，但其實是解碼失敗後 UI 沒有更新或沒有清空舊畫面。**這違反 Gate E 的核心通過條件之一：「不能顯示偽成功」**（規格原本這句是寫在唯讀情境，但同一原則適用於任何失敗情境）。
 - App 本身沒有 crash，兩張正常照片（96、97）都能正常瀏覽，掃描本身有繼續（沒有整個卡死）。
 - 額外觀察：第一次點 96 時畫面持續 loading 不出來，點了 97（正常）、98（損壞、顯示 97 殘影）之後**再點回 96，這次才正常出現**。目前不確定跟損壞檔案是否有關，還是純粹是首次解碼較慢；需要之後單獨用一個沒有損壞檔案的資料夾重現排除。
 - 損壞的 sidecar（`BAD-SIDECAR-DEADBEEF.json`）：**沒有被改名／移動／隔離**，測試後檔案還在原位、內容原封不動（用 `ls -la` 確認 mtime 沒變）。App 沒有覆寫它，但也沒有任何「隔離」的可觀察行為——不確定是 App 真的有內部隔離機制只是沒有 UI 呈現，還是根本沒有處理這個檔案、單純沒讀到就跳過。使用者在編輯另一張照片時，App 有正常新建一個獨立的 edit json（`C3BDC256-....json`），代表正常 sidecar 讀寫路徑沒被壞檔卡住。
@@ -92,12 +92,12 @@
 - `Tests/LumaHarborAppTests/AppTestSupport.swift` 同時新增了 `RecordingPreviewRenderer`／`SelectivelyFailingPreviewRenderer` 兩個測試替身，並讓 `makeServices(...)` 多一個 `previewRenderer` 參數可以注入自訂 renderer。
 - 全套件跑過：335 tests，0 failures，8 skipped（跟以前一樣是需要真實硬體的 `RawFixtureTests`）。build 也過。
 
-**Gate E 第 9 項的前置準備做好了**：`Fixtures/Private/ReadOnly-Test/`（3 張 ARW 複製檔，目錄 `chmod 555`、檔案 `chmod 444`，已用 `touch` 驗證真的無法寫入，且在 `.gitignore` 排除範圍內不會誤 commit）。
+**Gate E 第 9 項的前置準備做好了**：未追蹤私人 read-only fixture（3 張 ARW 複製檔，目錄 `chmod 555`、檔案 `chmod 444`，已用 `touch` 驗證真的無法寫入，且在 `.gitignore` 排除範圍內不會誤 commit）。
 
 **還沒做、下一步要人工在真機上走的清單：**
 1. ~~**Gate E 第 7、8 項（拔插 SSD）**~~ — **2026-08-18 人工測完，通過，見下方新增段落。**
 2. ~~**Gate E 第 9 項（唯讀資料夾）**~~ — **2026-08-18 人工測完，通過，見下方新增段落。**
-3. **Gate E 第 10 項重測（損壞 RAW，驗證今天的修法）**：用 `Fixtures/Private/Corrupt-Test/` 點開 `_DSC1898-corrupt.ARW` → 應該要跳錯誤提示、**不再顯示前一張的殘影**；順便看「首次點 96 loading 不出來」是否還會重現。
+3. **Gate E 第 10 項重測（損壞 RAW，驗證今天的修法）**：用未追蹤私人 corrupt fixture 點開損壞樣本 → 應該要跳錯誤提示、**不再顯示前一張的殘影**；順便看首次載入失敗是否還會重現。
 4. ~~**損壞 sidecar 是否真的有隔離機制**~~ — **2026-08-18 讀 code 確認完畢，機制存在且完整，不需要再重測，見下方新增段落。**
 5. **Gate F UI 矩陣**：十個調整項目即時預覽＋個別 Reset；原圖比較／Undo／Redo／整張 Reset；拉滑桿後立刻切照片＝先存檔，唯讀情境下切照片＝停留原照片；匯出 JPEG／流水號／取消清暫存／Finder 顯示；各種錯誤情境（offline／read-only／unsupported／corrupt／disk-full）都要有下一步提示。
 6. **Gate F 效能量測**：Instruments 還沒接，順手用碼表確認節流修法後滑桿反應是不是真的接近 150ms 目標（不是完全靠肉眼猜）。
@@ -118,7 +118,7 @@
 
 ## 2026-08-18（續二）：人工重測 Gate E 第 10 項時發現新 bug——Inspector 面板顯示延遲一拍，已修
 
-**發現方式**：使用者用 `Fixtures/Private/Corrupt-Test/` 實測 96→97→98→96→97，附五張截圖。98（壞檔）正確跳出 alert（P1 修法驗證通過），但 96／97 的 Adjustments 面板數值明顯不對：97 第一次顯示 Blacks=0（正確，97 本來沒存檔），96 第二次顯示 Blacks=0（應為存檔值 88.49，錯）、97 第二次顯示 Blacks≈88（應為 0，錯）。核對 `Fixtures/Private/Corrupt-Test/.lumaharbor/edits/C3BDC256-....json` 確認 88.49 是 96 的真實存檔值。
+**發現方式**：使用者用未追蹤私人 corrupt fixture 實測 A→B→C→A→B，附五張截圖。C（壞檔）正確跳出 alert（P1 修法驗證通過），但 A／B 的 Adjustments 面板數值明顯不對：B 第一次顯示 Blacks=0（正確，B 本來沒存檔），A 第二次顯示 Blacks=0（應為存檔值 88.49，錯）、B 第二次顯示 Blacks≈88（應為 0，錯）。本機 sidecar 證據確認 88.49 是 A 的真實存檔值；私人路徑與識別碼不寫入 Git。
 
 **根因**：`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`（修前 `:52`）`let editor = EditorViewModel()` 不是 `@Published`，`init()`（修前 `:75`）沒有把 `EditorViewModel.objectWillChange` 轉發給 `LibraryViewModel.objectWillChange`。全專案只有 `LibraryViewModel` 被注入成 environmentObject（`LumaHarborMainApp.swift:15`、`RootView.swift:38`），`EditorView`／`InspectorView` 都是透過 `@EnvironmentObject var model: LibraryViewModel` 間接讀 `model.editor.*`——editor 自己內部狀態變化（開新照片、預覽跑完）不會觸發 SwiftUI 重繪，畫面只在 `LibraryViewModel` 自己的 `@Published`（例如 `selectedPhotoID`）變動時重繪一次，讀到的是上一張照片剛好在背景載入完、但從沒被畫出來的舊快照——**顯示延遲一拍，不是資料錯**（`save()`/自動存檔讀的是 `editor.history` 即時內部狀態，不是畫面快照，底層存檔應該沒事，但畫面不可信）。這也解釋了使用者問的「第一張是否要雙點擊才會打開」的觀感——不是真的沒反應，是重繪沒被觸發，看起來像卡住。
 
@@ -140,12 +140,12 @@ editorForwarding = editor.objectWillChange.sink { [weak self] in
 
 ## 2026-08-18（續三）：Gate E 第 9 項（唯讀資料夾）人工測完，通過
 
-用 `Fixtures/Private/ReadOnly-Test/`：
+用未追蹤私人 read-only fixture：
 
 - **加入資料夾**：立刻跳出「Scanned, but couldn't update the library file / 路徑唯讀 / 照片仍可瀏覽，需解鎖磁碟才能存回調整」——訊息清楚、有下一步。**通過。**
 - **拉滑桿**：滑桿可正常互動（本地暫存調整還在），工具列出現橘色「Not saved」警告三角形圖示（`SaveStateLabel` 的 `.failed` 分支），不是偽成功。**通過。**
 - **警告圖示的 tooltip**：`.help("This drive is read-only, so edits can't be saved.")` 確實有接上，但使用者反映「通知有點不太明顯很難出現」——原生 macOS tooltip 本身要滑鼠完全靜止停留一陣子才會跳出，這是系統行為特性，不是完全失效。**列為次要 UX 待改善項目（不擋簽收）**：目前唯一的失敗原因說明管道是這個容易被忽略的原生 tooltip，沒有更明顯的 UI（例如 popover 或第一次失敗時跳一次性 alert）。之後如果要處理，可以考慮把 `saveState == .failed` 的說明也接進 `editor.alert`（跟壞檔那條路徑一樣），但這次驗收先不擋。
-- **匯出**：目的地由使用者自己在系統儲存面板選（`ExportSheet.swift` 的「Choose Destination…」），跟來源資料夾唯讀與否無關。使用者實測選了可寫入的目的地，成功匯出並顯示「Exported _DSC1896.jpg」+「Show in Finder」。**通過，且確認這條跟來源唯讀無關是預期設計，不是 bug。**
+- **匯出**：目的地由使用者自己在系統儲存面板選（`ExportSheet.swift` 的「Choose Destination…」），跟來源資料夾唯讀與否無關。使用者實測選了可寫入的目的地，成功匯出並顯示「Exported <private-sample>.jpg」+「Show in Finder」。**通過，且確認這條跟來源唯讀無關是預期設計，不是 bug。**
 
 **Gate E 第 9 項整體結論：通過，但過程中發現並修掉一個真的卡死的 bug，見下方。**
 
@@ -291,9 +291,9 @@ L10n.t(Exposure)=曝光
 
 ## 2026-08-19（續七）：Gate F 效能量測，發現這個環境其實可以跑真實 RAW 硬體測試，加了一個真實量測
 
-**意外發現**：`RawFixtureTests`（8 個測試，一直被記成「需要真實硬體」而跳過）其實只是靠環境變數 `LUMAHARBOR_RAW_FIXTURE_DIR` 決定要不要跑，不是真的缺硬體支援——這個環境本身就是有完整 Xcode 工具鏈的 Apple Silicon Mac，`CIRAWFilter` 完全可用。設 `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW` 之後這 8 個測試全部真的跑起來、全過（用的是本機那 81 張真實 Sony ARW 相機檔案）。之前每次驗收記錄「8 skipped」，都只是沒設這個環境變數，不代表這台機器真的不能測——以後想跑這批測試，記得先設這個變數。
+**意外發現**：`RawFixtureTests`（8 個測試，一直被記成「需要真實硬體」而跳過）其實只是靠環境變數 `LUMAHARBOR_RAW_FIXTURE_DIR` 決定要不要跑，不是真的缺硬體支援——這個環境本身就是有完整 Xcode 工具鏈的 Apple Silicon Mac，`CIRAWFilter` 完全可用。把環境變數指向未追蹤私人 RAW fixture 後，這 8 個測試全部真的跑起來、全過（用的是本機 81 張真實 Sony ARW 相機檔案）。之前每次驗收記錄「8 skipped」，都只是沒設這個環境變數，不代表這台機器真的不能測。
 
-**效能量測**：沒有 Instruments.app 本體可操作（GUI 工具，這個環境沒有畫面），改寫一個等效的自動化量測——`RawFixtureTests.testInteractivePreviewLatencyForARealPhoto`，直接呼叫 `CoreImagePreviewRenderer.render(...)`，用跟 `EditorViewModel.previewPixelDimension` 完全一樣的 1600px 目標、對一張真實 `_DSC1896.ARW` 做 interactive 品質解碼，量真實耗時：
+**效能量測**：沒有 Instruments.app 本體可操作（GUI 工具，這個環境沒有畫面），改寫一個等效的自動化量測——`RawFixtureTests.testInteractivePreviewLatencyForARealPhoto`，直接呼叫 `CoreImagePreviewRenderer.render(...)`，用跟 `EditorViewModel.previewPixelDimension` 完全一樣的 1600px 目標、對私人 RAW 樣本 A 做 interactive 品質解碼，量真實耗時：
 
 ```
 cold:  338ms（第一次呼叫，CoreImage 內部快取還沒熱）
@@ -327,11 +327,11 @@ spec §11 目標：≤150ms
 
 ### disk-full：素材已備妥，目前正在掛載中
 
-建了一個 130MB APFS disk image：`Fixtures/Private/DiskFull-Test.dmg`（跟其他 `Fixtures/Private/` 底下的東西一樣被 `.gitignore` 排除，不會誤 commit）。裡面複製了 3 張真實 ARW（`_DSC1896`/`_DSC1897`/`_DSC1899`，跟 `ReadOnly-Test`/`Corrupt-Test` 用的同一批），再用 padding 檔案把剩餘空間灌到真的寫不進新東西為止——**已經實測驗證過連建立 `.lumaharbor` 目錄、寫入幾百 bytes 的小檔案都會直接收到 `ENOSPC`（"No space left on device"）**，不是「快滿了」而是真的滿到任何新寫入都會失敗。
+建了一個 130MB APFS disk image（私人檔名與路徑僅留在本機證據，並由 `.gitignore` 排除）。裡面複製了 3 張真實 ARW（私人樣本 A／B／C，與 read-only／corrupt fixture 共用），再用 padding 檔案把剩餘空間灌到真的寫不進新東西為止——**已經實測驗證過連建立 `.lumaharbor` 目錄、寫入幾百 bytes 的小檔案都會直接收到 `ENOSPC`（"No space left on device"）**，不是「快滿了」而是真的滿到任何新寫入都會失敗。
 
 **目前狀態**：已經 `hdiutil attach` 掛載在 `<DISK_FULL_TEST_VOLUME>`，現在就可以直接在 App 裡「加入照片資料夾」選這個磁碟測試。之後如果 volume 被卸載或重開機，用報告中已遮蔽的本機指令重新掛載：
 ```sh
-hdiutil attach Fixtures/Private/DiskFull-Test.dmg
+hdiutil attach <private-disk-full-fixture>
 ```
 
 **還沒做（人工待測）**：

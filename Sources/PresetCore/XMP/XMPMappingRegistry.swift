@@ -16,12 +16,14 @@ public enum XMPCompatibilityLevel: String, Codable, Equatable, Sendable {
 /// convert to and from a single `AdjustmentPatch` scalar leaf.
 ///
 /// Everything else encountered in a real document -- crop, masks, camera
-/// profile, per-channel tone curves, sharpening detail/masking, independent
-/// noise-reduction channels, and any unrecognised namespace -- is *not* in
-/// this table by design: `XMPImporter` treats "not in the table" as the
+/// profile, per-channel tone curves, sharpening detail/masking, noise-
+/// reduction smoothness/contrast, and any unrecognised namespace -- is *not*
+/// in this table by design: `XMPImporter` treats "not in the table" as the
 /// uniform, correct definition of `.preserved` (spec §7's own examples),
 /// rather than needing a second parallel list of "known but unsupported"
-/// properties.
+/// properties. The four amount/detail noise fields are registered below as
+/// one explicit `.approximate` mapping because Core Image exposes a single
+/// combined noise filter rather than Adobe's independent channels.
 public struct XMPMapping: Sendable {
     public var propertyID: XMPPropertyID
     public var field: AdjustmentFieldID
@@ -188,6 +190,15 @@ public struct XMPMappingRegistry: Sendable {
             exportScalar: { .text(format($0 / 1.5)) }
         ))
         mappings.append(scalar(.cameraRaw("SharpenRadius"), .sharpeningRadius, .approximate))
+
+        // MARK: Noise reduction -- approximate
+        // Core Image exposes one noise level and one sharpness control, so the
+        // renderer combines the imported luminance/colour amounts and details
+        // rather than claiming Adobe's independent channels are identical.
+        mappings.append(scalar(.cameraRaw("LuminanceSmoothing"), .noiseReductionLuminanceAmount, .approximate))
+        mappings.append(scalar(.cameraRaw("LuminanceNoiseReductionDetail"), .noiseReductionLuminanceDetail, .approximate))
+        mappings.append(scalar(.cameraRaw("ColorNoiseReduction"), .noiseReductionColorAmount, .approximate))
+        mappings.append(scalar(.cameraRaw("ColorNoiseReductionDetail"), .noiseReductionColorDetail, .approximate))
 
         // MARK: Vignette -- approximate, identical ranges
         mappings.append(scalar(.cameraRaw("PostCropVignetteAmount"), .vignetteAmount, .approximate))

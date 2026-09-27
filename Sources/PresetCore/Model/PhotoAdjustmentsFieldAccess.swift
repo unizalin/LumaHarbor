@@ -69,7 +69,7 @@ public extension PhotoAdjustments {
         case .presenceTexture: return presence.texture
         case .presenceClarity: return presence.clarity
         case .presenceDehaze: return presence.dehaze
-        case .colorGrading, .monochrome, .renderingProfile, .lensCorrection: return nil
+        case .colorGrading, .monochrome, .renderingProfile, .rawCameraProfile, .lensCorrection: return nil
         }
     }
 }
@@ -86,6 +86,7 @@ public extension AdjustmentPatch {
             case .colorGrading: builder.colorGrading = adjustments.colorGrading
             case .monochrome: builder.monochrome = adjustments.monochrome
             case .renderingProfile: builder.renderingProfile = adjustments.renderingProfile
+            case .rawCameraProfile: builder.rawCameraProfile = adjustments.rawCameraProfile
             case .lensCorrection: builder.lensCorrection = adjustments.lensCorrection
             default:
                 if let value = adjustments.scalarValue(for: field) {
@@ -106,6 +107,7 @@ public extension AdjustmentPatch {
             case .colorGrading: return !adjustments.colorGrading.isIdentity
             case .monochrome: return !adjustments.monochrome.isIdentity
             case .renderingProfile: return !adjustments.renderingProfile.isIdentity
+            case .rawCameraProfile: return !adjustments.rawCameraProfile.isEmpty
             case .lensCorrection: return !adjustments.lensCorrection.isIdentity
             default: return adjustments.scalarValue(for: field) != PhotoAdjustments.neutral.scalarValue(for: field)
             }
@@ -126,6 +128,7 @@ public extension AdjustmentPatch {
             case .colorGrading: return adjustments.colorGrading != baseline.colorGrading
             case .monochrome: return adjustments.monochrome != baseline.monochrome
             case .renderingProfile: return adjustments.renderingProfile != baseline.renderingProfile
+            case .rawCameraProfile: return adjustments.rawCameraProfile != baseline.rawCameraProfile
             case .lensCorrection: return adjustments.lensCorrection != baseline.lensCorrection
             default: return adjustments.scalarValue(for: field) != baseline.scalarValue(for: field)
             }
@@ -144,6 +147,7 @@ public extension AdjustmentPatch {
             case .colorGrading: builder.colorGrading = colorGrading
             case .monochrome: builder.monochrome = monochrome
             case .renderingProfile: builder.renderingProfile = renderingProfile
+            case .rawCameraProfile: builder.rawCameraProfile = rawCameraProfile
             case .lensCorrection: builder.lensCorrection = lensCorrection
             default:
                 if let value = scalarValue(for: field) {

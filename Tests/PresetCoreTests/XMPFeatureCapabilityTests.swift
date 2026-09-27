@@ -16,6 +16,37 @@ final class XMPFeatureCapabilityTests: XCTestCase {
         })
     }
 
+    func testDefaultManifestCoversCompositeAdobeFeatures() {
+        let manifest = XMPCapabilityManifest.default
+        XCTAssertTrue(manifest.capabilities(for: .monochrome).contains {
+            $0.propertyIDs.contains(.cameraRaw("ConvertToGrayscale"))
+                && $0.propertyIDs.contains(.cameraRaw("GrayMixerRed"))
+        })
+        XCTAssertTrue(manifest.capabilities(for: .colorGrading).contains {
+            $0.propertyIDs.contains(.cameraRaw("ColorGradeShadowHue"))
+                && $0.propertyIDs.contains(.cameraRaw("ColorGradeBlending"))
+        })
+        XCTAssertTrue(manifest.capabilities(for: .lensCorrection).contains {
+            $0.propertyIDs == [.cameraRaw("LensProfileEnable")]
+        })
+        XCTAssertTrue(manifest.capabilities(for: .renderingProfile).contains {
+            $0.propertyIDs == [.cameraRaw("CameraProfile")]
+                && $0.level == .preserved
+                && $0.direction == .importOnly
+                && $0.rendererEvidenceID == "profile.preservedNotApplied"
+        })
+    }
+
+    func testAdobeProfileRegistryRecognizesCorpusNamesAndTrimsInput() throws {
+        XCTAssertEqual(
+            AdobeProfileRegistry.descriptor(for: "  Adobe Standard ")?.name,
+            "Adobe Standard"
+        )
+        XCTAssertEqual(AdobeProfileRegistry.descriptor(for: "Adobe Color")?.level, .preserved)
+        XCTAssertNil(AdobeProfileRegistry.descriptor(for: "Camera Standard"))
+        XCTAssertEqual(AdobeProfileRegistry.recognizedNames, ["Adobe Standard", "Adobe Color"])
+    }
+
     func testManifestRejectsDuplicatePropertyOwnership() {
         XCTAssertNil(XMPCapabilityManifest(capabilities: [
             XMPFeatureCapability(

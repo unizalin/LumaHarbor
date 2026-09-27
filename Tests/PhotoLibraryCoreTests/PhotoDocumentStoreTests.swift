@@ -1278,13 +1278,24 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(try Data(contentsOf: sidecarURL), bytesBeforeSave)
     }
 
-    func testLoadAdjustmentsReturnsNeutralWhenNoSidecarHasBeenSaved() async throws {
+    func testLoadAdjustmentsUsesPersistedPolicyWhenNoSidecarHasBeenSaved() async throws {
         let sourceURL = try makeSourceFile()
-        let (store, _) = makeStore()
+        let (store, rootURL) = makeStore()
         let document = try await store.openInPlace(sourceURL, bookmarkData: nil).document
 
         let adjustments = try await store.loadAdjustments(documentID: document.id)
-        XCTAssertEqual(adjustments, .neutral)
+        XCTAssertEqual(adjustments, .neutral(using: .adobeProcess2012V1))
+
+        let recordURL = rootURL.appendingPathComponent("Records/\(document.id.uuidString).json")
+        var legacyRecord = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any]
+        )
+        legacyRecord.removeValue(forKey: "rawRenderingCompatibility")
+        try JSONSerialization.data(withJSONObject: legacyRecord).write(to: recordURL)
+
+        let legacyStore = PhotoDocumentStore(rootURL: rootURL)
+        let legacyAdjustments = try await legacyStore.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(legacyAdjustments, .neutral)
     }
 
     // MARK: - 6. Cancellation checkpoints

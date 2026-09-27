@@ -719,3 +719,15 @@
 "Collapsed" = "收起";
 "HSL" = "HSL 色相饱和度";
 "%@ Actions" = "%@ 操作";
+"Render Diagnostics" = "渲染诊断";
+"Rendering Mode" = "渲染模式";
+"LumaHarbor Native" = "LumaHarbor 原生";
+"Lightroom-compatible v1" = "Lightroom 兼容 v1";
+"White Balance" = "白平衡";
+"As Shot" = "拍摄值";
+"Adjusted" = "已调整";
+"Requested Camera Profile" = "请求的相机配置文件";
+"Resolved Profile" = "解析后的配置文件";
+"Profile Preserved, Not Applied" = "配置文件已保留，未套用";
+"Approximate fallback" = "近似回退";
+"Fallback" = "回退";

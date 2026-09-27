@@ -82,6 +82,35 @@ final class BatchExportQueueTests: XCTestCase {
         }
     }
 
+    func testAdobePolicyBatchUsesNativeEffectiveRecipeForEveryExportBeforeGateTwo() async {
+        let recorder = DecodeRequestRecorder()
+        let queue = BatchExportQueue(
+            exporter: PhotoExporter(
+                decoder: SyntheticRawDecoder(recorder: recorder)
+            )
+        )
+        var requests = zip(sourceURLs, ["a", "b", "c"]).map {
+            makeRequest($0, baseFilename: $1)
+        }
+        for index in requests.indices {
+            requests[index].adjustments = .neutral(using: .adobeProcess2012V1)
+        }
+
+        let report = await queue.run(requests)
+
+        XCTAssertEqual(report.succeededCount, requests.count)
+        XCTAssertEqual(recorder.requests.count, requests.count)
+        for request in recorder.requests {
+            XCTAssertEqual(request.rawRenderingCompatibility, .adobeProcess2012V1)
+            XCTAssertEqual(request.rawRenderRecipe?.policy, .adobeProcess2012V1)
+            XCTAssertEqual(request.rawRenderRecipe?.effectivePolicy, .native)
+            XCTAssertEqual(
+                request.rawRenderRecipe?.workingColorSpaceID,
+                RawWorkingColorSpaceID.nativeExtendedLinearSRGBV1.rawValue
+            )
+        }
+    }
+
     func testAFailingItemMovesToFailedAndDoesNotStopTheRestOfTheQueue() async {
         let failingDecoder = SyntheticRawDecoder(failure: .corruptedFile(path: "/tmp/bad.ARW"))
         let workingDecoder = SyntheticRawDecoder()

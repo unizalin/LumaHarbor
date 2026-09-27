@@ -1,7 +1,8 @@
 import Foundation
+import RawProcessingCore
 
 /// One photo's entry in `library.json`.
-public struct PhotoRecord: Codable, Equatable, Sendable {
+public struct PhotoRecord: Codable, Hashable, Sendable {
     public var photoID: PhotoID
     /// Path relative to the library root, `/`-separated.
     public var relativePath: String
@@ -16,6 +17,9 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
     public var variantOf: PhotoID?
     /// Mirrors `PhotoAsset.variantName`.
     public var variantName: String?
+    /// The source baseline selected when this record was first discovered.
+    /// `nil` remains decodable for records written before schema 2.
+    public var rawRenderingCompatibility: RawRenderingCompatibility?
 
     public init(
         photoID: PhotoID,
@@ -24,7 +28,8 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
         lastSeenAt: Date = Date(),
         needsConfirmation: Bool = false,
         variantOf: PhotoID? = nil,
-        variantName: String? = nil
+        variantName: String? = nil,
+        rawRenderingCompatibility: RawRenderingCompatibility? = nil
     ) {
         self.photoID = photoID
         self.relativePath = relativePath
@@ -33,6 +38,7 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
         self.needsConfirmation = needsConfirmation
         self.variantOf = variantOf
         self.variantName = variantName
+        self.rawRenderingCompatibility = rawRenderingCompatibility
     }
 
     public init(from decoder: Decoder) throws {
@@ -46,6 +52,15 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
         ) ?? false
         self.variantOf = try container.decodeIfPresent(PhotoID.self, forKey: .variantOf)
         self.variantName = try container.decodeIfPresent(String.self, forKey: .variantName)
+        self.rawRenderingCompatibility = try container.decodeIfPresent(
+            RawRenderingCompatibility.self, forKey: .rawRenderingCompatibility
+        )
+    }
+
+    /// Missing policy fields are always interpreted as the historic native
+    /// baseline until a complete manifest migration can persist that choice.
+    public var effectiveRawRenderingCompatibility: RawRenderingCompatibility {
+        rawRenderingCompatibility ?? .native
     }
 }
 
@@ -56,7 +71,7 @@ public struct PhotoRecord: Codable, Equatable, Sendable {
 /// disposable cache of exactly this, which is what makes "delete the database
 /// and rebuild" work.
 public struct LibraryManifest: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var libraryID: LibraryID
@@ -101,5 +116,21 @@ public struct LibraryManifest: Codable, Equatable, Sendable {
 
     public mutating func remove(photoID: PhotoID) {
         photos.removeAll { $0.photoID == photoID }
+    }
+
+    /// Upgrades the policy portion of a manifest as one in-memory value. The
+    /// caller persists this value atomically, so a write failure leaves the
+    /// prior manifest untouched rather than partially upgrading records.
+    @discardableResult
+    public mutating func migrateRawRenderingCompatibilityIfNeeded() -> Bool {
+        var changed = schemaVersion < Self.currentSchemaVersion
+        for index in photos.indices where photos[index].rawRenderingCompatibility == nil {
+            photos[index].rawRenderingCompatibility = .native
+            changed = true
+        }
+        if schemaVersion < Self.currentSchemaVersion {
+            schemaVersion = Self.currentSchemaVersion
+        }
+        return changed
     }
 }

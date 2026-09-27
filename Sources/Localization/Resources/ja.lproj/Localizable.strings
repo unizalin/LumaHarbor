@@ -719,3 +719,15 @@
 "Collapsed" = "折りたたみ";
 "HSL" = "HSL（色相・彩度・輝度）";
 "%@ Actions" = "%@の操作";
+"Render Diagnostics" = "レンダリング診断";
+"Rendering Mode" = "レンダリングモード";
+"LumaHarbor Native" = "LumaHarbor ネイティブ";
+"Lightroom-compatible v1" = "Lightroom 互換 v1";
+"White Balance" = "ホワイトバランス";
+"As Shot" = "撮影時の値";
+"Adjusted" = "調整済み";
+"Requested Camera Profile" = "要求されたカメラプロファイル";
+"Resolved Profile" = "解決済みプロファイル";
+"Profile Preserved, Not Applied" = "プロファイルを保持（未適用）";
+"Approximate fallback" = "近似フォールバック";
+"Fallback" = "フォールバック";

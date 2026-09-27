@@ -44,6 +44,55 @@ final class LightroomXMPFixtureTests: XCTestCase {
         }
     }
 
+    func testConfiguredBlackAndWhiteFixturesCarryTheirAdobeMonochromeState() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let fixtures: [LightroomXMPFixture]
+        do {
+            fixtures = try LightroomXMPFixtureSupport.load(environment: environment)
+        } catch LightroomXMPFixtureSupportError.missingDirectory {
+            throw XCTSkip("private Lightroom XMP corpus is not configured")
+        }
+
+        let importer = XMPImporter()
+        let first = try importer.preview(data: fixtures[0].data, suggestedName: fixtures[0].id)
+        let third = try importer.preview(data: fixtures[2].data, suggestedName: fixtures[2].id)
+        XCTAssertEqual(first.proposedPreset.patch.monochrome?.isEnabled, true)
+        XCTAssertEqual(third.proposedPreset.patch.monochrome?.isEnabled, true)
+        XCTAssertTrue(first.nativeFields.contains(.monochrome))
+        XCTAssertTrue(third.nativeFields.contains(.monochrome))
+    }
+
+    func testConfiguredCorpusCarriesVisualAdjustmentFieldsIntoPatch() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let fixtures: [LightroomXMPFixture]
+        do {
+            fixtures = try LightroomXMPFixtureSupport.load(environment: environment)
+        } catch LightroomXMPFixtureSupportError.missingDirectory {
+            throw XCTSkip("private Lightroom XMP corpus is not configured")
+        }
+
+        let importer = XMPImporter()
+        let previews = try fixtures.map {
+            try importer.preview(data: $0.data, suggestedName: $0.id)
+        }
+
+        let blackAndWhite = previews[0].proposedPreset.patch
+        XCTAssertEqual(blackAndWhite.monochrome?.red, 5)
+        XCTAssertEqual(blackAndWhite.noiseReduction?.luminanceAmount, 13)
+        XCTAssertEqual(blackAndWhite.noiseReduction?.colorAmount, 25)
+        XCTAssertEqual(blackAndWhite.lensCorrection?.mode, .automatic)
+
+        let hideaki = previews[1].proposedPreset.patch
+        XCTAssertEqual(hideaki.colorGrading?.midtones.hue, 174)
+        XCTAssertEqual(hideaki.colorGrading?.blending, 100)
+        XCTAssertEqual(hideaki.lensCorrection?.mode, .automatic)
+
+        let color = previews[3].proposedPreset.patch
+        XCTAssertEqual(color.basic?.temperature, 7656)
+        XCTAssertEqual(color.basic?.tint, 12)
+        XCTAssertEqual(color.lensCorrection?.mode, .off)
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("lr-xmp-fixture-test-\(UUID().uuidString)", isDirectory: true)

@@ -284,7 +284,8 @@ struct InspectorView: View {
                     MetadataPanel(
                         snapshot: EditorMetadataSnapshot(photo: photo),
                         photo: model.selectedPhoto ?? photo,
-                        model: model
+                        model: model,
+                        recipe: model.editor.latestRawRenderRecipe
                     )
                 }
                 Divider()
@@ -635,12 +636,19 @@ private struct MetadataPanel: View {
     let snapshot: EditorMetadataSnapshot
     let photo: PhotoAsset
     @ObservedObject var model: LibraryViewModel
+    let recipe: ResolvedRawRenderRecipe?
     @State private var keywordText: String
 
-    init(snapshot: EditorMetadataSnapshot, photo: PhotoAsset, model: LibraryViewModel) {
+    init(
+        snapshot: EditorMetadataSnapshot,
+        photo: PhotoAsset,
+        model: LibraryViewModel,
+        recipe: ResolvedRawRenderRecipe?
+    ) {
         self.snapshot = snapshot
         self.photo = photo
         self.model = model
+        self.recipe = recipe
         _keywordText = State(initialValue: photo.keywords.map(\.displayValue).joined(separator: ", "))
     }
 
@@ -660,6 +668,8 @@ private struct MetadataPanel: View {
             row(L10n.t("ISO"), snapshot.isoDescription)
             row(L10n.t("Capture Date"), snapshot.captureDateDescription)
             row(L10n.t("Orientation"), snapshot.orientationDescription)
+
+            RawRenderDiagnosticsPanel(recipe: recipe)
 
             Divider()
             Text(L10n.t("Curation"))

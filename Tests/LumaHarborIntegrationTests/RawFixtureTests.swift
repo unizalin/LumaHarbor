@@ -115,7 +115,7 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
         // CIRAWFilter.nativeSize ignores the orientation property, but the
         // decoded output's extent respects it, so a portrait-tagged fixture
         // (EXIF orientation 8, confirmed via CIRAWFilter debug output on
-        // _DSC1896.ARW: nativeSize=6000x4000, outputExtent=4000x6000) swaps
+        // a private Sony fixture: nativeSize=6000x4000, outputExtent=4000x6000) swaps
         // axes here. Compare the pair rather than each side.
         let decodedPair = [decoded.decodedPixelSize.width, decoded.decodedPixelSize.height].sorted()
         let nativePair = [decoded.nativePixelSize.width, decoded.nativePixelSize.height].sorted()
@@ -174,6 +174,40 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
             CGColorSpace.sRGB as String,
             "Expected an sRGB profile, got \((colorSpace.name as String?) ?? "none")"
         )
+    }
+
+    /// The Lightroom comparison corpus is kept outside Git. When an output
+    /// directory is supplied, this opt-in acceptance test leaves the four
+    /// current RAW exports available for the external reference comparator.
+    /// Without the environment variable it remains a normal skipped private
+    /// fixture test and never writes into the repository.
+    func testSixteenBitTIFFExportIsRGBWithoutAlphaForEverySonyFixture() async throws {
+        guard let outputPath = ProcessInfo.processInfo.environment["LUMAHARBOR_REFERENCE_EXPORT_DIR"],
+              !outputPath.isEmpty else {
+            throw XCTSkip("Set LUMAHARBOR_REFERENCE_EXPORT_DIR to retain private TIFF outputs for comparison.")
+        }
+
+        let destination = URL(fileURLWithPath: outputPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        for url in sonyFixtures {
+            let outcome = try await PhotoExporter().export(ExportRequest(
+                sourceURL: url,
+                adjustments: .neutral,
+                destinationDirectory: destination,
+                baseFilename: url.deletingPathExtension().lastPathComponent,
+                format: .tiff,
+                bitDepth: .sixteenBit,
+                exifRetentionPolicy: .removeAll
+            ))
+
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            XCTAssertEqual(image.bitsPerComponent, 16, url.lastPathComponent)
+            XCTAssertFalse(
+                [CGImageAlphaInfo.first, .last, .premultipliedFirst, .premultipliedLast].contains(image.alphaInfo),
+                "TIFF export unexpectedly contains alpha: \(url.lastPathComponent)"
+            )
+        }
     }
 
     func testExportingNeverModifiesTheOriginal() async throws {

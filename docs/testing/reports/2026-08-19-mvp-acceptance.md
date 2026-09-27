@@ -39,7 +39,7 @@ interactive 預覽節流／decode 失敗偽成功殘影／Inspector 面板延遲
 |---|---|---|
 | RAW fixture 安全代號 | `fixture-set-sony-arw`（本機相機拍攝，2019-03-28） | — |
 | Sony `.ARW` 檔案數 | `find` 計數 | 81 張 |
-| 樣本 SHA-256（3 張，跨 ReadOnly/Corrupt/DiskFull 測試共用） | `shasum -a 256` | `_DSC1896.ARW`: `50e2afadcfc2598342576ac716a37113397d40c824729d6d43376705a83d8487`；`_DSC1897.ARW`: `7dc07b18fded66427f3f00e6c95dc551c07944773ed8ddae9fe2e79786ba8fdc`；`_DSC1899.ARW`: `cf4c01e71830664836460b2d2cecd166d3936bc3c2af6928a24893735f1a3733` |
+| 樣本 SHA-256（3 張，跨 ReadOnly/Corrupt/DiskFull 測試共用） | `shasum -a 256` | 私人樣本 A／B／C 均於本機核對；檔名與 digest 不寫入 Git。 |
 | 各 fixture 檔案大小 | `ls -la` | 24,910,592 / 24,906,496 / 24,914,688 bytes |
 | 各 fixture 修改時間（測試前後） | `stat -f %Sm` | `Mar 28 11:59:12 2019`，測試前後完全一致（見 §6） |
 | 橫向樣本 | | ☑ 已含 |
@@ -177,7 +177,7 @@ LUMAHARBOR_RAW_FIXTURE_DIR=<fixture-set-sony-arw> swift test --filter RawFixture
 | 指標 | 目標 | 實測 | 結果 |
 |---|---|---|---|
 | Cached thumbnail 延遲 | ≤ 300 ms | 未量測 | ☐ 未量測（P2） |
-| Slider preview 延遲 | ≤ 150 ms | 穩定狀態 137–148ms（三次重複量測，見 `testInteractivePreviewLatencyForARealPhoto`），對真實 `_DSC1896.ARW`、1600px interactive 品質解碼直接計時 | ☑ 達標（壓線，餘裕不大） |
+| Slider preview 延遲 | ≤ 150 ms | 穩定狀態 137–148ms（三次重複量測，見 `testInteractivePreviewLatencyForARealPhoto`），對私人 RAW 樣本 A、1600px interactive 品質解碼直接計時 | ☑ 達標（壓線，餘裕不大） |
 | 快速切換照片 100 次後 in-flight work／記憶體 | 不持續線性成長 | 未量測 | ☐ 未量測（P2） |
 | 大資料夾掃描 high-water | bounded；main thread 無 RAW decode／hash／export | 未經 Instruments 量測；架構上有 `BoundedFolderScanTests` 跟 `runOffActor` 相關單元測試佐證設計意圖 | ☐ 未經 Instruments 直接量測（P2） |
 

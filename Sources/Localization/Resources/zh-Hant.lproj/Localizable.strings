@@ -719,3 +719,15 @@
 "Collapsed" = "收合";
 "HSL" = "HSL 色相飽和度";
 "%@ Actions" = "%@ 動作";
+"Render Diagnostics" = "渲染診斷";
+"Rendering Mode" = "渲染模式";
+"LumaHarbor Native" = "LumaHarbor 原生";
+"Lightroom-compatible v1" = "Lightroom 相容 v1";
+"White Balance" = "白平衡";
+"As Shot" = "拍攝值";
+"Adjusted" = "已調整";
+"Requested Camera Profile" = "要求的相機描述檔";
+"Resolved Profile" = "解析後描述檔";
+"Profile Preserved, Not Applied" = "描述檔已保留，未套用";
+"Approximate fallback" = "近似 fallback";
+"Fallback" = "fallback";

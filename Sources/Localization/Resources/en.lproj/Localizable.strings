@@ -719,3 +719,15 @@
 "Collapsed" = "Collapsed";
 "HSL" = "HSL";
 "%@ Actions" = "%@ Actions";
+"Render Diagnostics" = "Render Diagnostics";
+"Rendering Mode" = "Rendering Mode";
+"LumaHarbor Native" = "LumaHarbor Native";
+"Lightroom-compatible v1" = "Lightroom-compatible v1";
+"White Balance" = "White Balance";
+"As Shot" = "As Shot";
+"Adjusted" = "Adjusted";
+"Requested Camera Profile" = "Requested Camera Profile";
+"Resolved Profile" = "Resolved Profile";
+"Profile Preserved, Not Applied" = "Profile Preserved, Not Applied";
+"Approximate fallback" = "Approximate fallback";
+"Fallback" = "Fallback";

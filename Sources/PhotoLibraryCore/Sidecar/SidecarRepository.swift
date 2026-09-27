@@ -331,7 +331,19 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     ) throws -> Data {
         let encoded = try SidecarCoding.encode(sidecar)
         let url = sidecarURL(for: sidecar.photoID)
-        guard fileManager.fileExists(atPath: url.path) else { return encoded }
+        guard fileManager.fileExists(atPath: url.path) else {
+            // Rewrites preserve unknown top-level fields through
+            // JSONSerialization. Canonicalize the first write through that
+            // same path so an unchanged sidecar is byte-identical on the
+            // first save and every subsequent save.
+            guard let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+                return encoded
+            }
+            return try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            )
+        }
 
         // Validate the existing file through the same compatibility gate used
         // by every reader. This blocks replacing a newer schema and

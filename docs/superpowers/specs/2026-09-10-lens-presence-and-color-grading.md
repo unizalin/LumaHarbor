@@ -176,3 +176,14 @@ Rendering Profile 放在 Monochrome 之後、Split Toning 之前——因為 pro
 ## 12. Handoff
 
 完成後於 `docs/coordination/2026-09-10-p4-lens-presence-color-grading-handoff.md` 記錄,下一步指向 P5。
+
+## 13. 2026-09-17 實作更新
+
+實際匯入 Lightroom XMP 時，已將下列 Adobe 欄位接入既有調整 patch 與渲染管線：
+
+- `ConvertToGrayscale` 與 `GrayMixer*` → `MonochromeAdjustments`（native、可匯出回 XMP）。
+- `ColorGrade*` → `ColorGradingAdjustments`（native、可匯出回 XMP）。
+- `LensProfileEnable` → `LensCorrectionAdjustments.mode`（native；`1` 使用 Core Image automatic，`0` 關閉）。
+- `LuminanceSmoothing`、`LuminanceNoiseReductionDetail`、`ColorNoiseReduction`、`ColorNoiseReductionDetail` → `NoiseReductionPatch`（approximate；Core Image 只有合併式降噪控制）。
+
+這些欄位原本會落入 preserved-only，導致「匯入成功但套用後畫面沒有相應效果」。本次修正取代本文件第 1 節第 5 點與第 7 節的 preserved-only 實作狀態；Adobe `CameraProfile`／DCP、Parametric Curve、Point Color、遮罩、Defringe 與 Lens Blur 等仍維持 preserved，因為目前沒有可驗證的等價渲染器。這個專案因此仍不宣稱與 Lightroom 逐像素 100% 相同。

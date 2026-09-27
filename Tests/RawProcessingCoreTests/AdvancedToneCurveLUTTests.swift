@@ -135,4 +135,17 @@ final class AdvancedToneCurveLUTTests: XCTestCase {
         )
         XCTAssertTrue(combined.allSatisfy { $0 >= 0 && $0 <= 1 })
     }
+
+    func testParametricCurveBuildsAClampedMonotonicLUT() {
+        let curve = ParametricToneCurve(shadows: -40, darks: -10, lights: 15, highlights: 30)
+        let lut = AdvancedToneCurveLUT.buildParametric(from: curve, resolution: 256)
+
+        XCTAssertEqual(lut.count, 256)
+        XCTAssertTrue(lut.allSatisfy { $0 >= 0 && $0 <= 1 && $0.isFinite })
+        for index in 1..<lut.count {
+            XCTAssertGreaterThanOrEqual(lut[index], lut[index - 1])
+        }
+        XCTAssertGreaterThan(lut[32], 32.0 / 255.0)
+        XCTAssertLessThan(lut[224], 224.0 / 255.0)
+    }
 }

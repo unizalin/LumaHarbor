@@ -935,6 +935,64 @@ final class PhotoExportTests: XCTestCase {
         XCTAssertEqual(image.bitsPerComponent, 16)
     }
 
+    private func makeSixteenBitAlphaContentImage() throws -> CIImage {
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let source = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.5))
+            .cropped(to: extent)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        let cgImage = try XCTUnwrap(context.createCGImage(
+            source,
+            from: extent,
+            format: .RGBA16,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        ))
+        XCTAssertNotEqual(cgImage.alphaInfo, .none)
+        XCTAssertEqual(cgImage.bitsPerComponent, 16)
+        return CIImage(cgImage: cgImage)
+    }
+
+    func testSixteenBitTIFFIsRGBWithoutAnAlphaChannel() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(
+            pixelSize: CGSize(width: 8, height: 8),
+            contentImage: try makeSixteenBitAlphaContentImage()
+        ))
+        let outcome = try await exporter.export(makeRequest(format: .tiff, bitDepth: .sixteenBit))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.alphaInfo, .none)
+    }
+
+    func testEightBitTIFFIsRGBWithoutAnAlphaChannel() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder(
+            pixelSize: CGSize(width: 8, height: 8),
+            contentImage: try makeSixteenBitAlphaContentImage()
+        ))
+        let outcome = try await exporter.export(makeRequest(format: .tiff, bitDepth: .eightBit))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(outcome.url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.bitsPerComponent, 8)
+        XCTAssertTrue([CGImageAlphaInfo.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo))
+    }
+
+    func testSixteenBitTIFFUsesTheVersionedReferenceOutputTransform() async throws {
+        let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
+        let outcome = try await exporter.export(ExportRequest(
+            sourceURL: sourceURL,
+            adjustments: .neutral,
+            destinationDirectory: directory,
+            baseFilename: "reference",
+            format: .tiff,
+            bitDepth: .sixteenBit
+        ))
+
+        XCTAssertEqual(
+            outcome.rawRenderRecipe?.outputTransformID,
+            RawOutputTransformID.referenceTIFFSRGB16V1.rawValue
+        )
+    }
+
     func testEightBitTIFFProducesAnEightBitPerChannelFile() async throws {
         let exporter = PhotoExporter(decoder: SyntheticRawDecoder())
         let outcome = try await exporter.export(makeRequest(format: .tiff, bitDepth: .eightBit))

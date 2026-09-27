@@ -98,6 +98,31 @@ public struct XMPImporter: Sendable {
                 continue
             }
 
+            if let component = Self.parametricToneCurveComponent(for: id) {
+                do {
+                    var curve = builder.advancedToneCurve ?? .neutral
+                    let number = try Self.importNumeric(value)
+                    switch component {
+                    case .shadows: curve.parametric.shadows = number
+                    case .darks: curve.parametric.darks = number
+                    case .lights: curve.parametric.lights = number
+                    case .highlights: curve.parametric.highlights = number
+                    case .shadowSplit: curve.parametric.shadowSplit = number
+                    case .midtoneSplit: curve.parametric.midtoneSplit = number
+                    case .highlightSplit: curve.parametric.highlightSplit = number
+                    }
+                    builder.advancedToneCurve = curve
+                    mappedProperties.insert(id)
+                    if !nativeFields.contains(.advancedToneCurve) {
+                        nativeFields.append(.advancedToneCurve)
+                    }
+                } catch {
+                    diagnostics.append(XMPDiagnostic(severity: .warning, code: "malformedPropertyValue", propertyID: id))
+                    preservedProperties.append(id)
+                }
+                continue
+            }
+
             if let channel = Self.toneCurveChannel(for: id) {
                 do {
                     let points = try Self.importToneCurvePoints(value)
@@ -109,6 +134,116 @@ public struct XMPImporter: Sendable {
                 } catch {
                     diagnostics.append(XMPDiagnostic(severity: .warning, code: "malformedToneCurve", propertyID: id))
                     preservedProperties.append(id)
+                }
+                continue
+            }
+
+            if let monochromeComponent = Self.monochromeComponent(for: id) {
+                do {
+                    var monochrome = builder.monochrome ?? .neutral
+                    switch monochromeComponent {
+                    case .enabled:
+                        monochrome.isEnabled = try Self.importBoolean(value)
+                    case .red:
+                        monochrome.red = try Self.importNumeric(value)
+                    case .orange:
+                        monochrome.orange = try Self.importNumeric(value)
+                    case .yellow:
+                        monochrome.yellow = try Self.importNumeric(value)
+                    case .green:
+                        monochrome.green = try Self.importNumeric(value)
+                    case .aqua:
+                        monochrome.aqua = try Self.importNumeric(value)
+                    case .blue:
+                        monochrome.blue = try Self.importNumeric(value)
+                    case .purple:
+                        monochrome.purple = try Self.importNumeric(value)
+                    case .magenta:
+                        monochrome.magenta = try Self.importNumeric(value)
+                    }
+                    builder.monochrome = monochrome
+                    mappedProperties.insert(id)
+                    if !nativeFields.contains(.monochrome) {
+                        nativeFields.append(.monochrome)
+                    }
+                } catch {
+                    diagnostics.append(XMPDiagnostic(severity: .warning, code: "malformedPropertyValue", propertyID: id))
+                    preservedProperties.append(id)
+                }
+                continue
+            }
+
+            if let colorGradingComponent = Self.colorGradingComponent(for: id) {
+                do {
+                    var grading = builder.colorGrading ?? .neutral
+                    let number = try Self.importNumeric(value)
+                    switch colorGradingComponent {
+                    case .shadowHue: grading.shadows.hue = number
+                    case .shadowSaturation: grading.shadows.saturation = number
+                    case .shadowLuminance: grading.shadows.luminance = number
+                    case .midtoneHue: grading.midtones.hue = number
+                    case .midtoneSaturation: grading.midtones.saturation = number
+                    case .midtoneLuminance: grading.midtones.luminance = number
+                    case .highlightHue: grading.highlights.hue = number
+                    case .highlightSaturation: grading.highlights.saturation = number
+                    case .highlightLuminance: grading.highlights.luminance = number
+                    case .globalHue: grading.global.hue = number
+                    case .globalSaturation: grading.global.saturation = number
+                    case .globalLuminance: grading.global.luminance = number
+                    case .blending: grading.blending = number
+                    case .balance: grading.balance = number
+                    }
+                    builder.colorGrading = grading
+                    mappedProperties.insert(id)
+                    if !nativeFields.contains(.colorGrading) {
+                        nativeFields.append(.colorGrading)
+                    }
+                } catch {
+                    diagnostics.append(XMPDiagnostic(severity: .warning, code: "malformedPropertyValue", propertyID: id))
+                    preservedProperties.append(id)
+                }
+                continue
+            }
+
+            if id == .cameraRaw("LensProfileEnable") {
+                do {
+                    var lensCorrection = builder.lensCorrection ?? .neutral
+                    lensCorrection.mode = try Self.importBoolean(value) ? .automatic : .off
+                    builder.lensCorrection = lensCorrection
+                    mappedProperties.insert(id)
+                    if !nativeFields.contains(.lensCorrection) {
+                        nativeFields.append(.lensCorrection)
+                    }
+                } catch {
+                    diagnostics.append(XMPDiagnostic(severity: .warning, code: "malformedPropertyValue", propertyID: id))
+                    preservedProperties.append(id)
+                }
+                continue
+            }
+
+            if id == .cameraRaw("CameraProfile") {
+                preservedProperties.append(id)
+                if case .text(let profile) = value,
+                   !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    builder.rawCameraProfile = RawCameraProfileSelection(requestedName: profile)
+                    mappedProperties.insert(id)
+                    if let descriptor = AdobeCompatibleProfileRegistry.descriptor(
+                        for: builder.rawCameraProfile ?? RawCameraProfileSelection(requestedName: profile)
+                    ) {
+                        diagnostics.append(XMPDiagnostic(
+                            severity: .warning,
+                            code: "profilePreservedNotApplied",
+                            propertyID: id,
+                            detail: descriptor.sourceName
+                        ))
+                    } else {
+                        diagnostics.append(XMPDiagnostic(
+                            severity: .warning,
+                            code: "profilePreservedNotApplied",
+                            propertyID: id,
+                            detail: profile
+                        ))
+                    }
                 }
                 continue
             }
@@ -204,6 +339,25 @@ public struct XMPImporter: Sendable {
         }
     }
 
+    private enum ParametricToneCurveComponent {
+        case shadows, darks, lights, highlights
+        case shadowSplit, midtoneSplit, highlightSplit
+    }
+
+    private static func parametricToneCurveComponent(for id: XMPPropertyID) -> ParametricToneCurveComponent? {
+        guard id.namespaceURI == XMPNamespace.cameraRaw else { return nil }
+        switch id.localName {
+        case "ParametricShadows": return .shadows
+        case "ParametricDarks": return .darks
+        case "ParametricLights": return .lights
+        case "ParametricHighlights": return .highlights
+        case "ParametricShadowSplit": return .shadowSplit
+        case "ParametricMidtoneSplit": return .midtoneSplit
+        case "ParametricHighlightSplit": return .highlightSplit
+        default: return nil
+        }
+    }
+
     /// `crs:ToneCurvePV2012` (and its Red/Green/Blue siblings, P3) are each an
     /// `rdf:Seq` of `"x, y"` text pairs on a 0...255 scale (Adobe/exiv2
     /// reference); LumaHarbor's curve is normalised to 0...1.
@@ -234,6 +388,76 @@ public struct XMPImporter: Sendable {
         AdvancedToneCurve(points: try importToneCurvePoints(value))
     }
 
+    private enum MonochromeComponent {
+        case enabled
+        case red, orange, yellow, green, aqua, blue, purple, magenta
+    }
+
+    private enum ColorGradingComponent {
+        case shadowHue, shadowSaturation, shadowLuminance
+        case midtoneHue, midtoneSaturation, midtoneLuminance
+        case highlightHue, highlightSaturation, highlightLuminance
+        case globalHue, globalSaturation, globalLuminance
+        case blending, balance
+    }
+
+    private static func colorGradingComponent(for id: XMPPropertyID) -> ColorGradingComponent? {
+        guard id.namespaceURI == XMPNamespace.cameraRaw else { return nil }
+        switch id.localName {
+        case "ColorGradeShadowHue": return .shadowHue
+        case "ColorGradeShadowSat": return .shadowSaturation
+        case "ColorGradeShadowLum": return .shadowLuminance
+        case "ColorGradeMidtoneHue": return .midtoneHue
+        case "ColorGradeMidtoneSat": return .midtoneSaturation
+        case "ColorGradeMidtoneLum": return .midtoneLuminance
+        case "ColorGradeHighlightHue": return .highlightHue
+        case "ColorGradeHighlightSat": return .highlightSaturation
+        case "ColorGradeHighlightLum": return .highlightLuminance
+        case "ColorGradeGlobalHue": return .globalHue
+        case "ColorGradeGlobalSat": return .globalSaturation
+        case "ColorGradeGlobalLum": return .globalLuminance
+        case "ColorGradeBlending": return .blending
+        case "ColorGradeBalance": return .balance
+        default: return nil
+        }
+    }
+
+    private static func monochromeComponent(for id: XMPPropertyID) -> MonochromeComponent? {
+        guard id.namespaceURI == XMPNamespace.cameraRaw else { return nil }
+        switch id.localName {
+        case "ConvertToGrayscale": return .enabled
+        case "GrayMixerRed": return .red
+        case "GrayMixerOrange": return .orange
+        case "GrayMixerYellow": return .yellow
+        case "GrayMixerGreen": return .green
+        case "GrayMixerAqua": return .aqua
+        case "GrayMixerBlue": return .blue
+        case "GrayMixerPurple": return .purple
+        case "GrayMixerMagenta": return .magenta
+        default: return nil
+        }
+    }
+
+    private static func importNumeric(_ value: XMPValue) throws -> Double {
+        guard case .text(let text) = value,
+              let number = Double(text.trimmingCharacters(in: .whitespaces)),
+              number.isFinite else {
+            throw PresetError.malformedXML("not a finite number")
+        }
+        return number
+    }
+
+    private static func importBoolean(_ value: XMPValue) throws -> Bool {
+        guard case .text(let text) = value else {
+            throw PresetError.malformedXML("expected a boolean XMP value")
+        }
+        switch text.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "true", "1": return true
+        case "false", "0": return false
+        default: throw PresetError.malformedXML("expected a boolean XMP value")
+        }
+    }
+
     /// Inverse of `importToneCurvePoints`, rounding back to integers the way
     /// Adobe itself writes them.
     static func exportToneCurvePoints(_ points: [ToneCurvePoint]) -> XMPValue {
@@ -257,12 +481,14 @@ struct AdjustmentPatchBuilder {
     var hsl = HSLAdjustmentPatch()
     var splitToning = SplitToningPatch()
     var sharpening = SharpeningPatch()
+    var noiseReduction = NoiseReductionPatch()
     var vignette = VignettePatch()
     var grain = GrainPatch()
     var presence = PresencePatch()
     var colorGrading: ColorGradingAdjustments?
     var monochrome: MonochromeAdjustments?
     var renderingProfile: RenderingProfileSelection?
+    var rawCameraProfile: RawCameraProfileSelection?
     var lensCorrection: LensCorrectionAdjustments?
 
     mutating func set(_ field: AdjustmentFieldID, to value: Double) {
@@ -311,9 +537,10 @@ struct AdjustmentPatchBuilder {
         case .sharpeningRadius: sharpening.radius = value
         case .sharpeningDetail: sharpening.detail = value
         case .sharpeningMasking: sharpening.masking = value
-        case .noiseReductionLuminanceAmount, .noiseReductionLuminanceDetail,
-             .noiseReductionColorAmount, .noiseReductionColorDetail:
-            break // never mapped in the registry -- spec §7: preserved only
+        case .noiseReductionLuminanceAmount: noiseReduction.luminanceAmount = value
+        case .noiseReductionLuminanceDetail: noiseReduction.luminanceDetail = value
+        case .noiseReductionColorAmount: noiseReduction.colorAmount = value
+        case .noiseReductionColorDetail: noiseReduction.colorDetail = value
         case .vignetteAmount: vignette.amount = value
         case .vignetteMidpoint: vignette.midpoint = value
         case .vignetteRoundness: vignette.roundness = value
@@ -326,6 +553,8 @@ struct AdjustmentPatchBuilder {
         case .presenceDehaze: presence.dehaze = value
         case .colorGrading, .monochrome, .renderingProfile, .lensCorrection:
             break // whole-value leaves, set directly on the matching stored property
+        case .rawCameraProfile:
+            break // request is set directly on `rawCameraProfile`
         }
     }
 
@@ -336,13 +565,14 @@ struct AdjustmentPatchBuilder {
             hsl: hsl,
             splitToning: splitToning,
             sharpening: sharpening,
-            noiseReduction: nil,
+            noiseReduction: noiseReduction,
             vignette: vignette,
             grain: grain,
             presence: presence,
             colorGrading: colorGrading,
             monochrome: monochrome,
             renderingProfile: renderingProfile,
+            rawCameraProfile: rawCameraProfile,
             lensCorrection: lensCorrection
         )
     }
@@ -404,6 +634,55 @@ public struct XMPExporter: Sendable {
             if !curve.isIdentity(for: .blue) {
                 document.properties[.cameraRaw("ToneCurvePV2012Blue")] = XMPImporter.exportToneCurvePoints(curve.bluePoints)
             }
+            let parametric = curve.parametric
+            document.properties[.cameraRaw("ParametricShadows")] = .text(XMPMappingRegistry.format(parametric.shadows))
+            document.properties[.cameraRaw("ParametricDarks")] = .text(XMPMappingRegistry.format(parametric.darks))
+            document.properties[.cameraRaw("ParametricLights")] = .text(XMPMappingRegistry.format(parametric.lights))
+            document.properties[.cameraRaw("ParametricHighlights")] = .text(XMPMappingRegistry.format(parametric.highlights))
+            document.properties[.cameraRaw("ParametricShadowSplit")] = .text(XMPMappingRegistry.format(parametric.shadowSplit))
+            document.properties[.cameraRaw("ParametricMidtoneSplit")] = .text(XMPMappingRegistry.format(parametric.midtoneSplit))
+            document.properties[.cameraRaw("ParametricHighlightSplit")] = .text(XMPMappingRegistry.format(parametric.highlightSplit))
+        }
+
+        if let monochrome = preset.patch.monochrome {
+            document.properties[.cameraRaw("ConvertToGrayscale")] = .text(monochrome.isEnabled ? "True" : "False")
+            document.properties[.cameraRaw("GrayMixerRed")] = .text(XMPMappingRegistry.format(monochrome.red))
+            document.properties[.cameraRaw("GrayMixerOrange")] = .text(XMPMappingRegistry.format(monochrome.orange))
+            document.properties[.cameraRaw("GrayMixerYellow")] = .text(XMPMappingRegistry.format(monochrome.yellow))
+            document.properties[.cameraRaw("GrayMixerGreen")] = .text(XMPMappingRegistry.format(monochrome.green))
+            document.properties[.cameraRaw("GrayMixerAqua")] = .text(XMPMappingRegistry.format(monochrome.aqua))
+            document.properties[.cameraRaw("GrayMixerBlue")] = .text(XMPMappingRegistry.format(monochrome.blue))
+            document.properties[.cameraRaw("GrayMixerPurple")] = .text(XMPMappingRegistry.format(monochrome.purple))
+            document.properties[.cameraRaw("GrayMixerMagenta")] = .text(XMPMappingRegistry.format(monochrome.magenta))
+        }
+
+        if let grading = preset.patch.colorGrading {
+            document.properties[.cameraRaw("ColorGradeShadowHue")] = .text(XMPMappingRegistry.format(grading.shadows.hue))
+            document.properties[.cameraRaw("ColorGradeShadowSat")] = .text(XMPMappingRegistry.format(grading.shadows.saturation))
+            document.properties[.cameraRaw("ColorGradeShadowLum")] = .text(XMPMappingRegistry.format(grading.shadows.luminance))
+            document.properties[.cameraRaw("ColorGradeMidtoneHue")] = .text(XMPMappingRegistry.format(grading.midtones.hue))
+            document.properties[.cameraRaw("ColorGradeMidtoneSat")] = .text(XMPMappingRegistry.format(grading.midtones.saturation))
+            document.properties[.cameraRaw("ColorGradeMidtoneLum")] = .text(XMPMappingRegistry.format(grading.midtones.luminance))
+            document.properties[.cameraRaw("ColorGradeHighlightHue")] = .text(XMPMappingRegistry.format(grading.highlights.hue))
+            document.properties[.cameraRaw("ColorGradeHighlightSat")] = .text(XMPMappingRegistry.format(grading.highlights.saturation))
+            document.properties[.cameraRaw("ColorGradeHighlightLum")] = .text(XMPMappingRegistry.format(grading.highlights.luminance))
+            document.properties[.cameraRaw("ColorGradeGlobalHue")] = .text(XMPMappingRegistry.format(grading.global.hue))
+            document.properties[.cameraRaw("ColorGradeGlobalSat")] = .text(XMPMappingRegistry.format(grading.global.saturation))
+            document.properties[.cameraRaw("ColorGradeGlobalLum")] = .text(XMPMappingRegistry.format(grading.global.luminance))
+            document.properties[.cameraRaw("ColorGradeBlending")] = .text(XMPMappingRegistry.format(grading.blending))
+            document.properties[.cameraRaw("ColorGradeBalance")] = .text(XMPMappingRegistry.format(grading.balance))
+        }
+
+        if let lensCorrection = preset.patch.lensCorrection {
+            document.properties[.cameraRaw("LensProfileEnable")] = .text(
+                lensCorrection.mode == .automatic ? "1" : "0"
+            )
+        }
+
+        if let rawCameraProfile = preset.patch.rawCameraProfile,
+           let requestedName = rawCameraProfile.requestedName,
+           !requestedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            document.properties[.cameraRaw("CameraProfile")] = .text(requestedName)
         }
 
         let data = try codec.serialize(document)

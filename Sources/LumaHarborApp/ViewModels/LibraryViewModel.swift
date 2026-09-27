@@ -1307,7 +1307,8 @@ public final class LibraryViewModel: ObservableObject {
             dpi: options.dpi,
             exifRetentionPolicy: options.exifRetentionPolicy,
             collisionPolicy: options.collisionPolicy,
-            watermark: options.watermark
+            watermark: options.watermark,
+            cameraProfileRequest: rawCameraProfileRequest(for: editor.adjustments)
         )
 
         exportTask = Task { [weak self] in
@@ -1485,7 +1486,16 @@ public final class LibraryViewModel: ObservableObject {
             dpi: options.dpi,
             exifRetentionPolicy: options.exifRetentionPolicy,
             collisionPolicy: options.collisionPolicy,
-            watermark: options.watermark
+            watermark: options.watermark,
+            cameraProfileRequest: rawCameraProfileRequest(for: adjustments)
         )
+    }
+
+    private func rawCameraProfileRequest(
+        for adjustments: PhotoAdjustments
+    ) -> RawCameraProfileRequest? {
+        adjustments.rawCameraProfile.normalizedName.map {
+            RawCameraProfileRequest(sourceName: $0)
+        }
     }
 }

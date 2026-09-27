@@ -21,6 +21,19 @@ final class RawDecodingTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testAdobeProcess2012CompatibilityUsesTheLegacyWireValue() throws {
+        let decoded = try JSONDecoder().decode(
+            RawRenderingCompatibility.self,
+            from: Data("\"adobeProcess2012\"".utf8)
+        )
+
+        XCTAssertEqual(decoded, .adobeProcess2012V1)
+        XCTAssertEqual(
+            try JSONDecoder().decode(String.self, from: JSONEncoder().encode(decoded)),
+            "adobeProcess2012"
+        )
+    }
+
     // MARK: - Scale factor
 
     func testFullQualityNeverScales() {
@@ -113,6 +126,14 @@ final class RawDecodingTests: XCTestCase {
     func testOnlyFullDecodeIgnoresAPixelBudget() {
         XCTAssertNil(DecodeQuality.full.maximumPixelDimension)
         XCTAssertEqual(DecodeQuality.interactive(maximumPixelDimension: 900).maximumPixelDimension, 900)
+    }
+
+    func testAdobePolicyKeepsThePreserveDefaultsDecoderVectorSeparateFromSliderValues() {
+        let vector = CoreImageRawPolicy.optionVector(for: .adobeProcess2012V1)
+
+        XCTAssertNil(vector?.exposure)
+        XCTAssertNil(vector?.boostAmount)
+        XCTAssertNotEqual(vector?.id, "native-v1")
     }
 
     // MARK: - Error classification

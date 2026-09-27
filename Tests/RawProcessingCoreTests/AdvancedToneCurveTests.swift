@@ -12,6 +12,27 @@ final class AdvancedToneCurveTests: XCTestCase {
         XCTAssertFalse(curve.isIdentity)
     }
 
+    func testParametricCurveIsStoredAndMakesCurveNonIdentity() throws {
+        let parametric = ParametricToneCurve(shadows: -5, darks: 5, lights: -40, highlights: -20)
+        let original = AdvancedToneCurve(parametric: parametric)
+
+        XCTAssertFalse(original.isIdentity)
+        let decoded = try JSONDecoder().decode(
+            AdvancedToneCurve.self,
+            from: JSONEncoder().encode(original)
+        )
+        XCTAssertEqual(decoded.parametric, parametric)
+    }
+
+    func testLegacyToneCurveWithoutParametricKeyRemainsNeutral() throws {
+        let decoded = try JSONDecoder().decode(
+            AdvancedToneCurve.self,
+            from: Data(#"{"points":[]}"#.utf8)
+        )
+        XCTAssertEqual(decoded.parametric, .neutral)
+        XCTAssertTrue(decoded.isIdentity)
+    }
+
     func testRoundTripsThroughJSON() throws {
         let original = AdvancedToneCurve(points: [
             ToneCurvePoint(x: 0, y: 0),

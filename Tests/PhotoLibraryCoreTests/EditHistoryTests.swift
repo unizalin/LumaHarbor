@@ -4,6 +4,18 @@ import XCTest
 
 /// Spec §13.4: original comparison, undo, redo and reset all need test cover.
 final class EditHistoryTests: XCTestCase {
+
+    func testResetPreservesPhotoBaselinePolicy() {
+        var history = EditHistory(initial: PhotoAdjustments.neutral(using: .adobeProcess2012V1))
+        var adjusted = history.current
+        adjusted.exposure = 1.0
+        history.record(adjusted)
+
+        history.resetToNeutral()
+
+        XCTAssertEqual(history.current.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertFalse(history.current.hasUserAdjustments)
+    }
     func testStartsWithNothingToUndoOrRedo() {
         let history = EditHistory(initial: PhotoAdjustments.neutral)
         XCTAssertFalse(history.canUndo)

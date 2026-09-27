@@ -272,6 +272,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
     public var colorGrading: ColorGradingAdjustments?
     public var monochrome: MonochromeAdjustments?
     public var renderingProfile: RenderingProfileSelection?
+    public var rawCameraProfile: RawCameraProfileSelection?
     public var lensCorrection: LensCorrectionAdjustments?
 
     public init(
@@ -287,6 +288,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         colorGrading: ColorGradingAdjustments? = nil,
         monochrome: MonochromeAdjustments? = nil,
         renderingProfile: RenderingProfileSelection? = nil,
+        rawCameraProfile: RawCameraProfileSelection? = nil,
         lensCorrection: LensCorrectionAdjustments? = nil
     ) {
         self.basic = basic?.canonicalized()
@@ -301,6 +303,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         self.colorGrading = colorGrading
         self.monochrome = monochrome
         self.renderingProfile = renderingProfile
+        self.rawCameraProfile = rawCameraProfile
         self.lensCorrection = lensCorrection
     }
 
@@ -308,7 +311,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         basic == nil && advancedToneCurve == nil && hsl == nil && splitToning == nil
             && sharpening == nil && noiseReduction == nil && vignette == nil && grain == nil
             && presence == nil && colorGrading == nil && monochrome == nil
-            && renderingProfile == nil && lensCorrection == nil
+            && renderingProfile == nil && rawCameraProfile == nil && lensCorrection == nil
     }
 
     /// Whether `field` has an explicit value in this patch.
@@ -318,6 +321,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         case .colorGrading: return colorGrading != nil
         case .monochrome: return monochrome != nil
         case .renderingProfile: return renderingProfile != nil
+        case .rawCameraProfile: return rawCameraProfile != nil
         case .lensCorrection: return lensCorrection != nil
         default: return scalarValue(for: field) != nil
         }
@@ -385,13 +389,13 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         case .presenceTexture: return presence?.texture
         case .presenceClarity: return presence?.clarity
         case .presenceDehaze: return presence?.dehaze
-        case .colorGrading, .monochrome, .renderingProfile, .lensCorrection: return nil
+        case .colorGrading, .monochrome, .renderingProfile, .rawCameraProfile, .lensCorrection: return nil
         }
     }
 
     private enum CodingKeys: String, CodingKey {
         case basic, advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
-        case presence, colorGrading, monochrome, renderingProfile, lensCorrection
+        case presence, colorGrading, monochrome, renderingProfile, rawCameraProfile, lensCorrection
     }
 
     public init(from decoder: Decoder) throws {
@@ -409,6 +413,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
             colorGrading: try container.decodeIfPresent(ColorGradingAdjustments.self, forKey: .colorGrading),
             monochrome: try container.decodeIfPresent(MonochromeAdjustments.self, forKey: .monochrome),
             renderingProfile: try container.decodeIfPresent(RenderingProfileSelection.self, forKey: .renderingProfile),
+            rawCameraProfile: try container.decodeIfPresent(RawCameraProfileSelection.self, forKey: .rawCameraProfile),
             lensCorrection: try container.decodeIfPresent(LensCorrectionAdjustments.self, forKey: .lensCorrection)
         )
     }
@@ -427,6 +432,7 @@ public struct AdjustmentPatch: Codable, Equatable, Sendable {
         try container.encodeIfPresent(colorGrading, forKey: .colorGrading)
         try container.encodeIfPresent(monochrome, forKey: .monochrome)
         try container.encodeIfPresent(renderingProfile, forKey: .renderingProfile)
+        try container.encodeIfPresent(rawCameraProfile, forKey: .rawCameraProfile)
         try container.encodeIfPresent(lensCorrection, forKey: .lensCorrection)
     }
 }

@@ -101,6 +101,13 @@ final class XMPMappingTests: XCTestCase {
         MappingCase(.cameraRaw("Sharpness"), .sharpeningAmount, .approximate, importText: "40", expectedValue: 60, expectedExportText: "40"),
         MappingCase(.cameraRaw("SharpenRadius"), .sharpeningRadius, .approximate, importText: "1", expectedValue: 1, expectedExportText: "1"),
 
+        // MARK: Noise reduction -- approximate. Core Image combines the
+        // imported luminance/colour channels into one filter pass.
+        MappingCase(.cameraRaw("LuminanceSmoothing"), .noiseReductionLuminanceAmount, .approximate, importText: "13", expectedValue: 13, expectedExportText: "13"),
+        MappingCase(.cameraRaw("LuminanceNoiseReductionDetail"), .noiseReductionLuminanceDetail, .approximate, importText: "50", expectedValue: 50, expectedExportText: "50"),
+        MappingCase(.cameraRaw("ColorNoiseReduction"), .noiseReductionColorAmount, .approximate, importText: "25", expectedValue: 25, expectedExportText: "25"),
+        MappingCase(.cameraRaw("ColorNoiseReductionDetail"), .noiseReductionColorDetail, .approximate, importText: "40", expectedValue: 40, expectedExportText: "40"),
+
         // MARK: Vignette -- approximate
         MappingCase(.cameraRaw("PostCropVignetteAmount"), .vignetteAmount, .approximate, importText: "-25", expectedValue: -25, expectedExportText: "-25"),
         MappingCase(.cameraRaw("PostCropVignetteMidpoint"), .vignetteMidpoint, .approximate, importText: "50", expectedValue: 50, expectedExportText: "50"),
@@ -192,12 +199,26 @@ final class XMPMappingTests: XCTestCase {
         XCTAssertNil(XMPMappingRegistry.default.mapping(for: .cameraRaw("SharpenEdgeMasking")))
     }
 
-    func testIndependentLuminanceNoiseReductionHasNoMapping() {
-        XCTAssertNil(XMPMappingRegistry.default.mapping(for: .cameraRaw("LuminanceSmoothing")))
+    func testLuminanceNoiseReductionUsesApproximateMapping() {
+        XCTAssertEqual(
+            XMPMappingRegistry.default.mapping(for: .cameraRaw("LuminanceSmoothing"))?.field,
+            .noiseReductionLuminanceAmount
+        )
+        XCTAssertEqual(
+            XMPMappingRegistry.default.mapping(for: .cameraRaw("LuminanceNoiseReductionDetail"))?.field,
+            .noiseReductionLuminanceDetail
+        )
     }
 
-    func testIndependentColorNoiseReductionHasNoMapping() {
-        XCTAssertNil(XMPMappingRegistry.default.mapping(for: .cameraRaw("ColorNoiseReduction")))
+    func testColorNoiseReductionUsesApproximateMapping() {
+        XCTAssertEqual(
+            XMPMappingRegistry.default.mapping(for: .cameraRaw("ColorNoiseReduction"))?.field,
+            .noiseReductionColorAmount
+        )
+        XCTAssertEqual(
+            XMPMappingRegistry.default.mapping(for: .cameraRaw("ColorNoiseReductionDetail"))?.field,
+            .noiseReductionColorDetail
+        )
     }
 
     func testCameraProfileHasNoMapping() {

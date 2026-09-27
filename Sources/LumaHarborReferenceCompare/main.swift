@@ -1,10 +1,10 @@
 import CoreGraphics
 import Darwin
 import Foundation
-import ImageIO
 import RawProcessingCore
 
 private struct MatrixCase: Decodable {
+    let caseID: String
     let fixtureID: String
     let rawID: String
     let lrNeutralID: String
@@ -24,55 +24,158 @@ private struct ReferenceMatrix: Decodable {
     let cases: [MatrixCase]
 }
 
-private struct NormalizedImage {
+private struct LoadedReference {
     let width: Int
     let height: Int
-    let pixels: [SIMD4<Float>]
+    let hasAlpha: Bool
+    let reader: ReferenceImageTileReader
 }
 
 private struct MetricsOutput: Encodable {
-    let meanAbsoluteEffectError: Double
-    let p95AbsoluteEffectError: Double
-    let luminanceEffectSSIM: Double
+    let meanAbsoluteError: Double
+    let p95AbsoluteError: Double
+    let luminanceSSIM: Double
+    let highlightClippingFractionDelta: Double
+    let shadowClippingFractionDelta: Double
     let sampleCount: Int
+}
+
+private struct ThresholdsOutput: Encodable {
+    let version: Int
+    let meanAbsoluteError: Double
+    let p95AbsoluteError: Double
+    let luminanceSSIM: Double
+    let highlightClippingFractionDelta: Double
+    let shadowClippingFractionDelta: Double
+}
+
+private struct EvaluationOutput: Encodable {
+    let meanAbsoluteErrorPassed: Bool
+    let p95AbsoluteErrorPassed: Bool
+    let luminanceSSIMPassed: Bool
+    let highlightClippingFractionDeltaPassed: Bool
+    let shadowClippingFractionDeltaPassed: Bool
+    let isPassing: Bool
 }
 
 private struct ComparisonOutput: Encodable {
     let status: String
+    let mode: ReferenceComparisonMode?
     let caseID: String?
+    let rawID: String?
     let width: Int?
     let height: Int?
     let metrics: MetricsOutput?
+    let thresholds: ThresholdsOutput?
+    let evaluation: EvaluationOutput?
     let reason: String?
 }
 
-private enum CommandFailure {
+private struct BatchCaseOutput: Encodable {
+    let status: String
+    let rawID: String
+    let caseID: String
+    let width: Int?
+    let height: Int?
+    let metrics: MetricsOutput?
+    let evaluation: EvaluationOutput?
+    let reason: String?
+}
+
+private struct BatchOutput: Encodable {
+    let status: String
+    let mode: ReferenceComparisonMode
+    let cases: [BatchCaseOutput]
+    let thresholds: ThresholdsOutput
+}
+
+private struct ParsedArguments {
+    let values: [String: String]
+    let flags: Set<String>
+}
+
+private struct EvaluatedCase {
+    let width: Int
+    let height: Int
+    let result: ReferenceComparisonResult
+    let evaluation: LightroomReferenceThresholds.Evaluation
+}
+
+private func currentThresholdsOutput() -> ThresholdsOutput {
+    let thresholds = LightroomReferenceThresholds.current
+    return ThresholdsOutput(
+        version: thresholds.version,
+        meanAbsoluteError: thresholds.meanAbsoluteEffectError,
+        p95AbsoluteError: thresholds.p95AbsoluteEffectError,
+        luminanceSSIM: thresholds.luminanceEffectSSIM,
+        highlightClippingFractionDelta: thresholds.highlightClippingFractionDelta,
+        shadowClippingFractionDelta: thresholds.shadowClippingFractionDelta
+    )
+}
+
+private func metricsOutput(for result: ReferenceComparisonResult) -> MetricsOutput {
+    MetricsOutput(
+        meanAbsoluteError: result.meanAbsoluteError,
+        p95AbsoluteError: result.p95AbsoluteError,
+        luminanceSSIM: result.luminanceSSIM,
+        highlightClippingFractionDelta: result.highlightClippingFractionDelta,
+        shadowClippingFractionDelta: result.shadowClippingFractionDelta,
+        sampleCount: result.sampleCount
+    )
+}
+
+private func evaluationOutput(for evaluation: LightroomReferenceThresholds.Evaluation) -> EvaluationOutput {
+    EvaluationOutput(
+        meanAbsoluteErrorPassed: evaluation.meanAbsoluteEffectErrorPassed,
+        p95AbsoluteErrorPassed: evaluation.p95AbsoluteEffectErrorPassed,
+        luminanceSSIMPassed: evaluation.luminanceEffectSSIMPassed,
+        highlightClippingFractionDeltaPassed: evaluation.highlightClippingFractionDeltaPassed,
+        shadowClippingFractionDeltaPassed: evaluation.shadowClippingFractionDeltaPassed,
+        isPassing: evaluation.isPassing
+    )
+}
+
+private enum CommandFailure: Error {
     case notRun
     case invalidArguments
     case invalidMatrix
     case matrixMismatch
+    case ambiguousImage
     case unsupportedImage
     case dimensionMismatch
     case comparisonFailed
+    case invalidReportDestination
 }
 
-private let imageExtensions = ["tiff", "tif", "png", "jpg", "jpeg"]
-private let meanErrorThreshold = 0.02
-private let p95ErrorThreshold = 0.05
-private let ssimThreshold = 0.98
+private func printJSON<T: Encodable>(_ output: T, status: String) -> Never {
+    printJSON(output, status: status, reportURL: nil)
+}
 
-private func printJSON(_ output: ComparisonOutput) -> Never {
+private func printJSON<T: Encodable>(_ output: T, status: String, reportURL: URL?) -> Never {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     if let data = try? encoder.encode(output), let string = String(data: data, encoding: .utf8) {
+        if let reportURL {
+            do {
+                try data.write(to: reportURL, options: [.atomic])
+            } catch {
+                print("{\"status\":\"FAIL\",\"reason\":\"report write failed\"}")
+                exit(1)
+            }
+        }
         print(string)
     } else {
         print("{\"status\":\"FAIL\",\"reason\":\"output encoding failed\"}")
     }
-    exit(output.status == "PASS" ? 0 : 1)
+    exit(status == "PASS" ? 0 : 1)
 }
 
-private func fail(_ failure: CommandFailure, caseID: String? = nil) -> Never {
+private func fail(
+    _ failure: CommandFailure,
+    mode: ReferenceComparisonMode? = nil,
+    caseID: String? = nil,
+    rawID: String? = nil
+) -> Never {
     let status: String
     let reason: String
     switch failure {
@@ -88,6 +191,9 @@ private func fail(_ failure: CommandFailure, caseID: String? = nil) -> Never {
     case .matrixMismatch:
         status = "FAIL"
         reason = "matrix ID mismatch"
+    case .ambiguousImage:
+        status = "FAIL"
+        reason = "ambiguous reference image"
     case .unsupportedImage:
         status = "FAIL"
         reason = "unsupported reference image"
@@ -97,157 +203,285 @@ private func fail(_ failure: CommandFailure, caseID: String? = nil) -> Never {
     case .comparisonFailed:
         status = "FAIL"
         reason = "reference comparison failed"
+    case .invalidReportDestination:
+        status = "FAIL"
+        reason = "invalid report destination"
     }
-    printJSON(ComparisonOutput(status: status, caseID: caseID, width: nil, height: nil, metrics: nil, reason: reason))
+    printJSON(ComparisonOutput(
+        status: status,
+        mode: mode,
+        caseID: caseID,
+        rawID: rawID,
+        width: nil,
+        height: nil,
+        metrics: nil,
+        thresholds: currentThresholdsOutput(),
+        evaluation: nil,
+        reason: reason
+    ), status: status)
 }
 
 private func usage() -> Never {
-    print("usage: LumaHarborReferenceCompare --case <id> --lr-neutral <id> --lr-preset <id> --lh-neutral <id> --lh-preset <id> --matrix <file> --images <directory>")
+    print("usage: LumaHarborReferenceCompare --all-neutral --matrix <file> --images <directory> [--report <file>]")
+    print("   or: LumaHarborReferenceCompare --mode <neutralDirect|presetEffect|finalDirect> --case <id> --lr-neutral <id> --lr-preset <id> --lh-neutral <id> --lh-preset <id> --matrix <file> --images <directory> [--report <file>]")
     exit(0)
 }
 
-private func arguments() -> [String: String] {
+private func arguments() -> ParsedArguments {
     let values = Array(CommandLine.arguments.dropFirst())
     if values.contains("--help") { usage() }
-    guard values.count % 2 == 0 else { fail(.invalidArguments) }
-    var parsed: [String: String] = [:]
+    var parsedValues: [String: String] = [:]
+    var parsedFlags = Set<String>()
     var index = 0
     while index < values.count {
         let key = values[index]
-        let value = values[index + 1]
-        guard key.hasPrefix("--"), !value.hasPrefix("--"), parsed[key] == nil else {
+        guard key.hasPrefix("--"), parsedValues[key] == nil, !parsedFlags.contains(key) else {
             fail(.invalidArguments)
         }
-        parsed[key] = value
+        if key == "--all-neutral" {
+            parsedFlags.insert(key)
+            index += 1
+            continue
+        }
+        guard index + 1 < values.count else { fail(.invalidArguments) }
+        let value = values[index + 1]
+        guard !value.hasPrefix("--") else { fail(.invalidArguments) }
+        parsedValues[key] = value
         index += 2
     }
-    return parsed
+    return ParsedArguments(values: parsedValues, flags: parsedFlags)
 }
 
 private func loadMatrix(at path: String) -> ReferenceMatrix? {
     guard let data = FileManager.default.contents(atPath: path),
           let matrix = try? JSONDecoder().decode(ReferenceMatrix.self, from: data),
-          matrix.schemaVersion == 1,
-          matrix.cases.count == 5 else {
+          matrix.schemaVersion == 2,
+          matrix.cases.count == 20 else {
+        return nil
+    }
+    let expectedRawIDs = Set(["raw-a", "raw-b", "raw-c", "raw-d"])
+    let expectedFixtureIDs = Set(["fixture-a", "fixture-b", "fixture-c", "fixture-d", "fixture-e"])
+    guard Set(matrix.cases.map(\.rawID)) == expectedRawIDs,
+          Set(matrix.cases.map(\.fixtureID)) == expectedFixtureIDs,
+          matrix.cases.allSatisfy({ item in
+              item.caseID == "\(item.rawID)--\(item.fixtureID)"
+                  && expectedRawIDs.contains(item.rawID)
+                  && expectedFixtureIDs.contains(item.fixtureID)
+                  && item.bitDepth == 16
+                  && item.width > 0
+                  && item.height > 0
+                  && item.colorSpace == "sRGB"
+                  && item.profile != "record-after-reference-export"
+          }) else {
         return nil
     }
     return matrix
 }
 
-private func imageURL(for identifier: String, in directory: URL) -> URL? {
-    imageExtensions
-        .map { directory.appendingPathComponent("\(identifier).\($0)") }
-        .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+private func loadReference(
+    identifier: String,
+    matrixCase: MatrixCase,
+    in directory: URL
+) throws -> LoadedReference {
+    let url = try ReferenceImageLocator.resolve(identifier: identifier, in: directory)
+    let reader = try ReferenceImageTileReader(url: url)
+    guard reader.width == matrixCase.width,
+          reader.height == matrixCase.height,
+          reader.bitsPerComponent == matrixCase.bitDepth,
+          reader.colorSpaceIdentifier == (CGColorSpace.sRGB as String) else {
+        throw CommandFailure.dimensionMismatch
+    }
+    return LoadedReference(
+        width: reader.width,
+        height: reader.height,
+        hasAlpha: reader.hasAlpha,
+        reader: reader
+    )
 }
 
-private func loadImage(at url: URL) -> NormalizedImage? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-          let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-          image.width > 0,
-          image.height > 0,
-          let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-        return nil
+private func evaluate(
+    mode: ReferenceComparisonMode,
+    matrixCase: MatrixCase,
+    in directory: URL
+) throws -> EvaluatedCase {
+    let lrNeutral = try loadReference(identifier: matrixCase.lrNeutralID, matrixCase: matrixCase, in: directory)
+    let lhNeutral = try loadReference(identifier: matrixCase.lhNeutralID, matrixCase: matrixCase, in: directory)
+    let lrPreset: LoadedReference
+    let lhPreset: LoadedReference
+    if mode == .neutralDirect {
+        // Batch neutral mode intentionally requires only the neutral pair.
+        lrPreset = lrNeutral
+        lhPreset = lhNeutral
+    } else {
+        lrPreset = try loadReference(identifier: matrixCase.lrPresetID, matrixCase: matrixCase, in: directory)
+        lhPreset = try loadReference(identifier: matrixCase.lhPresetID, matrixCase: matrixCase, in: directory)
     }
+    guard Set([lrNeutral.hasAlpha, lrPreset.hasAlpha, lhNeutral.hasAlpha, lhPreset.hasAlpha]).count == 1 else {
+        throw CommandFailure.dimensionMismatch
+    }
+    guard let result = try? ReferenceComparisonMetrics.compareStreaming(
+        mode: mode,
+        lrNeutral: lrNeutral.reader,
+        lrPreset: lrPreset.reader,
+        lhNeutral: lhNeutral.reader,
+        lhPreset: lhPreset.reader,
+        tileHeight: 64
+    ) else {
+        throw CommandFailure.comparisonFailed
+    }
+    return EvaluatedCase(
+        width: matrixCase.width,
+        height: matrixCase.height,
+        result: result,
+        evaluation: LightroomReferenceThresholds.current.evaluate(result)
+    )
+}
 
-    let width = image.width
-    let height = image.height
-    var bytes = [UInt8](repeating: 0, count: width * height * 4)
-    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
-    let rendered = bytes.withUnsafeMutableBytes { buffer -> Bool in
-        guard let baseAddress = buffer.baseAddress,
-              let context = CGContext(
-                  data: baseAddress,
-                  width: width,
-                  height: height,
-                  bitsPerComponent: 8,
-                  bytesPerRow: width * 4,
-                  space: colorSpace,
-                  bitmapInfo: bitmapInfo
-              ) else {
-            return false
+private func resolveFailure(_ error: Error) -> CommandFailure {
+    if let locatorError = error as? ReferenceImageLocatorError {
+        switch locatorError {
+        case .notFound: return .notRun
+        case .ambiguous: return .ambiguousImage
         }
-        context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return true
     }
-    guard rendered else { return nil }
-
-    var pixels: [SIMD4<Float>] = []
-    pixels.reserveCapacity(width * height)
-    for index in stride(from: 0, to: bytes.count, by: 4) {
-        pixels.append(SIMD4(
-            Float(bytes[index]) / 255,
-            Float(bytes[index + 1]) / 255,
-            Float(bytes[index + 2]) / 255,
-            Float(bytes[index + 3]) / 255
-        ))
+    if let commandFailure = error as? CommandFailure {
+        return commandFailure
     }
-    return NormalizedImage(width: width, height: height, pixels: pixels)
+    return .unsupportedImage
 }
 
-let parsed = arguments()
-let requiredKeys = ["--case", "--lr-neutral", "--lr-preset", "--lh-neutral", "--lh-preset", "--matrix", "--images"]
-guard requiredKeys.allSatisfy({ parsed[$0] != nil }),
-      let caseID = parsed["--case"],
-      let matrixPath = parsed["--matrix"],
-      let imageDirectoryPath = parsed["--images"],
-      let matrix = loadMatrix(at: matrixPath),
-      let matrixCase = matrix.cases.first(where: { $0.fixtureID == caseID }) else {
+private let parsed = arguments()
+guard let matrixPath = parsed.values["--matrix"],
+      let imageDirectoryPath = parsed.values["--images"],
+      let matrix = loadMatrix(at: matrixPath) else {
     fail(.invalidMatrix)
 }
-
-guard matrixCase.lrNeutralID == parsed["--lr-neutral"],
-      matrixCase.lrPresetID == parsed["--lr-preset"],
-      matrixCase.lhNeutralID == parsed["--lh-neutral"],
-      matrixCase.lhPresetID == parsed["--lh-preset"] else {
-    fail(.matrixMismatch, caseID: caseID)
-}
-
 let imageDirectory = URL(fileURLWithPath: imageDirectoryPath, isDirectory: true)
-let identifiers = [
-    parsed["--lr-neutral"]!, parsed["--lr-preset"]!,
-    parsed["--lh-neutral"]!, parsed["--lh-preset"]!
-]
-let optionalURLs = identifiers.map { imageURL(for: $0, in: imageDirectory) }
-guard optionalURLs.allSatisfy({ $0 != nil }) else {
-    fail(.notRun, caseID: caseID)
-}
-let urls = optionalURLs.compactMap { $0 }
-private let optionalImages = urls.map(loadImage)
-guard optionalImages.allSatisfy({ $0 != nil }) else {
-    fail(.unsupportedImage, caseID: caseID)
-}
-private let images = optionalImages.compactMap { $0 }
-let firstSize = (images[0].width, images[0].height)
-guard images.dropFirst().allSatisfy({ ($0.width, $0.height) == firstSize }) else {
-    fail(.dimensionMismatch, caseID: caseID)
+let reportURL = parsed.values["--report"].map { URL(fileURLWithPath: $0) }
+if let reportURL {
+    do {
+        try ReferenceCompareOutputPathValidator.validate(
+            reportURL: reportURL,
+            matrixURL: URL(fileURLWithPath: matrixPath),
+            referenceRootURL: imageDirectory
+        )
+    } catch {
+        fail(.invalidReportDestination)
+    }
 }
 
-guard let result = try? ReferenceComparisonMetrics.compare(
-    width: firstSize.0,
-    height: firstSize.1,
-    lrNeutral: images[0].pixels,
-    lrPreset: images[1].pixels,
-    lhNeutral: images[2].pixels,
-    lhPreset: images[3].pixels
-) else {
-    fail(.comparisonFailed, caseID: caseID)
+if parsed.flags.contains("--all-neutral") {
+    guard parsed.values.keys.allSatisfy({ $0 == "--matrix" || $0 == "--images" || $0 == "--report" }) else {
+        fail(.invalidArguments)
+    }
+    let mode: ReferenceComparisonMode = .neutralDirect
+    let rawIDs = ["raw-a", "raw-b", "raw-c", "raw-d"]
+    var cases: [BatchCaseOutput] = []
+    for rawID in rawIDs {
+        guard let matrixCase = matrix.cases
+            .filter({ $0.rawID == rawID })
+            .sorted(by: { $0.caseID < $1.caseID })
+            .first else {
+            cases.append(BatchCaseOutput(
+                status: "NOT RUN",
+                rawID: rawID,
+                caseID: "\(rawID)--fixture-a",
+                width: nil,
+                height: nil,
+                metrics: nil,
+                evaluation: nil,
+                reason: "reference matrix case unavailable"
+            ))
+            continue
+        }
+        do {
+            let evaluated = try evaluate(mode: mode, matrixCase: matrixCase, in: imageDirectory)
+            cases.append(BatchCaseOutput(
+                status: evaluated.evaluation.isPassing ? "PASS" : "FAIL",
+                rawID: rawID,
+                caseID: matrixCase.caseID,
+                width: evaluated.width,
+                height: evaluated.height,
+                metrics: metricsOutput(for: evaluated.result),
+                evaluation: evaluationOutput(for: evaluated.evaluation),
+                reason: nil
+            ))
+        } catch {
+            let failure = resolveFailure(error)
+            let reason: String
+            switch failure {
+            case .notRun: reason = "reference image unavailable"
+            case .ambiguousImage: reason = "ambiguous reference image"
+            case .dimensionMismatch: reason = "reference dimensions do not match"
+            case .comparisonFailed: reason = "reference comparison failed"
+            default: reason = "unsupported reference image"
+            }
+            cases.append(BatchCaseOutput(
+                status: failure == .notRun ? "NOT RUN" : "FAIL",
+                rawID: rawID,
+                caseID: matrixCase.caseID,
+                width: nil,
+                height: nil,
+                metrics: nil,
+                evaluation: nil,
+                reason: reason
+            ))
+        }
+    }
+    let status: String
+    if cases.allSatisfy({ $0.status == "PASS" }) {
+        status = "PASS"
+    } else if cases.contains(where: { $0.status == "NOT RUN" }) {
+        status = "NOT RUN"
+    } else {
+        status = "FAIL"
+    }
+    printJSON(
+        BatchOutput(
+            status: status,
+            mode: mode,
+            cases: cases,
+            thresholds: currentThresholdsOutput()
+        ),
+        status: status,
+        reportURL: reportURL
+    )
 }
 
-let passed = result.meanAbsoluteEffectError <= meanErrorThreshold
-    && result.p95AbsoluteEffectError <= p95ErrorThreshold
-    && result.luminanceEffectSSIM >= ssimThreshold
-private let output = ComparisonOutput(
-    status: passed ? "PASS" : "FAIL",
-    caseID: caseID,
-    width: firstSize.0,
-    height: firstSize.1,
-    metrics: MetricsOutput(
-        meanAbsoluteEffectError: result.meanAbsoluteEffectError,
-        p95AbsoluteEffectError: result.p95AbsoluteEffectError,
-        luminanceEffectSSIM: result.luminanceEffectSSIM,
-        sampleCount: result.sampleCount
-    ),
-    reason: nil
-)
-printJSON(output)
+let requiredKeys = ["--mode", "--case", "--lr-neutral", "--lr-preset", "--lh-neutral", "--lh-preset"]
+guard requiredKeys.allSatisfy({ parsed.values[$0] != nil }),
+      let modeValue = parsed.values["--mode"],
+      let mode = ReferenceComparisonMode(rawValue: modeValue),
+      let caseID = parsed.values["--case"],
+      let matrixCase = matrix.cases.first(where: { $0.caseID == caseID }) else {
+    fail(.invalidArguments)
+}
+guard matrixCase.lrNeutralID == parsed.values["--lr-neutral"],
+      matrixCase.lrPresetID == parsed.values["--lr-preset"],
+      matrixCase.lhNeutralID == parsed.values["--lh-neutral"],
+      matrixCase.lhPresetID == parsed.values["--lh-preset"] else {
+    fail(.matrixMismatch, mode: mode, caseID: caseID, rawID: matrixCase.rawID)
+}
+
+do {
+    let evaluated = try evaluate(mode: mode, matrixCase: matrixCase, in: imageDirectory)
+    let status = evaluated.evaluation.isPassing ? "PASS" : "FAIL"
+    printJSON(
+        ComparisonOutput(
+            status: status,
+            mode: mode,
+            caseID: caseID,
+            rawID: matrixCase.rawID,
+            width: evaluated.width,
+            height: evaluated.height,
+            metrics: metricsOutput(for: evaluated.result),
+            thresholds: currentThresholdsOutput(),
+            evaluation: evaluationOutput(for: evaluated.evaluation),
+            reason: nil
+        ),
+        status: status,
+        reportURL: reportURL
+    )
+} catch {
+    fail(resolveFailure(error), mode: mode, caseID: caseID, rawID: matrixCase.rawID)
+}

@@ -93,10 +93,9 @@ public struct XMPCapabilityManifest: Codable, Equatable, Sendable {
         capabilities.filter { $0.feature == feature }
     }
 
-    /// The P0 manifest is derived from the mappings that are actually wired
-    /// into the current importer. This prevents a second, drifting list of
-    /// property names while leaving room for composite feature converters to
-    /// add their own entries explicitly in later phases.
+    /// The manifest is derived from mappings that are actually wired into the
+    /// current importer. Composite converters append their grouped ownership
+    /// explicitly because one feature is assembled from several XMP fields.
     public static let `default`: XMPCapabilityManifest = {
         var grouped: [String: XMPFeatureCapability] = [:]
 
@@ -136,6 +135,77 @@ public struct XMPCapabilityManifest: Codable, Equatable, Sendable {
             level: .native,
             direction: .roundTrip,
             rendererEvidenceID: "mapping.toneCurve"
+        ))
+        capabilities.append(XMPFeatureCapability(
+            propertyIDs: [
+                .cameraRaw("ParametricShadows"), .cameraRaw("ParametricDarks"),
+                .cameraRaw("ParametricLights"), .cameraRaw("ParametricHighlights"),
+                .cameraRaw("ParametricShadowSplit"), .cameraRaw("ParametricMidtoneSplit"),
+                .cameraRaw("ParametricHighlightSplit")
+            ],
+            feature: .parametricCurve,
+            processVersionFamily: .process2012,
+            level: .approximate,
+            direction: .roundTrip,
+            rendererEvidenceID: "mapping.parametricCurve"
+        ))
+
+        // Composite converters are intentionally listed here rather than
+        // split into scalar mappings: the importer must assemble all Adobe
+        // fields before it can apply one coherent feature to the renderer.
+        capabilities.append(XMPFeatureCapability(
+            propertyIDs: [
+                .cameraRaw("ConvertToGrayscale"),
+                .cameraRaw("GrayMixerRed"), .cameraRaw("GrayMixerOrange"),
+                .cameraRaw("GrayMixerYellow"), .cameraRaw("GrayMixerGreen"),
+                .cameraRaw("GrayMixerAqua"), .cameraRaw("GrayMixerBlue"),
+                .cameraRaw("GrayMixerPurple"), .cameraRaw("GrayMixerMagenta")
+            ],
+            feature: .monochrome,
+            processVersionFamily: .process2012,
+            level: .native,
+            direction: .roundTrip,
+            rendererEvidenceID: "mapping.monochrome"
+        ))
+        capabilities.append(XMPFeatureCapability(
+            propertyIDs: [
+                .cameraRaw("ColorGradeShadowHue"), .cameraRaw("ColorGradeShadowSat"),
+                .cameraRaw("ColorGradeShadowLum"), .cameraRaw("ColorGradeMidtoneHue"),
+                .cameraRaw("ColorGradeMidtoneSat"), .cameraRaw("ColorGradeMidtoneLum"),
+                .cameraRaw("ColorGradeHighlightHue"), .cameraRaw("ColorGradeHighlightSat"),
+                .cameraRaw("ColorGradeHighlightLum"), .cameraRaw("ColorGradeGlobalHue"),
+                .cameraRaw("ColorGradeGlobalSat"), .cameraRaw("ColorGradeGlobalLum"),
+                .cameraRaw("ColorGradeBlending"), .cameraRaw("ColorGradeBalance")
+            ],
+            feature: .colorGrading,
+            processVersionFamily: .process2012,
+            level: .native,
+            direction: .roundTrip,
+            rendererEvidenceID: "mapping.colorGrading"
+        ))
+        capabilities.append(XMPFeatureCapability(
+            propertyIDs: [.cameraRaw("LensProfileEnable")],
+            feature: .lensCorrection,
+            processVersionFamily: .process2012,
+            level: .native,
+            direction: .roundTrip,
+            rendererEvidenceID: "mapping.lensCorrection"
+        ))
+        capabilities.append(XMPFeatureCapability(
+            propertyIDs: [.cameraRaw("CameraProfile")],
+            feature: .renderingProfile,
+            processVersionFamily: .process2012,
+            level: .preserved,
+            direction: .importOnly,
+            rendererEvidenceID: "profile.preservedNotApplied"
+        ))
+        capabilities.append(XMPFeatureCapability(
+            propertyIDs: [.cameraRaw("RGBTable")],
+            feature: .renderingProfile,
+            processVersionFamily: .process2012,
+            level: .preserved,
+            direction: .importOnly,
+            rendererEvidenceID: "profile.rgbTableParseOnly"
         ))
         return XMPCapabilityManifest(capabilities: capabilities)!
     }()

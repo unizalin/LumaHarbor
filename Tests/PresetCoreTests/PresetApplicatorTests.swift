@@ -1,5 +1,6 @@
 import XCTest
 @testable import PresetCore
+import PhotoLibraryCore
 import RawProcessingCore
 
 final class PresetApplicatorTests: XCTestCase {
@@ -34,6 +35,168 @@ final class PresetApplicatorTests: XCTestCase {
         let current = PhotoAdjustments(exposure: 1, contrast: 20)
         let result = applicator.apply(AdjustmentPatch(), to: current, mode: .replace, context: .none)
         XCTAssertEqual(result.adjustments, .neutral)
+    }
+
+    func testAdobePresetMarksTheAppliedStateAsProcess2012Compatible() throws {
+        let patch = AdjustmentPatch(basic: .init(exposure: 1))
+        let result = applicator.apply(
+            patch,
+            to: .neutral,
+            mode: .replace,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(result.adjustments.lensCorrection.mode, .automatic)
+    }
+
+    func testAdobeProfileRequestIsAppliedSeparatelyFromCreativeRenderingProfile() {
+        let patch = AdjustmentPatch(
+            renderingProfile: RenderingProfileSelection(profileID: "lumaharbor.vivid"),
+            rawCameraProfile: RawCameraProfileSelection(requestedName: "Adobe Color")
+        )
+        let result = applicator.apply(
+            patch,
+            to: .neutral,
+            mode: .merge,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(
+            result.adjustments.rawCameraProfile.requestedName,
+            "Adobe Color"
+        )
+        XCTAssertEqual(result.adjustments.renderingProfile.profileID, "lumaharbor.vivid")
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, RawRenderingCompatibility.adobeProcess2012V1)
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "profilePreservedNotApplied" })
+    }
+
+    func testAdobePresetWithExplicitLensOffKeepsLensOff() throws {
+        let patch = AdjustmentPatch(
+            lensCorrection: LensCorrectionAdjustments(mode: .off)
+        )
+        let result = applicator.apply(
+            patch,
+            to: .neutral,
+            mode: .replace,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(result.adjustments.lensCorrection.mode, .off)
+    }
+
+    func testAdobePresetWithExplicitLeafEqualToCurrentStillSelectsCompatibility() {
+        let result = applicator.apply(
+            AdjustmentPatch(basic: .init(exposure: 0)),
+            to: .neutral,
+            mode: .merge,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(result.adjustments.lensCorrection.mode, .automatic)
+    }
+
+    func testEmptyAdobePatchRemainsANoop() {
+        var current = PhotoAdjustments(exposure: 1, contrast: 20)
+        current.rawRenderingCompatibility = .native
+        let result = applicator.apply(
+            AdjustmentPatch(),
+            to: current,
+            mode: .replace,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments, current)
+        XCTAssertTrue(result.diagnostics.isEmpty)
+    }
+
+    func testSemanticallyEmptyNestedAdobePatchRemainsANoop() {
+        let result = applicator.apply(
+            AdjustmentPatch(hsl: HSLAdjustmentPatch(red: HSLBandPatch())),
+            to: PhotoAdjustments(exposure: 1),
+            mode: .merge,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments.exposure, 1)
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .native)
+        XCTAssertTrue(result.diagnostics.isEmpty)
+    }
+
+    func testSkippedAdobeWhiteBalanceLeafDoesNotSelectCompatibility() {
+        let result = applicator.apply(
+            AdjustmentPatch(basic: .init(temperature: 6000)),
+            to: .neutral,
+            mode: .merge,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments, .neutral)
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "missingWhiteBalanceBaseline" })
+    }
+
+    func testNativePresetPreservesExistingCompatibilityInMerge() throws {
+        var current = PhotoAdjustments.neutral
+        current.rawRenderingCompatibility = .adobeProcess2012V1
+        let result = applicator.apply(
+            AdjustmentPatch(basic: .init(exposure: 1)),
+            to: current,
+            mode: .merge,
+            context: .none
+        )
+
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+    }
+
+    func testReplaceStartsFromTheCurrentPhotoBaselinePolicy() {
+        let current = PhotoAdjustments.neutral(using: .adobeProcess2012V1)
+        let result = applicator.apply(
+            AdjustmentPatch(basic: .init(exposure: 1)),
+            to: current,
+            mode: .replace,
+            context: .none
+        )
+
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(result.adjustments.exposure, 1)
+    }
+
+    func testAdobeXMPPreviewAndCommitUseAdobePolicyAndUndoRestoresPriorPolicy() {
+        let preview = applicator.apply(
+            AdjustmentPatch(basic: .init(exposure: 1)),
+            to: .neutral,
+            mode: .replace,
+            context: .none,
+            temperatureIsAbsoluteKelvin: true
+        )
+        var history = EditHistory(initial: PhotoAdjustments.neutral)
+
+        history.record(preview.adjustments)
+
+        XCTAssertEqual(preview.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(history.current.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(history.undo()?.rawRenderingCompatibility, .native)
+    }
+
+    func testNonAdobeReplaceDoesNotSwitchAnExistingAdobePolicy() {
+        let current = PhotoAdjustments.neutral(using: .adobeProcess2012V1)
+        let result = applicator.apply(
+            AdjustmentPatch(basic: .init(exposure: 1)),
+            to: current,
+            mode: .replace,
+            context: .none
+        )
+
+        XCTAssertEqual(result.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
     }
 
     // MARK: - Every leaf group, table-driven
@@ -196,6 +359,11 @@ final class PresetApplicatorTests: XCTestCase {
             case .renderingProfile:
                 XCTAssertEqual(
                     result.adjustments.renderingProfile, patch.renderingProfile,
+                    "\(field) was set in the patch but never reached PresetApplicator's output"
+                )
+            case .rawCameraProfile:
+                XCTAssertEqual(
+                    result.adjustments.rawCameraProfile, patch.rawCameraProfile,
                     "\(field) was set in the patch but never reached PresetApplicator's output"
                 )
             case .lensCorrection:

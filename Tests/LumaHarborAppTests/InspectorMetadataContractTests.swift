@@ -26,6 +26,12 @@ final class InspectorMetadataContractTests: XCTestCase {
             .appendingPathComponent(filename)
     }
 
+    private static func padSourceURL(_ filename: String) -> URL {
+        repositoryRootURL
+            .appendingPathComponent("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp", isDirectory: true)
+            .appendingPathComponent(filename)
+    }
+
     private static func loadSource(_ filename: String) throws -> String {
         try String(contentsOf: appSourceURL(filename), encoding: .utf8)
     }
@@ -71,5 +77,16 @@ final class InspectorMetadataContractTests: XCTestCase {
             source.contains("sourceURL.path") || source.contains("sourceURL!.path"),
             "the metadata panel must never render a source URL's raw filesystem path"
         )
+    }
+
+    func testMacAndIPadInfoPanelsMountTheSharedRawDiagnosticsPanel() throws {
+        let macSource = try Self.loadSource("InspectorView.swift")
+        let padHostSource = try String(contentsOf: Self.padSourceURL("PadInspectorHost.swift"), encoding: .utf8)
+        let padInfoSource = try String(contentsOf: Self.padSourceURL("PadEditorInfoViews.swift"), encoding: .utf8)
+
+        XCTAssertTrue(macSource.contains("RawRenderDiagnosticsPanel(recipe:"))
+        XCTAssertTrue(macSource.contains("latestRawRenderRecipe"))
+        XCTAssertTrue(padHostSource.contains("latestRawRenderRecipe"))
+        XCTAssertTrue(padInfoSource.contains("RawRenderDiagnosticsPanel(recipe:"))
     }
 }

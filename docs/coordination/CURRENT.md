@@ -1,8 +1,93 @@
 # Current Coordination State
 
-Updated: 2026-09-17
+## Lightroom fail-closed integration candidate（2026-09-27, Codex）
 
-Updated by: Codex（Phase 0 iPad Inspector 來源整併完成；產品驗證基線不變）
+- **狀態**：`READY ONLY WITH RENDERER DISABLED`。準備以單一乾淨 snapshot 整合至 `main`；Adobe renderer 預設關閉，production registry 空白，持久化 Adobe policy 只顯示請求狀態，實際 decode／preview／export 維持 Native。
+- **安全修正**：反序列化 recipe 不再採信儲存的 `effectivePolicy`；所有 recipe 重新開啟時一律 Native，必須重新通過 resolver admission。Artifact admission 同時核對 ID、version、camera 與 canonical profile；public in-memory initializer 也不能以 Native policy 組出 Adobe effective state。Mac 單張與批次 export 現共用保存的 camera-profile request，不再與 preview 分歧。
+- **回歸證據**：完整 `swift test` 2,552 executed、17 skipped、0 failures；新增 controlled-enablement／DCP fail-closed／App export focused tests 16/16 PASS；私人 RAW Native parity 3/3 PASS。最後候選 snapshot 的 strict-concurrency、Mac Release app bundle 與 generic iPad Simulator build 均 PASS；實體 iPad 安裝會在 squash 整合後以 `main` 的簽署 build 重跑。
+- **版本**：Mac 與 iPad 維持 `0.1.0`，本次 build number 為 `3`。簽署 Team 只允許由本機建置命令注入，不寫入專案或 Git。
+- **Gate 2 邊界**：2026-09-22 的正式 neutral 4/4 與 independent hold-out 都是 `FAIL`，不是 PASS；本輪沒有重跑正式 Lightroom reference comparison。Adobe 顯色相容與 XMP final parity 仍未完成，不能開啟 renderer 或填入 production registry。
+- **Gate 2 待辦**：production registry 與 feature flag 啟用前，仍須完成 metadata 後的受控升級 resolver、profile runtime error 的完整 Native fallback，以及 post-decode recipe 重新配置 preview／export color-space。這些路徑目前因 renderer 預設關閉與 registry 空白而不可達，不能以本版視為完成。
+- **隱私**：目前 snapshot 已移除私人 preset／RAW 名稱、本機證據路徑，以及舊驗收文件內的私人 RAW basename／digest；來源分支舊歷史保留在本機，不推送。整合使用 squash snapshot，避免發布舊歷史中的私人字串。
+
+Updated: 2026-09-27
+
+Updated by: Codex（Lightroom fail-closed integration candidate）
+
+## Successor execution status (2026-09-23, Codex)
+
+- **P8 current**：完整 `swift test` rerun 2,546 executed、17 skipped、0 failures；strict-concurrency build、Mac app bundle 與 generic iPad Simulator build 均 PASS，parser／fail-closed／CLI process focused 22/22 PASS，`git diff --check` PASS。這些是回歸與跨平台建置證據；正式私人 neutral 4/4、hold-out、full-resolution performance opt-in 與實體 iPad 仍為 `NOT RUN`，因此維持 `READY ONLY WITH RENDERER DISABLED`。
+- **P7 current**：既有 comparator slice 已完成 RED→GREEN；真實 `LumaHarborReferenceCompare` process tests 9/9 PASS，metadata／streaming 7/7 PASS，metrics 8/8 PASS，full-resolution performance 1 skip（未 opt-in）、0 failure。`--all-neutral`、16-bit encoded-sRGB TIFF、sanitized JSON、duplicate／path traversal／symlink 防護均已由 process boundary 驗證；正式私人 reference／Gate 2 仍未宣告通過。
+- **P6 current**：新增 `DCPProfileArtifactV2.swift` 與 `DCPProfileFailClosedTests.swift`；RED 因 atomic artifact／resolver contract 不存在正確失敗，GREEN focused 5/5 PASS，fail-closed／controlled／recipe／preview-export／batch regression 31/31 PASS。artifact 以 schema v2 綁定 fallback 與 manifest，只有 exact camera/profile/runtime binding 才能被明確注入的 resolver admission；預設 registry 與 feature flag 不變。
+- **P5 current**：新增 `AdobeRGBTable.swift`、`AdobeRGBTableCodec.swift` 與 `AdobeRGBTableCodecTests.swift`；RED 因 codec 型別不存在正確失敗，GREEN focused suite 8/8 PASS，XMP／capability／fixture regression 41 executed、3 skipped、0 failures，P1-P5 合併 suite 45/45 PASS。codec 僅支援 bounded Adobe custom base85／zlib、exact size、header/footer、delta reconstruction 與 B-fastest trilinear sampling；`RGBTable` 維持 `preserved`／`importOnly`，沒有接入 renderer。測試找出並修正 identity endpoint rounding 與 base85 padding 的 fail-closed traps。
+- **P4**：新增 `DCPProfileToneCurve.swift` 與 `DCPProfileToneCurveTests.swift`；RED 因型別不存在正確失敗，GREEN focused suite 8/8 PASS，P1-P4 合併 suite 37/37 PASS，strict-concurrency build PASS。tone curve 採 monotonic knots／linear interpolation，RGB 以 HSV value 套用並保留 hue/saturation；metadata 維持純值且不觸碰 `PhotoAdjustments`。
+- **P3**：新增 `DCPHueSatMap.swift`、`DCPLookTable.swift` 與兩組 synthetic tests；RED 正確失敗，首次 GREEN 的 hue wrap signal 5 已修正，focused suite 13/13 PASS。
+- **狀態**：`IN_PROGRESS; READY ONLY WITH RENDERER DISABLED`。P0-P7 的可執行切片與回歸已完成；P8 只完成建置／測試矩陣，正式 reference、hold-out 與實體裝置 Gate 尚未完成。Adobe feature flag 預設關閉，production registry 維持空白。
+- **基線**：branch `codex/lr-neutral-baseline-v1`、HEAD `fb421507bfeed1b2ff146109e3540d91de0eba62`；P0 dirty path 52，目前 dirty path 70，既有 dirty files 均保留。
+- **P1**：DCP TIFF IFD parser focused 8/8 PASS；profile／manifest／recipe regression 19/19 PASS；strict-concurrency build 與 `git diff --check` PASS；只解碼 in-memory 純值，未接入 production。
+- **P2**：新增 `DCPProfileMatrixResolver.swift` 與 `DCPProfileMatrixResolverTests.swift`。RED 曾因 resolver 缺失正確失敗；GREEN 8/8 PASS；P1/P2 parser／matrix 合併 suite 16/16 PASS。涵蓋 ForwardMatrix 優先、ColorMatrix Bradford→D50、雙 illuminant reciprocal-temperature 插值、越界／不完整 pair／奇異矩陣／相機不符 fail closed。
+- **安全閘門**：Adobe feature flag 預設關閉、production registry 維持空白；formal neutral 4/4、hold-out、Mac／iPad、效能與隱私 Gate 仍不是 PASS。
+- **下一個 bounded action**：取得去識別化的正式 Lightroom/LumaHarbor 16-bit neutral paired references 與 hold-out manifest，才能執行 P8 Gate 2；在此之前不得填入 registry 或開啟 Adobe renderer。
+- **本機 reference corpus audit（2026-09-23）**：使用者提供的未追蹤 Lightroom corpus 可辨識為 4 組 neutral、20 組 XMP-applied 與 4 組 base TIFF，共 28 張；全部為 150×100、8-bit RGB，雖有 embedded ICC，仍不符合原尺寸 16-bit Gate 2 契約。未找到相對應的 LumaHarbor paired TIFF；素材未複製進 Git，正式 4/4 與 hold-out 維持 `NOT RUN`。
+- **LumaHarbor private export smoke（2026-09-23）**：以使用者提供的 5 個 ARW 執行 `RawFixtureTests/testSixteenBitTIFFExportIsRGBWithoutAlphaForEverySonyFixture`，1/1 PASS；在 repository 外產生 5 張 16-bit RGB、原尺寸 7008×4672、embedded sRGB TIFF。這只證明 LumaHarbor neutral 輸出契約，尚無 Lightroom 原尺寸 paired TIFF，因此不提升 Gate 2 狀態。
+
+- **文件閱讀提示**：下方同名 successor spec 區塊保留 P0 初始交接快照；本節是目前有效狀態，後續更新應延續本節而非回寫歷史驗證結論。
+
+Updated: 2026-09-23
+
+Updated by: Codex（Lightroom DCP／XMP Profile Renderer successor spec）
+
+## Lightroom DCP／XMP Profile Renderer successor spec（2026-09-23, Codex）
+
+- **狀態**：`SPEC_ONLY`。新增 `docs/superpowers/specs/2026-09-23-lightroom-dcp-xmp-profile-renderer.md`，目前沒有修改產品程式碼、registry 或 feature flag。
+- **目的**：以 Adobe DNG／XMP 公開規格為 normative source，建立 clean-room DCP parser、matrix／HueSatMap／LookTable／ProfileToneCurve renderer 與隔離的 XMP RGBTable codec；開源專案只作行為 oracle，不複製 GPL 實作。
+- **安全邊界**：正式 neutral 4/4、獨立 hold-out、preview／export、Mac／iPad、效能與隱私驗收全部通過前，Adobe renderer 維持 fail closed、production registry 維持空白、feature flag 預設關閉。
+- **既有 worktree**：分支 `codex/lr-neutral-baseline-v1`、基準 HEAD `fb421507bfeed1b2ff146109e3540d91de0eba62`。本輪保留原有 51 個 dirty paths，只新增 successor spec；因此預期 dirty path 總數為 52。
+- **交接**：Luna 接手實作前必須成為此 worktree 唯一 writer，先建立 `docs/superpowers/plans/2026-09-23-lightroom-dcp-xmp-profile-renderer.md`，再依 P0 至 P8 使用 TDD 執行。不得 commit、push、merge、rebase 或修改 main。
+- **Implementation plan**：`docs/superpowers/plans/2026-09-23-lightroom-dcp-xmp-profile-renderer.md` 已建立；P0 證據凍結核對完成，下一個唯一 bounded action 是 P1 in-memory DCP TIFF container parser 的 RED 測試。
+- **P0 evidence freeze**：branch `codex/lr-neutral-baseline-v1`、HEAD `fb421507bfeed1b2ff146109e3540d91de0eba62`、worktree dirty path 52；既有產品 dirty files 保留，Adobe feature flag 預設關閉，production registry 維持空白，formal neutral 4/4／hold-out 不是 PASS。
+- **P1 DCP container parser**：`DCPProfileDocument.swift`、`DCPProfileParser.swift` 與 synthetic in-memory `DCPProfileParserTests.swift` 已完成 TDD；RED 曾因缺少 parser API 正確失敗，GREEN focused suite 8/8 PASS，既有 profile／manifest／recipe regression 19/19 PASS，strict-concurrency build PASS，`git diff --check` PASS。parser 只解碼 bounds-checked TIFF IFD 純值，未接入 renderer、recipe、registry 或 feature flag。
+- **目前 dirty state**：P0/P1 只新增 successor plan、parser 兩個 source、parser test 與 coordination 記錄；目前 `git status --short` 為 56 paths，原有 52 paths 均保留。下一個唯一 bounded action 是 P2 matrix／illuminant resolver 的 RED isolation vectors。
+
+## Lightroom 相容 Neutral RAW Baseline v1 規格與計劃（2026-09-19, Codex）
+
+- **狀態**：`IN_PROGRESS`。聚焦 C0 規格已確認，implementation plan 已拆成 10 個可獨立驗證、可停止與可回退的 TDD task；Task 1 policy／edit-state、Task 2 persistence migration、Task 3 shared recipe、Task 4 deterministic Core Image RAW policy、Task 5 versioned color management、Task 6 XMP Camera Profile request／registry 已完成，Task 7 已完成 renderer／校正工具的 synthetic slice，但仍停在合法 paired Lightroom hold-out 證據前。
+- **規格**：`docs/superpowers/specs/2026-09-19-lightroom-neutral-raw-baseline-v1.md`。範圍只含版本化 RAW 顯色政策、deterministic Core Image decode、As Shot white balance、wide-gamut/output transform、Adobe Color／Adobe Standard fallback 與 Gate 2 驗收。
+- **計劃**：`docs/superpowers/plans/2026-09-19-lightroom-neutral-raw-baseline-v1.md`。順序為 policy／edit-state、持久化 migration、shared recipe、deterministic decode、色彩空間、Profile request／registry、合法 fallback renderer、雙平台診斷、正式 Gate 2、完整回歸。
+- **相容邊界**：新匯入 RAW 預設走 `adobeProcess2012V1`；既有 sidecar／catalog／document 缺少欄位時維持 native。未調整狀態與 baseline policy 分離，禁止產生假的 edit badge 或 dirty state。
+- **停止條件**：4/4 原尺寸 16-bit sRGB neutral reference 未全數通過 Gate 2 前，不進 Process 2012 Basic tone、Presence、Calibration 或其他 XMP effect 校正，也不得用 slider 補償 baseline。
+- **Task 2 提交**：`e7a707d`；RAW persistence matrix 5/5 PASS，PhotoDocumentStore／PhotoLibraryService／CurationMigration focused suites 104/104 PASS；完整相關 suites 僅保留既有 `SidecarRepositoryTests.testRewritingIdenticalContentProducesIdenticalBytes` 失敗。
+- **Task 3 提交**：`33f2323`；RawRenderRecipeResolver、preview／export parity 與 EditorSession provenance focused tests 44/44 PASS；recipe 為可序列化純值，未改變現有像素路徑。
+- **Task 4 提交**：`574814b`；Core Image option vector、固定 decoder version selector、orientation mapping、availability diagnostics 已加入；Task 4 focused suites 86/86 PASS，Sony ARW fixture suite 9/9 PASS，私有 RAW recipe／pixel stability 1/1 PASS，strict-concurrency build PASS。
+- **Task 5 提交**：`3523642`；加入 native extended-linear sRGB、Adobe-compatible extended-linear Display P3、sRGB display／reference TIFF output IDs，preview／export recipe-aware render service；Task 5 focused suites 56/56 PASS，Sony ARW decode／export suites 10/10 PASS，strict-concurrency build PASS。
+- **Task 6 提交**：`5599012`；加入獨立 `RawCameraProfileSelection`、共用 Adobe profile registry、camera match／neutral fallback descriptor，XMP CameraProfile request 進入 PhotoAdjustments／AdjustmentPatch 並完整 round-trip；EditorSession 不再把 creative rendering profile 當 RAW profile request。focused suite 85/85 PASS，既有 XMPImportExport suite 32/32 PASS。
+- **Task 7 slice**：目前工作樹已加入 `CameraProfileFallback` 的純值 validation、3×3 matrix + 單調 per-channel LUT renderer、deterministic training／hold-out least-squares calibrator、隱私安全 CLI 與 preview／export pipeline stage。focused renderer／calibration／CLI／resolver suites 15/15 PASS，RawProcessingCore 全套 608/608（1 skip）PASS，strict-concurrency build PASS，CLI `--help` PASS。generated registry 目前刻意為空；沒有合法 paired Lightroom hold-out 證據前，profile 仍為 `preservedNotApplied`，不得宣稱 Adobe Color／Standard 已還原。
+- **Task 7 停止條件**：需要使用者提供或明確授權的 Lightroom paired reference（training／hold-out）後，才能執行 `LumaHarborProfileCalibrate` 並驗證係數；目前不加入私有路徑、RAW ID、Adobe table 或 per-photo 特例。完整 `swift test` 本輪在既有跨平台 contract suite 執行期間被 xctest signal 11 中止，沒有以此宣稱全套通過；Task 7 focused suites 與 strict build 是目前有效證據。
+- **下一步**：以 CLI 接收去識別的 paired samples，只有 hold-out 改善且 provenance 可散布時才產生 generated fallback；完成後再跑 Gate 2 的 4 neutral + 20 effect + 20 final 及 Mac／iPad 人工驗收。Task 9 Gate 2 未通過時不得開始 C1；目前未 merge 或 push。
+- **XMP fixture 驗證閘門修正（2026-09-19）**：`Scripts/run-lr-xmp-fixture-baseline.zsh` 現在明確 export fixture 環境變數，並要求 `LightroomXMPFixtureTests` 真的執行 5/5、0 skip、0 failure 才回報 PASS；本機未納入 Git 的 XMP corpus 已驗證 5/5 PASS。這只證明 XMP 解析／patch round-trip，不代表 Lightroom 像素相容或 Gate 2 通過。
+- **RAW fixture smoke（2026-09-19）**：同一組未納入 Git 的 4 張 Sony ARW 已通過 `RawFixtureTests` 9/9，涵蓋全檔解碼、預覽尺寸、完整輸出、原檔不被修改與互動預覽效能。這證明 LumaHarbor 能讀取這批 RAW，但尚未證明套用後與 Lightroom 的像素一致。
+
+## Lightroom XMP Parametric Curve approximate slice（2026-09-19, Codex）
+
+- **狀態**：`IN_PROGRESS`。Adobe 四區 Parametric Curve 與三個 split 已加入共用模型、XMP round-trip 與 monotonic LUT 近似渲染；這不是 Adobe Process 2012 原生等價實作。
+- **分支**：`codex/lr-profile-application`，目前仍有未提交的程式、測試與文件變更；沒有加入私有 RAW／XMP，也沒有 commit、merge 或 push。
+- **修改範圍**：`ParametricToneCurve` 以 neutral 預設維持舊 sidecar 相容；import/export 支援七個欄位；capability manifest 標示 `approximate` + `roundTrip`；identity 路徑不增加 LUT 量化誤差。
+- **驗證**：Parametric／XMP composite／capability focused suite 42/42 PASS；`git diff --check` PASS。私有 Lightroom smoke comparison 的個別 raw-a case 有小幅改善，但正式 4 × 5 matrix、原尺寸 16-bit TIFF 與 Mac／iPad 人工驗收仍未通過／未執行。
+- **下一步**：先用 reference corpus 校正 Parametric 的符號、split 邊界與 render order，再處理 Calibration、Detail 子控制與 Adobe profile fallback；neutral RAW gate 仍是前置停止條件。
+
+## Lightroom XMP 4 × 5 診斷矩陣（2026-09-18, Codex）
+
+- **狀態**：`IN_PROGRESS`。四張私有 ARW × 五份私有 XMP 共 20 組 Lightroom／LumaHarbor preset effect comparison 已完成；五份 XMP parser／patch fixture tests 5/5 PASS，但 4/4 neutral、20/20 effect 與 20/20 final 低解析度診斷案例均未達設計門檻。Phase A4 工具與 C0 第一個相容性 plumbing 切片已完成；neutral RAW／Profile 修復仍未完成。
+- **分支**：`codex/lr-profile-application`，基於 `origin/main` `f694308723d8cae98db10dd4416d66f72ffb58a2`；目前產品 HEAD 為 `f876c88`，其上 `8e15843` 僅更新協作文件。本 worktree 目前包含未提交的 Phase A4 程式、測試與文件變更，未加入私有 fixture。
+- **報告**：`docs/testing/reports/2026-09-17-lightroom-xmp-application-fix.md`。原始 150 × 100 診斷的 20 組平均 mean `0.118019`、p95 `0.381961`、effect SSIM `0.109177`；2026-09-19 以 Lightroom Classic 原尺寸 16-bit TIFF 對同一批 ARW／XMP 做 512 × 342 smoke comparison，neutral 4 組平均 mean `0.069503`、effect 20 組 `0.145974`、final 20 組 `0.108675`，仍全部未過正式門檻。關閉 LumaHarbor Grain 的 16 組消融測試仍為 0/16 通過，證明 Grain 是主要差異之一但不是唯一根因。
+- **三層診斷**：原始 150 × 100 neutral direct 平均 mean `0.056280`、p95 `0.210784`、SSIM `0.779461`（0/4 PASS）；512 × 342 smoke comparison 的 neutral direct 為 mean `0.069503`、p95 `0.279412`、SSIM `0.536303`，effect 為 mean `0.145974`、p95 `0.462353`、SSIM `0.011747`，final 為 mean `0.108675`、p95 `0.304706`、SSIM `0.575788`（全部 0 PASS）。Phase B 後正式原尺寸 final matrix 仍為 `NOT RUN`。
+- **修復規格**：`docs/superpowers/specs/2026-09-18-lightroom-xmp-rendering-parity-recovery.md`，狀態為 Active。規格新增 `neutralDirect`／`presetEffect`／`finalDirect` 三個獨立 mode、duplicate hash／多副檔名／暫存隔離契約，以及 Gate 2 Neutral RAW baseline；Profile／RAW baseline 改為 Basic tone 校正前的 C0 停止條件。
+- **Phase A4 實作**：`LumaHarborReferenceCompare` 現在要求 `neutralDirect`、`presetEffect` 或 `finalDirect`，JSON 使用通用 direct／effect 都適用的 metric 名稱並輸出 mode。CLI 與 validator 都會拒絕同一 ID 的多副檔名；validator 以 SHA-256 拒絕跨 case 重複內容，只允許同一 RAW、同一 neutral ID 的明確共用。聚焦測試 18/18 PASS；三種 CLI mode 煙霧測試皆 PASS，歧義候選測試如預期 FAIL。完整 strict-concurrency 測試 2,380 executed、12 skipped、0 failures，strict-concurrency build PASS。
+- **已確認缺口**：Basic tone／Presence 校正、Parametric Curve 的 Adobe 精確等價校正、Calibration、Adobe Profile／Look fallback、Detail 子控制；Parametric Curve 已有 approximate slice，Grain 已完成 source-coordinate 修正但仍需正式 4 × 5 matrix 驗證，門檻來源已由 Phase A 統一。
+- **驗證邊界**：本輪 Lightroom 輸出為 150 × 100、8-bit sRGB，用於快速診斷；規格要求的原尺寸 16-bit TIFF、detail 專用指標、Mac／iPad 人工目視與跨平台輸出一致性仍為 `NOT RUN`，不得宣稱 Lightroom 視覺相容已完成。
+- **C0 開發切片**：新增版本化 `RawRenderingCompatibility`，Adobe XMP 套用標記 `.adobeProcess2012` 並傳入 preview／export decode request；`AdobeProfileRegistry` 辨識 `Adobe Standard`／`Adobe Color`，保留原 property、輸出 `profilePreservedNotApplied`，並在 capability manifest 標示為 `preserved` + `importOnly`。沒有內嵌 Adobe DCP／digest，也沒有宣稱 profile 已還原。
+- **C0 no-op 修正**：只有確實有可套用的 Adobe leaf，或 XMP 明確帶鏡頭策略時，才寫入 Process 2012 相容性標記；僅有缺少 baseline 的白平衡 leaf 會顯示診斷，但不新增 Undo 或 dirty 狀態。
+- **下一步**：在隔離的 compatibility path 上完成 Adobe profile fallback／RAW neutral baseline，重新跑 4 neutral + 20 effect + 20 final；Phase B 後原尺寸 16-bit detail gate、Mac／iPad 人工目視仍需另行驗收。
 
 ## Phase 0 iPad Inspector 來源整併 implementation plan（2026-09-17, Codex）
 
@@ -612,19 +697,19 @@ Updated by: Codex（Phase 0 iPad Inspector 來源整併完成；產品驗證基�
 ## 重新驗測（2026-09-08, Codex）
 
 - **自動化 PASS**：最新 focused selection `LibraryQueryWiringTests|EditorWorkflowUXContractTests|EightLanguageLocalizationGateTests|LocalizationSmokeTest|PhotoCatalogMetadataTests|PhotoIndexMigrationTests|PhotoIndexQueryTests|ExportOptionsWiringTests` → 121/121；iPad unsigned simulator `xcodebuild` → `** BUILD SUCCEEDED **`；`git diff --check` → PASS。
-- **Mac UI PASS**：以目前 worktree 的 Debug app 驗證圖庫搜尋（`_DSC1995` 可縮成單張，清除後恢復 81 張）、評分／旗標／調整篩選選單、進階篩選 sheet（格式／相機／鏡頭／關鍵字／拍攝日期）、Workspace 選單、照片右鍵關鍵字編輯 sheet（取消不寫入）。本輪沒有儲存評分、旗標或關鍵字，未改動使用者照片資料。
-- **BLOCKED / NOT RUN**：MVP preflight 因 `Fixtures/Private/Sony-ARW`、`Fixtures/Private/APFS-Test`、`<EXFAT_TEST_DIR>` 均不存在而無法進入完整 acceptance；iPad 目前僅顯示 paired/available，未連接可安裝的實體裝置，因此真機驗收未執行。完整 `swift test` 的既有唯一失敗仍是本機 Debug `DEVELOPMENT_TEAM` 與 `AppIconAssetContractTests` 的環境差異（1824 tests、9 skipped、1 failure），未修改 signing 設定。
+- **Mac UI PASS**：以目前 worktree 的 Debug app 驗證圖庫搜尋（私人樣本名稱 可縮成單張，清除後恢復 81 張）、評分／旗標／調整篩選選單、進階篩選 sheet（格式／相機／鏡頭／關鍵字／拍攝日期）、Workspace 選單、照片右鍵關鍵字編輯 sheet（取消不寫入）。本輪沒有儲存評分、旗標或關鍵字，未改動使用者照片資料。
+- **BLOCKED / NOT RUN**：MVP preflight 因 `<private-raw-fixture-dir>`、`<private-apfs-fixture-dir>`、`<EXFAT_TEST_DIR>` 均不存在而無法進入完整 acceptance；iPad 目前僅顯示 paired/available，未連接可安裝的實體裝置，因此真機驗收未執行。完整 `swift test` 的既有唯一失敗仍是本機 Debug `DEVELOPMENT_TEAM` 與 `AppIconAssetContractTests` 的環境差異（1824 tests、9 skipped、1 failure），未修改 signing 設定。
 - **結論**：本輪確認自動化與可逆的 Mac UI 路徑正常；不能把缺少 fixture 或未連接 iPad 的 gate 宣稱為 PASS，也不能宣稱 Phase 1–3 或整體產品驗收結案。下一步需提供測試 fixture 並連接 iPad，另在可丟棄的測試資料上驗證 rating／flag／keyword 的實際寫入與重開持久化。
 
 ### 外接裝置重測（2026-09-08）
 
 - 外接測試磁碟已掛載，`<EXFAT_TEST_DIR>` 存在，檔案系統為 `exfat`；但該驗收資料夾目前為空，尚不能執行外接 RAW／拔除／權限情境。
-- `Fixtures/Private/Sony-ARW` 與 `Fixtures/Private/APFS-Test` 仍不存在，因此 MVP preflight 現在是 arm64／Xcode 工具 PASS、exFAT 路徑 PASS、Sony RAW 與 APFS 路徑 FAIL。
+- `<private-raw-fixture-dir>` 與 `<private-apfs-fixture-dir>` 仍不存在，因此 MVP preflight 現在是 arm64／Xcode 工具 PASS、exFAT 路徑 PASS、Sony RAW 與 APFS 路徑 FAIL。
 - `xcrun devicectl list devices` 與 `simctl` 當下都因 CoreDevice／CoreSimulator XPC service 初始化失敗而無法列出 iPad；這次不能判定為 iPad 未連接，需重啟 Xcode／CoreDevice 後再確認 USB 與信任狀態。
 
 ### Fixture 與 iPad 真機重測（2026-09-08）
 
-- 建立未納入 Git 的 `Fixtures/Private/Sony-ARW` 與 `Fixtures/Private/APFS-Test`，各放入一個已下載的真實 Sony `_DSC1946.ARW`；同一檔案複製到 `<EXFAT_TEST_DIR>`。MVP preflight 三個 fixture／儲存條件全數 PASS。
+- 建立未納入 Git 的 `<private-raw-fixture-dir>` 與 `<private-apfs-fixture-dir>`，各放入一個已下載的真實 Sony ARW 樣本；同一檔案複製到 `<EXFAT_TEST_DIR>`。MVP preflight 三個 fixture／儲存條件全數 PASS。
 - iPad `<CONNECTED_IPAD_UDID>` 重新偵測為 `connected`；真機 Debug build、安裝與啟動 `org.lumaharbor.LumaHarborPad` 全數 PASS。建置使用目前本機 Apple Development signing，沒有修改 project signing 設定。
 - MVP acceptance run：strict-concurrency build PASS；`RawFixtureTests` 9/9 PASS（RAW 解碼、metadata、preview、full-resolution export、原檔不變）；full `swift test` 仍為 1824 tests、9 skipped、1 failure，唯一失敗是 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier` 的本機 Debug `DEVELOPMENT_TEAM` contract 差異，因此 runner Overall 仍為 FAIL。
 
@@ -775,7 +860,7 @@ Updated by: Codex（Phase 0 iPad Inspector 來源整併完成；產品驗證基�
 - **根因**：編輯器本身的 undo history 正常，工具列 Undo 也可用；但 SwiftUI 標準 Edit 選單會在每次更新時重新建立 `undo:`/`redo:` 項目，且 hosting responder 先取得 action、卻因空的系統 `UndoManager` 將項目驗證為 disabled。只在 app 啟動或模型變更後設定 `NSMenuItem.target` 會被下一次 `menuNeedsUpdate` 蓋掉，所以 `⌘Z` 在送到 `LumaHarborAppDelegate` 前就被吃掉。
 - **修正**：保留 SwiftUI 原本的私有 `NSMenuDelegate`，用 `UndoRedoMenuDelegateProxy` 完整轉送既有 optional delegate callbacks；只在原 delegate 完成 `menuNeedsUpdate` 後，將 Undo/Redo 項目 target 接到 `LumaHarborAppDelegate`。文字欄位仍優先使用自己的 `UndoManager`，照片編輯器才是 fallback；沒有使用 global hotkey、event tap 或 Accessibility 權限。
 - **TDD**：先新增「SwiftUI 重建選單後 target 會被清空」與「proxy 必須先呼叫既有 delegate、再接回 Undo，且其他 delegate callback 仍被轉送」測試；RED 分別呈現缺少重新接線能力與缺少 proxy API，實作後 `LumaHarborAppDelegateUndoRedoTests` PASS（8 tests）。曾以全域 menu notification 驗證時序，但真 Release app 啟動會與 SwiftUI menu graph 互相干擾；該方案與所有診斷碼均已移除，沒有留在 commit。
-- **真 App 自動驗證**：以 `Scripts/build-app-bundle.sh release` 重建並啟動真 `.app`，對 `_DSC1896.ARW` 將曝光從 `+1.08` 調到 `+2.08`；CUA `super+z` 復原回 `+1.08`，工具列切為 Undo disabled / Redo enabled；CUA `super+shift+z` 重做到 `+2.08`，狀態反向切換；展開 Edit 選單時 Undo 顯示 enabled、Redo 依 history 正確 disabled。最後再復原到 `+1.08`，沒有把測試增量留在照片設定中。這是 app-level 合成按鍵驗證，不能取代使用者實體鍵盤重測。
+- **真 App 自動驗證**：以 `Scripts/build-app-bundle.sh release` 重建並啟動真 `.app`，對 私人 ARW 樣本 將曝光從 `+1.08` 調到 `+2.08`；CUA `super+z` 復原回 `+1.08`，工具列切為 Undo disabled / Redo enabled；CUA `super+shift+z` 重做到 `+2.08`，狀態反向切換；展開 Edit 選單時 Undo 顯示 enabled、Redo 依 history 正確 disabled。最後再復原到 `+1.08`，沒有把測試增量留在照片設定中。這是 app-level 合成按鍵驗證，不能取代使用者實體鍵盤重測。
 - **完整驗證與安全**：release app build PASS；`swift test` PASS（1725 tests, 9 fixture-dependent skipped, 0 failures）；`git diff --check` PASS；本輪兩個 code/test changed files 的私人路徑、volume、Team ID、UDID、provisioning profile、private key、API key/secret/password 掃描零命中。
 - **更新後 alpha**：在整合後的 `main` 重建 `build/LumaHarbor.app`，封裝為 `build/LumaHarbor-0.1.0-alpha-853b837.zip`；`codesign --verify --deep --strict`、`unzip -t` 與整合後 `LumaHarborAppDelegateUndoRedoTests`（8 tests）均 PASS。SHA-256 為 `50125d3fcf03a12d8535c197aa0bb6f85f7114797816a4155356e7c359518af9`。這份取代不含 A11 第二次修正的 `f281604` alpha，仍是 ad-hoc／未 notarize，只供已知小範圍測試者使用。
 - **Next action**：A11 與 Phase 4.6 已完成；後續優先補齊 exFAT fixture 後的完整 MVP acceptance，再安排六語母語審校與 iPad hands-on checklist。
@@ -1920,3 +2005,136 @@ The iPad UI/UX state-feedback polish branch is ready for merge/landing review fr
 - **問題**：垂直工具列與底部／浮動分頁列雖然保留固定尺寸，窄直向與 Split View 下的多行標籤仍可能只把文字／圖示自然範圍當成命中區，造成點擊位置不一致。
 - **修正**：Xcode 內嵌 host、共用 `PadToolRail.swift` 與 SwiftPM standalone host 的穩定 rail/domain cell 都加上 `.contentShape(Rectangle())`；不改變分頁選擇、編輯值或版面尺寸。
 - **驗證**：`InspectorCrossPlatformHierarchyContractTests` 新增整列命中區契約；實機觸控與旋轉驗收仍是 `NOT RUN`。
+
+## Mac／iPad RAW 渲染診斷資訊對齊（2026-09-19, Codex）
+
+- **修正**：新增共用 `RawRenderDiagnosticsPresenter` 與 `RawRenderDiagnosticsPanel`，Mac 與 iPad 的 Info 頁現在使用同一份 resolved recipe 顯示渲染模式、白平衡是否為 As Shot、要求的相機描述檔、解析後 fallback、decoder fallback 與 metadata fallback。未知或未校正描述檔明確顯示「描述檔已保留，未套用」，不把 Adobe profile 誤報成已完成像素套用。
+- **資料安全**：診斷列只允許穩定識別碼、在地化文案與 canonical profile name；不顯示 decoder detail、來源 URL 或私人檔案路徑。EditorSession 沒有目前 frame 時回傳空面板，避免換照片後殘留前一張的診斷。
+- **RAW decoder**：當影像 metadata 字典或尺寸欄位需要以 RAW native size 補回時，recipe 會追加 `metadataFallback` 診斷；既有 native／Adobe recipe 與調整值流程不變。
+- **驗證**：`RawRenderDiagnosticsContractTests` 4/4、`InspectorMetadataContractTests` 4/4、`CrossDeviceParityVerificationTests` 10/10、`LocalizationKeyParityContractTests` 6/6、`EightLanguageLocalizationGateTests` 10/10 PASS；strict-concurrency `swift build` PASS；iPad generic Simulator `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` PASS；`git diff --check` PASS。
+- **限制**：尚未在實體 iPad 或不同 macOS 視窗尺寸做人工視覺驗收；Lightroom 像素校正仍需要同一批 RAW 的 Lightroom 16-bit sRGB TIFF 參考，這次只完成診斷資訊對齊與 fallback 可觀測性。
+
+## RAW 中性政策與 sidecar 位元組穩定性（2026-09-19, Codex）
+
+- **測試契約修正**：新 RAW 開啟時，使用者調整欄位仍為 neutral 且沒有 user adjustments，但渲染相容政策預設為 `adobeProcess2012V1`；整合測試改為分別驗證這三個語意，不再把渲染政策誤當成使用者調整值。
+- **sidecar 修正**：第一次寫入 sidecar 時也經過與後續重寫相同的 `JSONSerialization` canonical path，保留未知頂層欄位的同時，確保內容未變更的重寫產生 byte-identical 結果。
+- **驗證**：完整 `swift test` 執行 2444 個測試、跳過 13 個、失敗 0 個；`LibraryLifecycleTests.testAnUneditedPhotoOpensAtNeutral` 與 `SidecarRepositoryTests.testRewritingIdenticalContentProducesIdenticalBytes` 均 PASS。
+
+## Lightroom Gate 2 公開工具鏈狀態（2026-09-19, Codex）
+
+- 公開 reference contract／metrics 測試 15/15 PASS；矩陣模板 validator PASS（schema v2、20 cases、80 references）。
+- 實際 Lightroom neutral／XMP-applied TIFF 尚未找到；Gate 2、preset effect、Mac／iPad pixel parity、效能與實體 iPad smoke 均維持 `NOT RUN`，沒有把工具鏈 PASS 誤報成色彩 PASS。
+- 去識別驗收報告：`docs/testing/reports/2026-09-19-lightroom-neutral-raw-baseline-v1.md`。
+
+## Fail-closed Adobe renderer（2026-09-21, Codex）
+
+- 在 `codex/lr-neutral-baseline-v1` 完成 TDD fail-closed runtime：Gate 2 前 `RawRendererFeatureFlags.adobeProcess2012V1Enabled` 預設為 `false`。
+- persisted/requested Adobe policy 不變；新增 resolved `effectivePolicy`。disabled／unsupported 時 decoder options、working color space、camera-profile fallback、preview/export 皆實際走 native，並保留 fallback diagnostics。
+- legacy recipe 缺少 `effectivePolicy` 時採 native fallback；不因舊 recipe 的 Adobe policy 意外啟用 renderer。
+- 驗證：完整 `swift test` 2453/3 skipped/0 failures（包含未追蹤私人 RAW fixture）；含 decoder／preview／export 的私人 RAW parity 2/2 PASS，paste/reset/batch/persistence workflow 30/30 PASS；diagnostics presentation 的 fail-closed native mode 測試 PASS；strict-concurrency、macOS app bundle、iPad generic Simulator build PASS；公開 contracts 15/15、matrix schema v2 20 cases/80 references PASS。
+- 實體 iPad smoke `NOT RUN`：`xcrun devicectl list devices` 被 CoreDevice service XPC connection invalidated 阻擋，未安裝或推論實體裝置結果。Lightroom Gate 2、Mac/iPad pixel parity、performance 仍 `NOT RUN`，因缺 paired Lightroom TIFF；本輪未 commit、push、merge、rebase 或修改 main。
+
+## Lightroom Gate 2 下一階段規格（2026-09-21, Codex）
+
+- 重新驗測 fail-closed focused suites：32/32 PASS；公開 reference contracts：15/15 PASS。前一輪完整證據仍為 2453 executed、3 skipped、0 failures，且 strict-concurrency、macOS app bundle、iPad generic Simulator build、diff/privacy gates PASS。
+- 現況審查確認 Gate 2 尚不可執行：reference comparator 仍是 single-case 且先量化為 8-bit；thresholds 缺 highlight/shadow clipping；matrix 尚未從影像本體驗證 16-bit/ICC/dimensions；generated camera-profile registry 仍為空。
+- 新增草案：`docs/superpowers/specs/2026-09-21-lightroom-gate2-calibration-and-controlled-enablement.md`。下一步是在確認 spec 後建立 implementation plan，以 TDD 補齊 16-bit batch gate、hold-out artifact 與 camera/profile-scoped controlled enablement。
+- 實體 iPad 本次仍 `NOT RUN`：CoreDevice service XPC connection invalidated 並 timeout。Renderer 繼續 fail closed；未 commit、push、merge、rebase 或修改 main。
+
+## Gate 2 production hardening handoff（2026-09-21, Codex）
+
+> **歷史 freeze snapshot**：以下記錄的是接手當下、尚未執行本輪 P1-P4 前的狀態；最新結果請以下方「Gate 2 production hardening implementation」為準。
+
+- **交接狀態**：接手 `codex/lr-neutral-baseline-v1` 上 Sol 保留的 dirty worktree；不覆蓋、回復或刪除既有修改。本輪 ownership 先鎖定在本分支與本機 coordination 文件，未建立新 worktree，也未變更 `main`。
+- **基準快照**：HEAD `fb421507bfeed1b2ff146109e3540d91de0eba62`；相對本機 `main` 為 ahead 31、behind 0；相對本機 `origin/main` 為 ahead 39、behind 0；分支沒有 upstream。這是 task-scoped preserved snapshot，沒有 push、merge、rebase 或 commit。
+- **規格來源**：本輪依 `docs/superpowers/specs/2026-09-21-lightroom-gate2-production-hardening-and-reference-admission.md` 執行；它優先於舊的 calibration 草案。新的 P0-P7 handoff 與 implementation 順序見 `docs/coordination/2026-09-21-lr-gate2-production-hardening-handoff.md`。
+- **最新可重現證據**：focused suites `ReferenceImageBufferTests|ReferenceImageMetadataValidatorTests|ReferenceComparisonMetricsTests|ReferenceCompareProcessTests|ControlledRendererEnablementTests|ProfileCalibrationArtifactManifestTests` 為 28 executed、0 skipped、0 failures；`git diff --check` PASS。這只證明現有工具鏈與 fail-closed contract，並不等於 Lightroom Gate 2 PASS。
+- **尚未完成**：P1 canonical derived execution state、P2 reachable two-phase enablement／strict artifact binding、P3 bounded-memory comparator 與報告 validator、P4-P7 的完整 build/performance、真實 4/4 paired TIFF、hold-out、production registry 與實體 iPad 驗收均為 `NOT RUN` 或未完成。
+- **安全邊界**：在 Gate 2 4/4、hold-out、效能與跨平台驗收完成前，Adobe renderer 維持 fail closed，production registry 維持空白；不得把私人 RAW/XMP/TIFF、hash、檔名或絕對路徑加入 Git。
+
+## Gate 2 production hardening implementation（2026-09-21, Codex）
+
+- **P0 PASS**：完成 evidence freeze、ownership 與 CURRENT/report 對齊；新增 `docs/coordination/2026-09-21-lr-gate2-production-hardening-handoff.md`。
+- **P1 PASS**：`ResolvedRawRenderRecipe` 在 `effectivePolicy == .native` 時正規化 decoder option vector、working/output transform 與 camera profile stage；persisted `policy` 仍保留 Adobe intent。
+- **P2 PASS**：artifact manifest 綁定係數 digest、decoder identifier/version、option vector、working color space、output transform 與 provenance schema；resolver admission 對 runtime mismatch fail closed。`ProfileCalibrationArtifactManifestsV1.all` 仍為空。
+- **P3 PASS**：reference comparator 改為 bounded histogram／累加器與無暫存陣列 SSIM；CLI 支援 `--report` atomic JSON write，process-level test 驗證報告不含私人路徑與檔名。
+- **P4 PASS**：`swift test` 2477 executed、14 skipped、0 failures；strict-concurrency `swift build` PASS；macOS app bundle PASS；iPad generic Simulator PASS；公開矩陣 validator PASS；`git diff --check` 與本輪新增文件 privacy scan PASS。
+- **P5-P7 BLOCKED/NOT RUN**：尚無四組真實 Lightroom neutral／XMP-applied 16-bit TIFF，無法執行正式 4/4、hold-out artifact admission 或宣告 Mac/iPad pixel parity；實體 iPad smoke 仍未執行。Adobe renderer 與 production registry 維持 fail closed/空白。
+- **下一個 bounded action**：取得未追蹤私人 reference 目錄後，先以 `--all-neutral --report` 完成 4/4 neutral baseline，再依矩陣執行 preset/final/hold-out；未取得素材前不得填入 generated registry。
+
+## Gate 2 P5-P7 execution plan revision（2026-09-21, Codex）
+
+- **狀態**：`READY ONLY WITH RENDERER DISABLED`。本輪只改寫 execution plan，沒有修改產品程式碼，也沒有新增 Gate PASS 證據。
+- **新版計畫**：`docs/superpowers/plans/2026-09-21-lightroom-gate2-calibration-and-controlled-enablement.md` 已收斂為 Task 0-7，依序處理 process/report fail-closed、6000x4000 streaming performance、私人 reference admission、正式 neutral 4/4、XMP target validation、條件式 calibration/hold-out、Mac/iPad 與實體 iPad 驗收。
+- **證據邊界修正**：P4 automated tests/build/privacy 保留既有 PASS 證據；full-resolution peak RSS/wall-time 仍是 `NOT RUN`，因此 P4 不再整體標示完成。P5-P7 仍為 `NOT RUN`。
+- **安全狀態**：Adobe feature flag 預設關閉，production artifact registry 保持空白。Gate 2 4/4、hold-out、效能、跨平台與實體 iPad 全部 PASS 前不得受控啟用。
+- **Git 安全**：保留既有 dirty worktree；未 commit、push、merge、rebase、reset、stash 或修改 `main`。
+
+## Gate 2 execution start（2026-09-22, Codex）
+
+- **Baseline**：`codex/lr-neutral-baseline-v1` at `fb421507bfeed1b2ff146109e3540d91de0eba62`；既有 dirty worktree 與 Sol 交接清單一致，本輪只做 append/小範圍 patch。
+- **安全狀態**：`RawRendererFeatureFlags.adobeProcess2012V1Enabled` default 為 `false`；`ProfileCalibrationArtifactManifestsV1.all` 與 `AdobeCompatibleProfileFallbacksV1.all` 都是空白。Adobe renderer 維持 fail closed。
+- **素材現況**：來源目錄已確認有 5 個 ARW 與 5 個 XMP，但尚無 Lightroom／LumaHarborPad paired TIFF。Reference 產生階段已加入 implementation plan，正式 4/4 目前仍為 `NOT RUN`。
+- **下一個 bounded action**：先依 Task 2A 產生並驗證 raw-a 至 raw-d 的 8 張 neutral TIFF 與 raw-e 的 2 張 hold-out TIFF；未取得合格原尺寸 16-bit embedded-sRGB pair 前，不進 calibration 或 registry admission。
+
+## Gate 2 execution update (2026-09-22, Codex)
+
+- Task 1 is GREEN: process tests and report destination validation passed with zero skips.
+- Task 2 is GREEN for synthetic coverage: tiled 16-bit reader and rolling SSIM match array metrics within `1e-9`; the 6000x4000 process gate passed under the 1.5 GB RSS budget (aggregate wall time approximately 331 seconds).
+- Task 2A automated export preflight is GREEN (54 tests); actual Lightroom/LumaHarborPad TIFF pairs and the hold-out are still missing, so P5-P7 remain `NOT RUN`.
+- Renderer remains fail closed; production artifact manifests remain empty.
+
+## Gate 2 execution final verification (2026-09-22, Codex)
+
+- Task 1 process hardening：PASS；8 個 process cases、0 skip、0 failure。
+- Task 2 streaming metrics：PASS；tile height 1／4／7 與既有 array metrics 的 mean、P95、SSIM、clipping delta 均在 `1e-9` 內。
+- Full-resolution synthetic gate：PASS；6000x4000、16-bit、embedded-sRGB TIFF，peak RSS `904167424` bytes，小於 1.5 GB，aggregate wall time 約 331 秒；測試素材均為暫存且已清除。
+- Task 2A export preflight：PASS；`PhotoExportTests` 50/50、`PadExportOptionsTests` 4/4。實際 Lightroom/LumaHarborPad paired TIFF 與 hold-out 尚未提供。
+- 完整 `swift test`：2488 executed、15 skipped、0 failures。
+- `swift build -Xswiftc -strict-concurrency=complete`、macOS app bundle、iPad generic Simulator build：PASS。
+- `git diff --check` 與本輪差異的敏感資料掃描：PASS；沒有新增私人素材、路徑、檔名或 hash。
+- Gate 2 4/4、hold-out、production registry、Mac/iPad pixel parity、實體 iPad：`NOT RUN`。依決策表目前狀態為 **READY ONLY WITH RENDERER DISABLED**；Adobe feature flag 維持關閉，兩個 production registry 維持空白。
+- 本輪未 commit、push、merge、rebase、reset、stash 或修改 `main`。
+- 實體 iPad 狀態可列出且已配對，但 device build 因 `LumaHarborPad` 未設定 development team 而失敗；未安裝、未執行實機 RAW/XMP 驗收，physical iPad 仍為 `NOT RUN`。
+
+## Gate 2 neutral export smoke update（2026-09-22, Codex）
+
+- 真實私人來源目前可核對為 4 張 Sony ARW 與 5 份 XMP；本輪沒有把私人檔案、檔名、路徑、hash 或影像內容加入 Git 或 coordination 文件。
+- 新增 TIFF exporter contract：16-bit TIFF 先由 RGBA16 render path 產生，再以 TIFF-only RGB container 寫出，避免 Lightroom reference 的無 Alpha 與 Luma 輸出格式不一致。自動化 test 與 4 張真實 RAW export preflight 均 PASS。
+- `neutralDirect` 全尺寸比較已實際完成 4/4，但 4/4 均 FAIL thresholds（mean 約 `0.3333–0.3478`、P95 約 `0.7772–0.8164`、luminance SSIM 約 `0.0094–0.0123`）；clipping delta 通過不代表像素 parity 通過。
+- 這是 baseline 顯色差異的證據，不得以 Exposure、tone、Presence、Curve、Detail 或單張照片特例補償；XMP effect/final、hold-out、Mac/iPad parity 與 controlled enablement 仍為 `NOT RUN`。
+- Adobe feature flag 仍預設關閉，兩個 production registry 仍空白；最新決策為 **READY ONLY WITH RENDERER DISABLED**。本輪未 commit、push、merge、rebase 或修改 `main`。
+
+## Latest regression verification（2026-09-22, Codex）
+
+- 完整 `swift test`：2491 executed、16 skipped、0 failures。
+- TIFF RGB container focused tests：2/2 PASS；private RAW fixture suite：10/10 PASS；XMP fixture suite：5/5 PASS。
+- strict-concurrency、macOS app bundle、iPad generic Simulator、matrix validator、`git diff --check` 與絕對路徑／私人素材掃描均 PASS。
+- 實體 iPad 未安裝或驗收，維持 `NOT RUN`；neutral 4/4 雖已實際比較但為 4/4 FAIL，故不進 hold-out、校正或 production registry。
+
+## Gate 2 16-bit byte-order correction（2026-09-22, Codex）
+
+- 更正先前 neutral smoke evidence：16-bit TIFF reader 的 big-endian bitmap context 與 host-endian `UInt16` buffer 不相容，造成真實 sample byte swap；先前 `0.3333–0.3478` MAE、`0.7772–0.8164` P95、`0.0094–0.0123` SSIM 已被取代，不得作為 Gate evidence。
+- TDD 修正 reader 與 synthetic fixture byte order，並新增 tile reader 與 process-level CLI 的已知 16-bit sample 契約。Focused reader／streaming tests 8/8 PASS；process tests 9/9 PASS。
+- 修正後同一批去識別化 4/4 full-resolution neutral comparison 均完成但仍 FAIL thresholds：MAE 約 `0.0555–0.1173`、P95 約 `0.1871–0.4836`、SSIM 約 `0.2847–0.6621`；highlight／shadow clipping delta 4/4 PASS。
+- 完整 `swift test`：2493 executed、2 skipped、0 failures；strict-concurrency、macOS bundle、iPad generic Simulator 與公開矩陣 validator PASS。
+- XMP effect／final、hold-out、Mac/iPad pixel parity 與實體 iPad 仍為 `NOT RUN`。Adobe renderer 繼續 fail closed，production registries 維持空白；決策仍為 **READY ONLY WITH RENDERER DISABLED**。
+- 本輪沒有把私人 RAW／XMP／TIFF、檔名、路徑或 hash 加入 Git，也未 commit、push、merge、rebase 或修改 `main`。
+
+## Gate 2 layer-isolation and hold-out update（2026-09-22, Codex）
+
+- Decoder option-vector ablation 證明舊的「全部歸零」向量會覆蓋 Core Image 對每張 RAW 的有效預設；4/4 指標大幅惡化。Adobe v1 向量已以 TDD 改為保留 per-RAW defaults，並更換版本 ID，使舊 artifact 無法被 runtime 誤接納。
+- 新向量在 5 張私人 RAW 的 decoder-only pixel comparison 與 Native 完全一致；feature flag 與 registry 並未因此開啟。
+- 單獨切換到 linear Display P3 工作域只有極小且方向不一致的變化，formal neutral 4/4 與獨立 hold-out 仍 FAIL，不能視為原因或解法。
+- 只使用前 4 組 training、在 runtime-equivalent linear Display P3 domain 求得的 3×3 camera matrix，training RMSE 約改善 2.2%，但 formal 4/4 仍全部 FAIL；第 5 組 hold-out 的 MAE 約 `0.0921`、P95 約 `0.3306`、SSIM 約 `0.6534`，highlight clipping delta 約 `0.1196`，因此 artifact 已拒絕。
+- Calibration JSON 現在必須明確宣告 `colorDomain=linear-display-p3-v1`；缺少 domain 或使用 encoded sRGB 會在求解前 fail closed，避免以錯誤數值域產生看似有效的係數。
+- XMP effect／final、Mac/iPad pixel parity 與實體 iPad 仍為 `NOT RUN`。Adobe renderer 保持關閉，production fallback／manifest registries 保持空白；決策仍為 **READY ONLY WITH RENDERER DISABLED**。
+
+## Gate 2 layer-isolation final verification（2026-09-22, Codex）
+
+- Calibration domain／artifact focused suites：12/12 PASS；私人 RAW fail-closed／preserve-defaults suite：3/3 PASS；私人 XMP fixture suite：5/5 PASS，均無 skip。
+- 完整 `swift test`：2496 executed、17 skipped、0 failures；完整套件未注入私人目錄，相關 evidence 已由前述獨立 focused runs 補足。
+- `swift build -Xswiftc -strict-concurrency=complete`、macOS app bundle、iPad generic Simulator、公開 schema v2 矩陣（20 cases／80 references）：PASS。
+- `git diff --check`、dirty file material scan、changed-diff 路徑／私人素材掃描與 obsolete option-vector ID 掃描：PASS。51 個 dirty paths 均為既有或本輪程式／測試／文件，沒有私人影像、RAW、XMP、TIFF 或生成係數。
+- Task 5 已因 formal 4/4 與 hold-out FAIL 停止，未進 Task 6 實體 iPad／controlled enablement。Adobe flag 預設仍為 `false`，兩個 production registries 仍空白。
+- 本輪未 commit、push、merge、rebase、reset、stash 或修改 `main`。

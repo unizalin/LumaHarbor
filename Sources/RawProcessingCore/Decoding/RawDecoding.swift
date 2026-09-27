@@ -6,7 +6,7 @@ import Foundation
 /// Offsets rather than absolutes so the same sidecar produces a sensible result
 /// on any decoder: a `LibRawDecoder` added later reports its own as-shot neutral
 /// and applies the same delta.
-public struct RawWhiteBalance: Equatable, Sendable {
+public struct RawWhiteBalance: Codable, Equatable, Hashable, Sendable {
     public var temperatureOffsetKelvin: Double
     public var tintOffset: Double
 
@@ -20,10 +20,25 @@ public struct RawWhiteBalance: Equatable, Sendable {
     public var isAsShot: Bool { self == .asShot }
 }
 
+/// Versioned rendering policy selected by the source of an edit.
+///
+/// Native LumaHarbor edits retain the existing Core Image behaviour. Adobe
+/// Process 2012 edits carry this marker through the shared render request so a
+/// future profile/tone converter can be enabled only for that compatibility
+/// path, without changing existing native RAW photos.
+public enum RawRenderingCompatibility: String, Codable, Equatable, Hashable, Sendable {
+    case native
+    case adobeProcess2012V1 = "adobeProcess2012"
+
+    /// Source compatibility for clients that used the precursor's case name.
+    /// Sidecars continue to encode the v1 case as `"adobeProcess2012"`.
+    public static var adobeProcess2012: Self { .adobeProcess2012V1 }
+}
+
 /// How much work the decoder should do.
 ///
 /// Spec §9: previews decode at display size, exports re-decode at full size.
-public enum DecodeQuality: Equatable, Sendable {
+public enum DecodeQuality: Codable, Equatable, Hashable, Sendable {
     /// Small, draft-mode decode for grid and filmstrip cells.
     case thumbnail(maximumPixelDimension: Int)
     /// Screen-sized draft decode that keeps slider dragging responsive.
@@ -59,17 +74,29 @@ public struct RawDecodeRequest: Equatable, Sendable {
     /// `AdjustmentPipeline`, since white balance is already baked in by the
     /// time this decoder returns.
     public var lensCorrection: LensCorrectionAdjustments
+    /// The source-specific rendering policy. This is intentionally separate
+    /// from slider values so a renderer can evolve Adobe compatibility without
+    /// changing the meaning of native edits.
+    public var rawRenderingCompatibility: RawRenderingCompatibility
+    public var cameraProfileRequest: RawCameraProfileRequest?
+    public var rawRenderRecipe: ResolvedRawRenderRecipe?
 
     public init(
         url: URL,
         quality: DecodeQuality = .full,
         whiteBalance: RawWhiteBalance = .asShot,
-        lensCorrection: LensCorrectionAdjustments = .neutral
+        lensCorrection: LensCorrectionAdjustments = .neutral,
+        rawRenderingCompatibility: RawRenderingCompatibility = .native,
+        cameraProfileRequest: RawCameraProfileRequest? = nil,
+        rawRenderRecipe: ResolvedRawRenderRecipe? = nil
     ) {
         self.url = url
         self.quality = quality
         self.whiteBalance = whiteBalance
         self.lensCorrection = lensCorrection
+        self.rawRenderingCompatibility = rawRenderingCompatibility
+        self.cameraProfileRequest = cameraProfileRequest
+        self.rawRenderRecipe = rawRenderRecipe
     }
 }
 
@@ -89,7 +116,7 @@ public struct RawWhiteBalanceBaseline: Equatable, Sendable {
 
 /// Identifies which decoder produced an edit, recorded in the sidecar so a
 /// future decoder swap is visible rather than silent.
-public struct DecoderIdentifier: Codable, Equatable, Sendable {
+public struct DecoderIdentifier: Codable, Equatable, Hashable, Sendable {
     public var kind: String
     public var version: String
 
@@ -113,6 +140,7 @@ public struct DecodedRawImage: @unchecked Sendable {
     public let baselineTemperature: Double
     public let baselineTint: Double
     public let metadata: RawMetadata
+    public let rawRenderRecipe: ResolvedRawRenderRecipe?
 
     public init(
         image: CIImage,
@@ -120,7 +148,8 @@ public struct DecodedRawImage: @unchecked Sendable {
         decodedPixelSize: CGSize,
         baselineTemperature: Double,
         baselineTint: Double,
-        metadata: RawMetadata
+        metadata: RawMetadata,
+        rawRenderRecipe: ResolvedRawRenderRecipe? = nil
     ) {
         self.image = image
         self.nativePixelSize = nativePixelSize
@@ -128,6 +157,7 @@ public struct DecodedRawImage: @unchecked Sendable {
         self.baselineTemperature = baselineTemperature
         self.baselineTint = baselineTint
         self.metadata = metadata
+        self.rawRenderRecipe = rawRenderRecipe
     }
 
     /// How far `image` has been downscaled from native, by longest edge —

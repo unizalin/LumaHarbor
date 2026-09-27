@@ -82,6 +82,7 @@ public enum AdjustmentFieldID: String, CaseIterable, Codable, Hashable, Sendable
     case colorGrading
     case monochrome
     case renderingProfile
+    case rawCameraProfile
     case lensCorrection
 }
 
@@ -127,6 +128,8 @@ extension AdjustmentFieldID {
         case .monochrome:
             return .monochrome
         case .renderingProfile:
+            return .renderingProfile
+        case .rawCameraProfile:
             return .renderingProfile
         case .lensCorrection:
             return .lensCorrection

@@ -68,6 +68,25 @@ final class LocalizationKeyParityContractTests: XCTestCase {
         "Reset Adjust", "Reset Geometry", "Reset Local Adjustments",
     ]
 
+    private static let rawDiagnosticsKeys = [
+        "Render Diagnostics", "Rendering Mode", "LumaHarbor Native",
+        "Lightroom-compatible v1", "White Balance", "As Shot", "Adjusted",
+        "Requested Camera Profile", "Resolved Profile",
+        "Profile Preserved, Not Applied", "Approximate fallback", "Fallback",
+    ]
+
+    func testRawRenderDiagnosticsKeysExistInEveryLanguage() throws {
+        for language in Self.languages {
+            let table = try Self.keys(for: language)
+            for key in Self.rawDiagnosticsKeys {
+                XCTAssertNotNil(
+                    table[key],
+                    "\(language).lproj is missing RAW diagnostics key \"\(key)\""
+                )
+            }
+        }
+    }
+
     func testP2KeysExistInEveryLanguage() throws {
         for language in Self.languages {
             let table = try Self.keys(for: language)

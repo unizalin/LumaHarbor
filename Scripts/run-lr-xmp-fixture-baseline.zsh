@@ -22,9 +22,19 @@ if (( ${#fixture_files} != 5 )); then
     exit 1
 fi
 
-if swift test --filter LightroomXMPFixtureTests >/dev/null 2>&1; then
-    print "PASS private Lightroom XMP fixture count=5 preview=PASS report=redacted"
-else
+export LUMAHARBOR_LR_XMP_FIXTURE_DIR="$fixture_directory"
+
+typeset test_output
+if ! test_output="$(swift test --filter LightroomXMPFixtureTests 2>&1)"; then
     print "FAIL private Lightroom XMP fixture preview"
     exit 1
 fi
+
+typeset summary
+summary="$(print -r -- "$test_output" | awk '/Executed [0-9]+ tests/ { line = $0 } END { print line }')"
+if [[ "$summary" != *"Executed 5 tests, with 0 failures"* || "$summary" == *"skipped"* ]]; then
+    print "FAIL private Lightroom XMP fixture preview"
+    exit 1
+fi
+
+print "PASS private Lightroom XMP fixture count=5 preview=PASS report=redacted"

@@ -61,11 +61,13 @@ final class XMPImportExportTests: XCTestCase {
         // toning + 1 tone curve (special-cased, spec §7's own table).
         XCTAssertEqual(preview.nativeFields.count, 35)
         XCTAssertTrue(preview.nativeFields.contains(.advancedToneCurve))
-        // 5 approximate basic + 2 sharpening + 4 vignette + 3 grain.
-        XCTAssertEqual(preview.approximateFields.count, 14)
-        // SharpenDetail, SharpenEdgeMasking, LuminanceSmoothing,
-        // ColorNoiseReduction, CameraProfile.
-        XCTAssertEqual(preview.preservedProperties.count, 5)
+        // 5 approximate basic + 2 sharpening + 4 noise-reduction + 4 vignette
+        // + 3 grain.
+        XCTAssertEqual(preview.approximateFields.count, 16)
+        // SharpenDetail, SharpenEdgeMasking and CameraProfile remain
+        // preserved-only because the renderer cannot reproduce their Adobe
+        // semantics independently.
+        XCTAssertEqual(preview.preservedProperties.count, 3)
         XCTAssertTrue(preview.preservedProperties.contains(.cameraRaw("SharpenDetail")))
         XCTAssertTrue(preview.preservedProperties.contains(.cameraRaw("CameraProfile")))
     }
@@ -409,17 +411,17 @@ final class XMPImportExportTests: XCTestCase {
     // MARK: - Export: fields with no reverse mapping are flagged, not silently dropped
 
     func testExportFlagsFieldsWithNoReverseMappingAtAll() throws {
-        // `noiseReduction` leaves have no registry entry in either direction
-        // (spec §7: independent luminance/color noise reduction stays
-        // preserved-only) -- exporting one must surface a diagnostic rather
-        // than silently doing nothing.
+        // Sharpening detail has no registry entry in either direction -- the
+        // renderer cannot reproduce Adobe's edge-aware detail control, so
+        // exporting one must surface a diagnostic rather than silently doing
+        // nothing.
         let preset = PresetDocument(
             name: "No Reverse Mapping",
             source: .native,
-            patch: AdjustmentPatch(noiseReduction: NoiseReductionPatch(luminanceAmount: 20))
+            patch: AdjustmentPatch(sharpening: SharpeningPatch(detail: 20))
         )
         let result = try XMPExporter().export(preset)
-        XCTAssertTrue(result.diagnostics.contains { $0.code == "reverseMappingUnavailable" && $0.detail == AdjustmentFieldID.noiseReductionLuminanceAmount.rawValue })
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "reverseMappingUnavailable" && $0.detail == AdjustmentFieldID.sharpeningDetail.rawValue })
     }
 
     // MARK: - Native-sourced preset with no prior envelope exports from scratch

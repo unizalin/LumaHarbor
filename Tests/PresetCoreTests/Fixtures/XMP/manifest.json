@@ -40,9 +40,9 @@
       "generatedBy": "hand-authored, synthetic",
       "processVersion": "15.4",
       "expectedNativeFieldCount": 35,
-      "expectedApproximateFieldCount": 14,
-      "expectedPreservedPropertyCount": 5,
-      "note": "Full basic/HSL/split-toning/tone-curve coverage: every native and approximate mapping in XMPMappingRegistry.default at least once, plus crs:SharpenDetail, SharpenEdgeMasking, LuminanceSmoothing, ColorNoiseReduction and CameraProfile as preserved-only adjustment-like properties (spec §7's own preserved examples).",
+      "expectedApproximateFieldCount": 16,
+      "expectedPreservedPropertyCount": 3,
+      "note": "Full basic/HSL/split-toning/tone-curve coverage: every native and approximate mapping in XMPMappingRegistry.default at least once, plus crs:SharpenDetail, SharpenEdgeMasking and CameraProfile as preserved-only adjustment-like properties. LuminanceSmoothing and ColorNoiseReduction are approximate mappings because Core Image combines their channels.",
       "committable": true
     },
     {

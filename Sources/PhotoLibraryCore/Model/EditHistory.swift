@@ -66,7 +66,7 @@ extension EditHistory where Value == PhotoAdjustments {
     /// "Reset this photo" — an undoable step back to neutral (spec §6.2).
     @discardableResult
     public mutating func resetToNeutral() -> Bool {
-        record(.neutral)
+        record(.neutral(using: current.rawRenderingCompatibility))
     }
 
     @discardableResult

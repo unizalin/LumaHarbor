@@ -58,7 +58,8 @@ final class PhotoAdjustmentsTests: XCTestCase {
                 "shadows", "whites", "blacks", "vibrance", "saturation",
                 "advancedToneCurve", "hsl", "splitToning", "sharpening",
                 "noiseReduction", "vignette", "grain", "geometry", "localAdjustments",
-                "presence", "colorGrading", "monochrome", "renderingProfile", "lensCorrection"
+                "presence", "colorGrading", "monochrome", "renderingProfile", "rawCameraProfile", "lensCorrection",
+                "rawRenderingCompatibility"
             ]
         )
     }
@@ -120,6 +121,43 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(adjustments.monochrome, .neutral)
         XCTAssertEqual(adjustments.renderingProfile, .neutral)
         XCTAssertEqual(adjustments.lensCorrection, .neutral)
+    }
+
+    func testAdobeCompatibilityDefaultsToNativeAndRoundTrips() throws {
+        XCTAssertEqual(PhotoAdjustments.neutral.rawRenderingCompatibility, .native)
+
+        var original = PhotoAdjustments.neutral
+        original.rawRenderingCompatibility = .adobeProcess2012V1
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
+
+        XCTAssertEqual(decoded.rawRenderingCompatibility, .adobeProcess2012V1)
+    }
+
+    func testAdobeBaselineIsStillVisuallyUnedited() {
+        let value = PhotoAdjustments.neutral(using: .adobeProcess2012V1)
+
+        XCTAssertTrue(value.isNeutral)
+        XCTAssertFalse(value.hasUserAdjustments)
+        XCTAssertNotEqual(value, .neutral)
+    }
+
+    func testExplicitPolicyRollbackPreservesUserAdjustmentsAndProfileRequest() {
+        var value = PhotoAdjustments.neutral(using: .adobeProcess2012V1)
+        value.exposure = 1
+        value.renderingProfile = RenderingProfileSelection(profileID: "com.adobe.camera.raw", amount: 80)
+
+        value.rawRenderingCompatibility = .native
+
+        XCTAssertEqual(value.exposure, 1)
+        XCTAssertEqual(value.renderingProfile, RenderingProfileSelection(profileID: "com.adobe.camera.raw", amount: 80))
+        XCTAssertTrue(value.hasUserAdjustments)
+    }
+
+    func testOldSidecarWithoutRenderingCompatibilityDefaultsToNative() throws {
+        let json = Data(#"{"exposure": 1.0}"#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.rawRenderingCompatibility, .native)
     }
 
     func testOldSidecarWithoutP4KeysDecodesToNeutralExpansions() throws {

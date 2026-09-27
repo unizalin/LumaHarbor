@@ -54,9 +54,13 @@ public enum AdvancedToneCurveLUT {
     public static func buildCombined(
         compositePoints: [ToneCurvePoint],
         channelPoints: [ToneCurvePoint],
+        parametric: ParametricToneCurve = .neutral,
         resolution: Int = 256
     ) -> [Float] {
-        let compositeTable = build(from: compositePoints, resolution: resolution)
+        let baseComposite = build(from: compositePoints, resolution: resolution)
+        let compositeTable = parametric.isIdentity
+            ? baseComposite
+            : compose(baseComposite, with: buildParametric(from: parametric, resolution: resolution))
         // An identity channel leaves the composite result untouched -- return
         // it directly rather than round-tripping every sample through an
         // index lookup, which would otherwise quantise an exact composite
@@ -69,6 +73,53 @@ public enum AdvancedToneCurveLUT {
             let index = Int((value * lastIndex).rounded())
             let clampedIndex = Swift.min(Swift.max(index, 0), resolution - 1)
             return channelTable[clampedIndex]
+        }
+    }
+
+    /// Builds a monotonic approximation of Adobe's four-zone parametric curve.
+    /// Each zone is linearly blended between its neighbouring split points;
+    /// the 0.002 scale maps Adobe's -100...100 range to a maximum 0.2 output
+    /// movement. Adobe's positive parametric values lower the corresponding
+    /// output zone, hence the subtraction below.
+    public static func buildParametric(from curve: ParametricToneCurve, resolution: Int = 256) -> [Float] {
+        guard resolution > 0 else { return [] }
+        guard !curve.isIdentity else {
+            return (0..<resolution).map { resolution == 1 ? 0 : Float($0) / Float(resolution - 1) }
+        }
+
+        let firstSplit = min(curve.shadowSplit, curve.midtoneSplit) / 100
+        let secondSplit = max(curve.shadowSplit, curve.midtoneSplit) / 100
+        let thirdSplit = max(secondSplit, curve.highlightSplit / 100)
+        var table = [Float](repeating: 0, count: resolution)
+        for index in 0..<resolution {
+            let x = resolution == 1 ? 0 : Double(index) / Double(resolution - 1)
+            let value: Double
+            if x <= firstSplit {
+                value = curve.shadows
+            } else if x <= secondSplit {
+                value = interpolate(curve.shadows, curve.darks, at: x, from: firstSplit, to: secondSplit)
+            } else if x <= thirdSplit {
+                value = interpolate(curve.darks, curve.lights, at: x, from: secondSplit, to: thirdSplit)
+            } else {
+                value = interpolate(curve.lights, curve.highlights, at: x, from: thirdSplit, to: 1)
+            }
+            table[index] = Float(clamp01(x - value * 0.002))
+        }
+        return enforceMonotonicNonDecreasing(table)
+    }
+
+    private static func interpolate(_ start: Double, _ end: Double, at x: Double, from lower: Double, to upper: Double) -> Double {
+        guard upper > lower else { return end }
+        let t = min(max((x - lower) / (upper - lower), 0), 1)
+        return start + (end - start) * t
+    }
+
+    private static func compose(_ first: [Float], with second: [Float]) -> [Float] {
+        guard first.count == second.count, first.count > 1 else { return second }
+        let lastIndex = Float(second.count - 1)
+        return first.map { value in
+            let index = Int((value * lastIndex).rounded())
+            return second[min(max(index, 0), second.count - 1)]
         }
     }
 

@@ -118,7 +118,7 @@ Gate V0 was rerun after the external test device was connected:
 - Architecture: `arm64`
 - Xcode: 26.6 (`17F113`)
 - Xcode developer directory: full Xcode.app toolchain
-- RAW fixture: Sony `_DSC1896.ARW`, SHA-256 `50e2afadcfc2598342576ac716a37113397d40c824729d6d43376705a83d8487`
+- RAW fixture: 私人 Sony RAW 樣本 A；SHA-256 已於本機核對，檔名與 digest 不寫入 Git。
 - External fixture volume: USB ExFAT, safe label `EXFAT_FIXTURE`
 - Privacy rule: no private fixture or mount paths were written to this report or to the production summary.
 

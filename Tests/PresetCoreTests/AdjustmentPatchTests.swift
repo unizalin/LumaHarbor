@@ -3,6 +3,35 @@ import XCTest
 import RawProcessingCore
 
 final class AdjustmentPatchTests: XCTestCase {
+    func testRawCameraProfileIsASeparateWholeValueLeaf() throws {
+        let adjustments = PhotoAdjustments(
+            rawCameraProfile: RawCameraProfileSelection(requestedName: "Adobe Color")
+        )
+
+        let patch = AdjustmentPatch.extracting([.rawCameraProfile], from: adjustments)
+
+        XCTAssertEqual(
+            patch.rawCameraProfile,
+            RawCameraProfileSelection(requestedName: "Adobe Color")
+        )
+        XCTAssertTrue(patch.contains(.rawCameraProfile))
+        XCTAssertFalse(patch.contains(.renderingProfile))
+    }
+
+    func testRawCameraProfileRoundTripsThroughPhotoAdjustmentsAndPatch() throws {
+        let original = PhotoAdjustments(
+            rawCameraProfile: RawCameraProfileSelection(requestedName: "Unknown DCP")
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: data)
+        XCTAssertEqual(decoded, original)
+
+        let patch = AdjustmentPatch(rawCameraProfile: original.rawCameraProfile)
+        let patchData = try JSONEncoder().encode(patch)
+        let decodedPatch = try JSONDecoder().decode(AdjustmentPatch.self, from: patchData)
+        XCTAssertEqual(decodedPatch.rawCameraProfile, original.rawCameraProfile)
+    }
     // MARK: - Absent vs explicit default
 
     func testBasicPatchDistinguishesAbsentFromExplicitNeutral() throws {
@@ -104,6 +133,7 @@ final class AdjustmentPatchTests: XCTestCase {
             patch.colorGrading = grading
         case .monochrome: patch.monochrome = MonochromeAdjustments(isEnabled: true, red: value)
         case .renderingProfile: patch.renderingProfile = RenderingProfileSelection(profileID: "lumaharbor.vivid", amount: value)
+        case .rawCameraProfile: patch.rawCameraProfile = RawCameraProfileSelection(requestedName: "Adobe Color")
         case .lensCorrection: patch.lensCorrection = LensCorrectionAdjustments(mode: .manual, distortionAmount: value)
         }
         return patch

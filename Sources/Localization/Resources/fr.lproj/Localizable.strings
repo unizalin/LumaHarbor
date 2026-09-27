@@ -719,3 +719,15 @@
 "Collapsed" = "Réduit";
 "HSL" = "TSL (Teinte/Saturation/Luminance)";
 "%@ Actions" = "Actions : %@";
+"Render Diagnostics" = "Diagnostic du rendu";
+"Rendering Mode" = "Mode de rendu";
+"LumaHarbor Native" = "Natif LumaHarbor";
+"Lightroom-compatible v1" = "Compatible Lightroom v1";
+"White Balance" = "Balance des blancs";
+"As Shot" = "Prise de vue";
+"Adjusted" = "Modifié";
+"Requested Camera Profile" = "Profil d’appareil demandé";
+"Resolved Profile" = "Profil résolu";
+"Profile Preserved, Not Applied" = "Profil conservé, non appliqué";
+"Approximate fallback" = "Solution de remplacement approximative";
+"Fallback" = "Solution de remplacement";

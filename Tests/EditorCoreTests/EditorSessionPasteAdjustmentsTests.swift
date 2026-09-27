@@ -14,7 +14,9 @@ import RawProcessingCore
 /// `EditorSession.pasteAdjustments`'s own unit tests).
 @MainActor
 final class EditorSessionPasteAdjustmentsTests: XCTestCase {
-    private func makeOpenEditor() -> EditorSession {
+    private func makeOpenEditor(
+        adjustments: PhotoAdjustments = .neutral
+    ) -> EditorSession {
         let editor = EditorSession()
         let photo = PhotoAsset(
             id: PhotoID(),
@@ -26,10 +28,17 @@ final class EditorSessionPasteAdjustmentsTests: XCTestCase {
         editor.open(
             photo: photo,
             sourceURL: URL(fileURLWithPath: "/fixture.ARW"),
-            adjustments: .neutral,
+            adjustments: adjustments,
             isReadOnly: false
         )
         return editor
+    }
+
+    private func effectivePolicy(for adjustments: PhotoAdjustments) -> RawRenderingCompatibility {
+        RawRenderRecipeResolver().resolve(
+            RawRenderRecipeInput(policy: adjustments.rawRenderingCompatibility),
+            capabilities: RawDecoderCapabilities()
+        ).effectivePolicy
     }
 
     func testPasteAdjustmentsAppliesOnlyThePatchsFieldsAsOneUndoEntry() {
@@ -118,6 +127,32 @@ final class EditorSessionPasteAdjustmentsTests: XCTestCase {
         editor.pasteAdjustments(patch: patch, geometry: nil, localAdjustments: nil)
 
         XCTAssertFalse(editor.canUndo, "pasting values that match what's already current must not push an undo entry")
+    }
+
+    func testPasteAndUndoPreserveAdobePolicyButStayNativeBeforeGateTwo() {
+        let editor = makeOpenEditor(adjustments: .neutral(using: .adobeProcess2012V1))
+        let patch = AdjustmentPatch.extracting([.basicExposure], from: PhotoAdjustments(exposure: 1.2))
+
+        editor.pasteAdjustments(patch: patch, geometry: nil, localAdjustments: nil)
+
+        XCTAssertEqual(editor.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(effectivePolicy(for: editor.adjustments), .native)
+
+        editor.undo()
+
+        XCTAssertEqual(editor.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(effectivePolicy(for: editor.adjustments), .native)
+    }
+
+    func testResetAllPreservesAdobePolicyButStaysNativeBeforeGateTwo() {
+        let editor = makeOpenEditor(adjustments: .neutral(using: .adobeProcess2012V1))
+        editor.updateAdjustments { $0.exposure = 1.5 }
+
+        editor.resetAll()
+
+        XCTAssertTrue(editor.adjustments.isNeutral)
+        XCTAssertEqual(editor.adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
+        XCTAssertEqual(effectivePolicy(for: editor.adjustments), .native)
     }
 
     func testPasteAdjustmentsDoesNothingWithoutAnOpenPhoto() {

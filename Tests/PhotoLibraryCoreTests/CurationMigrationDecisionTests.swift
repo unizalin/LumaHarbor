@@ -28,6 +28,12 @@ final class CurationMigrationDecisionTests: XCTestCase {
         )
     }
 
+    func testPhotoSidecarNeutralAdjustmentsKeepNativeRenderingCompatibility() {
+        let sidecar = makeSidecar()
+        XCTAssertEqual(sidecar.adjustments.rawRenderingCompatibility, .native)
+        XCTAssertEqual(sidecar.adjustments, .neutral)
+    }
+
     // Row 1: v3 sidecar always wins, even when SQLite disagrees.
     func testSchemaV3SidecarWinsEvenWhenSQLiteDisagrees() {
         let sidecar = makeSidecar(curation: PhotoCuration(rating: 2))

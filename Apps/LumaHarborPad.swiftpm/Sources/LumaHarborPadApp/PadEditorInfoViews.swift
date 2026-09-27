@@ -55,6 +55,7 @@ struct PadMetadataBlock: View {
     let snapshot: EditorMetadataSnapshot
     let photo: PhotoAsset
     @ObservedObject var batchCoordinator: PadBatchAdjustmentCoordinator
+    let recipe: ResolvedRawRenderRecipe?
 
     @State private var keywordText: String
     @State private var isSavingKeywords = false
@@ -63,11 +64,13 @@ struct PadMetadataBlock: View {
     init(
         snapshot: EditorMetadataSnapshot,
         photo: PhotoAsset,
-        batchCoordinator: PadBatchAdjustmentCoordinator
+        batchCoordinator: PadBatchAdjustmentCoordinator,
+        recipe: ResolvedRawRenderRecipe?
     ) {
         self.snapshot = snapshot
         self.photo = photo
         self.batchCoordinator = batchCoordinator
+        self.recipe = recipe
         _keywordText = State(initialValue: photo.keywords.map(\.displayValue).joined(separator: ", "))
     }
 
@@ -122,6 +125,8 @@ struct PadMetadataBlock: View {
             if let v = snapshot.isoDescription       { Row(label: L10n.t("ISO"),        value: v) }
             if let v = snapshot.captureDateDescription { Row(label: L10n.t("Date"),     value: v) }
             if let v = snapshot.orientationDescription { Row(label: L10n.t("Orientation"), value: v) }
+
+            RawRenderDiagnosticsPanel(recipe: recipe)
 
             Divider()
             Text(L10n.t("Curation"))

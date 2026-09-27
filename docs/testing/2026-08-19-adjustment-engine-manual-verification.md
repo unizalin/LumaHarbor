@@ -50,7 +50,7 @@ render, inspect, then revert.
 
 **Date**: 2026-08-20. **Machine**: arm64 (Apple Silicon), Xcode 26.6 — the
 target environment this checklist requires. **Fixture**: a real Sony `.ARW`
-from `Fixtures/Private/Sony-ARW/` (a rattan chair + kitten photo — warm
+from an untracked private fixture directory (a rattan chair + kitten photo — warm
 orange/brown wood, grey tabby fur, cream fabric, near-black curtain; limited
 yellow/green/purple/magenta content, noted as a coverage gap below), decoded
 at `.highQuality(maximumPixelDimension: 1600)` and run through
@@ -130,7 +130,7 @@ open) was closed in the follow-up run below.
 ## Follow-up: yellow/green/aqua/purple/magenta (2026-08-20, Gate A2)
 
 **Prerequisite check**: `swift test -Xswiftc -strict-concurrency=complete`
-(421 tests) and `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW swift
+(421 tests) and `LUMAHARBOR_RAW_FIXTURE_DIR=<private-raw-fixture-dir> swift
 test --filter RawFixtureTests` (9 tests) were both green immediately before
 this run — see `docs/superpowers/specs/2026-08-19-adjustment-engine-expansion-design.md`
 progress log, fourth 2026-08-20 entry (Gate A1).
@@ -138,18 +138,18 @@ progress log, fourth 2026-08-20 entry (Gate A1).
 **Method**: same approach as the original run — a throwaway XCTest harness
 (`Tests/LumaHarborIntegrationTests/ManualVisualHarnessTests.swift`, deleted
 after use, never committed) decoded real Sony ARWs from
-`Fixtures/Private/Sony-ARW/` at `.highQuality(maximumPixelDimension: 1600)`,
+an untracked private fixture directory at `.highQuality(maximumPixelDimension: 1600)`,
 pushed one band at a time through `AdjustmentPipeline`, and wrote PNGs
 inspected visually plus pixel-sampled (Pillow/numpy, HSV, circular mean for
 hue) against a mask of the baseline pixels actually in that band's hue range.
 Three fixtures were used, chosen by scanning all 81 fixtures' JPEG-preview hue
 histograms for the best real coverage of each remaining band:
 
-- `_DSC1908.ARW` — a garden/railing scene with strong green and aqua foliage
+- private sample A — a garden/railing scene with strong green and aqua foliage
   content (green: 23% of frame in-band, aqua: 11%).
-- `_DSC1932.ARW` — a cream/beige curtain scene, strong genuine yellow content
+- private sample B — a cream/beige curtain scene, strong genuine yellow content
   (62% of frame in-band).
-- `_DSC1919.ARW` — the same kitten+wicker-chair scene as the original run, has
+- private sample C — the same kitten+wicker-chair scene as the original run, has
   no genuine purple or magenta subject matter, but was used deliberately: with
   `HSLKernelWeights.halfWidthDegrees = 60`, blue (35° from purple's 275°
   centre) and red (45° from magenta's 315° centre, wrapping through 0) both

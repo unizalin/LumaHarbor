@@ -180,7 +180,9 @@ final class LibraryLifecycleTests: TemporaryDirectoryTestCase {
         let indexed = try await service.photos(inLibrary: library.id)
         let photo = try XCTUnwrap(indexed.first)
         let adjustments = try await service.adjustments(for: photo)
-        XCTAssertEqual(adjustments, .neutral)
+        XCTAssertTrue(adjustments.isNeutral)
+        XCTAssertFalse(adjustments.hasUserAdjustments)
+        XCTAssertEqual(adjustments.rawRenderingCompatibility, .adobeProcess2012V1)
     }
 
     func testSavingWritesAPortableSidecarBesideThePhotos() async throws {

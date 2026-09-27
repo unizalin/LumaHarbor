@@ -31,6 +31,16 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertFalse(editor.canUndo)
     }
 
+    func testRawRenderRecipeProvenanceStartsClearedForANewPhoto() {
+        let editor = makeOpenEditor()
+
+        XCTAssertNil(editor.latestRawRenderRecipe)
+
+        editor.close()
+
+        XCTAssertNil(editor.latestRawRenderRecipe)
+    }
+
     /// AwayPhotoRawEditor parity Phase 1 Task 3: the grouped inspector
     /// panels (Color/Curve/Detail/Effects) edit sub-struct fields that have
     /// no `AdjustmentKind` case of their own -- `setAdjustment(_:to:)` can't

@@ -308,13 +308,13 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 **環境**：`worktree-adjustment-engine-expansion` 分支已 fast-forward 領先 `main` 16 個 commit（落後 0），確認已推上遠端。本機為 arm64 + Xcode 26.6，符合上一則條目要求的驗證環境。
 
-**結果**：`swift build` 乾淨（僅兩則預期中的 CIKL `init(source:)` deprecation 警告，來自 Task 6/Task 7 的兩個 kernel，非錯誤）。`swift test`（不含 fixture）：**418 個測試全過，0 失敗**，其中最優先要看的兩項——`testAdvancedCurveDarkeningPointsDarkenTheImage`、`testReducingRedSaturationDesaturatesARedPatch`／`testAdjustingBlueDoesNotVisiblyMoveARedPatch`——全部通過，確認 Task 6／Task 7 的兩個 CIKL kernel 在真機上能正常編譯與運作，之前兩則條目的擔憂可以正式排除。另有 9 個 `RawFixtureTests` 因未設定 `LUMAHARBOR_RAW_FIXTURE_DIR` 而略過；本機 `Fixtures/Private/Sony-ARW/` 剛好有 82 張真實 Sony ARW，補上環境變數後這 9 個也全過，含 Gate F 效能測試（互動預覽解碼 1600px，spec §11 目標 ≤150ms，實測 cold 0.157s／warm 約 0.139s，在容許範圍內是暖機後達標、冷啟動些微超標但屬預期的首次 JIT／快取成本，非本分支範圍的迴歸）。
+**結果**：`swift build` 乾淨（僅兩則預期中的 CIKL `init(source:)` deprecation 警告，來自 Task 6/Task 7 的兩個 kernel，非錯誤）。`swift test`（不含 fixture）：**418 個測試全過，0 失敗**，其中最優先要看的兩項——`testAdvancedCurveDarkeningPointsDarkenTheImage`、`testReducingRedSaturationDesaturatesARedPatch`／`testAdjustingBlueDoesNotVisiblyMoveARedPatch`——全部通過，確認 Task 6／Task 7 的兩個 CIKL kernel 在真機上能正常編譯與運作，之前兩則條目的擔憂可以正式排除。另有 9 個 `RawFixtureTests` 因未設定 `LUMAHARBOR_RAW_FIXTURE_DIR` 而略過；本機未追蹤私人 fixture 剛好有 82 張真實 Sony ARW，補上環境變數後這 9 個也全過，含 Gate F 效能測試（互動預覽解碼 1600px，spec §11 目標 ≤150ms，實測 cold 0.157s／warm 約 0.139s，在容許範圍內是暖機後達標、冷啟動些微超標但屬預期的首次 JIT／快取成本，非本分支範圍的迴歸）。
 
 **下一步**：自動化測試已完整跑過，接下來要做的是 Task 8 的人工視覺驗證清單（`docs/testing/2026-08-19-adjustment-engine-manual-verification.md`），七項效果目前都不能從 Inspector UI 觸發，需要用臨時 debug harness 直接對 `PhotoAdjustments` 塞值、渲染、輸出圖片人工比對。這一步尚未開始。
 
 ### 2026-08-20（第三則）：Task 8 人工視覺驗證清單已完成，全分支 8 項子任務至此全部收尾
 
-**做法**：寫了一個臨時 XCTest harness（`ManualVisualHarnessTests.swift`，用完即刪、未 commit），對本機 `Fixtures/Private/Sony-ARW/` 裡一張真實 Sony ARW（藤椅＋小貓照片）解碼到 1600px，逐一把七項效果推到極端值渲染成 PNG，人工比對 + 兩項用 Pillow/numpy 做像素採樣做定量確認（HSL 稀釋程度、暈影明暗方向）。細節與逐項結果已寫入 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 的「## Result」章節，勾選全部七項。
+**做法**：寫了一個臨時 XCTest harness（`ManualVisualHarnessTests.swift`，用完即刪、未 commit），對本機未追蹤私人 fixture 裡一張真實 Sony ARW（藤椅＋小貓照片）解碼到 1600px，逐一把七項效果推到極端值渲染成 PNG，人工比對 + 兩項用 Pillow/numpy 做像素採樣做定量確認（HSL 稀釋程度、暈影明暗方向）。細節與逐項結果已寫入 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md` 的「## Result」章節，勾選全部七項。
 
 **結論：七項效果在真機上視覺表現全部正確，沒有發現新的阻礙性問題。** 兩個值得記錄但非缺陷的觀察：
 
@@ -329,7 +329,7 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 **環境**：同上，arm64 + Xcode 26.6。
 
-**結果**：`swift test -Xswiftc -strict-concurrency=complete`（不含 fixture 環境變數）：**421 個測試，0 失敗，9 個 `RawFixtureTests` 略過**（未設 `LUMAHARBOR_RAW_FIXTURE_DIR`）。接著補跑 `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW swift test --filter RawFixtureTests`：**9 個全過，0 失敗**，含 Gate F 效能測試（互動預覽解碼 1600px，cold 0.149s／warm 約 0.140s，符合 spec §11 ≤150ms 目標）。兩次合計 421 個測試全數執行且全綠，包含 `a26ac3c` 新增的 `AdjustmentMappingTests`、`AdjustmentPipelineTests`、`AdvancedToneCurveLUTTests` 邊界案例。**Gate A1 完成。**
+**結果**：`swift test -Xswiftc -strict-concurrency=complete`（不含 fixture 環境變數）：**421 個測試，0 失敗，9 個 `RawFixtureTests` 略過**（未設 `LUMAHARBOR_RAW_FIXTURE_DIR`）。接著以 `LUMAHARBOR_RAW_FIXTURE_DIR=<private-raw-fixture-dir>` 補跑 `RawFixtureTests`：**9 個全過，0 失敗**，含 Gate F 效能測試（互動預覽解碼 1600px，cold 0.149s／warm 約 0.140s，符合 spec §11 ≤150ms 目標）。兩次合計 421 個測試全數執行且全綠，包含 `a26ac3c` 新增的 `AdjustmentMappingTests`、`AdjustmentPipelineTests`、`AdvancedToneCurveLUTTests` 邊界案例。**Gate A1 完成。**
 
 **下一步**：Gate A2（HSL 八色帶人工驗證的黃／綠／青／紫／洋紅五色帶）仍是唯一剩餘的合併前阻塞項，見 `docs/testing/2026-08-19-adjustment-engine-manual-verification.md`。
 
@@ -351,7 +351,7 @@ public struct Grain: Codable, Equatable, Hashable, Sendable {
 
 結果：**maxDiff = 0.0，0 個 mismatch**——新舊實作在測試覆蓋的所有案例下逐位元組完全一致。接著把驗證過的 `.metal` 檔案正式接入套件（改 `AdjustmentPipeline.swift` 從 `Bundle.module` 載入 `default.metallib`，`hslKernel` 型別從 `CIColorKernel?` 改成 `CIKernel?`——呼叫端 `applyHSL` 一直用的是 `CIKernel` 基底類別的 `apply(extent:roiCallback:arguments:)`，型別改變不影響呼叫端），乾淨建置後重跑：
 - `swift test -Xswiftc -strict-concurrency=complete`：421 個測試，0 失敗，9 個略過。
-- `LUMAHARBOR_RAW_FIXTURE_DIR=Fixtures/Private/Sony-ARW swift test --filter RawFixtureTests`：9 個全過，含 Gate F 效能測試（cold 0.152s／warm 約 0.141s，符合 ≤150ms）。
+- `LUMAHARBOR_RAW_FIXTURE_DIR=<private-raw-fixture-dir> swift test --filter RawFixtureTests`：9 個全過，含 Gate F 效能測試（cold 0.152s／warm 約 0.141s，符合 ≤150ms）。
 
 `swift build` 的 `CIKernel(source:)`／`CIColorKernel(source:)` deprecation warning 兩則都消失，只剩既有、已記錄在 P2 待辦裡的 `UndoRedoKeyEquivalentFix.monitor` Swift 6 concurrency warning。**Gate B1 完成。**
 

@@ -127,7 +127,7 @@ if url.pathExtension.lowercased() == "xmp" {
 
 **影響範圍**：這不是 Lightroom 端的問題，是 LumaHarbor 自己的匯出 UI 從未真正產生過 XMP 檔案——`XMPExporter`／`exportAsXMP` 底層邏輯本身可能是對的（已有 `XMPImportExportTests` 單元測試覆蓋），但完全沒有 UI 入口能觸發它，使用者也無從得知（不會跳出任何錯誤或警告，靜默寫出錯誤格式的檔案，只是副檔名恰好看起來對）。Gate B 要求的「LumaHarbor 匯出 → Adobe 匯入」整條路徑因此在 Test A 第一步就被擋住；Test B（完整 HSL／Tone Curve round-trip）與 Test C（Lightroom → LumaHarbor → Lightroom）雖然不直接依賴這個匯出按鈕，但 Test A／B 的「匯出後給 Lightroom Classic 檢查」步驟與 Test C 的最後一步「LumaHarbor 再匯出給 Lightroom 驗證」全部連帶受阻，一個真正合法的 `.xmp` 都拿不到手上。
 
-**測試素材與隱私**：使用 `Fixtures/Private/Sony-ARW/_DSC1896.ARW` 的隔離副本（`mktemp -d` 建立的私人暫存目錄，未進 Git），原始 fixture 全程未被觸碰——匯出測試前後 SHA-256 一致：`50e2afadcfc2598342576ac716a37113397d40c824729d6d43376705a83d8487`。過程中建立的暫存測試 Preset（`LH GateB Native`）與兩個因這個 bug 而產生的錯誤格式檔案已於驗證完成後清除，未進入 Git，未殘留在系統上，未寫入任何 Adobe 帳號資訊。
+**測試素材與隱私**：使用未追蹤私人 RAW 樣本的隔離副本（`mktemp -d` 建立的私人暫存目錄，未進 Git），原始 fixture 全程未被觸碰；匯出測試前後 SHA-256 一致，檔名與 digest 僅留在本機證據。過程中建立的暫存測試 Preset（`LH GateB Native`）與兩個因這個 bug 而產生的錯誤格式檔案已於驗證完成後清除，未進入 Git，未殘留在系統上，未寫入任何 Adobe 帳號資訊。
 
 ### 2026-08-24（同日稍晚）：bug 已修復並重新驗證，commit `a94446c`
 
@@ -152,7 +152,7 @@ if url.pathExtension.lowercased() == "xmp" {
 `Scripts/run-mvp-acceptance.zsh --preflight-only` 在本機的結果：
 
 ```
-LUMAHARBOR_RAW_FIXTURE_DIR: PASS (directory ok, 81 .ARW file(s), e.g. _DSC1896.ARW)
+LUMAHARBOR_RAW_FIXTURE_DIR: PASS (directory ok, 81 private .ARW file(s))
 LUMAHARBOR_APFS_TEST_DIR: FAIL (not set)
 LUMAHARBOR_EXFAT_TEST_DIR: FAIL (not set)
 ```
@@ -292,7 +292,7 @@ func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
 
 | # | 情境 | 結果 | 備註 |
 |---|---|---|---|
-| 1 | diagnostic-only hover（Baseline Test on 損毀的 `_DSC1898-corrupt.ARW`） | ☑ 通過（修復 §11.6 的 bug 後重測，見 §11.7） | 最初被 §11.6 記錄的卡住 bug 擋住；bug 修復（commit `e262b7e`）後重新驗證：非 modal 診斷文字「White balance from this preset couldn't be applied yet because this photo hasn't finished decoding.」正確出現，全程沒有跳出任何 modal alert，細節見 §11.7 |
+| 1 | diagnostic-only hover（Baseline Test on 損毀的私人 RAW 樣本） | ☑ 通過（修復 §11.6 的 bug 後重測，見 §11.7） | 最初被 §11.6 記錄的卡住 bug 擋住；bug 修復（commit `e262b7e`）後重新驗證：非 modal 診斷文字「White balance from this preset couldn't be applied yet because this photo hasn't finished decoding.」正確出現，全程沒有跳出任何 modal alert，細節見 §11.7 |
 | 2 | 會改變畫面的 preset hover 在解碼失敗的照片上 | ☑ 通過（修復 §11.6 的 bug 後重測，見 §11.7） | 最初被同一個 bug 擋住；bug 修復後用新建立的 `ExposureBump`（真的會改變畫面的 preset）重測：非 modal 的 `previewRenderFailureMessage`「This preset's preview couldn't be rendered right now.」正確出現，連續快速切換 6 次前後仍只顯示一行、不疊加、不跳 modal，細節見 §11.7 |
 | 3 | 鍵盤方向鍵在 Preset 清單移動 focus | ☑ 導覽機制驗證通過；跟 hover 的 preview 是否為同一路徑**未能完全確認** | 在 Sony-ARW 一張正常解碼的照片上：點擊「搜尋 Preset」欄位後按 Tab，focus 移到清單第一列（Baseline Test，出現藍色 focus 外框）；按方向鍵向下，focus 正確移到下一列（ReadOnlyTest）；點擊畫布把 focus 移出清單後，focus 外框消失，畫面無殘留。導覽機制本身正常。但這個環境唯一可用的兩個全域 preset（`Baseline Test` 溫度設為 5500K、`ReadOnlyTest` 的 tint=0）對這張測試照片剛好都是視覺上的 no-op（tint 本來就是 0；5500K 疑似等於這張照片的原生基準值），調整面板的滑桿依設計只反映已提交狀態、不反映 preview，因此無法從畫面上分辨「方向鍵是否真的跟 hover 一樣觸發了 `previewPreset()`」，只能確認導覽本身沒有壞、也沒有誤觸發任何 alert |
 | 4 | Copy to This Library（可寫入目的地） | ☑ 通過 | 在 Sony-ARW 照片庫、對 `Baseline Test` 按「⋯」→「Copy to This Library」：清單立即多出一筆同名 `Baseline Test`（library-scope 複本），沒有跳出任何 alert，操作過程沒有卡頓 |
@@ -304,7 +304,7 @@ func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
 
 **這不是自動化操作問題，是可重現的產品 bug：**
 
-在 Corrupt-Test 照片庫選取 `_DSC1898-corrupt.ARW`（一張刻意做壞的 RAW）：
+在 Corrupt-Test 照片庫選取一張刻意做壞的私人 RAW 樣本：
 
 1. 選取當下必定觸發一次解碼，失敗後跳出 modal alert：標題「無法顯示這張照片」、內容「這個 RAW 檔案似乎已經損壞。」／「試著從記憶卡重新複製這個檔案。」——這是既有、預期的行為，不屬於本輪修正範圍。
 2. 按下 alert 的「好」關閉後，畫面**立即**（不到 1 秒）顯示「正在解碼 RAW...」的載入動畫。
@@ -334,9 +334,9 @@ if let image = model.editor.displayedImage {
 
 **重新驗證**（GUI 自動化，沿用 §11.4 記錄的技巧）：
 
-1. **修復本身**：在 Corrupt-Test 開啟 `_DSC1898-corrupt.ARW`，關閉初次「無法顯示這張照片」modal alert 後，畫面正確顯示靜態占位畫面（警示三角形圖示 +「無法顯示這張照片」文字），靜置 15 秒以上不變、CPU 維持 0%；在乾淨重新啟動的 App 上重複整個流程第二次，結果一致。
+1. **修復本身**：在 Corrupt-Test 開啟損毀的私人 RAW 樣本，關閉初次「無法顯示這張照片」modal alert 後，畫面正確顯示靜態占位畫面（警示三角形圖示 +「無法顯示這張照片」文字），靜置 15 秒以上不變、CPU 維持 0%；在乾淨重新啟動的 App 上重複整個流程第二次，結果一致。
 2. **情境 1（diagnostic-only hover）**：對這張照片用鍵盤 focus 移到「Baseline Test」（跟滑鼠 hover 共用同一個 `previewPreset()` 呼叫路徑），非 modal 診斷文字「White balance from this preset couldn't be applied yet because this photo hasn't finished decoding.」正確出現在 preset 清單上方，移開 focus 後消失，全程沒有跳出任何 modal alert；主畫面的靜態占位畫面沒有被覆蓋或打斷。
-3. **情境 2（會改變畫面的 preset）**：這個環境既有的三個全域 preset 對測試照片都是視覺 no-op（§11.5 情境 3 已記錄），因此另外用一張正常照片把 Exposure 拖到 +3.21 後建立一個新的全域 preset `ExposureBump`（真的會改變畫面），驗證完成後已透過 App 內建的「⋯」→「刪除」移除，不留在使用者的 Presets 目錄。對 `_DSC1898-corrupt.ARW` 用鍵盤 focus 移到 `ExposureBump`：非 modal 的 `previewRenderFailureMessage`「This preset's preview couldn't be rendered right now.」正確出現，沒有跳出任何 modal alert；連續快速在「Baseline Test」／`ExposureBump` 之間切換 focus 6 次（模擬快速 hover 進出），全程只維持同一行非 modal 訊息、沒有疊加、沒有跳出任何 modal alert。
+3. **情境 2（會改變畫面的 preset）**：這個環境既有的三個全域 preset 對測試照片都是視覺 no-op（§11.5 情境 3 已記錄），因此另外用一張正常照片把 Exposure 拖到 +3.21 後建立一個新的全域 preset `ExposureBump`（真的會改變畫面），驗證完成後已透過 App 內建的「⋯」→「刪除」移除，不留在使用者的 Presets 目錄。對損毀的私人 RAW 樣本用鍵盤 focus 移到 `ExposureBump`：非 modal 的 `previewRenderFailureMessage`「This preset's preview couldn't be rendered right now.」正確出現，沒有跳出任何 modal alert；連續快速在「Baseline Test」／`ExposureBump` 之間切換 focus 6 次（模擬快速 hover 進出），全程只維持同一行非 modal 訊息、沒有疊加、沒有跳出任何 modal alert。
 4. 過程中用一次性的除錯輸出（`FileHandle.standardError.write`，驗證後已還原、未進入 commit）確認了內部狀態機每一步都符合預期：`previewPreset` 正確判斷「改變畫面」／「no-op」、`requestPreview` 正確標記 preview-context、`handle(.failed)` 正確判斷該次失敗「仍與目前意圖相關」而非過期丟棄。
 
 **小發現，非阻塞**：`EditorViewModel.swift` 里 `previewFailureMessage(for:)` 用到的字串 `"This preset's preview couldn't be rendered right now."` 沒有被加進 `Sources/Localization/Resources/{en,zh-Hant}.lproj/Localizable.strings`，目前靠 `L10n.t` 對缺漏 key 的 fallback（顯示 key 本身，即英文原文）撐著，繁體中文介面下這行會顯示成英文而非翻譯。建議下一輪修掉（在兩個 `.lproj` 都補上這個 key），影響範圍很小（只有這一行非 modal 文字）。

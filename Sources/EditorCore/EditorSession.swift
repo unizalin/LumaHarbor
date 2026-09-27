@@ -47,6 +47,9 @@ public final class EditorSession: ObservableObject {
     @Published public private(set) var originalImage: CGImage?
     @Published public private(set) var previewQuality: PreviewQuality = .interactive
     @Published public private(set) var isRendering = false
+    /// Provenance for the frame currently displayed. Cleared on photo changes
+    /// and failures so diagnostics cannot leak from a previous RAW.
+    @Published public private(set) var latestRawRenderRecipe: ResolvedRawRenderRecipe?
 
     /// True once a decode has failed and nothing since -- a new photo
     /// opened, a fresh frame produced -- has superseded that outcome. Lets
@@ -325,6 +328,7 @@ public final class EditorSession: ObservableObject {
         self.previewOptions = .standard
         self.comparisonSnapshot = nil
         self.previewImage = nil
+        self.latestRawRenderRecipe = nil
         self.decodeFailed = false
         self.histogram = nil
         self.originalImage = nil
@@ -360,6 +364,7 @@ public final class EditorSession: ObservableObject {
         photo = nil
         sourceURL = nil
         previewImage = nil
+        latestRawRenderRecipe = nil
         decodeFailed = false
         histogram = nil
         originalImage = nil
@@ -897,7 +902,10 @@ public final class EditorSession: ObservableObject {
             adjustments: displayedAdjustments,
             targetPixelDimension: previewPixelDimension,
             quality: quality,
-            previewOptions: previewOptions
+            previewOptions: previewOptions,
+            cameraProfileRequest: displayedAdjustments.rawCameraProfile.requestedName.map {
+                RawCameraProfileRequest(sourceName: $0)
+            }
         )
         Task {
             let token = await services.previewScheduler.submit(request)
@@ -1009,6 +1017,7 @@ public final class EditorSession: ObservableObject {
             }
             lastDisplayedGeneration = result.token.generation
             previewImage = result.image.cgImage
+            latestRawRenderRecipe = result.image.rawRenderRecipe
             decodeFailed = false
             scheduleHistogramComputation(for: result.image.cgImage, generation: result.token.generation)
             previewQuality = result.quality
@@ -1026,6 +1035,7 @@ public final class EditorSession: ObservableObject {
         case .failed(let token, let error):
             guard let photo, token.subject.rawValue == photo.id.rawValue else { return }
             isRendering = false
+            latestRawRenderRecipe = nil
             switch previewContextRelevance(for: token.generation) {
             case .some(true):
                 // Round 3: a preset preview that genuinely changes the

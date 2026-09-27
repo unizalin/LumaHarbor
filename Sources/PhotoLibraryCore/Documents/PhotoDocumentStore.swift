@@ -700,14 +700,17 @@ public actor PhotoDocumentStore {
         sidecarsRootDirectoryURL.appendingPathComponent(documentID.uuidString, isDirectory: true)
     }
 
-    /// The currently saved adjustments for a document, or `.neutral` when no
-    /// sidecar has been written yet. Schema-too-new or corrupt sidecars throw
+    /// The currently saved adjustments for a document, or its persisted
+    /// baseline when no sidecar has been written yet. Schema-too-new or corrupt sidecars throw
     /// rather than being silently overwritten — `FileSidecarRepository`
     /// enforces that.
     public func loadAdjustments(documentID: UUID) throws -> PhotoAdjustments {
-        _ = try loadDocument(id: documentID)
+        let record = try loadRecord(id: documentID)
         let repository = try sidecarRepository(documentID: documentID)
-        return try repository.loadSidecar(for: PhotoID(documentID))?.adjustments ?? .neutral
+        if let sidecar = try repository.loadSidecar(for: PhotoID(documentID)) {
+            return sidecar.adjustments
+        }
+        return .neutral(using: record.effectiveRawRenderingCompatibility)
     }
 
     public func saveAdjustments(_ adjustments: PhotoAdjustments, documentID: UUID) throws {
@@ -1185,7 +1188,8 @@ public actor PhotoDocumentStore {
             sourceFingerprint: document.sourceFingerprint,
             workingFingerprint: document.workingFingerprint,
             lifecycleState: lifecycleState,
-            contentDigestSHA256: document.contentDigestSHA256
+            contentDigestSHA256: document.contentDigestSHA256,
+            rawRenderingCompatibility: Self.defaultRawRenderingCompatibility(for: document.workingURL)
         )
         try writeRecordData(try SidecarCoding.encode(record), recordURL(for: document.id), fileManager)
     }
@@ -1203,6 +1207,12 @@ public actor PhotoDocumentStore {
     private func relativeWorkingPathComponents(for document: PhotoDocument) -> [String]? {
         guard document.storageMode == .appCopy else { return nil }
         return [Self.documentsDirectoryName, document.id.uuidString, document.workingURL.lastPathComponent]
+    }
+
+    private static func defaultRawRenderingCompatibility(for url: URL) -> RawRenderingCompatibility {
+        CoreImageRawDecoder.candidateFileExtensions.contains(url.pathExtension.lowercased())
+            ? .adobeProcess2012V1
+            : .native
     }
 
     private func resolvedDocument(from record: PhotoDocumentRecord) -> PhotoDocument {
@@ -1649,8 +1659,15 @@ private struct PhotoDocumentRecord: Codable {
     /// existed. See `PhotoDocument.contentDigestSHA256` and
     /// `relinkInPlaceDocument`'s legacy fallback.
     var contentDigestSHA256: String?
+    /// Absent in records written before the versioned RAW baseline existed.
+    /// It remains optional on disk so the read path can preserve the historic
+    /// native policy until that record is rewritten.
+    var rawRenderingCompatibility: RawRenderingCompatibility?
 
     var effectiveLifecycleState: LifecycleState { lifecycleState ?? .committed }
+    var effectiveRawRenderingCompatibility: RawRenderingCompatibility {
+        rawRenderingCompatibility ?? .native
+    }
 }
 
 /// Result of a `reconcileOrphanedImports()` pass.

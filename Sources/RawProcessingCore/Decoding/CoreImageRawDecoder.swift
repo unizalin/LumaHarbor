@@ -52,10 +52,47 @@ public struct CoreImageRawDecoder: RawDecoding {
             throw RawDecodingError.corruptedFile(path: url.path)
         }
 
+        var metadata = properties.map(RawMetadata.from(imageProperties:)) ?? RawMetadata()
+        var recipe = request.rawRenderRecipe
         // Read the as-shot neutral before overwriting it, so the sidecar's
         // offsets stay relative to what the camera recorded.
         let baselineTemperature = Double(filter.neutralTemperature)
         let baselineTint = Double(filter.neutralTint)
+
+        if let existingRecipe = recipe, let profileRequest = request.cameraProfileRequest {
+            recipe = RawRenderRecipeResolver().resolvingCameraProfile(
+                in: existingRecipe,
+                request: profileRequest,
+                cameraMake: metadata.cameraMake,
+                cameraModel: metadata.cameraModel
+            )
+        }
+
+        // Set orientation explicitly from source metadata. This keeps the
+        // decoder contract stable instead of relying on a system default.
+        filter.orientation = CoreImageRawPolicy.orientation(for: metadata.orientation)
+
+        // `rawRenderingCompatibility` is persisted user intent. Only the
+        // resolved recipe can authorize the uncalibrated Adobe option vector;
+        // a missing recipe is therefore native by default (fail closed).
+        if recipe?.effectivePolicy == .adobeProcess2012V1 {
+            let resolution = CoreImageRawPolicy.resolveAdobeProcess2012V1(
+                supportedDecoderVersions: filter.supportedDecoderVersions.map(\.rawValue)
+            )
+            if let decoderVersion = resolution.decoderVersion {
+                filter.decoderVersion = CIRAWDecoderVersion(rawValue: decoderVersion)
+            }
+            Self.apply(resolution.optionVector, to: filter)
+
+            var diagnostics = resolution.diagnostics.map {
+                RawRenderDiagnostic(code: $0)
+            }
+            diagnostics.append(contentsOf: Self.unsupportedOptionDiagnostics(
+                for: filter,
+                vector: resolution.optionVector
+            ))
+            recipe = recipe?.addingDiagnostics(diagnostics)
+        }
 
         if !request.whiteBalance.isAsShot {
             filter.neutralTemperature = Float(baselineTemperature + request.whiteBalance.temperatureOffsetKelvin)
@@ -89,10 +126,17 @@ public struct CoreImageRawDecoder: RawDecoding {
             )
         }
 
-        var metadata = properties.map(RawMetadata.from(imageProperties:)) ?? RawMetadata()
+        let metadataNeededFallback = properties == nil
+            || metadata.pixelWidth == 0
+            || metadata.pixelHeight == 0
         if metadata.pixelWidth == 0 || metadata.pixelHeight == 0 {
             metadata.pixelWidth = Int(nativeSize.width.rounded())
             metadata.pixelHeight = Int(nativeSize.height.rounded())
+        }
+        if metadataNeededFallback {
+            recipe = recipe?.addingDiagnostics([
+                RawRenderDiagnostic(code: .metadataFallback)
+            ])
         }
 
         return DecodedRawImage(
@@ -101,7 +145,8 @@ public struct CoreImageRawDecoder: RawDecoding {
             decodedPixelSize: output.extent.size,
             baselineTemperature: baselineTemperature,
             baselineTint: baselineTint,
-            metadata: metadata
+            metadata: metadata,
+            rawRenderRecipe: recipe
         )
     }
 
@@ -113,6 +158,73 @@ public struct CoreImageRawDecoder: RawDecoding {
         let longestEdge = Double(max(nativeSize.width, nativeSize.height))
         guard longestEdge > 0 else { return 1 }
         return min(1, Double(maximum) / longestEdge)
+    }
+
+    private static func apply(_ vector: CoreImageRawOptionVector, to filter: CIRAWFilter) {
+        if let value = vector.exposure { filter.exposure = value }
+        if let value = vector.baselineExposure { filter.baselineExposure = value }
+        if let value = vector.shadowBias { filter.shadowBias = value }
+        if let value = vector.boostAmount { filter.boostAmount = value }
+        if let value = vector.boostShadowAmount { filter.boostShadowAmount = value }
+        if let value = vector.gamutMappingEnabled { filter.isGamutMappingEnabled = value }
+        if filter.isLuminanceNoiseReductionSupported,
+           let value = vector.luminanceNoiseReductionAmount {
+            filter.luminanceNoiseReductionAmount = value
+        }
+        if filter.isColorNoiseReductionSupported,
+           let value = vector.colorNoiseReductionAmount {
+            filter.colorNoiseReductionAmount = value
+        }
+        if filter.isSharpnessSupported, let value = vector.sharpnessAmount {
+            filter.sharpnessAmount = value
+        }
+        if filter.isContrastSupported, let value = vector.contrastAmount {
+            filter.contrastAmount = value
+        }
+        if filter.isDetailSupported, let value = vector.detailAmount {
+            filter.detailAmount = value
+        }
+        if filter.isMoireReductionSupported, let value = vector.moireReductionAmount {
+            filter.moireReductionAmount = value
+        }
+        if filter.isLocalToneMapSupported, let value = vector.localToneMapAmount {
+            filter.localToneMapAmount = value
+        }
+        if let value = vector.extendedDynamicRangeAmount {
+            filter.extendedDynamicRangeAmount = value
+        }
+        if #available(macOS 26.0, iOS 19.0, *),
+           filter.isHighlightRecoverySupported,
+           let enabled = vector.highlightRecoveryEnabled {
+            filter.isHighlightRecoveryEnabled = enabled
+        }
+    }
+
+    private static func unsupportedOptionDiagnostics(
+        for filter: CIRAWFilter,
+        vector: CoreImageRawOptionVector
+    ) -> [RawRenderDiagnostic] {
+        var diagnostics: [RawRenderDiagnostic] = []
+        let highlightRecoverySupported: Bool
+        if #available(macOS 26.0, iOS 19.0, *) {
+            highlightRecoverySupported = filter.isHighlightRecoverySupported
+        } else {
+            highlightRecoverySupported = false
+        }
+        let support: [(String, Bool, Bool)] = [
+            ("highlightRecovery", vector.highlightRecoveryEnabled != nil, highlightRecoverySupported),
+            ("luminanceNoiseReduction", vector.luminanceNoiseReductionAmount != nil, filter.isLuminanceNoiseReductionSupported),
+            ("colorNoiseReduction", vector.colorNoiseReductionAmount != nil, filter.isColorNoiseReductionSupported),
+            ("sharpness", vector.sharpnessAmount != nil, filter.isSharpnessSupported),
+            ("contrast", vector.contrastAmount != nil, filter.isContrastSupported),
+            ("detail", vector.detailAmount != nil, filter.isDetailSupported),
+            ("moireReduction", vector.moireReductionAmount != nil, filter.isMoireReductionSupported),
+            ("localToneMap", vector.localToneMapAmount != nil, filter.isLocalToneMapSupported)
+        ]
+        for (name, isRequested, isSupported) in support where isRequested && !isSupported {
+            diagnostics.append(RawRenderDiagnostic(code: .rawOptionUnavailable, detail: name))
+        }
+        return diagnostics
     }
 
     private func makeImageSource(for url: URL) throws -> CGImageSource {
