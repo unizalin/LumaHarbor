@@ -70,7 +70,7 @@ Scripts/package-mac-release.sh release
 2. 開啟前驗證 ZIP：
 
    ```sh
-   shasum -a 256 LumaHarbor-<version>-<build>.zip
+   shasum -a 256 LumaHarbor-<version>.zip
    ```
 
 3. 將終端機算出的結果與 `.sha256` 檔內容比對；相同才繼續。
@@ -128,12 +128,12 @@ Scripts/package-mac-release.sh release
 
 產物會放在 `dist/`：
 
-- `LumaHarbor-<version>-<build>.zip`
+- `LumaHarbor-<version>.zip`
 - 同名的 `.zip.sha256`
 
 將 ZIP、checksum 與對應的測試 commit 一起提供。對方只需要驗證 checksum、解壓縮並開啟 `LumaHarbor.app`；ad-hoc Alpha 第一次啟動可能要在 Finder 按右鍵選「打開」，或到「系統設定 > 隱私權與安全性」選「仍要打開」。不需要提供或匯出你的 Apple 開發憑證，也不要要求對方關閉 Gatekeeper。
 
-重新建置後請只分享最高 build number 的 ZIP 與同名 checksum，不要沿用較舊的 Alpha 壓縮檔。
+每個 semantic version 只保留一份 ZIP 與同名 checksum；若要重新發布相同版本的產品，請先增加 patch version，再分享新的壓縮檔。不要沿用較舊的 Alpha 壓縮檔。
 
 沒有付費 Apple Developer 帳號仍可分享 ad-hoc Mac 版本，但 macOS 會顯示未辨識開發者警告。要讓公開下載版本一般雙擊即可開啟，才需要 Developer ID 簽章與 Apple notarization。
 
