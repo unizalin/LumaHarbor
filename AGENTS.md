@@ -47,6 +47,7 @@ Confirm the current branch, HEAD, worktree, and dirty files against `CURRENT.md`
 
 ## Installed app synchronization
 
+- Public releases use `MAJOR.MINOR.PATCH` as the product version. The internal build remains separate deployment metadata and never becomes the product name or release archive name.
 - After an explicitly authorized product-version push to `origin/main`, build the macOS Release app from that exact pushed SHA and keep `/Applications/LumaHarbor.app` on the same version and build number. Replace an older installed copy through recoverable Trash handling, then verify bundle version, build number, code signature, and a launch smoke test.
 - If a paired physical iPad is reachable over USB or Wi-Fi, build the signed iPad Release app from the same pushed SHA, install it over the existing app, verify the installed version and build number, and run a launch smoke test. Never commit signing identities, device identifiers, or provisioning details.
 - If the Mac installation or physical iPad deployment cannot run, record it as `NOT RUN` or `BLOCKED` in `CURRENT.md` and the user-facing summary. Do not describe the device as updated merely because a generic build passed.

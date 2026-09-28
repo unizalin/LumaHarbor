@@ -71,3 +71,10 @@ This file is append-only. When a decision is replaced, retain the original entry
 - Decision: iPhone 與 iPad 使用同一個 Universal iOS App、服務與資料層。iPhone 首版採行動編輯器範圍，以全螢幕畫布和單一工具工作區呈現共享 Inspector 內容；不建立第三份調整實作，也不把 iPad 可移動浮動面板縮到手機。既有 Local Adjustments 在 iPhone 必須渲染並保存，但首版僅顯示唯讀摘要。
 - Reason: 共用核心已能承載手機，但現有 iPad Inspector 尚有 standalone／inlined 雙份來源。先整併來源並共享 Inspector composition，可避免三平台在欄位、狀態與調整行為上漂移；手機另用符合有限畫面與單手觸控的殼層，才能保留照片作為主要內容。
 - Impact: 實作依 `docs/superpowers/specs/2026-09-17-cross-device-workspace-and-iphone-editor-design.md` 分成獨立 Phase。Phase 0 必須先完成 iPad 來源整併；後續才可啟用 phone device family。Mac、iPad、iPhone 共用 catalog、editing state 與資料契約，但可使用不同平台容器與密度。
+
+## D-011 — Public releases use semantic versions
+
+- Date: 2026-09-28
+- Decision: Public releases use `MAJOR.MINOR.PATCH` as the product version. The current public version is `0.1.0`; internal build `3` remains separate deployment metadata for Mac and iPad.
+- Reason: Product names and public archive names must remain stable and understandable, while Apple deployment metadata still needs a synchronized, positive build number.
+- Impact: Public artifacts use only the product version. Technical evidence records product version, internal build, and tested commit separately. Repeated distribution requires a patch bump rather than reusing the same public version with a different build.

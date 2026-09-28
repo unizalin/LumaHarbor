@@ -89,12 +89,13 @@ git diff --stat origin/main...HEAD
 
 當使用者明確授權把產品版本推送到 `origin/main` 後，該次版本交付還必須完成：
 
-1. 以實際推送的同一個 `main` SHA 建置 macOS Release App，不得沿用來源不明或舊 `.build`／Derived Data 產物。
-2. 更新 `/Applications/LumaHarbor.app`；舊安裝版以可復原方式移到垃圾桶，不永久刪除。
-3. 核對 Mac App 的版本、build number、codesign，並執行啟動 smoke test。
-4. 若已配對的實體 iPad 可透過 USB 或 Wi-Fi 連線，從同一個 SHA 建置 signed iPad Release、覆蓋安裝、核對裝置回報的版本與 build number，並執行啟動 smoke test。
-5. 將 Mac 與 iPad 的 `INSTALLED`、`LAUNCHED`、`BLOCKED` 或 `NOT RUN` 狀態記錄到 `CURRENT.md`；generic Simulator build 不能代替實體裝置安裝證據。
-6. 簽章身分、Team、provisioning、裝置識別碼與本機安裝路徑只留在本機，不加入 Git 或公開報告。
+1. 準備發行時，同步 Mac 與 iPad 的產品版本 `MAJOR.MINOR.PATCH` 和內部 build；兩者都要保留在技術證據，但公開產物只使用產品版本。
+2. 以實際推送的同一個 `main` SHA 建置 macOS Release App，不得沿用來源不明或舊 `.build`／Derived Data 產物。
+3. 更新 `/Applications/LumaHarbor.app`；舊安裝版以可復原方式移到垃圾桶，不永久刪除。
+4. 核對 Mac App 的產品版本、內部 build、codesign，並執行啟動 smoke test。
+5. 若已配對的實體 iPad 可透過 USB 或 Wi-Fi 連線，從同一個 SHA 建置 signed iPad Release、覆蓋安裝、核對裝置回報的產品版本與內部 build，並執行啟動 smoke test。
+6. 將 Mac 與 iPad 的 `INSTALLED`、`LAUNCHED`、`BLOCKED` 或 `NOT RUN` 狀態記錄到 `CURRENT.md`；generic Simulator build 不能代替實體裝置安裝證據。
+7. 簽章身分、Team、provisioning、裝置識別碼與本機安裝路徑只留在本機，不加入 Git 或公開報告。
 
 純文件或 coordination-only push 不需要重建與重裝 App，除非該提交同時改變產品版本或發行產物。安裝與啟動成功也不取代功能人工驗收、Lightroom parity、效能、隱私或其他 release gate。
 

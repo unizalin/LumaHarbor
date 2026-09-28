@@ -5,8 +5,8 @@
 - **狀態**：`READY ONLY WITH RENDERER DISABLED`。單一乾淨 snapshot 已以 squash 整合至 `main`；Adobe renderer 預設關閉，production registry 空白，持久化 Adobe policy 只顯示請求狀態，實際 decode／preview／export 維持 Native。
 - **安全修正**：反序列化 recipe 不再採信儲存的 `effectivePolicy`；所有 recipe 重新開啟時一律 Native，必須重新通過 resolver admission。Artifact admission 同時核對 ID、version、camera 與 canonical profile；public in-memory initializer 也不能以 Native policy 組出 Adobe effective state。Mac 單張與批次 export 現共用保存的 camera-profile request，不再與 preview 分歧。
 - **回歸證據**：最新 `main` 以全新 scratch 目錄執行完整 `swift test`：2,552 executed、17 skipped、0 failures；新增 controlled-enablement／DCP fail-closed／App export focused tests 16/16 PASS；私人 RAW Native parity 3/3 PASS。strict-concurrency、Mac Release app bundle 與 generic iPad Simulator build 均 PASS。乾淨建置另發現並修正 `PresetCoreTests` 缺少 `PhotoLibraryCore` 依賴，以及 process tests 誤用舊 `.build` CLI 的問題。
-- **版本**：Mac 與 iPad 維持 `0.1.0`，本次 build number 為 `3`。簽署 Team 只允許由本機建置命令注入，不寫入專案或 Git。
-- **實體 iPad**：最新 `main` 的 signed Release `0.1.0 (3)` 已通過 codesign 與 release privacy scan，並透過 Wi-Fi 安裝到已配對 iPad；裝置已回報 build 3。使用者信任開發者憑證後，遠端啟動成功，目前為 `INSTALLED / LAUNCHED`。這是建置、安裝與啟動 smoke 驗證，不取代真實 RAW／XMP 人工操作或 Lightroom 像素一致性驗收。
+- **版本**：Mac 與 iPad 的產品版本 `0.1.0`，內部 build `3`。簽署 Team 只允許由本機建置命令注入，不寫入專案或 Git。
+- **實體 iPad**：最新 `main` 的 signed Release 產品版本 `0.1.0`、內部 build `3` 已通過 codesign 與 release privacy scan，並透過 Wi-Fi 安裝到已配對 iPad；裝置已回報 build 3。使用者信任開發者憑證後，遠端啟動成功，目前為 `INSTALLED / LAUNCHED`。這是建置、安裝與啟動 smoke 驗證，不取代真實 RAW／XMP 人工操作或 Lightroom 像素一致性驗收。
 - **Gate 2 邊界**：2026-09-22 的正式 neutral 4/4 與 independent hold-out 都是 `FAIL`，不是 PASS；本輪沒有重跑正式 Lightroom reference comparison。Adobe 顯色相容與 XMP final parity 仍未完成，不能開啟 renderer 或填入 production registry。
 - **Gate 2 待辦**：production registry 與 feature flag 啟用前，仍須完成 metadata 後的受控升級 resolver、profile runtime error 的完整 Native fallback，以及 post-decode recipe 重新配置 preview／export color-space。這些路徑目前因 renderer 預設關閉與 registry 空白而不可達，不能以本版視為完成。
 - **隱私**：目前 snapshot 已移除私人 preset／RAW 名稱、本機證據路徑，以及舊驗收文件內的私人 RAW basename／digest；來源分支舊歷史保留在本機，不推送。整合使用 squash snapshot，避免發布舊歷史中的私人字串。

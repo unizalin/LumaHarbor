@@ -50,7 +50,7 @@ The stable project entry point is `Apps/LumaHarborPad.xcodeproj`; see `docs/deve
 ## What to send
 
 - the app ZIP or TestFlight invitation;
-- version, build number, and tested commit;
+- product version, internal build, and tested commit;
 - SHA-256 checksum for direct downloads;
 - this alpha warning and the known-issues list;
 - a short feedback template that avoids full local paths and private photos.

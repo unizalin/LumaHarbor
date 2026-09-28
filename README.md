@@ -50,7 +50,7 @@ open build/LumaHarbor.app
 Scripts/package-mac-release.sh release
 ```
 
-產物會寫入 `dist/`，包含帶版本號的 ZIP 與 SHA-256 checksum。沒有設定簽章環境變數時，腳本會產生 ad-hoc 版本，只適合自己使用或提供給明確信任來源的小規模測試者。
+產物會寫入 `dist/`，包含以產品版本 `MAJOR.MINOR.PATCH` 命名的 ZIP 與 SHA-256 checksum。內部 build 僅供部署與技術核對，不會出現在產品名稱或發行檔名。沒有設定簽章環境變數時，腳本會產生 ad-hoc 版本，只適合自己使用或提供給明確信任來源的小規模測試者。
 
 封裝流程會強制帶入多語系與 RAW Metal kernel 資源，使用中性暫存目錄建置，並檢查 App、ZIP 解壓內容及 checksum 是否含有建置者的私人絕對路徑。任一檢查失敗時不應散布該產物。
 
@@ -131,7 +131,7 @@ Scripts/package-mac-release.sh release
 - `LumaHarbor-<version>.zip`
 - 同名的 `.zip.sha256`
 
-將 ZIP、checksum 與對應的測試 commit 一起提供。對方只需要驗證 checksum、解壓縮並開啟 `LumaHarbor.app`；ad-hoc Alpha 第一次啟動可能要在 Finder 按右鍵選「打開」，或到「系統設定 > 隱私權與安全性」選「仍要打開」。不需要提供或匯出你的 Apple 開發憑證，也不要要求對方關閉 Gatekeeper。
+將 ZIP、checksum、產品版本、內部 build 與對應的測試 commit 一起提供。對方只需要驗證 checksum、解壓縮並開啟 `LumaHarbor.app`；ad-hoc Alpha 第一次啟動可能要在 Finder 按右鍵選「打開」，或到「系統設定 > 隱私權與安全性」選「仍要打開」。不需要提供或匯出你的 Apple 開發憑證，也不要要求對方關閉 Gatekeeper。
 
 每個 semantic version 只保留一份 ZIP 與同名 checksum；若要重新發布相同版本的產品，請先增加 patch version，再分享新的壓縮檔。不要沿用較舊的 Alpha 壓縮檔。
 
@@ -151,7 +151,7 @@ Scripts/verify-release-privacy.sh build/LumaHarbor.app
 
 ### 產品版本推送後的本機同步
 
-正式產品版本經授權推送到 `origin/main` 後，開發機上的 `/Applications/LumaHarbor.app` 應以同一個 `main` SHA 重新建置及更新，並核對版本、build number、簽章與啟動狀態。若已配對的實體 iPad 可透過 USB 或 Wi-Fi 連線，也應安裝同一個 SHA 的 signed Release、核對裝置版本與 build number，並執行啟動 smoke test。
+正式產品版本經授權推送到 `origin/main` 後，開發機上的 `/Applications/LumaHarbor.app` 應以同一個 `main` SHA 重新建置及更新，並核對產品版本、內部 build、簽章與啟動狀態。若已配對的實體 iPad 可透過 USB 或 Wi-Fi 連線，也應安裝同一個 SHA 的 signed Release、核對裝置產品版本與內部 build，並執行啟動 smoke test。
 
 無法連接或安裝時，必須在 [`docs/coordination/CURRENT.md`](docs/coordination/CURRENT.md) 標記為 `BLOCKED` 或 `NOT RUN`，不能以模擬器或 generic build 取代真機證據。純文件或 coordination-only push 不觸發 App 重建與安裝。簽章身分、Team、provisioning 與裝置識別資訊只能保留在本機。
 

@@ -52,9 +52,24 @@ final class ReleaseVersionContractTests: XCTestCase {
 
     func testPublicDocumentationUsesVersionOnlyArtifactNames() throws {
         let readme = try text("README.md")
+        let legacyArchiveName = "LumaHarbor-<version>" + "-<build>.zip"
+        let legacyProductName = "0.1.0 " + "(3)"
+
         XCTAssertTrue(readme.contains("LumaHarbor-<version>.zip"))
-        XCTAssertFalse(readme.contains("LumaHarbor-<version>-<build>.zip"))
-        XCTAssertFalse(readme.contains("0.1.0 (3)"))
+        XCTAssertFalse(readme.contains(legacyArchiveName))
+        XCTAssertFalse(readme.contains(legacyProductName))
+    }
+
+    func testAgentAndWorkflowDocsSeparateProductVersionFromInternalBuild() throws {
+        let agents = try text("AGENTS.md")
+        let workflow = try text("docs/coordination/SHARED_GIT_WORKFLOW.md")
+        let decisions = try text("docs/coordination/DECISIONS.md")
+
+        XCTAssertTrue(agents.contains("MAJOR.MINOR.PATCH"))
+        XCTAssertTrue(agents.contains("internal build"))
+        XCTAssertTrue(workflow.contains("產品版本"))
+        XCTAssertTrue(workflow.contains("內部 build"))
+        XCTAssertTrue(decisions.contains("D-011 — Public releases use semantic versions"))
     }
 
     private func macBundleMetadata() throws -> BundleMetadata {

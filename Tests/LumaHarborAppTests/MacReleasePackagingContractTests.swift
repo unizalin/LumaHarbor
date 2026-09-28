@@ -107,13 +107,14 @@ final class MacReleasePackagingContractTests: XCTestCase {
 
     func testReleaseArchiveNameUsesOnlySemanticVersion() throws {
         let packageScript = try text("Scripts/package-mac-release.sh")
+        let legacyArchivePattern = "${APP_NAME}-${VERSION}" + "-${BUILD_NUMBER}.zip"
 
         XCTAssertTrue(
             packageScript.contains(
                 #"ARCHIVE_NAME="$(release_archive_name "${APP_NAME}" "${VERSION}")""#
             )
         )
-        XCTAssertFalse(packageScript.contains(#"${APP_NAME}-${VERSION}-${BUILD_NUMBER}.zip"#))
+        XCTAssertFalse(packageScript.contains(legacyArchivePattern))
     }
 
     func testReleaseVersioningHelperRejectsExistingArtifacts() throws {
