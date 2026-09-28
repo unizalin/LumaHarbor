@@ -135,6 +135,101 @@ final class MacReleasePackagingContractTests: XCTestCase {
         XCTAssertTrue(result.stderr.contains("already exists"))
     }
 
+    func testReleaseVersioningHelperRejectsLegacyArchiveAndChecksumArtifacts() throws {
+        let helper = url("Scripts/release-versioning.sh")
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaHarborLegacyReleaseVersioning-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let archive = root.appendingPathComponent("LumaHarbor-0.1.0.zip")
+        let checksum = root.appendingPathComponent("LumaHarbor-0.1.0.zip.sha256")
+        let legacyArtifacts = [
+            root.appendingPathComponent("LumaHarbor-0.1.0-3.zip"),
+            root.appendingPathComponent("LumaHarbor-0.1.0-4.zip.sha256"),
+        ]
+
+        for legacyArtifact in legacyArtifacts {
+            FileManager.default.createFile(atPath: legacyArtifact.path, contents: Data())
+            let result = try runBash(
+                #"source "$1"; assert_release_artifacts_available "$2" "$3""#,
+                arguments: [helper.path, archive.path, checksum.path]
+            )
+
+            XCTAssertEqual(result.status, 3, "accepted \(legacyArtifact.lastPathComponent)")
+            XCTAssertTrue(result.stderr.contains("already exists"))
+            try FileManager.default.removeItem(at: legacyArtifact)
+        }
+    }
+
+    func testReleaseVersioningHelperAllowsOnlyOneProcessToReserveAnArtifact() throws {
+        let helper = url("Scripts/release-versioning.sh")
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaHarborReleaseReservation-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let archive = root.appendingPathComponent("LumaHarbor-0.1.0.zip")
+        let checksum = root.appendingPathComponent("LumaHarbor-0.1.0.zip.sha256")
+        let reservation = root.appendingPathComponent("LumaHarbor-0.1.0.zip.reservation")
+        let ready = root.appendingPathComponent("first-process-ready")
+
+        let first = try startBash(
+            #"""
+            source "$1"
+            reserve_release_artifacts "$2" "$3" "$4" "$5"
+            status="$?"
+            printf '%s\n' "${status}" > "$6"
+            if [[ "${status}" -eq 0 ]]; then
+                IFS= read -r _
+                release_release_artifact_reservation "$4" "$5"
+            fi
+            exit "${status}"
+            """#,
+            arguments: [
+                helper.path,
+                archive.path,
+                checksum.path,
+                reservation.path,
+                "first-owner",
+                ready.path,
+            ]
+        )
+
+        XCTAssertTrue(waitForFile(ready), "first process did not acquire its reservation")
+        XCTAssertEqual(
+            try String(contentsOf: ready, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            "0"
+        )
+
+        let second = try runBash(
+            #"""
+            source "$1"
+            reserve_release_artifacts "$2" "$3" "$4" "$5"
+            status="$?"
+            release_release_artifact_reservation "$4" "$5"
+            exit "${status}"
+            """#,
+            arguments: [
+                helper.path,
+                archive.path,
+                checksum.path,
+                reservation.path,
+                "second-owner",
+            ]
+        )
+
+        XCTAssertEqual(second.status, 3)
+        XCTAssertTrue(second.stderr.contains("already exists"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: reservation.path))
+
+        first.input.fileHandleForWriting.closeFile()
+        first.process.waitUntilExit()
+        XCTAssertEqual(first.process.terminationStatus, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: reservation.path))
+    }
+
     func testReleaseVersioningHelperProducesVersionOnlyName() throws {
         let helper = url("Scripts/release-versioning.sh")
         let result = try runBash(
@@ -166,6 +261,11 @@ final class MacReleasePackagingContractTests: XCTestCase {
         let stderr: String
     }
 
+    private struct RunningBash {
+        let process: Process
+        let input: Pipe
+    }
+
     private func runBash(_ command: String, arguments: [String]) throws -> BashResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -183,5 +283,29 @@ final class MacReleasePackagingContractTests: XCTestCase {
             stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
             stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         )
+    }
+
+    private func startBash(_ command: String, arguments: [String]) throws -> RunningBash {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-c", command, "release-versioning-test"] + arguments
+
+        let input = Pipe()
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        return RunningBash(process: process, input: input)
+    }
+
+    private func waitForFile(_ url: URL) -> Bool {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: url.path) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        return false
     }
 }

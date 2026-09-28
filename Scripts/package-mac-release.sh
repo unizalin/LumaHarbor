@@ -25,10 +25,16 @@ NOTARY_PROFILE="${LUMAHARBOR_NOTARY_PROFILE:-}"
 RELEASE_SCRATCH_PARENT="${LUMAHARBOR_RELEASE_SCRATCH_PARENT:-/private/tmp}"
 RELEASE_SCRATCH_PATH=""
 VERIFY_DIR=""
+RESERVATION_PATH=""
+RESERVATION_TOKEN=""
+RESERVATION_HELD=0
 
 cleanup() {
     [[ -z "${VERIFY_DIR}" ]] || rm -rf "${VERIFY_DIR}"
     [[ -z "${RELEASE_SCRATCH_PATH}" ]] || rm -rf "${RELEASE_SCRATCH_PATH}"
+    if [[ "${RESERVATION_HELD}" == "1" ]]; then
+        release_release_artifact_reservation "${RESERVATION_PATH}" "${RESERVATION_TOKEN}" || true
+    fi
 }
 trap cleanup EXIT
 
@@ -43,11 +49,14 @@ ARCHIVE_NAME="$(release_archive_name "${APP_NAME}" "${VERSION}")"
 ARCHIVE_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
 
-assert_release_artifacts_available "${ARCHIVE_PATH}" "${CHECKSUM_PATH}"
+mkdir -p "${OUTPUT_DIR}"
+RESERVATION_PATH="${ARCHIVE_PATH}.reservation"
+RESERVATION_TOKEN="$$-${RANDOM}-${RANDOM}"
+reserve_release_artifacts "${ARCHIVE_PATH}" "${CHECKSUM_PATH}" "${RESERVATION_PATH}" "${RESERVATION_TOKEN}"
+RESERVATION_HELD=1
 echo "==> Product version ${VERSION}; internal build ${BUILD_NUMBER}"
 
 cd "${ROOT_DIR}"
-mkdir -p "${OUTPUT_DIR}"
 mkdir -p "${RELEASE_SCRATCH_PARENT}"
 
 # SwiftPM embeds the Bundle.module fallback path in the executable. Build in
