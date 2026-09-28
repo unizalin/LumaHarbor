@@ -28,6 +28,8 @@ VERIFY_DIR=""
 RESERVATION_PATH=""
 RESERVATION_TOKEN=""
 RESERVATION_HELD=0
+STAGING_ARCHIVE_PATH=""
+STAGING_CHECKSUM_PATH=""
 
 cleanup() {
     [[ -z "${VERIFY_DIR}" ]] || rm -rf "${VERIFY_DIR}"
@@ -54,6 +56,8 @@ RESERVATION_PATH="${ARCHIVE_PATH}.reservation"
 RESERVATION_TOKEN="$$-${RANDOM}-${RANDOM}"
 reserve_release_artifacts "${ARCHIVE_PATH}" "${CHECKSUM_PATH}" "${RESERVATION_PATH}" "${RESERVATION_TOKEN}"
 RESERVATION_HELD=1
+STAGING_ARCHIVE_PATH="${RESERVATION_PATH}/archive.zip"
+STAGING_CHECKSUM_PATH="${RESERVATION_PATH}/archive.zip.sha256"
 echo "==> Product version ${VERSION}; internal build ${BUILD_NUMBER}"
 
 cd "${ROOT_DIR}"
@@ -84,18 +88,18 @@ codesign --verify --deep --strict --verbose=2 "${APP_DIR}"
 Scripts/verify-release-privacy.sh "${APP_DIR}"
 
 package_zip() {
-    rm -f "${ARCHIVE_PATH}"
+    rm -f "${STAGING_ARCHIVE_PATH}"
     # Do not copy local macOS provenance/resource-fork metadata into the
     # distributable archive as `._*` AppleDouble files.
-    COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr --noqtn "${APP_DIR}" "${ARCHIVE_PATH}"
+    COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr --noqtn "${APP_DIR}" "${STAGING_ARCHIVE_PATH}"
 }
 
-echo "==> Packaging ${ARCHIVE_PATH}"
+echo "==> Packaging staged ${ARCHIVE_NAME}"
 package_zip
 
 if [[ -n "${NOTARY_PROFILE}" ]]; then
     echo "==> Submitting for notarization"
-    xcrun notarytool submit "${ARCHIVE_PATH}" \
+    xcrun notarytool submit "${STAGING_ARCHIVE_PATH}" \
         --keychain-profile "${NOTARY_PROFILE}" \
         --wait
 
@@ -113,7 +117,7 @@ fi
 # Verify the bytes the recipient will actually extract, not only the build
 # directory that existed before archiving or notarization.
 VERIFY_DIR="$(mktemp -d "${RELEASE_SCRATCH_PARENT%/}/LumaHarborReleaseVerify.XXXXXX")"
-ditto -x -k "${ARCHIVE_PATH}" "${VERIFY_DIR}"
+ditto -x -k "${STAGING_ARCHIVE_PATH}" "${VERIFY_DIR}"
 VERIFY_APP_DIR="${VERIFY_DIR}/${APP_NAME}.app"
 if [[ ! -d "${VERIFY_APP_DIR}" ]]; then
     echo "error: packaged app not found after archive extraction" >&2
@@ -121,10 +125,13 @@ if [[ ! -d "${VERIFY_APP_DIR}" ]]; then
 fi
 Scripts/verify-release-privacy.sh "${VERIFY_APP_DIR}"
 
-(
-    cd "${OUTPUT_DIR}"
-    shasum -a 256 "${ARCHIVE_NAME}"
-) | tee "${CHECKSUM_PATH}"
-Scripts/verify-release-privacy.sh "${CHECKSUM_PATH}"
+ARCHIVE_DIGEST="$(shasum -a 256 "${STAGING_ARCHIVE_PATH}" | awk '{ print $1 }')"
+printf '%s  %s\n' "${ARCHIVE_DIGEST}" "${ARCHIVE_NAME}" > "${STAGING_CHECKSUM_PATH}"
+Scripts/verify-release-privacy.sh "${STAGING_CHECKSUM_PATH}"
+publish_release_artifacts \
+    "${STAGING_ARCHIVE_PATH}" \
+    "${STAGING_CHECKSUM_PATH}" \
+    "${ARCHIVE_PATH}" \
+    "${CHECKSUM_PATH}"
 echo "==> Done: ${ARCHIVE_PATH}"
 echo "    Checksum: ${CHECKSUM_PATH}"

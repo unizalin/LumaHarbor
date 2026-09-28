@@ -1,7 +1,7 @@
 # LumaHarbor 語意版本與發行命名設計
 
 - 日期：2026-09-28
-- 狀態：已核准，待 implementation plan
+- 狀態：已實作，待最終驗證與合併
 - 適用平台：macOS、iPadOS
 - 目前產品版本：`0.1.0`
 

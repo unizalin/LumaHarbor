@@ -133,7 +133,7 @@ assert_release_artifacts_available "${ARCHIVE_PATH}" "${CHECKSUM_PATH}"
 echo "==> Product version ${VERSION}; internal build ${BUILD_NUMBER}"
 ```
 
-Keep `rm -f "${ARCHIVE_PATH}"` inside `package_zip`: it is needed to replace the pre-notarization ZIP within the same process after stapling. The new preflight guard is what prevents overwriting an artifact from an earlier invocation.
+Package and notarize only a staging ZIP stored inside the reservation directory on the output filesystem. Publishing must create the final ZIP and checksum with create-if-absent hard links, never remove or truncate final paths, and safely roll back only final paths that still share the staging inode if either publication step or the post-publication legacy-artifact scan fails.
 
 - [ ] **Step 4: Run focused tests and shell syntax checks**
 
