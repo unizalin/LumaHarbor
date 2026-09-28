@@ -351,6 +351,44 @@ final class MacReleasePackagingContractTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: checksum.path))
     }
 
+    func testFinalizerRejectsArchiveSymlinkToStagingWithoutDeletingTheSymlink() throws {
+        let scenario = try runFinalSymlinkReplacementScenario(replacing: "archive")
+
+        XCTAssertEqual(scenario.result.status, 3)
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: scenario.archive.path),
+            scenario.stagingArchive.path
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scenario.checksum.path))
+    }
+
+    func testFinalizerRejectsChecksumSymlinkToStagingWithoutDeletingTheSymlink() throws {
+        let scenario = try runFinalSymlinkReplacementScenario(replacing: "checksum")
+
+        XCTAssertEqual(scenario.result.status, 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scenario.archive.path))
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: scenario.checksum.path),
+            scenario.stagingChecksum.path
+        )
+    }
+
+    func testAtomicPublisherDoesNotWriteInsideArchiveDirectoryInjectedAfterPreflight() throws {
+        let scenario = try runDirectoryInjectionScenario(injecting: "archive")
+
+        XCTAssertEqual(scenario.result.status, 3)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: scenario.injected.path), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scenario.checksum.path))
+    }
+
+    func testAtomicPublisherDoesNotWriteInsideChecksumDirectoryInjectedAfterPreflight() throws {
+        let scenario = try runDirectoryInjectionScenario(injecting: "checksum")
+
+        XCTAssertEqual(scenario.result.status, 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scenario.archive.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: scenario.injected.path), [])
+    }
+
     func testReleaseVersioningHelperAllowsOnlyOneProcessToReserveAnArtifact() throws {
         let helper = url("Scripts/release-versioning.sh")
         let root = FileManager.default.temporaryDirectory
@@ -462,6 +500,21 @@ final class MacReleasePackagingContractTests: XCTestCase {
         let legacy: URL
     }
 
+    private struct FinalSymlinkReplacementScenario {
+        let result: BashResult
+        let archive: URL
+        let checksum: URL
+        let stagingArchive: URL
+        let stagingChecksum: URL
+    }
+
+    private struct DirectoryInjectionScenario {
+        let result: BashResult
+        let archive: URL
+        let checksum: URL
+        let injected: URL
+    }
+
     private func runPublicationScenario(inject: String) throws -> PublicationScenario {
         let helper = url("Scripts/release-versioning.sh")
         let root = FileManager.default.temporaryDirectory
@@ -509,6 +562,105 @@ final class MacReleasePackagingContractTests: XCTestCase {
             archive: archive,
             checksum: checksum,
             legacy: legacy
+        )
+    }
+
+    private func runFinalSymlinkReplacementScenario(
+        replacing: String
+    ) throws -> FinalSymlinkReplacementScenario {
+        let helper = url("Scripts/release-versioning.sh")
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaHarborFinalSymlinkReplacement-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let archive = root.appendingPathComponent("LumaHarbor-0.1.0.zip")
+        let checksum = root.appendingPathComponent("LumaHarbor-0.1.0.zip.sha256")
+        let stagingArchive = root.appendingPathComponent("staging-archive.zip")
+        let stagingChecksum = root.appendingPathComponent("staging-archive.zip.sha256")
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            printf 'our-archive' > "$4"
+            printf 'our-checksum' > "$5"
+            /bin/link "$4" "$2" || exit $?
+            /bin/link "$5" "$3" || exit $?
+            case "$6" in
+                archive)
+                    rm -f "$2"
+                    ln -s "$4" "$2"
+                    ;;
+                checksum)
+                    rm -f "$3"
+                    ln -s "$5" "$3"
+                    ;;
+            esac
+            finalize_release_artifact_publication "$4" "$5" "$2" "$3"
+            exit $?
+            """#,
+            arguments: [
+                helper.path,
+                archive.path,
+                checksum.path,
+                stagingArchive.path,
+                stagingChecksum.path,
+                replacing,
+            ]
+        )
+
+        return FinalSymlinkReplacementScenario(
+            result: result,
+            archive: archive,
+            checksum: checksum,
+            stagingArchive: stagingArchive,
+            stagingChecksum: stagingChecksum
+        )
+    }
+
+    private func runDirectoryInjectionScenario(
+        injecting: String
+    ) throws -> DirectoryInjectionScenario {
+        let helper = url("Scripts/release-versioning.sh")
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaHarborDirectoryInjection-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let archive = root.appendingPathComponent("LumaHarbor-0.1.0.zip")
+        let checksum = root.appendingPathComponent("LumaHarbor-0.1.0.zip.sha256")
+        let stagingArchive = root.appendingPathComponent("staging-archive.zip")
+        let stagingChecksum = root.appendingPathComponent("staging-archive.zip.sha256")
+        let injected = injecting == "archive" ? archive : checksum
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            printf 'our-archive' > "$2"
+            printf 'our-checksum' > "$3"
+            injected="$6"
+            assert_release_artifacts_available() {
+                mkdir "${injected}"
+                return 0
+            }
+            publish_release_artifacts "$2" "$3" "$4" "$5"
+            exit $?
+            """#,
+            arguments: [
+                helper.path,
+                stagingArchive.path,
+                stagingChecksum.path,
+                archive.path,
+                checksum.path,
+                injected.path,
+            ]
+        )
+
+        return DirectoryInjectionScenario(
+            result: result,
+            archive: archive,
+            checksum: checksum,
+            injected: injected
         )
     }
 

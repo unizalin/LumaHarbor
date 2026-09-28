@@ -31,7 +31,7 @@
 - Consumes: `APP_NAME`, `CFBundleShortVersionString`, output archive and checksum paths.
 - Produces: Bash functions `release_archive_name <app-name> <semantic-version>` and `assert_release_artifacts_available <archive-path> <checksum-path>`.
 
-- [ ] **Step 1: Write failing process and contract tests**
+- [x] **Step 1: Write failing process and contract tests**
 
 Append tests equivalent to:
 
@@ -81,7 +81,7 @@ func testReleaseVersioningHelperProducesVersionOnlyName() throws {
 
 Add a private test helper that launches `/bin/bash` with `Process`, passes `-c`, a neutral `$0`, then the provided arguments, and captures stdout／stderr separately. Do not replace this with a source-string-only collision test.
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
 Run:
 
@@ -91,7 +91,7 @@ swift test --filter MacReleasePackagingContractTests
 
 Expected: FAIL because `Scripts/release-versioning.sh` does not exist and the package script still uses `${APP_NAME}-${VERSION}-${BUILD_NUMBER}.zip`.
 
-- [ ] **Step 3: Implement the minimal Bash helper**
+- [x] **Step 3: Implement the minimal Bash helper**
 
 Create:
 
@@ -135,7 +135,7 @@ echo "==> Product version ${VERSION}; internal build ${BUILD_NUMBER}"
 
 Package and notarize only a staging ZIP stored inside the reservation directory on the output filesystem. Publishing must create the final ZIP and checksum with create-if-absent hard links, never remove or truncate final paths, and safely roll back only final paths that still share the staging inode if either publication step or the post-publication legacy-artifact scan fails.
 
-- [ ] **Step 4: Run focused tests and shell syntax checks**
+- [x] **Step 4: Run focused tests and shell syntax checks**
 
 Run:
 
@@ -147,12 +147,14 @@ swift test --filter MacReleasePackagingContractTests
 
 Expected: all commands exit 0; focused XCTest suite PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```sh
 git add Scripts/release-versioning.sh Scripts/package-mac-release.sh Tests/LumaHarborAppTests/MacReleasePackagingContractTests.swift
 git commit -m "fix: use semantic versions for release artifacts"
 ```
+
+Evidence: commits `b8b93c9`, `e89dbf8`, and `75d9cbe`; current focused release-packaging tests verify the hardened behavior. The original RED output is not reconstructed here.
 
 **Stop condition:** Stop if the helper cannot run under `/bin/bash` 3.2, if a pre-existing archive is overwritten, or if notarization repackaging is blocked within the same invocation.
 
@@ -170,7 +172,7 @@ git commit -m "fix: use semantic versions for release artifacts"
 - Consumes: Mac `Resources/Info.plist`, iPad `Apps/LumaHarborPad.xcodeproj/project.pbxproj`, and public README artifact examples.
 - Produces: XCTest contract that independently verifies public SemVer parity, positive internal build parity, and version-only public naming.
 
-- [ ] **Step 1: Add the failing release-version contract tests**
+- [x] **Step 1: Add the failing release-version contract tests**
 
 Create a test case that loads the Mac plist with `PropertyListSerialization`, extracts repeated Xcode settings with `NSRegularExpression`, and asserts:
 
@@ -206,7 +208,7 @@ func testPublicDocumentationUsesVersionOnlyArtifactNames() throws {
 
 The `values(for:in:)` helper must capture `KEY = value;` and return every target configuration occurrence. The plist helper must throw if either required key is missing.
 
-- [ ] **Step 2: Run the contract tests and confirm RED**
+- [x] **Step 2: Run the contract tests and confirm RED**
 
 Run:
 
@@ -216,7 +218,7 @@ swift test --filter ReleaseVersionContractTests
 
 Expected: FAIL because README still documents `LumaHarbor-<version>-<build>.zip`.
 
-- [ ] **Step 3: Make the smallest README correction**
+- [x] **Step 3: Make the smallest README correction**
 
 Replace the checksum example and artifact list with:
 
@@ -229,7 +231,7 @@ shasum -a 256 LumaHarbor-<version>.zip
 
 Replace “只分享最高 build number” with a rule that only one archive exists per semantic version and any republished product requires a patch bump. Keep the maturity warning as prose; do not append `Alpha` to `0.1.0`.
 
-- [ ] **Step 4: Run Task 2 tests**
+- [x] **Step 4: Run Task 2 tests**
 
 Run:
 
@@ -240,12 +242,14 @@ swift test --filter MacReleasePackagingContractTests
 
 Expected: both suites PASS; Mac and iPad remain public version `0.1.0`, internal build `3`.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```sh
 git add Tests/LumaHarborAppTests/ReleaseVersionContractTests.swift README.md
 git commit -m "test: enforce cross-platform release versions"
 ```
+
+Evidence: commit `5bc7d82`; the current `ReleaseVersionContractTests` and `MacReleasePackagingContractTests` results are the retained verification evidence. The original RED output is not reconstructed here.
 
 **Stop condition:** Stop if Mac and iPad metadata differ, if either public version is not `x.y.z`, or if a test requires committing a signing Team or personal bundle identifier.
 
@@ -267,7 +271,7 @@ git commit -m "test: enforce cross-platform release versions"
 - Consumes: approved semantic-version spec and Task 2 contract terminology.
 - Produces: one durable cross-agent decision and consistent user／technical wording.
 
-- [ ] **Step 1: Extend the failing documentation contract**
+- [x] **Step 1: Extend the failing documentation contract**
 
 Add assertions to `ReleaseVersionContractTests` that the three durable entry points contain the exact concepts:
 
@@ -285,7 +289,7 @@ func testAgentAndWorkflowDocsSeparateProductVersionFromInternalBuild() throws {
 }
 ```
 
-- [ ] **Step 2: Run the test and confirm RED**
+- [x] **Step 2: Run the test and confirm RED**
 
 Run:
 
@@ -295,7 +299,7 @@ swift test --filter ReleaseVersionContractTests.testAgentAndWorkflowDocsSeparate
 
 Expected: FAIL because D-011 and the exact shared terminology do not yet exist.
 
-- [ ] **Step 3: Update durable documentation**
+- [x] **Step 3: Update durable documentation**
 
 Make these exact policy changes:
 
@@ -305,7 +309,7 @@ Make these exact policy changes:
 - `CURRENT.md`: write “產品版本 `0.1.0`，內部 build `3`” and remove `0.1.0 (3)` phrasing from the current section.
 - `SMALL_GROUP_ALPHA.md`: request “product version, internal build, and tested commit” as separate evidence fields. Keep “alpha” only as project maturity language.
 
-- [ ] **Step 4: Run documentation contracts and format checks**
+- [x] **Step 4: Run documentation contracts and format checks**
 
 Run:
 
@@ -318,12 +322,14 @@ rg -n '0\.1\.0 \(3\)|LumaHarbor-<version>-<build>|\$\{APP_NAME\}-\$\{VERSION\}-\
 
 Expected: tests and `git diff --check` PASS; `rg` returns no matches.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```sh
 git add AGENTS.md README.md docs/coordination/SHARED_GIT_WORKFLOW.md docs/coordination/DECISIONS.md docs/coordination/CURRENT.md docs/testing/beta/SMALL_GROUP_ALPHA.md Tests/LumaHarborAppTests/ReleaseVersionContractTests.swift
 git commit -m "docs: standardize semantic release naming"
 ```
+
+Evidence: commit `e4b4858`; current contract tests and terminology scans provide the retained verification evidence. The original RED output is not reconstructed here.
 
 **Stop condition:** Stop if documentation implies internal build can be omitted from technical evidence, if “Alpha” is removed from safety warnings rather than only version names, or if CURRENT claims any unrun product gate passed.
 

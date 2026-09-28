@@ -91,9 +91,25 @@ rollback_owned_release_artifact() {
     local staging_path="$1"
     local final_path="$2"
 
-    if [[ -e "${staging_path}" && -e "${final_path}" && "${staging_path}" -ef "${final_path}" ]]; then
+    if release_artifact_is_owned_hard_link "${staging_path}" "${final_path}"; then
         rm -f "${final_path}"
     fi
+}
+
+release_artifact_is_owned_hard_link() {
+    local staging_path="$1"
+    local final_path="$2"
+
+    [[ -f "${staging_path}" && ! -L "${staging_path}" && \
+        -f "${final_path}" && ! -L "${final_path}" && \
+        "${staging_path}" -ef "${final_path}" ]]
+}
+
+create_release_artifact_if_absent() {
+    local staging_path="$1"
+    local final_path="$2"
+
+    /bin/link "${staging_path}" "${final_path}" 2>/dev/null
 }
 
 finalize_release_artifact_publication() {
@@ -102,8 +118,8 @@ finalize_release_artifact_publication() {
     local archive_path="$3"
     local checksum_path="$4"
 
-    if [[ ! "${staging_archive_path}" -ef "${archive_path}" || \
-        ! "${staging_checksum_path}" -ef "${checksum_path}" ]]; then
+    if ! release_artifact_is_owned_hard_link "${staging_archive_path}" "${archive_path}" || \
+        ! release_artifact_is_owned_hard_link "${staging_checksum_path}" "${checksum_path}"; then
         rollback_owned_release_artifact "${staging_checksum_path}" "${checksum_path}"
         rollback_owned_release_artifact "${staging_archive_path}" "${archive_path}"
         echo "error: release artifact changed while publishing; existing bytes were preserved" >&2
@@ -134,12 +150,12 @@ publish_release_artifacts() {
 
     assert_release_artifacts_available "${archive_path}" "${checksum_path}" || return $?
 
-    if ! ln -h "${staging_archive_path}" "${archive_path}" 2>/dev/null; then
+    if ! create_release_artifact_if_absent "${staging_archive_path}" "${archive_path}"; then
         echo "error: release artifact appeared while publishing; existing bytes were preserved" >&2
         return 3
     fi
 
-    if ! ln -h "${staging_checksum_path}" "${checksum_path}" 2>/dev/null; then
+    if ! create_release_artifact_if_absent "${staging_checksum_path}" "${checksum_path}"; then
         rollback_owned_release_artifact "${staging_archive_path}" "${archive_path}"
         echo "error: release artifact appeared while publishing; existing bytes were preserved" >&2
         return 3
