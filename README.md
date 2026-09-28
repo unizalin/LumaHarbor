@@ -149,6 +149,12 @@ Scripts/verify-release-privacy.sh build/LumaHarbor.app
 
 需要真實 RAW、外接磁碟或實體 iPad 的驗收不包含在一般單元測試內。最新證據與尚未執行的人工 gate 記錄於 [`docs/coordination/CURRENT.md`](docs/coordination/CURRENT.md)。
 
+### 產品版本推送後的本機同步
+
+正式產品版本經授權推送到 `origin/main` 後，開發機上的 `/Applications/LumaHarbor.app` 應以同一個 `main` SHA 重新建置及更新，並核對版本、build number、簽章與啟動狀態。若已配對的實體 iPad 可透過 USB 或 Wi-Fi 連線，也應安裝同一個 SHA 的 signed Release、核對裝置版本與 build number，並執行啟動 smoke test。
+
+無法連接或安裝時，必須在 [`docs/coordination/CURRENT.md`](docs/coordination/CURRENT.md) 標記為 `BLOCKED` 或 `NOT RUN`，不能以模擬器或 generic build 取代真機證據。純文件或 coordination-only push 不觸發 App 重建與安裝。簽章身分、Team、provisioning 與裝置識別資訊只能保留在本機。
+
 ## 目前限制
 
 - 目前仍是發布前 Alpha，請使用相片副本或已有完整備份的圖庫。
