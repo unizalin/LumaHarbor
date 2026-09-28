@@ -182,7 +182,7 @@ func testMacAndIPadUseTheSameSemanticVersion() throws {
 
     XCTAssertTrue(mac.version.range(of: #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"#,
                                             options: .regularExpression) != nil)
-    XCTAssertEqual(Set(ipadVersions), [mac.version])
+    XCTAssertEqual(Set(ipadVersions), Set([mac.version]))
     XCTAssertEqual(ipadVersions.count, 2)
 }
 
@@ -192,7 +192,7 @@ func testMacAndIPadUseTheSamePositiveInternalBuild() throws {
     let ipadBuilds = values(for: "CURRENT_PROJECT_VERSION", in: project)
 
     XCTAssertGreaterThan(Int(mac.build) ?? 0, 0)
-    XCTAssertEqual(Set(ipadBuilds), [mac.build])
+    XCTAssertEqual(Set(ipadBuilds), Set([mac.build]))
     XCTAssertEqual(ipadBuilds.count, 2)
 }
 
