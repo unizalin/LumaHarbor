@@ -347,7 +347,7 @@ Evidence: commit `e4b4858`; current contract tests and terminology scans provide
 - Consumes: version-only packager, metadata contracts, user-authorized merge／push, local-only signing environment.
 - Produces: reproducible ZIP/checksum evidence and truthful Mac／iPad deployment states tied to the pushed `main` SHA.
 
-- [ ] **Step 1: Run focused and complete automated tests**
+- [x] **Step 1: Run focused and complete automated tests**
 
 ```sh
 swift test --filter 'MacReleasePackagingContractTests|ReleaseVersionContractTests'
@@ -357,7 +357,7 @@ swift build -Xswiftc -strict-concurrency=complete
 
 Expected: all commands exit 0; report exact executed, skipped, and failed counts.
 
-- [ ] **Step 2: Build and package in an empty isolated release directory**
+- [x] **Step 2: Build and package in an empty isolated release directory**
 
 ```sh
 RELEASE_DIR="$(mktemp -d /private/tmp/LumaHarborSemVerRelease.XXXXXX)"
@@ -369,7 +369,7 @@ test ! -e "${RELEASE_DIR}/LumaHarbor-0.1.0-3.zip"
 
 Run the package command a second time against the same directory. Expected: exit 3 with “already exists”; the first ZIP and checksum remain unchanged.
 
-- [ ] **Step 3: Verify platform builds and privacy**
+- [x] **Step 3: Verify platform builds and privacy**
 
 ```sh
 Scripts/verify-release-privacy.sh build/LumaHarbor.app
@@ -386,9 +386,11 @@ git diff --check
 
 Expected: privacy scan, generic iPad build, and diff check PASS.
 
-- [ ] **Step 4: Perform final privacy scan**
+- [x] **Step 4: Perform final privacy scan**
 
 Scan tracked additions and release artifacts for private absolute paths, signing Team, provisioning UUIDs, device identifiers, private RAW／XMP／TIFF names, and credentials. Expected: no matches. Do not print any local identifier into a committed report.
+
+Evidence: at `1648e0e`, focused tests passed 29/29; the complete suite passed 2,574 executed, 17 skipped, 0 failures; strict-concurrency and generic iPad Simulator Release builds passed. An isolated Mac package produced only the version-only ZIP and checksum, a second run exited 3 without changing either artifact, and app/archive/checksum/privacy scans passed. Steps 5-8 remain pending explicit merge/push authorization and post-push device synchronization.
 
 - [ ] **Step 5: Obtain explicit merge／push authorization**
 
