@@ -14,6 +14,7 @@ set -euo pipefail
 
 CONFIGURATION="${1:-release}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/Scripts/release-versioning.sh"
 APP_NAME="LumaHarbor"
 BUILD_DIR="${ROOT_DIR}/build"
 APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
@@ -38,9 +39,12 @@ fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${INFO_PLIST}")"
 BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${INFO_PLIST}")"
-ARCHIVE_NAME="${APP_NAME}-${VERSION}-${BUILD_NUMBER}.zip"
+ARCHIVE_NAME="$(release_archive_name "${APP_NAME}" "${VERSION}")"
 ARCHIVE_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}"
 CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
+
+assert_release_artifacts_available "${ARCHIVE_PATH}" "${CHECKSUM_PATH}"
+echo "==> Product version ${VERSION}; internal build ${BUILD_NUMBER}"
 
 cd "${ROOT_DIR}"
 mkdir -p "${OUTPUT_DIR}"

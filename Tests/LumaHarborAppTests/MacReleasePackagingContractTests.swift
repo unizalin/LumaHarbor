@@ -105,6 +105,50 @@ final class MacReleasePackagingContractTests: XCTestCase {
         }
     }
 
+    func testReleaseArchiveNameUsesOnlySemanticVersion() throws {
+        let packageScript = try text("Scripts/package-mac-release.sh")
+
+        XCTAssertTrue(
+            packageScript.contains(
+                #"ARCHIVE_NAME="$(release_archive_name "${APP_NAME}" "${VERSION}")""#
+            )
+        )
+        XCTAssertFalse(packageScript.contains(#"${APP_NAME}-${VERSION}-${BUILD_NUMBER}.zip"#))
+    }
+
+    func testReleaseVersioningHelperRejectsExistingArtifacts() throws {
+        let helper = url("Scripts/release-versioning.sh")
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumaHarborReleaseVersioning-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let archive = root.appendingPathComponent("LumaHarbor-0.1.0.zip")
+        let checksum = root.appendingPathComponent("LumaHarbor-0.1.0.zip.sha256")
+        FileManager.default.createFile(atPath: archive.path, contents: Data())
+
+        let result = try runBash(
+            #"source "$1"; assert_release_artifacts_available "$2" "$3""#,
+            arguments: [helper.path, archive.path, checksum.path]
+        )
+        XCTAssertEqual(result.status, 3)
+        XCTAssertTrue(result.stderr.contains("already exists"))
+    }
+
+    func testReleaseVersioningHelperProducesVersionOnlyName() throws {
+        let helper = url("Scripts/release-versioning.sh")
+        let result = try runBash(
+            #"source "$1"; release_archive_name LumaHarbor 0.1.0"#,
+            arguments: [helper.path]
+        )
+
+        XCTAssertEqual(result.status, 0)
+        XCTAssertEqual(
+            result.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
+            "LumaHarbor-0.1.0.zip"
+        )
+    }
+
     private func runScanner(_ scanner: URL, target: URL) throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -114,5 +158,30 @@ final class MacReleasePackagingContractTests: XCTestCase {
         try process.run()
         process.waitUntilExit()
         return process.terminationStatus
+    }
+
+    private struct BashResult {
+        let status: Int32
+        let stdout: String
+        let stderr: String
+    }
+
+    private func runBash(_ command: String, arguments: [String]) throws -> BashResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-c", command, "release-versioning-test"] + arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+
+        return BashResult(
+            status: process.terminationStatus,
+            stdout: String(decoding: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+            stderr: String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        )
     }
 }
