@@ -1,5 +1,18 @@
 # Current Coordination State
 
+## Semantic release versioning landed（2026-09-29, Codex）
+
+- **整合狀態**：`codex/semver-release-versioning` 已以 fast-forward 合併並推送至 `origin/main`，正式產品基準為 `2905314872686aa836848ebe27a8e82cddfee658`；工作樹在推送前後均乾淨。
+- **版本契約**：Mac 與 iPad 的產品版本維持 `0.1.0`，內部 build 維持 `3`。公開 Mac 產物使用 `LumaHarbor-0.1.0.zip` 與同名 `.sha256`，不再把內部 build 或 `Alpha` 放進公開版本名稱；同一發行位置的同版本產物採原子 fail-closed 發布，不覆寫既有檔案。
+- **合併後驗證**：完整 `swift test` 執行 2,574、跳過 17、失敗 0；`swift build -Xswiftc -strict-concurrency=complete`、`git diff --check` 均 PASS。
+- **Mac 同步**：從上述已推送 SHA 重建 Release；`/Applications/LumaHarbor.app` 已更新為產品版本 `0.1.0`、內部 build `3`，codesign 驗證與啟動 smoke test 均 PASS，狀態為 `INSTALLED / LAUNCHED`。舊安裝版已以可復原方式移到垃圾桶。
+- **iPad 同步**：實體 iPad 可由 CoreDevice 回應、已配對且 Developer Mode 已啟用，但 Xcode 未提供可用的實體 destination；改以 generic iOS signed Release 嘗試後，因本機 Xcode 帳號／provisioning 不含 `org.lumaharbor.LumaHarborPad` 而失敗。未修改或提交 Team、provisioning、裝置 ID 或 signing 設定，狀態為 `BLOCKED`；既有裝置安裝版不得視為本 SHA 的驗證證據。
+- **未改變的 Gate**：本輪只落地版本與發布工具，不變更 Adobe renderer、production registry、RAW／XMP 顯色或 Lightroom Gate 2；既有 Gate 2 `FAIL`／`NOT RUN` 邊界維持不變。
+
+Updated: 2026-09-29
+
+Updated by: Codex（semantic release versioning landing）
+
 ## Lightroom fail-closed integration candidate（2026-09-27, Codex）
 
 - **狀態**：`READY ONLY WITH RENDERER DISABLED`。單一乾淨 snapshot 已以 squash 整合至 `main`；Adobe renderer 預設關閉，production registry 空白，持久化 Adobe policy 只顯示請求狀態，實際 decode／preview／export 維持 Native。
