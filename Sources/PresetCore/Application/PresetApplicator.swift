@@ -197,8 +197,46 @@ public struct PresetApplicator: Sendable {
         to result: inout PhotoAdjustments,
         diagnostics: inout [PresetDiagnostic]
     ) {
+        guard rawValue.isFinite else {
+            diagnostics.append(PresetDiagnostic(
+                severity: .warning,
+                code: "invalidWhiteBalanceValue",
+                field: field,
+                detail: "requested=nonFinite"
+            ))
+            return
+        }
         guard isAbsolute else {
-            result[kind] = rawValue
+            if kind == .temperature, baseline == nil {
+                diagnostics.append(PresetDiagnostic(severity: .warning,
+                    code: "missingWhiteBalanceBaseline", field: field))
+                return
+            }
+            if kind == .temperature, let baseline {
+                guard let allowed = WhiteBalancePresentation.allowedStoredOffsetRange(
+                    baselineKelvin: baseline
+                ) else {
+                    diagnostics.append(PresetDiagnostic(
+                        severity: .warning,
+                        code: "invalidWhiteBalanceBaseline",
+                        field: field,
+                        detail: "requested=\(rawValue)"
+                    ))
+                    return
+                }
+                let clamped = min(max(rawValue, allowed.lowerBound), allowed.upperBound)
+                result[kind] = clamped
+                if clamped != rawValue {
+                    diagnostics.append(PresetDiagnostic(
+                        severity: .warning,
+                        code: "clampedWhiteBalance",
+                        field: field,
+                        detail: "requested=\(rawValue) clamped=\(clamped)"
+                    ))
+                }
+            } else {
+                result[kind] = rawValue
+            }
             return
         }
         guard let baseline else {
@@ -210,8 +248,37 @@ public struct PresetApplicator: Sendable {
             ))
             return
         }
+        guard baseline.isFinite,
+              kind != .temperature || WhiteBalancePresentation.allowedStoredOffsetRange(
+                  baselineKelvin: baseline
+              ) != nil else {
+            diagnostics.append(PresetDiagnostic(
+                severity: .warning,
+                code: "invalidWhiteBalanceBaseline",
+                field: field,
+                detail: "requested=\(rawValue)"
+            ))
+            return
+        }
         let converted = (rawValue - baseline) / span
-        let clamped = AdjustmentCatalog.definition(for: kind).clamp(converted)
+        let clamped: Double
+        if kind == .temperature {
+            guard let resolved = WhiteBalancePresentation.storedOffsetIfResolvable(
+                forKelvin: rawValue,
+                baselineKelvin: baseline
+            ) else {
+                diagnostics.append(PresetDiagnostic(
+                    severity: .warning,
+                    code: "invalidWhiteBalanceBaseline",
+                    field: field,
+                    detail: "requested=\(rawValue)"
+                ))
+                return
+            }
+            clamped = resolved
+        } else {
+            clamped = AdjustmentCatalog.definition(for: kind).clamp(converted)
+        }
         result[kind] = clamped
         if clamped != converted {
             diagnostics.append(PresetDiagnostic(

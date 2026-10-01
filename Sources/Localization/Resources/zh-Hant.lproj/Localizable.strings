@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "白平衡滴管";
 "Cancel Eyedropper" = "取消滴管";
 "Click a point that should be neutral gray" = "點選畫面上應該是中性灰的位置";
+"The sampled color is unavailable." = "無法取得取樣色彩。";
+"Choose a visible pixel inside the photo." = "請選取照片內的可見像素。";
+"Choose a brighter neutral area." = "請選取較明亮的中性區域。";
+"Choose a neutral area without clipped highlights." = "請選取沒有高光裁切的中性區域。";
 "Local Adjustments" = "局部調整";
 "Add Gradient" = "新增漸層";
 "Edit Gradients" = "編輯漸層";
@@ -610,3 +614,19 @@
 "Collision" = "同名檔案";
 "Leave blank to keep the full resolution." = "留白以保留完整解析度。";
 "Leave blank to use the encoder default." = "留白以使用編碼器預設值。";
+"Solo Mode" = "Solo 模式";
+"Pin Group" = "釘選群組";
+"Unpin Group" = "取消釘選群組";
+"Pinned" = "已釘選";
+"Value out of range." = "數值超出有效範圍。";
+"White balance was outside the supported range; preview and export are clamped." = "白平衡超出支援範圍；預覽與匯出已限制在有效範圍內。";
+"The white-balance baseline is unavailable or invalid." = "白平衡基準目前無法取得或無效。";
+"White balance baseline is still loading; relative adjustment remains available." = "白平衡基準仍在載入；目前仍可使用相對調整。";
+/* White-balance and native input validation. */
+"Enter a finite number." = "請輸入有效的有限數值。";
+"Allowed range: %@–%@ %@." = "允許範圍：%@–%@ %@。";
+"White balance is unavailable for this photo." = "這張照片無法使用白平衡調整。";
+"White balance baseline is still loading." = "正在載入白平衡基準。";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "白平衡基準無效，無法調整絕對色溫。";
+"The temperature adjustment limit has been reached." = "已達色溫調整範圍。";
+"Wait for the current preview before sampling." = "請等目前的預覽完成後再取樣。";

@@ -33,7 +33,7 @@ struct WhiteBalanceEyedropperButton: View {
         .buttonStyle(.bordered)
         .tint(isActive ? Color.accentColor : nil)
         .controlSize(.small)
-        .disabled(editor.photo == nil)
+        .disabled(editor.photo == nil || (!isActive && editor.whiteBalanceCapability != .valid))
         .help(isActive ? L10n.t("Cancel Eyedropper") : L10n.t("White Balance Eyedropper"))
     }
 }

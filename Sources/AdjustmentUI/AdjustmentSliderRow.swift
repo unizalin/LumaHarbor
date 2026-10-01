@@ -26,27 +26,68 @@ struct AdjustmentSliderRow: View {
 
     var body: some View {
         macOSResetGesture(
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(label)
-                    Spacer()
-                    AdjustmentValueInput(
-                        label: label,
-                        value: .init(get: { value }, set: onChange),
-                        range: range,
-                        fractionDigits: fractionDigits,
-                        step: step,
-                        onReset: onReset
-                    )
-                }
-                Slider(value: Binding(get: { value }, set: onChange), in: range, step: step, onEditingChanged: onEditingChanged)
-                    .accessibilityLabel(Text(label))
-                    .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))
+            Group {
+                #if os(macOS)
+                compactRow
+                #else
+                expandedRow
+                #endif
             }
             .contextMenu {
                 Button("\(L10n.t("Reset")) \(label)") { onReset() }
             }
         )
+    }
+
+    #if os(macOS)
+    private var compactRow: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(label)
+                .lineLimit(1)
+                .frame(minWidth: 92, alignment: .leading)
+            Slider(
+                value: Binding(get: { value }, set: onChange),
+                in: range,
+                step: step,
+                onEditingChanged: onEditingChanged
+            )
+            .accessibilityLabel(Text(label))
+            .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))
+            AdjustmentValueInput(
+                label: label,
+                value: .init(get: { value }, set: onChange),
+                range: range,
+                fractionDigits: fractionDigits,
+                step: step,
+                onReset: onReset
+            )
+        }
+    }
+    #endif
+
+    private var expandedRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                Spacer()
+                AdjustmentValueInput(
+                    label: label,
+                    value: .init(get: { value }, set: onChange),
+                    range: range,
+                    fractionDigits: fractionDigits,
+                    step: step,
+                    onReset: onReset
+                )
+            }
+            Slider(
+                value: Binding(get: { value }, set: onChange),
+                in: range,
+                step: step,
+                onEditingChanged: onEditingChanged
+            )
+            .accessibilityLabel(Text(label))
+            .accessibilityValue(Text(BasicAdjustmentPanelModel.formatted(value, fractionDigits: fractionDigits)))
+        }
     }
 
     private func macOSResetGesture<Content: View>(_ content: Content) -> some View {

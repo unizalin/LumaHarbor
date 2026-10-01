@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "White Balance Eyedropper";
 "Cancel Eyedropper" = "Cancel Eyedropper";
 "Click a point that should be neutral gray" = "Click a point that should be neutral gray";
+"The sampled color is unavailable." = "The sampled color is unavailable.";
+"Choose a visible pixel inside the photo." = "Choose a visible pixel inside the photo.";
+"Choose a brighter neutral area." = "Choose a brighter neutral area.";
+"Choose a neutral area without clipped highlights." = "Choose a neutral area without clipped highlights.";
 "Local Adjustments" = "Local Adjustments";
 "Add Gradient" = "Add Gradient";
 "Edit Gradients" = "Edit Gradients";
@@ -588,6 +592,10 @@
 "Has Edits" = "Has Edits";
 "No Edits" = "No Edits";
 "All Photos" = "All Photos";
+"Solo Mode" = "Solo Mode";
+"Pin Group" = "Pin Group";
+"Unpin Group" = "Unpin Group";
+"Pinned" = "Pinned";
 "Filter" = "Filter";
 "Filter photos by curation state" = "Filter photos by curation state";
 "Photo rating and flag" = "Photo rating and flag";
@@ -610,3 +618,15 @@
 "Collision" = "Existing file";
 "Leave blank to keep the full resolution." = "Leave blank to keep the full resolution.";
 "Leave blank to use the encoder default." = "Leave blank to use the encoder default.";
+"Value out of range." = "Value out of range.";
+"White balance was outside the supported range; preview and export are clamped." = "White balance was outside the supported range; preview and export are clamped.";
+"The white-balance baseline is unavailable or invalid." = "The white-balance baseline is unavailable or invalid.";
+"White balance baseline is still loading; relative adjustment remains available." = "White balance baseline is still loading; relative adjustment remains available.";
+/* White-balance and native input validation. */
+"Enter a finite number." = "Enter a finite number.";
+"Allowed range: %@–%@ %@." = "Allowed range: %@–%@ %@.";
+"White balance is unavailable for this photo." = "White balance is unavailable for this photo.";
+"White balance baseline is still loading." = "White balance baseline is still loading.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "White balance baseline is invalid; Kelvin adjustment is unavailable.";
+"The temperature adjustment limit has been reached." = "The temperature adjustment limit has been reached.";
+"Wait for the current preview before sampling." = "Wait for the current preview before sampling.";

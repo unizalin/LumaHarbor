@@ -14,6 +14,7 @@ public struct DetailAdjustmentPanel: View {
     }
 
     public var body: some View {
+        Group {
         DisclosureGroup(L10n.t("Sharpening")) {
             AdjustmentSliderRow(
                 label: L10n.t("Amount"), value: editor.adjustments.sharpening.amount,
@@ -71,5 +72,8 @@ public struct DetailAdjustmentPanel: View {
                 )
             }
         }
+        }
+        .id(editor.photo?.id)
+        .adjustmentEditingContext(editor)
     }
 }

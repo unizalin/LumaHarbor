@@ -60,6 +60,23 @@ final class SidecarRepositoryTests: TemporaryDirectoryTestCase {
         XCTAssertEqual(loaded, sidecar)
     }
 
+    func testLegacyOutOfRangeTemperatureLoadsWithoutRewritingTheSidecar() throws {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.temperature = 1_400
+        let sidecar = makeSidecar(adjustments: adjustments)
+        try repository.write(sidecar: sidecar)
+        let bytesBeforeLoad = try Data(contentsOf: repository.sidecarURL(for: sidecar.photoID))
+
+        let loaded = try XCTUnwrap(try repository.loadSidecar(for: sidecar.photoID))
+
+        XCTAssertEqual(loaded.adjustments.temperature, 1_400)
+        XCTAssertEqual(
+            try Data(contentsOf: repository.sidecarURL(for: sidecar.photoID)),
+            bytesBeforeLoad,
+            "opening a legacy sidecar must not autosave a normalized temperature"
+        )
+    }
+
     func testMissingSidecarIsNilNotAnError() throws {
         let loaded = try repository.loadSidecar(for: PhotoID())
         XCTAssertNil(loaded)

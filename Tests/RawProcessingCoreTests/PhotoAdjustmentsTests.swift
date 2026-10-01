@@ -90,6 +90,20 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(decoded.contrast, -100)
     }
 
+    func testLegacyOutOfRangeTemperatureSurvivesLoadUntilAnExplicitEdit() throws {
+        let json = Data(#"{"temperature": 1400.0}"#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+
+        XCTAssertEqual(decoded.temperature, 1_400, "loading must not silently migrate the legacy sidecar")
+        XCTAssertEqual(
+            AdjustmentMapping.renderParameters(for: decoded).temperatureOffsetKelvin,
+            63_000,
+            "the raw value remains available for the shared decoder boundary to diagnose"
+        )
+        XCTAssertEqual(decoded.setting(.exposure, to: 1).temperature, 1_400)
+        XCTAssertEqual(decoded.setting(.temperature, to: 12).temperature, 12)
+    }
+
     func testEncodingIsStableForIdenticalValues() throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

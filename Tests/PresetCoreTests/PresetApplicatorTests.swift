@@ -91,6 +91,14 @@ final class PresetApplicatorTests: XCTestCase {
 
     // MARK: - White balance context
 
+    func testNativeTemperatureWithoutBaselineIsSkippedButExposureApplies() {
+        let result = applicator.apply(AdjustmentPatch(basic: .init(exposure: 1, temperature: -100)),
+            to: PhotoAdjustments(temperature: 12), mode: .merge, context: .none)
+        XCTAssertEqual(result.adjustments.temperature, 12)
+        XCTAssertEqual(result.adjustments.exposure, 1)
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "missingWhiteBalanceBaseline" })
+    }
+
     func testContextualTemperatureConvertsAbsoluteKelvinAgainstBaseline() throws {
         let current = PhotoAdjustments.neutral
         let patch = AdjustmentPatch(basic: .init(temperature: 6000))
@@ -114,6 +122,19 @@ final class PresetApplicatorTests: XCTestCase {
         XCTAssertTrue(result.diagnostics.contains { $0.code == "missingWhiteBalanceBaseline" })
     }
 
+    func testInvalidBaselineKeepsCurrentTemperatureAndEmitsDiagnostic() throws {
+        let current = PhotoAdjustments(temperature: 12)
+        let patch = AdjustmentPatch(basic: .init(temperature: 6000))
+        let context = PresetApplicationContext(baselineTemperatureKelvin: .nan, baselineTint: 0)
+        let result = applicator.apply(
+            patch, to: current, mode: .merge, context: context,
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments.temperature, 12)
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "invalidWhiteBalanceBaseline" })
+    }
+
     func testOutOfRangeContextualTemperatureClampsAndDiagnoses() throws {
         let current = PhotoAdjustments.neutral
         let patch = AdjustmentPatch(basic: .init(temperature: 60000))
@@ -122,7 +143,28 @@ final class PresetApplicatorTests: XCTestCase {
             patch, to: current, mode: .merge, context: context,
             temperatureIsAbsoluteKelvin: true
         )
-        XCTAssertEqual(result.adjustments.temperature, 100) // clamped to the slider's max
+        XCTAssertEqual(
+            result.adjustments.temperature,
+            (WhiteBalancePresentation.maximumKelvin - 5_000) / AdjustmentMapping.kelvinPerTemperatureUnit
+        ) // clamped to the RAW offset max
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "clampedWhiteBalance" })
+    }
+
+    func testNativeRelativeTemperatureAlsoUsesThePhotoBaselineBoundary() throws {
+        let baseline = 4_536.72802734375
+        let result = applicator.apply(
+            AdjustmentPatch(basic: .init(temperature: -100)),
+            to: .neutral,
+            mode: .merge,
+            context: PresetApplicationContext(baselineTemperatureKelvin: baseline),
+            temperatureIsAbsoluteKelvin: false
+        )
+
+        XCTAssertEqual(
+            result.adjustments.temperature,
+            (WhiteBalancePresentation.minimumKelvin - baseline) / WhiteBalancePresentation.kelvinPerStoredUnit,
+            accuracy: 0.000001
+        )
         XCTAssertTrue(result.diagnostics.contains { $0.code == "clampedWhiteBalance" })
     }
 
@@ -160,7 +202,8 @@ final class PresetApplicatorTests: XCTestCase {
         let value = 1.0
         for field in AdjustmentFieldID.allCases {
             let patch = AdjustmentPatchTests.makePatch(settingOnly: field, to: value)
-            let result = applicator.apply(patch, to: .neutral, mode: .merge, context: .none)
+            let result = applicator.apply(patch, to: .neutral, mode: .merge,
+                context: .init(baselineTemperatureKelvin: 5500, baselineTint: 0))
 
             if field == .advancedToneCurve {
                 XCTAssertEqual(

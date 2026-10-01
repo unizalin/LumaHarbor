@@ -62,6 +62,27 @@ final class PadBatchContractTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("updatePhotoCuration"))
     }
 
+    func testInfoRatingControlsDoNotForceTheTrailingInspectorWiderThanItsDock() throws {
+        let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadEditorView.swift")
+        guard let start = source.range(of: "private var ratingControls: some View {") else {
+            return XCTFail("PadEditorView must define the Info-domain rating controls")
+        }
+        let tail = source[start.lowerBound...]
+        guard let end = tail.range(of: "\n    private var flagControl:") else {
+            return XCTFail("ratingControls must remain a bounded view property")
+        }
+        let ratingControls = tail[..<end.lowerBound]
+
+        XCTAssertTrue(
+            ratingControls.contains("VStack(alignment: .leading"),
+            "the rating label and six 32 pt buttons must stack vertically inside the 320 pt dock"
+        )
+        XCTAssertFalse(
+            ratingControls.contains("frame(width: 120"),
+            "a fixed label column plus six rating buttons exceeds the dock's padded content width"
+        )
+    }
+
     func testLibrarySelectionBarExposesBatchCurationActions() throws {
         let source = try Self.loadSource("Apps/LumaHarborPad.swiftpm/Sources/LumaHarborPadApp/PadLibraryGrid.swift")
         XCTAssertTrue(source.contains("applyRatingToSelected"))

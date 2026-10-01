@@ -60,7 +60,7 @@ public actor PreviewScheduler {
     @discardableResult
     public func submit(_ request: PreviewRequest) -> PreviewToken {
         generationCounter += 1
-        let token = PreviewToken(subject: request.subject, generation: generationCounter)
+        let token = PreviewToken(subject: request.subject, generation: generationCounter, contextID: request.contextID)
 
         // Switching photos: everything queued for other photos is now pointless
         // work competing for the same GPU. Cancel it before starting the new one.

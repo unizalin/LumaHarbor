@@ -10,6 +10,12 @@ struct InspectorView: View {
     @EnvironmentObject private var model: LibraryViewModel
     @State private var selectedTab: InspectorTab = .adjustments
     @State private var expandedGroups: Set<InspectorGroup> = [.basic, .color]
+    @AppStorage("workspaceSoloMode") private var soloMode = false
+    @AppStorage("workspacePinnedInspectorGroups") private var pinnedGroupRaw = ""
+
+    private var pinnedGroups: Set<InspectorGroup> {
+        Set(pinnedGroupRaw.split(separator: ",").compactMap { InspectorGroup(rawValue: String($0)) })
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,15 +54,15 @@ struct InspectorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HistogramPanel(histogram: model.editor.histogram)
                 inspectorGroup(.basic, title: L10n.t("Basic")) {
-                    BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
-                }
-                inspectorGroup(.color, title: L10n.t("Color")) {
                     HStack {
                         Text(L10n.t("White Balance")).font(.headline)
                         Spacer()
                         WhiteBalanceEyedropperButton(editor: model.editor)
                     }
                     BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.whiteBalanceKinds)
+                    BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
+                }
+                inspectorGroup(.color, title: L10n.t("Color")) {
                     ColorAdjustmentPanel(editor: model.editor)
                 }
                 inspectorGroup(.curve, title: L10n.t("Curve")) {
@@ -68,9 +74,7 @@ struct InspectorView: View {
                 inspectorGroup(.effects, title: L10n.t("Effects")) {
                     EffectsAdjustmentPanel(editor: model.editor)
                 }
-                inspectorGroup(.geometry, title: L10n.t("Geometry")) {
-                    GeometryAdjustmentPanel(editor: model.editor)
-                }
+                geometrySection
                 inspectorGroup(.local, title: L10n.t("Local Adjustments")) {
                     LocalAdjustmentsPanel(editor: model.editor)
                 }
@@ -101,13 +105,7 @@ struct InspectorView: View {
         DisclosureGroup(
             isExpanded: Binding(
                 get: { expandedGroups.contains(group) },
-                set: { isExpanded in
-                    if isExpanded {
-                        expandedGroups.insert(group)
-                    } else {
-                        expandedGroups.remove(group)
-                    }
-                }
+                set: { setExpanded(group, isExpanded: $0) }
             )
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -115,8 +113,53 @@ struct InspectorView: View {
             }
             .padding(.top, 8)
         } label: {
-            Text(title).font(.headline)
+            HStack(spacing: 6) {
+                Text(title).font(.headline)
+                if pinnedGroups.contains(group) {
+                    Image(systemName: "pin.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text(L10n.t("Pinned")))
+                }
+            }
+            .contextMenu {
+                Button(
+                    pinnedGroups.contains(group)
+                        ? L10n.t("Unpin Group")
+                        : L10n.t("Pin Group")
+                ) {
+                    togglePinned(group)
+                }
+            }
         }
+    }
+
+    private var geometrySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.t("Geometry"))
+                .font(.headline)
+            GeometryAdjustmentPanel(editor: model.editor)
+        }
+    }
+
+    private func setExpanded(_ group: InspectorGroup, isExpanded: Bool) {
+        var state = InspectorLayoutState(
+            expandedGroups: expandedGroups,
+            pinnedGroups: pinnedGroups,
+            soloMode: soloMode
+        )
+        state.setExpanded(group, isExpanded: isExpanded)
+        expandedGroups = state.expandedGroups
+    }
+
+    private func togglePinned(_ group: InspectorGroup) {
+        var state = InspectorLayoutState(
+            expandedGroups: expandedGroups,
+            pinnedGroups: pinnedGroups,
+            soloMode: soloMode
+        )
+        state.togglePinned(group)
+        pinnedGroupRaw = state.pinnedGroups.map(\.rawValue).sorted().joined(separator: ",")
     }
 
     private var header: some View {
@@ -130,6 +173,12 @@ struct InspectorView: View {
             }
             .controlSize(.small)
             .disabled(selectedTab != .adjustments || model.editor.photo == nil || !model.editor.hasEdits)
+            Menu {
+                Toggle(L10n.t("Solo Mode"), isOn: $soloMode)
+            } label: {
+                Label(L10n.t("Workspace"), systemImage: "rectangle.split.3x1")
+            }
+            .controlSize(.small)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -178,10 +227,6 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
         case .metadata: return L10n.t("Metadata")
         }
     }
-}
-
-private enum InspectorGroup: Hashable {
-    case basic, color, curve, detail, effects, geometry, local
 }
 
 private enum MacBasicAdjustmentPanel {

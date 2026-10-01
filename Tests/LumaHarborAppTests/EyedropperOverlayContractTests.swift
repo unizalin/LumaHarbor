@@ -44,9 +44,17 @@ final class EyedropperOverlayContractTests: XCTestCase {
         XCTAssertTrue(source.contains("editor.previewEyedropper("), "a drag in progress must only preview, never write to history")
         XCTAssertTrue(source.contains(".onChanged"))
         XCTAssertTrue(source.contains(".onEnded"))
-        XCTAssertTrue(source.contains("editor.commitEyedropper()"), "release must be the one place that commits")
+        XCTAssertTrue(source.contains("editor.commitEyedropper(context: snapshot.context)"), "release must commit only its original gesture context")
         XCTAssertTrue(source.contains("PixelSampler.sample("), "must sample the actually-displayed image, not a hardcoded/mocked colour")
         XCTAssertTrue(source.contains("AspectFitRect.imagePixel("), "must map the click location to a pixel coordinate through the shared, tested helper")
+    }
+
+    func testEyedropperDragPinsOneSourceFrameAndRejectsOutOfFrameSamples() throws {
+        let source = try Self.loadSource("Sources/LumaHarborApp/Views/EyedropperOverlayView.swift")
+
+        XCTAssertTrue(source.contains("samplingSnapshot"), "a drag must keep sampling the frame captured at press time")
+        XCTAssertTrue(source.contains("snapshot.imageFrame.contains(location)"), "coordinates outside the fitted photo must not clamp to an edge pixel")
+        XCTAssertTrue(source.contains("editor.rejectEyedropperSample(.outOfRange, context: snapshot.context)"), "a failed pixel read must invalidate only its live candidate")
     }
 
     /// The explicit cancel path (design spec §6.4: "使用者必須能取消滴管") --

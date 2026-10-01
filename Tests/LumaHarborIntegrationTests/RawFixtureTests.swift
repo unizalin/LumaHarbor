@@ -145,6 +145,71 @@ final class RawFixtureTests: TemporaryDirectoryTestCase {
 
     // MARK: - Export
 
+    func testDirectRawRequestsClampToRealKelvinEndpointsAndRejectNonFiniteValues() throws {
+        let url = try firstSonyFixture()
+        let original = try Data(contentsOf: url)
+        let decoder = CoreImageRawDecoder()
+        let renderer = ImageRenderService()
+        let quality = DecodeQuality.highQuality(maximumPixelDimension: 128)
+        let baseline = try decoder.decode(RawDecodeRequest(url: url, quality: quality)).baselineTemperature
+        for (kelvin, outside) in [(2000.0, -1_000_000.0), (50000.0, 1_000_000.0)] {
+            let exact = try decoder.decode(RawDecodeRequest(url: url, quality: quality,
+                whiteBalance: RawWhiteBalance(temperatureOffsetKelvin: kelvin - baseline)))
+            let limited = try decoder.decode(RawDecodeRequest(url: url, quality: quality,
+                whiteBalance: RawWhiteBalance(temperatureOffsetKelvin: outside)))
+            let exactPixels = try renderer.makeCGImage(exact.image)
+            let limitedPixels = try renderer.makeCGImage(limited.image)
+            XCTAssertEqual(exactPixels.dataProvider?.data as Data?, limitedPixels.dataProvider?.data as Data?)
+            let resolved = try XCTUnwrap(CoreImageRawDecoder.resolvedWhiteBalance(
+                for: .init(temperatureOffsetKelvin: outside), baselineTemperature: baseline, baselineTint: exact.baselineTint))
+            XCTAssertEqual(Double(Float(baseline + resolved.temperatureOffsetKelvin)), kelvin, accuracy: 0.01)
+        }
+        for invalid in [Double.nan, .infinity, -.infinity] {
+            XCTAssertThrowsError(try decoder.decode(RawDecodeRequest(url: url, quality: quality,
+                whiteBalance: .init(temperatureOffsetKelvin: invalid))))
+            XCTAssertThrowsError(try decoder.decode(RawDecodeRequest(url: url, quality: quality,
+                whiteBalance: .init(tintOffset: invalid))))
+        }
+        XCTAssertEqual(try Data(contentsOf: url), original, "RAW contents must remain byte-identical")
+    }
+
+    func testPreviewAndBackgroundExportUseTheSameWhiteBalanceEndpointLimits() async throws {
+        let url = try firstSonyFixture()
+        let original = try Data(contentsOf: url)
+        let baseline = try CoreImageRawDecoder().decode(RawDecodeRequest(url: url,
+            quality: .thumbnail(maximumPixelDimension: 128))).baselineTemperature
+        let directory = try makeSubdirectory("WhiteBalanceExports")
+        let exporter = PhotoExporter()
+        let previewer = CoreImagePreviewRenderer()
+        for (kelvin, rawOffset) in [(2000.0, -2000.0), (50000.0, 2000.0)] {
+            var legacy = PhotoAdjustments.neutral
+            legacy.temperature = rawOffset
+            var effective = PhotoAdjustments.neutral
+            effective.temperature = (kelvin - baseline) / 45
+            let subject = PreviewSubject(UUID())
+            let rawPreview = try await previewer.render(PreviewRequest(subject: subject, url: url,
+                adjustments: legacy, targetPixelDimension: 128, quality: .high))
+            let effectivePreview = try await previewer.render(PreviewRequest(subject: subject, url: url,
+                adjustments: effective, targetPixelDimension: 128, quality: .high))
+            XCTAssertEqual(rawPreview.cgImage.dataProvider?.data as Data?,
+                effectivePreview.cgImage.dataProvider?.data as Data?)
+            let rawExport = try await exporter.export(ExportRequest(sourceURL: url, adjustments: legacy,
+                destinationDirectory: directory, baseFilename: "legacy-\(Int(kelvin))", format: .png,
+                maximumWidth: 128, maximumHeight: 128))
+            let effectiveExport = try await exporter.export(ExportRequest(sourceURL: url, adjustments: effective,
+                destinationDirectory: directory, baseFilename: "effective-\(Int(kelvin))", format: .png,
+                maximumWidth: 128, maximumHeight: 128))
+            func pixels(_ output: ExportOutcome) throws -> Data {
+                let source = try XCTUnwrap(CGImageSourceCreateWithURL(output.url as CFURL, nil))
+                let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+                return try XCTUnwrap(image.dataProvider?.data as Data?)
+            }
+            XCTAssertEqual(try pixels(rawExport), try pixels(effectiveExport))
+            XCTAssertEqual(legacy.temperature, rawOffset, "export must not mutate the preserved recipe")
+        }
+        XCTAssertEqual(try Data(contentsOf: url), original)
+    }
+
     func testFullResolutionExportMatchesTheSourceDimensions() async throws {
         // Spec §13.7: export from the full-resolution RAW, tagged sRGB.
         let url = try firstSonyFixture()

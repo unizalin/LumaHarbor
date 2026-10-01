@@ -145,4 +145,12 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
         XCTAssertTrue(source.contains("Button(L10n.t(\"Reset\")"))
         XCTAssertTrue(source.contains("isIdentity"), "the panel's own Reset must disable once geometry is already neutral")
     }
+
+    func testGeometryOpensCropAndStraightenByDefault() throws {
+        let source = try Self.loadSource("GeometryAdjustmentPanel.swift")
+
+        XCTAssertTrue(source.contains("isStraightenExpanded = true"), "straighten should be immediately available when Geometry opens")
+        XCTAssertTrue(source.contains("isCropExpanded = true"), "crop should be immediately available when Geometry opens")
+        XCTAssertTrue(source.contains("DisclosureGroup(isExpanded:"), "geometry expansion state must be explicit rather than relying on an opaque default")
+    }
 }

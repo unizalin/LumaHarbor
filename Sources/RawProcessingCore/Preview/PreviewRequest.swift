@@ -32,10 +32,14 @@ public enum PreviewQuality: Int, Comparable, Sendable, CaseIterable {
 public struct PreviewToken: Hashable, Sendable {
     public let subject: PreviewSubject
     public let generation: UInt64
+    /// Ephemeral caller context, registered before the scheduler actor hop.
+    /// It supplements, but never replaces, generation and subject validation.
+    public let contextID: UUID?
 
-    public init(subject: PreviewSubject, generation: UInt64) {
+    public init(subject: PreviewSubject, generation: UInt64, contextID: UUID? = nil) {
         self.subject = subject
         self.generation = generation
+        self.contextID = contextID
     }
 }
 
@@ -46,19 +50,22 @@ public struct PreviewRequest: Sendable {
     /// Longest edge, in pixels, the preview should cover.
     public var targetPixelDimension: Int
     public var quality: PreviewQuality
+    public var contextID: UUID?
 
     public init(
         subject: PreviewSubject,
         url: URL,
         adjustments: PhotoAdjustments,
         targetPixelDimension: Int,
-        quality: PreviewQuality
+        quality: PreviewQuality,
+        contextID: UUID? = nil
     ) {
         self.subject = subject
         self.url = url
         self.adjustments = adjustments
         self.targetPixelDimension = targetPixelDimension
         self.quality = quality
+        self.contextID = contextID
     }
 
     public var decodeQuality: DecodeQuality {

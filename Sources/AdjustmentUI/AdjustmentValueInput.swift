@@ -1,19 +1,21 @@
 import Localization
 import SwiftUI
 
-/// A compact, keyboard-friendly numeric editor for one adjustment value.
-/// Invalid input is never sent to the editor; committing it restores the last
-/// valid value. Slider changes update the field once editing has ended so a
-/// partially typed decimal is not destroyed mid-entry.
+/// Shared layout around a native numeric field. Draft ownership and event
+/// ordering live in AdjustmentInputState, not deferred SwiftUI onChange hooks.
+@MainActor
 public struct AdjustmentValueInput: View {
     @Binding private var value: Double
+    @Environment(\.adjustmentEditingContext) private var editingContext
     private let range: ClosedRange<Double>
     private let fractionDigits: Int
     private let step: Double
     private let label: String
+    private let identity: AnyHashable
+    private let revision: UInt64
+    private let unit: String
     private let onReset: () -> Void
-    @State private var text: String
-    @State private var isEditing = false
+    @StateObject private var controller: AdjustmentInputController
 
     public init(
         label: String,
@@ -21,7 +23,10 @@ public struct AdjustmentValueInput: View {
         range: ClosedRange<Double>,
         fractionDigits: Int,
         step: Double = 0.1,
-        onReset: @escaping () -> Void
+        onReset: @escaping () -> Void,
+        identity: AnyHashable = AnyHashable("default"),
+        revision: UInt64 = 0,
+        unit: String = ""
     ) {
         self.label = label
         self._value = value
@@ -29,101 +34,99 @@ public struct AdjustmentValueInput: View {
         self.fractionDigits = fractionDigits
         self.step = step.isFinite && step > 0 ? step : 0.1
         self.onReset = onReset
-        self._text = State(initialValue: PadAdjustmentPolicy.formatted(value.wrappedValue, fractionDigits: fractionDigits))
+        self.identity = identity
+        self.revision = revision
+        self.unit = unit
+        self._controller = StateObject(wrappedValue: AdjustmentInputController(
+            value: value, range: range, fractionDigits: fractionDigits,
+            identity: identity, revision: revision, unit: unit))
     }
 
     public var body: some View {
-        HStack(spacing: 6) {
-            stepButton(
-                systemName: "minus",
-                accessibilityKey: "Decrease",
-                action: { adjust(by: -step) }
-            )
-
-            TextField(label, text: $text, onEditingChanged: { editing in
-                isEditing = editing
-                if !editing { commit() }
-            }, onCommit: commit)
-            .multilineTextAlignment(.trailing)
-            .textFieldStyle(.plain)
-            .font(.body.monospacedDigit())
-            .padding(.horizontal, 10)
-            .frame(minWidth: 56, idealWidth: 72, maxWidth: 72, minHeight: 36, idealHeight: 36, maxHeight: 36)
-            .background(
-                Color.primary.opacity(0.08),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
+        HStack(spacing: AdjustmentControlMetrics.actionSpacing) {
             #if os(iOS)
-            .keyboardType(.numbersAndPunctuation)
+            stepButton(systemName: "minus", accessibilityKey: "Decrease", delta: -step)
             #endif
-            .accessibilityLabel(Text(label))
-            .accessibilityValue(Text(text))
 
-            stepButton(
-                systemName: "plus",
-                accessibilityKey: "Increase",
-                action: { adjust(by: step) }
-            )
+            AdjustmentNativeTextField(controller: controller, label: label, value: $value,
+                range: range, fractionDigits: fractionDigits, identity: identity,
+                revision: currentContext().1, unit: unit, readContext: contextReader)
+                .padding(.horizontal, 10)
+                .frame(width: AdjustmentControlMetrics.numericFieldWidth)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+            #if os(iOS)
+            stepButton(systemName: "plus", accessibilityKey: "Increase", delta: step)
+            #endif
 
             Button {
+                controller.cancel()
                 onReset()
-                text = PadAdjustmentPolicy.formatted(value, fractionDigits: fractionDigits)
+                configureController()
             } label: {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 30, height: 30)
+                    .frame(width: AdjustmentControlMetrics.resetVisualDiameter,
+                           height: AdjustmentControlMetrics.resetVisualDiameter)
                     .background(Color.accentColor.opacity(0.12), in: Circle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.tint)
-            .frame(width: 44, height: 44)
+            .frame(width: AdjustmentControlMetrics.resetHitTarget,
+                   height: AdjustmentControlMetrics.resetHitTarget)
             .contentShape(Rectangle())
             .accessibilityLabel(Text("\(label) \(L10n.t("Reset"))"))
         }
-        .onChange(of: value) { _, newValue in
-            guard !isEditing else { return }
-            text = PadAdjustmentPolicy.formatted(newValue, fractionDigits: fractionDigits)
+        #if os(macOS)
+        .accessibilityAdjustableAction { direction in
+            configureController()
+            switch direction {
+            case .increment: controller.nudge(by: step)
+            case .decrement: controller.nudge(by: -step)
+            @unknown default: break
+            }
+        }
+        #endif
+    }
+
+    private func configureController() {
+        controller.configure(value: $value, range: range, fractionDigits: fractionDigits,
+            identity: currentContext().0, revision: currentContext().1, unit: unit,
+            readContext: contextReader)
+    }
+
+    private func currentContext() -> (AnyHashable, UInt64) {
+        contextReader()
+    }
+
+    private var contextReader: () -> (AnyHashable, UInt64) {
+        // The controller retains this reader. Capture only the context inputs,
+        // not the entire View containing its own StateObject controller.
+        let identity = identity
+        let label = label
+        let revision = revision
+        let context = editingContext
+        return {
+            (AnyHashable([identity, AnyHashable(label), AnyHashable(context.identity())]),
+             revision &+ context.revision())
         }
     }
 
-    private func commit() {
-        guard let parsed = PadAdjustmentPolicy.parse(text, range: range, fractionDigits: fractionDigits) else {
-            text = PadAdjustmentPolicy.formatted(value, fractionDigits: fractionDigits)
-            return
-        }
-        value = parsed
-        text = PadAdjustmentPolicy.formatted(parsed, fractionDigits: fractionDigits)
-    }
-
-    private func adjust(by delta: Double) {
-        // Commit a partially typed value first, so a nudge always starts from
-        // what the user sees instead of the last slider tick.
-        if isEditing { commit() }
-        let adjusted = PadAdjustmentPolicy.adjusted(
-            value,
-            by: delta,
-            range: range,
-            fractionDigits: fractionDigits
-        )
-        value = adjusted
-        text = PadAdjustmentPolicy.formatted(adjusted, fractionDigits: fractionDigits)
-    }
-
-    @ViewBuilder
-    private func stepButton(
-        systemName: String,
-        accessibilityKey: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
+    private func stepButton(systemName: String, accessibilityKey: String, delta: Double) -> some View {
+        Button {
+            configureController()
+            controller.nudge(by: delta)
+        } label: {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .semibold))
-                .frame(width: 30, height: 30)
+                .frame(width: AdjustmentControlMetrics.nudgeVisualDiameter,
+                       height: AdjustmentControlMetrics.nudgeVisualDiameter)
                 .background(Color.primary.opacity(0.08), in: Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .frame(width: 44, height: 44)
+        .frame(width: AdjustmentControlMetrics.nudgeHitTarget,
+               height: AdjustmentControlMetrics.nudgeHitTarget)
         .contentShape(Rectangle())
         .accessibilityLabel(Text("\(L10n.t(accessibilityKey)) \(label)"))
         .help("\(L10n.t(accessibilityKey)) \(label)")

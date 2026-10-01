@@ -47,6 +47,30 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
         XCTAssertTrue(panelSource.contains("editor.endAdjustmentGesture()"))
     }
 
+    func testTemperatureUsesAbsoluteKelvinPresentationInsteadOfTheGenericSignedField() throws {
+        let panelSource = try panelSource()
+
+        XCTAssertTrue(panelSource.contains("WhiteBalancePresentation"))
+        XCTAssertTrue(panelSource.contains("temperatureRow"))
+        XCTAssertFalse(
+            panelSource.contains("row(definition)\n            }\n        }\n    }"),
+            "temperature must not silently use the generic ±100 text field"
+        )
+    }
+
+    func testTemperatureDoesNotInventKelvinBeforeARAWBaselineArrives() throws {
+        let panelSource = try panelSource()
+
+        XCTAssertTrue(
+            panelSource.contains("if let baseline"),
+            "Kelvin presentation must be gated on a decoder-provided white-balance baseline"
+        )
+        XCTAssertFalse(
+            panelSource.contains("defaultBaselineKelvin"),
+            "the view must not show a fabricated default Kelvin value"
+        )
+    }
+
     private func panelSource() throws -> String {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

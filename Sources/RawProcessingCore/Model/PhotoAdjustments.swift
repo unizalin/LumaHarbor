@@ -122,14 +122,21 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     }
 
     public func clamped() -> PhotoAdjustments {
-        PhotoAdjustments(
-            exposure: exposure, temperature: temperature, tint: tint, contrast: contrast,
+        var copy = PhotoAdjustments(
+            exposure: exposure, temperature: 0, tint: tint, contrast: contrast,
             highlights: highlights, shadows: shadows, whites: whites, blacks: blacks,
             vibrance: vibrance, saturation: saturation,
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
             grain: grain, geometry: geometry, localAdjustments: localAdjustments
         )
+        // A finite, out-of-range temperature can originate in a legacy
+        // sidecar. Keep it intact until the white-balance resolver sees the
+        // decoder's actual baseline; silently clamping here would migrate the
+        // sidecar merely because it was previewed. Non-finite values still
+        // collapse to the neutral default as the corruption safeguard.
+        copy.temperature = temperature.isFinite ? temperature : AdjustmentCatalog.definition(for: .temperature).defaultValue
+        return copy
     }
 
     /// Kinds that currently differ from their default.
@@ -162,7 +169,15 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         }
 
         self.exposure = try value(.exposure, .exposure)
-        self.temperature = try value(.temperature, .temperature)
+        // Preserve a finite legacy temperature verbatim. The value is a
+        // decoder-relative offset, so its safety depends on the RAW baseline
+        // that is only available later in the render path. Explicit UI/model
+        // edits still use the normal catalogue-clamping initializer/subscript.
+        let temperatureDefinition = AdjustmentCatalog.definition(for: .temperature)
+        let rawTemperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+        self.temperature = rawTemperature?.isFinite == true
+            ? rawTemperature!
+            : temperatureDefinition.defaultValue
         self.tint = try value(.tint, .tint)
         self.contrast = try value(.contrast, .contrast)
         self.highlights = try value(.highlights, .highlights)

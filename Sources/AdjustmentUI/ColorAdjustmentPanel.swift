@@ -31,6 +31,8 @@ public struct ColorAdjustmentPanel: View {
                 bandRow(band.keyPath, fieldKey: "Luminance") { $0.luminance }
             }
         }
+        .id(editor.photo?.id)
+        .adjustmentEditingContext(editor)
     }
 
     private func bandRow(

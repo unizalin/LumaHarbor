@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "Weißabgleich-Pipette";
 "Cancel Eyedropper" = "Pipette abbrechen";
 "Click a point that should be neutral gray" = "Klicken Sie auf einen Punkt, der neutralgrau sein sollte";
+"The sampled color is unavailable." = "Die abgetastete Farbe ist nicht verfügbar.";
+"Choose a visible pixel inside the photo." = "Wähle ein sichtbares Pixel innerhalb des Fotos.";
+"Choose a brighter neutral area." = "Wähle einen helleren neutralen Bereich.";
+"Choose a neutral area without clipped highlights." = "Wähle einen neutralen Bereich ohne ausgefressene Lichter.";
 "Local Adjustments" = "Lokale Anpassungen";
 "Add Gradient" = "Verlauf hinzufügen";
 "Edit Gradients" = "Verläufe bearbeiten";
@@ -610,3 +614,19 @@
 "Collision" = "Dateikonflikt";
 "Leave blank to keep the full resolution." = "Leer lassen, um die volle Auflösung beizubehalten.";
 "Leave blank to use the encoder default." = "Leer lassen, um den Encoder-Standard zu verwenden.";
+"Solo Mode" = "Solo-Modus";
+"Pin Group" = "Gruppe anheften";
+"Unpin Group" = "Gruppe lösen";
+"Pinned" = "Angeheftet";
+"Value out of range." = "Wert außerhalb des gültigen Bereichs.";
+"White balance was outside the supported range; preview and export are clamped." = "Der Weißabgleich liegt außerhalb des unterstützten Bereichs; Vorschau und Export werden begrenzt.";
+"The white-balance baseline is unavailable or invalid." = "Der Weißabgleich-Basiswert ist nicht verfügbar oder ungültig.";
+"White balance baseline is still loading; relative adjustment remains available." = "Der Weißabgleich-Basiswert wird noch geladen; die relative Anpassung ist weiterhin verfügbar.";
+/* White-balance and native input validation. */
+"Enter a finite number." = "Gib eine endliche Zahl ein.";
+"Allowed range: %@–%@ %@." = "Zulässiger Bereich: %@–%@ %@.";
+"White balance is unavailable for this photo." = "Für dieses Foto ist kein Weißabgleich verfügbar.";
+"White balance baseline is still loading." = "Die Weißabgleichsbasis wird noch geladen.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "Die Weißabgleichsbasis ist ungültig; eine Kelvin-Anpassung ist nicht verfügbar.";
+"The temperature adjustment limit has been reached." = "Die Grenze der Farbtemperaturanpassung ist erreicht.";
+"Wait for the current preview before sampling." = "Warte vor der Probenahme auf die aktuelle Vorschau.";

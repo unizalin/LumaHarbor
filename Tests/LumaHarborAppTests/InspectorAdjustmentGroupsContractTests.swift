@@ -38,6 +38,27 @@ final class InspectorAdjustmentGroupsContractTests: XCTestCase {
         XCTAssertTrue(source.contains("BasicAdjustmentPanel(editor:"), "the Basic group must mount BasicAdjustmentPanel, which already covers every AdjustmentKind")
     }
 
+    func testWhiteBalanceIsMountedInsideTheBasicAdjustmentFlow() throws {
+        let source = try Self.inspectorSource()
+        guard
+            let basicStart = source.range(of: "inspectorGroup(.basic"),
+            let colorStart = source.range(of: "inspectorGroup(.color")
+        else {
+            XCTFail("InspectorView must retain Basic and Color groups")
+            return
+        }
+
+        let basicSource = String(source[basicStart.lowerBound..<colorStart.lowerBound])
+        XCTAssertTrue(
+            basicSource.contains("whiteBalanceKinds"),
+            "white balance must be reachable in the Basic group before tone controls"
+        )
+        XCTAssertTrue(
+            basicSource.contains("WhiteBalanceEyedropperButton"),
+            "the Basic group must keep the white-balance eyedropper beside the controls"
+        )
+    }
+
     /// The four groups the design spec adds beyond the ten basic sliders --
     /// each must have its own localized header and mount its own panel.
     func testInspectorViewMountsEveryNewGroupWithALocalizedHeader() throws {
@@ -60,6 +81,23 @@ final class InspectorAdjustmentGroupsContractTests: XCTestCase {
                 "the \(group.header) group must actually mount \(group.panelConstructorPrefix)…)"
             )
         }
+    }
+
+    func testInspectorOffersSoloModeAndPersistentGroupPinning() throws {
+        let source = try Self.inspectorSource()
+
+        XCTAssertTrue(source.contains("soloMode"), "Solo Mode must be a workspace preference, not photo state")
+        XCTAssertTrue(source.contains("workspaceSoloMode"), "Solo Mode needs a stable persisted workspace key")
+        XCTAssertTrue(source.contains("pinnedGroups"), "the inspector must track pinned groups separately from expansion state")
+        XCTAssertTrue(source.contains("Pin Group"))
+        XCTAssertTrue(source.contains("Unpin Group"))
+    }
+
+    func testGeometryIsNotWrappedInAnAdditionalSameNameDisclosureGroup() throws {
+        let source = try Self.inspectorSource()
+
+        XCTAssertTrue(source.contains("geometrySection"), "Geometry should have a direct section entry")
+        XCTAssertFalse(source.contains("inspectorGroup(.geometry"), "Geometry must not be nested in a same-name outer disclosure")
     }
 
     /// Every new panel referenced by `InspectorView` must actually exist as

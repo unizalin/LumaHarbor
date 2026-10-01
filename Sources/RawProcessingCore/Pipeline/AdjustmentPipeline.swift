@@ -110,35 +110,21 @@ public struct AdjustmentPipeline: Sendable {
 
         // 8. Sharpening (spec §4.2 step 8) — a post-colour detail effect, so it
         // runs after the perceptual stage and its own linear round-trip, not
-        // inside it. CISharpenLuminance exposes exactly two knobs
-        // (`inputSharpness`, `inputRadius`), so only `amount` and `radius` are
-        // read here: `Sharpening.detail` and `Sharpening.masking` have no
-        // corresponding filter parameter in this implementation. They are still
-        // decoded, clamped and round-tripped so a Lightroom-authored sidecar or
-        // (next spec) an imported `.xmp` keeps them intact for a future
-        // implementation that can honour them, rather than silently dropping
-        // them on the first save.
+        // inside it. Core Image exposes the amount/radius pair directly; detail
+        // is layered through an unsharp-mask pass and masking limits that result
+        // to an edge-derived alpha mask. This is an approximation of Lightroom's
+        // frequency-aware sharpening, but every stored control now changes the
+        // rendered image instead of being silently ignored.
         if !parameters.isSharpeningIdentity {
-            let filter = CIFilter.sharpenLuminance()
-            filter.inputImage = working
-            filter.sharpness = Float(parameters.sharpening.amount * AdjustmentMapping.sharpenLuminanceSharpnessSpan)
-            filter.radius = Float(parameters.sharpening.radius * scaleFactor)
-            working = filter.outputImage ?? working
+            working = Self.applySharpening(parameters.sharpening, to: working, scaleFactor: scaleFactor)
         }
 
-        // 9. Noise reduction (spec §4.2 step 9). CINoiseReduction exposes one
-        // noise-level knob and one sharpness knob, not independent
-        // luminance/colour controls, so both amounts are averaged into the
-        // former and both detail values into the latter (see the span
-        // constants' doc comments in AdjustmentMapping).
+        // 9. Noise reduction (spec §4.2 step 9). Core Image's noise-reduction
+        // filter has one noise-level/sharpness pair, so run separate passes for
+        // the luminance and colour controls rather than averaging the two (which
+        // made equal-looking edits produce byte-identical output).
         if !parameters.isNoiseReductionIdentity {
-            let filter = CIFilter.noiseReduction()
-            filter.inputImage = working
-            let averageAmount = (parameters.noiseReduction.luminanceAmount + parameters.noiseReduction.colorAmount) / 2
-            let averageDetail = (parameters.noiseReduction.luminanceDetail + parameters.noiseReduction.colorDetail) / 2
-            filter.noiseLevel = Float(averageAmount * AdjustmentMapping.noiseReductionNoiseLevelSpan)
-            filter.sharpness = Float(averageDetail * AdjustmentMapping.noiseReductionSharpnessSpan)
-            working = filter.outputImage ?? working
+            working = Self.applyNoiseReduction(parameters.noiseReduction, to: working)
         }
 
         // 10. Vignette (spec §4.2 step 10). Built with an explicit radial-alpha
@@ -156,6 +142,82 @@ public struct AdjustmentPipeline: Sendable {
         // amountScale's magnitude, making the grain read more strongly.
         if !parameters.isGrainIdentity {
             working = Self.applyGrain(parameters.grain, to: working, scaleFactor: scaleFactor)
+        }
+
+        return working
+    }
+
+    private static func applySharpening(
+        _ sharpening: Sharpening,
+        to image: CIImage,
+        scaleFactor: Double
+    ) -> CIImage {
+        let radius = Float(sharpening.radius * scaleFactor)
+        let amount = Float(sharpening.amount * AdjustmentMapping.sharpenLuminanceSharpnessSpan)
+        let detailFraction = Float(sharpening.detail / 100)
+
+        let base = CIFilter.sharpenLuminance()
+        base.inputImage = image
+        // Keep the familiar Sharpen Luminance response while allowing Detail
+        // to move the pass from broad structure (0) toward fine edges (100).
+        base.sharpness = amount * (0.65 + detailFraction * 0.35)
+        base.radius = radius
+        var sharpened = base.outputImage ?? image
+
+        if detailFraction > 0 {
+            let detailPass = CIFilter.unsharpMask()
+            detailPass.inputImage = sharpened
+            detailPass.radius = radius
+            detailPass.intensity = amount * detailFraction
+            sharpened = detailPass.outputImage ?? sharpened
+        }
+
+        guard sharpening.masking > 0 else { return sharpened }
+        let extent = image.extent
+
+        // CIEdges produces a grayscale edge image. Converting it to alpha and
+        // mixing it with a white base gives masking=0 a full-strength mask and
+        // masking=100 an edge-only mask.
+        let edges = CIFilter.edges()
+        edges.inputImage = image
+        edges.intensity = 1
+        let toAlpha = CIFilter.maskToAlpha()
+        toAlpha.inputImage = edges.outputImage
+        guard let edgeMask = toAlpha.outputImage else { return sharpened }
+
+        let unrestrictedAlpha = CGFloat(1 - sharpening.masking / 100)
+        let unrestricted = CIImage(
+            color: CIColor(red: 1, green: 1, blue: 1, alpha: unrestrictedAlpha)
+        ).cropped(to: extent)
+        let maskComposite = CIFilter.sourceOverCompositing()
+        maskComposite.inputImage = unrestricted
+        maskComposite.backgroundImage = edgeMask.cropped(to: extent)
+        guard let mask = maskComposite.outputImage else { return sharpened }
+
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = sharpened
+        blend.backgroundImage = image
+        blend.maskImage = mask
+        return blend.outputImage ?? sharpened
+    }
+
+    private static func applyNoiseReduction(_ noise: NoiseReduction, to image: CIImage) -> CIImage {
+        var working = image
+
+        if noise.luminanceAmount > 0 {
+            let filter = CIFilter.noiseReduction()
+            filter.inputImage = working
+            filter.noiseLevel = Float(noise.luminanceAmount * AdjustmentMapping.noiseReductionNoiseLevelSpan)
+            filter.sharpness = Float(noise.luminanceDetail * AdjustmentMapping.noiseReductionSharpnessSpan)
+            working = filter.outputImage ?? working
+        }
+
+        if noise.colorAmount > 0 {
+            let filter = CIFilter.noiseReduction()
+            filter.inputImage = working
+            filter.noiseLevel = Float(noise.colorAmount * AdjustmentMapping.noiseReductionNoiseLevelSpan)
+            filter.sharpness = Float(noise.colorDetail * AdjustmentMapping.noiseReductionSharpnessSpan)
+            working = filter.outputImage ?? working
         }
 
         return working

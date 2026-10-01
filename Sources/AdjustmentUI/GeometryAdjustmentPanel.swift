@@ -13,6 +13,9 @@ import SwiftUI
 /// own.
 public struct GeometryAdjustmentPanel: View {
     @ObservedObject private var editor: EditorSession
+    @State private var isRotateExpanded = false
+    @State private var isStraightenExpanded = true
+    @State private var isCropExpanded = true
 
     public init(editor: EditorSession) {
         self.editor = editor
@@ -20,7 +23,7 @@ public struct GeometryAdjustmentPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            DisclosureGroup(L10n.t("Rotate & Flip")) {
+            DisclosureGroup(isExpanded: $isRotateExpanded) {
                 HStack(spacing: 16) {
                     Button {
                         editor.updateAdjustments { $0.geometry = $0.geometry.rotatedCounterclockwise() }
@@ -52,9 +55,11 @@ public struct GeometryAdjustmentPanel: View {
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.bordered)
+            } label: {
+                Text(L10n.t("Rotate & Flip"))
             }
 
-            DisclosureGroup(L10n.t("Straighten")) {
+            DisclosureGroup(isExpanded: $isStraightenExpanded) {
                 AdjustmentSliderRow(
                     label: L10n.t("Straighten"),
                     value: editor.adjustments.geometry.straightenDegrees,
@@ -64,9 +69,11 @@ public struct GeometryAdjustmentPanel: View {
                     onChange: { newValue in editor.updateAdjustments { $0.geometry.straightenDegrees = newValue } },
                     onReset: { editor.updateAdjustments { $0.geometry = $0.geometry.resettingStraighten() } }
                 )
+            } label: {
+                Text(L10n.t("Straighten"))
             }
 
-            DisclosureGroup(L10n.t("Crop")) {
+            DisclosureGroup(isExpanded: $isCropExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
                         editor.setToolMode(editor.toolMode == .crop ? .adjust : .crop)
@@ -92,6 +99,8 @@ public struct GeometryAdjustmentPanel: View {
                     .controlSize(.small)
                     .disabled(editor.adjustments.geometry.crop == nil)
                 }
+            } label: {
+                Text(L10n.t("Crop"))
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -107,6 +116,8 @@ public struct GeometryAdjustmentPanel: View {
             .controlSize(.small)
             .disabled(editor.adjustments.geometry.isIdentity)
         }
+        .id(editor.photo?.id)
+        .adjustmentEditingContext(editor)
     }
 
     private var aspectRatioBinding: Binding<CropAspectRatio> {

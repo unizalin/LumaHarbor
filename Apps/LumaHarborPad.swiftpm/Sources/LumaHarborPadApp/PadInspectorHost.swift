@@ -113,6 +113,9 @@ struct PadInspectorHost: View {
     private static let lightKinds: [AdjustmentKind] = [
         .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
     ]
+    private static let colorKinds: [AdjustmentKind] = [
+        .temperature, .tint, .vibrance, .saturation,
+    ]
 
     @ViewBuilder
     private var adjustPanel: some View {
@@ -148,6 +151,13 @@ struct PadInspectorHost: View {
             BasicAdjustmentPanel(editor: editor, kinds: Self.lightKinds)
             CurveAdjustmentPanel(editor: editor)
         case .color:
+            HStack {
+                Text(L10n.t("White Balance"))
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                PadWhiteBalanceEyedropperButton(editor: editor)
+            }
+            BasicAdjustmentPanel(editor: editor, kinds: Self.colorKinds)
             ColorAdjustmentPanel(editor: editor)
         case .detail:
             DetailAdjustmentPanel(editor: editor)

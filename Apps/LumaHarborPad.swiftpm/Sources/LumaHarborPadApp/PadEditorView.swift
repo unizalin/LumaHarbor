@@ -90,6 +90,12 @@ struct PadEditorView: View {
     /// never a second export path, only a second *destination picker* over
     /// the same already-exported file at `exportedURL`.
     @State private var isPresentingFileExporter = false
+    /// White-balance sampling owns the canvas gesture while active: the
+    /// displayed edited frame stays fixed until release, so a pinch cannot
+    /// move the pixel coordinate underneath the user's finger.
+    private var isSamplingEyedropper: Bool {
+        editor.toolMode == .whiteBalance
+    }
 
     @GestureState private var floatingPanelDragTranslation: CGSize = .zero
     @GestureState private var canvasMagnification: CGFloat = 1
@@ -520,34 +526,53 @@ struct PadEditorView: View {
 
     @ViewBuilder
     private var canvas: some View {
-        ZStack {
-            Color.black
-            if editor.previewImage != nil || editor.originalImage != nil {
-                comparisonCanvas
-                    .scaleEffect(workspaceState.canvasScale * canvasMagnification)
-                    .gesture(
-                        MagnificationGesture()
-                            .updating($canvasMagnification) { value, state, _ in
-                                state = value
-                            }
-                            .onEnded { value in
-                                let proposed = workspaceState.canvasScale * value
-                                workspaceState.canvasScale = min(max(proposed, Self.minimumCanvasScale), Self.maximumCanvasScale)
-                            }
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                if let image = editor.displayedImage {
+                    if isSamplingEyedropper {
+                        // Sampling always uses the edited image that is
+                        // actually visible, fitted into the current canvas.
+                        // The normal zoom gesture is intentionally absent
+                        // while this branch is active.
+                        canvasImage(image)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        PadEyedropperOverlayView(
+                            editor: editor,
+                            imageFrame: PadAspectFitRect.fitting(
+                                imageSize: CGSize(width: image.width, height: image.height),
+                                in: proxy.size
+                            ),
+                            image: image
+                        )
+                    } else {
+                        comparisonCanvas
+                            .scaleEffect(workspaceState.canvasScale * canvasMagnification)
+                            .gesture(
+                                MagnificationGesture()
+                                    .updating($canvasMagnification) { value, state, _ in
+                                        state = value
+                                    }
+                                    .onEnded { value in
+                                        let proposed = workspaceState.canvasScale * value
+                                        workspaceState.canvasScale = min(max(proposed, Self.minimumCanvasScale), Self.maximumCanvasScale)
+                                    }
+                            )
+                    }
+                } else if editor.decodeFailed {
+                    ContentUnavailableView(
+                        L10n.t("Couldn't show this photo"),
+                        systemImage: "exclamationmark.triangle"
                     )
-            } else if editor.decodeFailed {
-                ContentUnavailableView(
-                    L10n.t("Couldn't show this photo"),
-                    systemImage: "exclamationmark.triangle"
-                )
-            } else {
-                ProgressView(L10n.t("Decoding RAW…"))
-                    .tint(.white)
-                    .foregroundStyle(.white)
+                } else {
+                    ProgressView(L10n.t("Decoding RAW…"))
+                        .tint(.white)
+                        .foregroundStyle(.white)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if shouldShowFilmstrip {
                 PadEditorFilmstrip(
@@ -999,6 +1024,188 @@ struct PadEditorView: View {
     }
 }
 
+// MARK: - iPad white-balance eyedropper
+
+/// iPad's 44-point entry/cancel control. It deliberately shares the same
+/// EditorSession tool and preview lifecycle as macOS; the canvas overlay is
+/// the only platform-specific part.
+struct PadWhiteBalanceEyedropperButton: View {
+    @ObservedObject var editor: EditorSession
+
+    private var isActive: Bool { editor.toolMode == .whiteBalance }
+
+    var body: some View {
+        Button {
+            if isActive {
+                editor.cancelEyedropperPreview()
+                editor.setToolMode(.adjust)
+            } else {
+                editor.setToolMode(.whiteBalance)
+            }
+        } label: {
+            Label(
+                isActive ? L10n.t("Cancel Eyedropper") : L10n.t("White Balance Eyedropper"),
+                systemImage: "eyedropper"
+            )
+            .labelStyle(.iconOnly)
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .buttonStyle(.bordered)
+        .tint(isActive ? Color.accentColor : nil)
+        .disabled(editor.photo == nil || (!isActive && editor.whiteBalanceCapability != .valid))
+        .accessibilityLabel(Text(isActive ? L10n.t("Cancel Eyedropper") : L10n.t("White Balance Eyedropper")))
+        .accessibilityHint(Text(L10n.t("Click a point that should be neutral gray")))
+    }
+}
+
+/// iPad version of the on-canvas eyedropper. A press pins one displayed
+/// `CGImage` and one `EyedropperSamplingContext`; movement only previews and
+/// release performs the single commit. This prevents a late render or a
+/// second gesture from applying a sample to the wrong photo/frame.
+private struct PadEyedropperOverlayView: View {
+    @ObservedObject var editor: EditorSession
+    let imageFrame: CGRect
+    let image: CGImage
+
+    @State private var lastSampleLocation: CGPoint?
+    @State private var samplingSnapshot: SamplingSnapshot?
+    @State private var samplingAttempted = false
+
+    private struct SamplingSnapshot {
+        let image: CGImage
+        let imageFrame: CGRect
+        let context: EditorSession.EyedropperSamplingContext
+    }
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .contentShape(Rectangle())
+                .frame(width: imageFrame.width, height: imageFrame.height)
+                .position(x: imageFrame.midX, y: imageFrame.midY)
+                .gesture(sampleGesture)
+
+            if let lastSampleLocation {
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 1.5)
+                    .frame(width: 24, height: 24)
+                    .shadow(radius: 1)
+                    .position(lastSampleLocation)
+                    .allowsHitTesting(false)
+            }
+
+            if let issue = editor.eyedropperIssue {
+                Text(issueMessage(for: issue))
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(L10n.t("White Balance Eyedropper")))
+    }
+
+    private var sampleGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                sample(at: value.location, commit: false)
+            }
+            .onEnded { value in
+                sample(at: value.location, commit: true)
+                samplingSnapshot = nil
+                samplingAttempted = false
+            }
+    }
+
+    private func sample(at location: CGPoint, commit: Bool) {
+        if !samplingAttempted {
+            samplingAttempted = true
+            guard imageFrame.width > 0, imageFrame.height > 0,
+                  let context = editor.beginEyedropperSampling(sourceImage: image) else {
+                editor.rejectEyedropperSample(
+                    editor.whiteBalanceCapability == .valid ? .staleFrame : .unavailableBaseline
+                )
+                return
+            }
+            samplingSnapshot = SamplingSnapshot(image: image, imageFrame: imageFrame, context: context)
+        }
+        guard let snapshot = samplingSnapshot else { return }
+        guard snapshot.imageFrame.contains(location) else {
+            editor.rejectEyedropperSample(.outOfRange, context: snapshot.context)
+            if commit { samplingSnapshot = nil }
+            return
+        }
+        let pixel = PadAspectFitRect.imagePixel(
+            at: location,
+            imageFrame: snapshot.imageFrame,
+            imageSize: CGSize(width: snapshot.image.width, height: snapshot.image.height)
+        )
+        guard let rgb = PixelSampler.sample(at: pixel, in: snapshot.image) else {
+            editor.rejectEyedropperSample(.outOfRange, context: snapshot.context)
+            if commit { samplingSnapshot = nil }
+            return
+        }
+        lastSampleLocation = location
+        editor.previewEyedropper(
+            sample: WhiteBalanceEyedropper.Sample(red: rgb.red, green: rgb.green, blue: rgb.blue),
+            context: snapshot.context
+        )
+        if commit {
+            if editor.commitEyedropper(context: snapshot.context) {
+                editor.setToolMode(.adjust)
+            }
+            samplingSnapshot = nil
+        }
+    }
+
+    private func issueMessage(for issue: WhiteBalanceEyedropper.SampleIssue) -> String {
+        switch issue {
+        case .nonFinite: return L10n.t("The sampled color is unavailable.")
+        case .outOfRange: return L10n.t("Choose a visible pixel inside the photo.")
+        case .tooDark: return L10n.t("Choose a brighter neutral area.")
+        case .clipped: return L10n.t("Choose a neutral area without clipped highlights.")
+        case .unavailableBaseline: return L10n.t("White balance is unavailable for this photo.")
+        case .staleFrame: return L10n.t("Wait for the current preview before sampling.")
+        }
+    }
+}
+
+private enum PadAspectFitRect {
+    static func fitting(imageSize: CGSize, in container: CGSize, padding: CGFloat = 0) -> CGRect {
+        let available = CGSize(
+            width: max(container.width - padding * 2, 0),
+            height: max(container.height - padding * 2, 0)
+        )
+        guard imageSize.width > 0, imageSize.height > 0,
+              available.width > 0, available.height > 0 else {
+            return CGRect(origin: CGPoint(x: padding, y: padding), size: available)
+        }
+        let imageAspect = imageSize.width / imageSize.height
+        let availableAspect = available.width / available.height
+        let fittedSize = imageAspect > availableAspect
+            ? CGSize(width: available.width, height: available.width / imageAspect)
+            : CGSize(width: available.height * imageAspect, height: available.height)
+        return CGRect(
+            x: padding + (available.width - fittedSize.width) / 2,
+            y: padding + (available.height - fittedSize.height) / 2,
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
+    }
+
+    static func imagePixel(at point: CGPoint, imageFrame: CGRect, imageSize: CGSize) -> CGPoint {
+        guard imageFrame.width > 0, imageFrame.height > 0 else { return .zero }
+        let x = min(max((point.x - imageFrame.minX) / imageFrame.width, 0), 1)
+        let y = min(max((point.y - imageFrame.minY) / imageFrame.height, 0), 1)
+        return CGPoint(x: x * imageSize.width, y: y * imageSize.height)
+    }
+}
+
 /// Carries the floating panel's own measured size out of
 /// `PadEditorView.floatingPanelSizeReader`'s background `GeometryReader`.
 private struct FloatingPanelSizeKey: PreferenceKey {
@@ -1174,6 +1381,9 @@ private struct PadInspectorHost: View {
     private static let lightKinds: [AdjustmentKind] = [
         .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
     ]
+    private static let colorKinds: [AdjustmentKind] = [
+        .temperature, .tint, .vibrance, .saturation,
+    ]
 
     @ViewBuilder
     private var adjustPanel: some View {
@@ -1209,6 +1419,13 @@ private struct PadInspectorHost: View {
             BasicAdjustmentPanel(editor: editor, kinds: Self.lightKinds)
             CurveAdjustmentPanel(editor: editor)
         case .color:
+            HStack {
+                Text(L10n.t("White Balance"))
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                PadWhiteBalanceEyedropperButton(editor: editor)
+            }
+            BasicAdjustmentPanel(editor: editor, kinds: Self.colorKinds)
             ColorAdjustmentPanel(editor: editor)
         case .detail:
             DetailAdjustmentPanel(editor: editor)
@@ -1448,26 +1665,27 @@ private struct PadMetadataBlock: View {
     }
 
     private var ratingControls: some View {
-        HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(L10n.t("Rating"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(width: 120, alignment: .leading)
-            ForEach(0...5, id: \.self) { value in
-                Button {
-                    Task {
-                        let succeeded = await batchCoordinator.setRating(value, for: photo.id)
-                        if !succeeded { message = L10n.t("Couldn't save rating") }
+            HStack(spacing: 4) {
+                ForEach(0...5, id: \.self) { value in
+                    Button {
+                        Task {
+                            let succeeded = await batchCoordinator.setRating(value, for: photo.id)
+                            if !succeeded { message = L10n.t("Couldn't save rating") }
+                        }
+                    } label: {
+                        Image(systemName: value == 0 ? "xmark.circle" : "star.fill")
+                            .foregroundStyle(value > photo.rating ? Color.secondary : Color.yellow)
                     }
-                } label: {
-                    Image(systemName: value == 0 ? "xmark.circle" : "star.fill")
-                        .foregroundStyle(value > photo.rating ? Color.secondary : Color.yellow)
+                    .buttonStyle(.plain)
+                    .frame(width: 32, height: 32)
+                    .accessibilityLabel(Text("\(L10n.t("Rating")) \(value)"))
                 }
-                .buttonStyle(.plain)
-                .frame(width: 32, height: 32)
-                .accessibilityLabel(Text("\(L10n.t("Rating")) \(value)"))
+                Spacer(minLength: 0)
             }
-            Spacer()
         }
     }
 

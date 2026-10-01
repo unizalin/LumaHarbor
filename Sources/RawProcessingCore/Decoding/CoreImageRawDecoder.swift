@@ -58,8 +58,18 @@ public struct CoreImageRawDecoder: RawDecoding {
         let baselineTint = Double(filter.neutralTint)
 
         if !request.whiteBalance.isAsShot {
-            filter.neutralTemperature = Float(baselineTemperature + request.whiteBalance.temperatureOffsetKelvin)
-            filter.neutralTint = Float(baselineTint + request.whiteBalance.tintOffset)
+            guard let resolvedWhiteBalance = Self.resolvedWhiteBalance(
+                for: request.whiteBalance,
+                baselineTemperature: baselineTemperature,
+                baselineTint: baselineTint
+            ) else {
+                throw RawDecodingError.decodeFailed(
+                    path: url.path,
+                    reason: L10n.t("The white-balance baseline is unavailable or invalid.")
+                )
+            }
+            filter.neutralTemperature = Float(baselineTemperature + resolvedWhiteBalance.temperatureOffsetKelvin)
+            filter.neutralTint = Float(baselineTint + resolvedWhiteBalance.tintOffset)
         }
 
         let scaleFactor = Self.scaleFactor(
@@ -89,6 +99,29 @@ public struct CoreImageRawDecoder: RawDecoding {
             baselineTemperature: baselineTemperature,
             baselineTint: baselineTint,
             metadata: metadata
+        )
+    }
+
+    /// Final, UI-independent white-balance validation shared by preview and
+    /// export.  Keeping this pure makes the native filter assignment easy to
+    /// regression-test without requiring a private RAW fixture.
+    public static func resolvedWhiteBalance(
+        for request: RawWhiteBalance,
+        baselineTemperature: Double,
+        baselineTint: Double
+    ) -> RawWhiteBalance? {
+        guard !request.isAsShot else { return .asShot }
+        guard baselineTint.isFinite, request.tintOffset.isFinite,
+              let safeOffsetKelvin = WhiteBalancePresentation.resolve(
+                  offsetKelvin: request.temperatureOffsetKelvin,
+                  baselineKelvin: baselineTemperature
+              ) else {
+            return nil
+        }
+        let safeTint = min(max(request.tintOffset, -150), 150)
+        return RawWhiteBalance(
+            temperatureOffsetKelvin: safeOffsetKelvin,
+            tintOffset: safeTint
         )
     }
 

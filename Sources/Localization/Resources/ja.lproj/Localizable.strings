@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "ホワイトバランス スポイト";
 "Cancel Eyedropper" = "スポイトをキャンセル";
 "Click a point that should be neutral gray" = "ニュートラルグレーになるはずの点をクリックしてください";
+"The sampled color is unavailable." = "サンプルした色を取得できません。";
+"Choose a visible pixel inside the photo." = "写真内の見えるピクセルを選択してください。";
+"Choose a brighter neutral area." = "より明るい中間色の領域を選択してください。";
+"Choose a neutral area without clipped highlights." = "ハイライトがクリップしていない中間色の領域を選択してください。";
 "Local Adjustments" = "部分調整";
 "Add Gradient" = "グラデーションを追加";
 "Edit Gradients" = "グラデーションを編集";
@@ -610,3 +614,19 @@
 "Collision" = "同名ファイル";
 "Leave blank to keep the full resolution." = "完全な解像度を維持するには空欄にします。";
 "Leave blank to use the encoder default." = "エンコーダーのデフォルトを使用するには空欄にします。";
+"Solo Mode" = "ソロモード";
+"Pin Group" = "グループをピン留め";
+"Unpin Group" = "グループのピン留めを解除";
+"Pinned" = "ピン留め済み";
+"Value out of range." = "値が有効範囲外です。";
+"White balance was outside the supported range; preview and export are clamped." = "ホワイトバランスが対応範囲外のため、プレビューと書き出しを範囲内に制限しています。";
+"The white-balance baseline is unavailable or invalid." = "ホワイトバランスの基準値を取得できないか、無効です。";
+"White balance baseline is still loading; relative adjustment remains available." = "ホワイトバランスの基準値を読み込み中です。相対調整は引き続き使用できます。";
+/* White-balance and native input validation. */
+"Enter a finite number." = "有限の数値を入力してください。";
+"Allowed range: %@–%@ %@." = "入力可能な範囲：%@–%@ %@。";
+"White balance is unavailable for this photo." = "この写真ではホワイトバランスを調整できません。";
+"White balance baseline is still loading." = "ホワイトバランスの基準を読み込んでいます。";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "ホワイトバランスの基準が無効なため、ケルビン値を調整できません。";
+"The temperature adjustment limit has been reached." = "色温度の調整範囲の上限または下限に達しました。";
+"Wait for the current preview before sampling." = "現在のプレビューが完了してからサンプリングしてください。";

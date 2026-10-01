@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import XCTest
 @testable import EditorCore
 import PhotoLibraryCore
@@ -53,6 +54,22 @@ final class EditorSessionEditingTests: XCTestCase {
             adjustments: .neutral,
             isReadOnly: false
         )
+        return editor
+    }
+
+    private func makeWhiteBalanceEditor(adjustments: PhotoAdjustments = .neutral) async -> EditorSession {
+        let editor = EditorSession()
+        let renderer = BaselinePreviewRenderer()
+        editor.attach(dependencies: EditorDependencies(previewScheduler: PreviewScheduler(renderer: renderer),
+            previewRenderer: renderer, loadAdjustments: { _ in .neutral }, saveAdjustments: { _, _ in }))
+        let ready = expectation(description: "white-balance frame and baseline")
+        let subscription = editor.$previewImage.compactMap { $0 }.first().sink { _ in ready.fulfill() }
+        editor.open(photo: PhotoAsset(id: PhotoID(), libraryID: LibraryID(), relativePath: "fixture.ARW",
+            fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "fixture"), status: .ready),
+            sourceURL: URL(fileURLWithPath: "/tmp/fixture.ARW"), adjustments: adjustments, isReadOnly: false)
+        await fulfillment(of: [ready], timeout: 2)
+        withExtendedLifetime(subscription) {}
+        addTeardownBlock { await editor.close() }
         return editor
     }
 
@@ -224,8 +241,8 @@ final class EditorSessionEditingTests: XCTestCase {
     /// touching `history`/`saveState`/Undo at all, the same contract
     /// `previewPreset(_:mode:)` already guarantees for presets
     /// (`PresetWorkflowTests`).
-    func testPreviewEyedropperChangesDisplayedAdjustmentsButNotCommittedAdjustments() {
-        let editor = makeOpenEditor()
+    func testPreviewEyedropperChangesDisplayedAdjustmentsButNotCommittedAdjustments() async {
+        let editor = await makeWhiteBalanceEditor()
         let warmSample = WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4)
 
         editor.previewEyedropper(sample: warmSample)
@@ -234,16 +251,16 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(editor.adjustments, .neutral, "the committed adjustments must be untouched by a preview")
     }
 
-    func testPreviewEyedropperDoesNotDirtySaveStateOrTouchUndo() {
-        let editor = makeOpenEditor()
+    func testPreviewEyedropperDoesNotDirtySaveStateOrTouchUndo() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
 
         XCTAssertEqual(editor.saveState, .unchanged)
         XCTAssertFalse(editor.canUndo)
     }
 
-    func testCancellingAnEyedropperPreviewRestoresTheCommittedAdjustments() {
-        let editor = makeOpenEditor()
+    func testCancellingAnEyedropperPreviewRestoresTheCommittedAdjustments() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
         XCTAssertNotEqual(editor.displayedAdjustments, .neutral)
 
@@ -254,14 +271,14 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertFalse(editor.canUndo)
     }
 
-    func testCancellingWithNoActiveEyedropperPreviewIsHarmless() {
-        let editor = makeOpenEditor()
+    func testCancellingWithNoActiveEyedropperPreviewIsHarmless() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.cancelEyedropperPreview() // must not crash or change anything
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
     }
 
-    func testCommittingAnEyedropperSampleAppliesItAndCreatesExactlyOneUndoEntry() {
-        let editor = makeOpenEditor()
+    func testCommittingAnEyedropperSampleAppliesItAndCreatesExactlyOneUndoEntry() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
 
         editor.commitEyedropper()
@@ -274,18 +291,32 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.temperature, 0, "exactly one undo entry, regardless of how the preview updated along the way")
     }
 
-    func testCommittingAnEyedropperSampleMarksTheEditDirty() {
-        let editor = makeOpenEditor()
+    func testCommittingAnEyedropperSampleMarksTheEditDirty() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
         editor.commitEyedropper()
         XCTAssertEqual(editor.saveState, .pending)
     }
 
-    func testCommittingWithNoActivePreviewIsANoOp() {
-        let editor = makeOpenEditor()
+    func testExternalEditInvalidatesAnEyedropperCandidateInsteadOfOverwritingIt() async {
+        let editor = await makeWhiteBalanceEditor()
+        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
+
+        editor.setAdjustment(.exposure, to: 1)
+
+        XCTAssertFalse(editor.commitEyedropper())
+        XCTAssertEqual(editor.adjustments.exposure, 1)
+        XCTAssertEqual(editor.adjustments.temperature, 0)
+        XCTAssertFalse(editor.canRedo)
+    }
+
+    func testCommittingWithNoActivePreviewIsANoOp() async {
+        let editor = await makeWhiteBalanceEditor()
+        editor.previewEyedropper(sample: .init(red: 0.01, green: 0.02, blue: 0.01))
         editor.commitEyedropper()
         XCTAssertEqual(editor.adjustments, .neutral)
         XCTAssertFalse(editor.canUndo)
+        XCTAssertEqual(editor.eyedropperIssue, .tooDark, "release must not clear the rejection reason")
     }
 
     /// An already-neutral sample resolves to no delta at all
@@ -293,15 +324,24 @@ final class EditorSessionEditingTests: XCTestCase {
     /// so committing it must add no history entry -- same "no-op transform
     /// pushes nothing to Undo" contract every other edit path in this class
     /// already has.
-    func testCommittingANeutralSampleAddsNoHistoryEntry() {
-        let editor = makeOpenEditor()
+    func testCommittingANeutralSampleAddsNoHistoryEntry() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.5, green: 0.5, blue: 0.5))
         editor.commitEyedropper()
         XCTAssertFalse(editor.canUndo)
     }
 
-    func testPreviewingASecondSampleReplacesTheFirstRatherThanCompounding() {
-        let editor = makeOpenEditor()
+    func testCommittingANeutralSampleStillConsumesTheValidEyedropperPreview() async {
+        let editor = await makeWhiteBalanceEditor()
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.5, green: 0.5, blue: 0.5))
+
+        XCTAssertTrue(editor.commitEyedropper())
+        XCTAssertFalse(editor.hasEyedropperPreview)
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testPreviewingASecondSampleReplacesTheFirstRatherThanCompounding() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
         let firstPreviewTemperature = editor.displayedAdjustments.temperature
 
@@ -313,14 +353,14 @@ final class EditorSessionEditingTests: XCTestCase {
         )
     }
 
-    func testPreviewEyedropperDoesNothingWithoutAnOpenPhoto() {
+    func testPreviewEyedropperDoesNothingWithoutAnOpenPhoto() async {
         let editor = EditorSession()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
     }
 
-    func testOpeningAPhotoClearsAnyActiveEyedropperPreview() {
-        let editor = makeOpenEditor()
+    func testOpeningAPhotoClearsAnyActiveEyedropperPreview() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
         XCTAssertNotEqual(editor.displayedAdjustments, .neutral)
 
@@ -341,13 +381,53 @@ final class EditorSessionEditingTests: XCTestCase {
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
     }
 
-    func testClosingClearsAnyActiveEyedropperPreview() {
-        let editor = makeOpenEditor()
+    func testClosingClearsAnyActiveEyedropperPreview() async {
+        let editor = await makeWhiteBalanceEditor()
         editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4))
 
         editor.close()
 
         XCTAssertEqual(editor.displayedAdjustments, .neutral)
+    }
+
+    func testPreviewEyedropperRejectsAnUnusableSampleWithoutCreatingAPreview() async {
+        let editor = await makeWhiteBalanceEditor()
+
+        editor.previewEyedropper(sample: .init(red: 0.01, green: 0.02, blue: 0.01))
+
+        XCTAssertEqual(editor.eyedropperIssue, .tooDark)
+        XCTAssertFalse(editor.hasEyedropperPreview)
+        XCTAssertEqual(editor.displayedAdjustments, .neutral)
+        XCTAssertFalse(editor.canUndo)
+    }
+
+    func testInvalidSampleAfterAValidPreviewCannotBeReleasedAsTheOldCandidate() async {
+        let editor = await makeWhiteBalanceEditor()
+        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
+        XCTAssertTrue(editor.hasEyedropperPreview)
+
+        editor.previewEyedropper(sample: .init(red: 0.01, green: 0.02, blue: 0.01))
+
+        XCTAssertFalse(editor.hasEyedropperPreview)
+        XCTAssertEqual(editor.eyedropperIssue, .tooDark)
+        XCTAssertFalse(editor.commitEyedropper())
+        XCTAssertEqual(editor.eyedropperIssue, .tooDark)
+        XCTAssertEqual(editor.adjustments, .neutral)
+        XCTAssertFalse(editor.canUndo)
+
+        editor.previewEyedropper(sample: .init(red: 0.5, green: 0.5, blue: 0.5))
+        XCTAssertNil(editor.eyedropperIssue)
+        XCTAssertTrue(editor.commitEyedropper())
+    }
+
+    func testPreviewEyedropperClampsTheCombinedTemperatureAndTintEdit() async {
+        let editor = await makeWhiteBalanceEditor(adjustments: PhotoAdjustments(temperature: 1_190, tint: 95))
+
+        editor.previewEyedropper(sample: .init(red: 0.01, green: 0.5, blue: 0.9))
+
+        XCTAssertLessThanOrEqual(editor.displayedAdjustments.temperature, 1_200)
+        XCTAssertLessThanOrEqual(editor.displayedAdjustments.tint, 100)
+        XCTAssertTrue(editor.hasEyedropperPreview)
     }
 
     // MARK: - Adjustment gesture hooks (Phase 3 Task 3.3: batch sync)

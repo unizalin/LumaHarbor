@@ -54,23 +54,16 @@ public struct RenderParameters: Equatable, Sendable {
 /// Spec §8.2 requires this to be centralised and pinned by tests; the constants
 /// below are therefore part of the observable behaviour, not implementation
 /// detail. Changing one changes everyone's renders.
-/// Known limitation, flagged for a future task: the spatial parameters here —
-/// `Sharpening.radius`, the pixel scale `CINoiseReduction` works at, and the
-/// blur radius grain derives from `Grain.size` — are all in absolute pixels and
-/// do not scale with the image's decoded resolution. `RawDecoding` decodes at
-/// different sizes for thumbnails, the interactive preview and a high-quality
-/// export, so the same stored adjustment renders a visibly different amount of
-/// sharpening, noise reduction and grain at each of them. Vignette is the
-/// exception: it derives its radii from the image's own `extent`, so it is
-/// already resolution-independent. Lightroom has the same class of mismatch, so
-/// this is accepted for now rather than papered over with a guessed scale
-/// factor; a real fix means threading the decode's native pixel size through
-/// `RenderParameters` and scaling those three against it.
+/// Known limitation: `CINoiseReduction` still works in decoded pixels, while
+/// sharpening and grain explicitly scale their radii for preview resolution.
+/// Vignette derives its radii from the image's own `extent`, so it is already
+/// resolution-independent.
 public enum AdjustmentMapping {
-    /// ±100 on the temperature slider spans ±4500 K around the as-shot neutral,
-    /// which covers tungsten-to-shade without letting the slider reach values
-    /// `CIRAWFilter` clips anyway.
-    public static let kelvinPerTemperatureUnit = 45.0
+    /// One stored temperature unit spans 45 K around the decoder's as-shot
+    /// neutral. The RAW presentation layer exposes this as absolute Kelvin and
+    /// allows ±1200 stored units so the UI can cover 2,000–50,000 K without
+    /// changing the meaning of existing sidecars.
+    public static let kelvinPerTemperatureUnit = WhiteBalancePresentation.kelvinPerStoredUnit
     /// ±100 tint spans ±150, matching the usable range of `CIRAWFilter.neutralTint`.
     public static let tintPerUnit = 1.5
     /// ±100 contrast maps to 0.5...1.5 in `CIColorControls`.
@@ -83,10 +76,9 @@ public enum AdjustmentMapping {
     /// sharpness 0...3.0; radius passes straight through (spec's radius range
     /// 0.5...3.0 already matches the filter's own expected units).
     public static let sharpenLuminanceSharpnessSpan = 3.0 / 150.0
-    /// `CINoiseReduction` exposes exactly two knobs (`inputNoiseLevel`,
-    /// `inputSharpness`), not independent luminance/colour controls. Amount is
-    /// the average of the two Lightroom-style amounts, mapped to a noise level
-    /// span Apple's own filter treats as strong (its own default is 0.02).
+    /// `CINoiseReduction` exposes one noise-level/sharpness pair. The pipeline
+    /// applies separate passes for the luminance and colour controls rather
+    /// than averaging them; these spans are used by each pass.
     public static let noiseReductionNoiseLevelSpan = 0.1 / 100.0
     public static let noiseReductionSharpnessSpan = 2.0 / 100.0
 

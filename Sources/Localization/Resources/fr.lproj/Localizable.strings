@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "Pipette de balance des blancs";
 "Cancel Eyedropper" = "Annuler la pipette";
 "Click a point that should be neutral gray" = "Cliquez sur un point qui devrait être gris neutre";
+"The sampled color is unavailable." = "La couleur échantillonnée n'est pas disponible.";
+"Choose a visible pixel inside the photo." = "Choisissez un pixel visible dans la photo.";
+"Choose a brighter neutral area." = "Choisissez une zone neutre plus claire.";
+"Choose a neutral area without clipped highlights." = "Choisissez une zone neutre sans hautes lumières écrêtées.";
 "Local Adjustments" = "Retouches locales";
 "Add Gradient" = "Ajouter un dégradé";
 "Edit Gradients" = "Modifier les dégradés";
@@ -610,3 +614,19 @@
 "Collision" = "Fichier existant";
 "Leave blank to keep the full resolution." = "Laissez vide pour conserver la résolution complète.";
 "Leave blank to use the encoder default." = "Laissez vide pour utiliser la valeur par défaut de l’encodeur.";
+"Solo Mode" = "Mode solo";
+"Pin Group" = "Épingler le groupe";
+"Unpin Group" = "Désépingler le groupe";
+"Pinned" = "Épinglé";
+"Value out of range." = "La valeur est hors de la plage autorisée.";
+"White balance was outside the supported range; preview and export are clamped." = "La balance des blancs est hors de la plage prise en charge ; l’aperçu et l’exportation sont limités.";
+"The white-balance baseline is unavailable or invalid." = "La référence de balance des blancs est indisponible ou invalide.";
+"White balance baseline is still loading; relative adjustment remains available." = "La référence de balance des blancs est encore en cours de chargement ; le réglage relatif reste disponible.";
+/* White-balance and native input validation. */
+"Enter a finite number." = "Saisissez un nombre fini.";
+"Allowed range: %@–%@ %@." = "Plage autorisée : %@–%@ %@.";
+"White balance is unavailable for this photo." = "La balance des blancs n’est pas disponible pour cette photo.";
+"White balance baseline is still loading." = "La référence de balance des blancs est en cours de chargement.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "La référence de balance des blancs est invalide ; le réglage en kelvins est indisponible.";
+"The temperature adjustment limit has been reached." = "La limite de réglage de la température est atteinte.";
+"Wait for the current preview before sampling." = "Attendez la fin de l’aperçu actuel avant de prélever une couleur.";

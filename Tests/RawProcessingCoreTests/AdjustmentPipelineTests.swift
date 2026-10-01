@@ -95,6 +95,41 @@ final class AdjustmentPipelineTests: XCTestCase {
         return (Int(bytes[0]), Int(bytes[1]), Int(bytes[2]))
     }
 
+    private func renderBytes(_ image: CIImage) throws -> [UInt8] {
+        let renderer = ImageRenderService()
+        let cgImage = try renderer.makeCGImage(image)
+        let width = cgImage.width
+        let height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return bytes
+    }
+
+    private func makeSharpeningEdgeSource() -> CIImage {
+        let dark = CIImage(color: CIColor(red: 0.12, green: 0.12, blue: 0.12))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 16))
+        let light = CIImage(color: CIColor(red: 0.88, green: 0.88, blue: 0.88))
+            .cropped(to: CGRect(x: 8, y: 0, width: 8, height: 16))
+        return light.composited(over: dark).cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    private func makeChromaticNoiseSource() -> CIImage {
+        let red = CIImage(color: CIColor(red: 0.85, green: 0.08, blue: 0.08))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 16))
+        let blue = CIImage(color: CIColor(red: 0.08, green: 0.08, blue: 0.85))
+            .cropped(to: CGRect(x: 8, y: 0, width: 8, height: 16))
+        return blue.composited(over: red).cropped(to: CGRect(origin: .zero, size: size))
+    }
+
     // MARK: - Identity
 
     func testNeutralAdjustmentsAreAPassthrough() {
@@ -291,6 +326,30 @@ final class AdjustmentPipelineTests: XCTestCase {
         XCTAssertEqual(fullPixel.blue, defaultPixel.blue)
     }
 
+    func testSharpeningDetailChangesRenderedPixels() throws {
+        let source = makeSharpeningEdgeSource()
+        var lowDetail = PhotoAdjustments.neutral
+        lowDetail.sharpening = Sharpening(amount: 100, radius: 2.0, detail: 0, masking: 0)
+        var highDetail = lowDetail
+        highDetail.sharpening.detail = 100
+
+        let low = try renderBytes(pipeline.apply(lowDetail, to: source))
+        let high = try renderBytes(pipeline.apply(highDetail, to: source))
+        XCTAssertNotEqual(low, high, "Sharpening detail must affect the rendered edge")
+    }
+
+    func testSharpeningMaskingChangesRenderedPixels() throws {
+        let source = makeSharpeningEdgeSource()
+        var unmasked = PhotoAdjustments.neutral
+        unmasked.sharpening = Sharpening(amount: 100, radius: 2.0, detail: 75, masking: 0)
+        var masked = unmasked
+        masked.sharpening.masking = 100
+
+        let full = try renderBytes(pipeline.apply(unmasked, to: source))
+        let edgesOnly = try renderBytes(pipeline.apply(masked, to: source))
+        XCTAssertNotEqual(full, edgesOnly, "Sharpening masking must change where sharpening is applied")
+    }
+
     func testNoiseReductionAddsAFilterToTheChainWhenNonZero() {
         let source = makeSourceImage()
         var adjustments = PhotoAdjustments.neutral
@@ -298,6 +357,24 @@ final class AdjustmentPipelineTests: XCTestCase {
         let output = pipeline.apply(adjustments, to: source)
         XCTAssertFalse(output === source)
         XCTAssertEqual(output.extent, source.extent)
+    }
+
+    func testNoiseReductionChannelsAreNotCollapsedIntoOneAverage() throws {
+        let source = makeChromaticNoiseSource()
+        var luminanceOnly = PhotoAdjustments.neutral
+        luminanceOnly.noiseReduction = NoiseReduction(
+            luminanceAmount: 100, luminanceDetail: 50,
+            colorAmount: 0, colorDetail: 50
+        )
+        var balanced = PhotoAdjustments.neutral
+        balanced.noiseReduction = NoiseReduction(
+            luminanceAmount: 50, luminanceDetail: 50,
+            colorAmount: 50, colorDetail: 50
+        )
+
+        let luma = try renderBytes(pipeline.apply(luminanceOnly, to: source))
+        let twoPasses = try renderBytes(pipeline.apply(balanced, to: source))
+        XCTAssertNotEqual(luma, twoPasses, "Luminance and colour controls must not collapse into one averaged filter")
     }
 
     func testNegativeVignetteDarkensTheCorner() throws {

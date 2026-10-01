@@ -37,8 +37,14 @@ final class AdjustmentCatalogTests: XCTestCase {
         XCTAssertEqual(exposure.maximumValue, 5)
     }
 
-    func testNonExposureAdjustmentsUsePlusMinusOneHundred() {
-        for kind in AdjustmentKind.allCases where kind != .exposure {
+    func testTemperatureUsesTheWiderRawOffsetRange() {
+        let definition = AdjustmentCatalog.definition(for: .temperature)
+        XCTAssertEqual(definition.minimumValue, -1_200)
+        XCTAssertEqual(definition.maximumValue, 1_200)
+    }
+
+    func testNonExposureNonTemperatureAdjustmentsUsePlusMinusOneHundred() {
+        for kind in AdjustmentKind.allCases where kind != .exposure && kind != .temperature {
             let definition = AdjustmentCatalog.definition(for: kind)
             XCTAssertEqual(definition.minimumValue, -100, "\(kind)")
             XCTAssertEqual(definition.maximumValue, 100, "\(kind)")

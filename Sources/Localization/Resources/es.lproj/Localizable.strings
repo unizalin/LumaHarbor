@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "Cuentagotas de balance de blancos";
 "Cancel Eyedropper" = "Cancelar cuentagotas";
 "Click a point that should be neutral gray" = "Haz clic en un punto que debería ser gris neutro";
+"The sampled color is unavailable." = "El color muestreado no está disponible.";
+"Choose a visible pixel inside the photo." = "Elige un píxel visible dentro de la foto.";
+"Choose a brighter neutral area." = "Elige una zona neutra más luminosa.";
+"Choose a neutral area without clipped highlights." = "Elige una zona neutra sin altas luces recortadas.";
 "Local Adjustments" = "Ajustes locales";
 "Add Gradient" = "Añadir degradado";
 "Edit Gradients" = "Editar degradados";
@@ -610,3 +614,19 @@
 "Collision" = "Archivo existente";
 "Leave blank to keep the full resolution." = "Déjalo vacío para conservar la resolución completa.";
 "Leave blank to use the encoder default." = "Déjalo vacío para usar el valor predeterminado del codificador.";
+"Solo Mode" = "Modo solo";
+"Pin Group" = "Fijar grupo";
+"Unpin Group" = "Desfijar grupo";
+"Pinned" = "Fijado";
+"Value out of range." = "El valor está fuera del intervalo permitido.";
+"White balance was outside the supported range; preview and export are clamped." = "El balance de blancos está fuera del intervalo admitido; la vista previa y la exportación se limitan.";
+"The white-balance baseline is unavailable or invalid." = "La referencia del balance de blancos no está disponible o no es válida.";
+"White balance baseline is still loading; relative adjustment remains available." = "La referencia del balance de blancos aún se está cargando; el ajuste relativo sigue disponible.";
+/* White-balance and native input validation. */
+"Enter a finite number." = "Introduce un número finito.";
+"Allowed range: %@–%@ %@." = "Rango permitido: %@–%@ %@.";
+"White balance is unavailable for this photo." = "El balance de blancos no está disponible para esta foto.";
+"White balance baseline is still loading." = "Se está cargando la referencia del balance de blancos.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "La referencia del balance de blancos no es válida; no se puede ajustar en kelvin.";
+"The temperature adjustment limit has been reached." = "Se ha alcanzado el límite de ajuste de temperatura.";
+"Wait for the current preview before sampling." = "Espera a que termine la vista previa actual antes de tomar una muestra.";

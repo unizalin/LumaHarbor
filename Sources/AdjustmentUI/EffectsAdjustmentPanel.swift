@@ -14,6 +14,7 @@ public struct EffectsAdjustmentPanel: View {
     }
 
     public var body: some View {
+        Group {
         DisclosureGroup(L10n.t("Vignette")) {
             AdjustmentSliderRow(
                 label: L10n.t("Amount"), value: editor.adjustments.vignette.amount,
@@ -60,5 +61,8 @@ public struct EffectsAdjustmentPanel: View {
                 onReset: { editor.updateAdjustments { $0.grain.roughness = Grain.neutral.roughness } }
             )
         }
+        }
+        .id(editor.photo?.id)
+        .adjustmentEditingContext(editor)
     }
 }

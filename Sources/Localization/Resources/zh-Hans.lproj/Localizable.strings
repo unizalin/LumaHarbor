@@ -499,6 +499,10 @@
 "White Balance Eyedropper" = "白平衡吸管";
 "Cancel Eyedropper" = "取消吸管";
 "Click a point that should be neutral gray" = "点按一个应为中性灰的点";
+"The sampled color is unavailable." = "无法取得取样色彩。";
+"Choose a visible pixel inside the photo." = "请选择照片内的可见像素。";
+"Choose a brighter neutral area." = "请选择较明亮的中性区域。";
+"Choose a neutral area without clipped highlights." = "请选择没有高光裁切的中性区域。";
 "Local Adjustments" = "局部调整";
 "Add Gradient" = "添加渐变";
 "Edit Gradients" = "编辑渐变";
@@ -610,3 +614,19 @@
 "Collision" = "同名文件";
 "Leave blank to keep the full resolution." = "留空以保留完整分辨率。";
 "Leave blank to use the encoder default." = "留空以使用编码器默认值。";
+"Solo Mode" = "Solo 模式";
+"Pin Group" = "固定群组";
+"Unpin Group" = "取消固定群组";
+"Pinned" = "已固定";
+"Value out of range." = "数值超出有效范围。";
+"White balance was outside the supported range; preview and export are clamped." = "白平衡超出支持范围；预览和导出已限制在有效范围内。";
+"The white-balance baseline is unavailable or invalid." = "白平衡基准目前不可用或无效。";
+"White balance baseline is still loading; relative adjustment remains available." = "白平衡基准仍在加载；目前仍可使用相对调整。";
+/* White-balance and native input validation. */
+"Enter a finite number." = "请输入有效的有限数值。";
+"Allowed range: %@–%@ %@." = "允许范围：%@–%@ %@。";
+"White balance is unavailable for this photo." = "这张照片无法使用白平衡调整。";
+"White balance baseline is still loading." = "正在加载白平衡基准。";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "白平衡基准无效，无法调整绝对色温。";
+"The temperature adjustment limit has been reached." = "已达色温调整范围。";
+"Wait for the current preview before sampling." = "请等待当前预览完成后再取样。";

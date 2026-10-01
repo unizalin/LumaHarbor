@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import XCTest
 @testable import AdjustmentUI
 
@@ -29,10 +30,18 @@ final class AdjustmentValueInputTests: XCTestCase {
         XCTAssertEqual(PadAdjustmentPolicy.parse("-2.4", range: -10...10, fractionDigits: 0), -2)
     }
 
-    func testParseClampsValuesAndRejectsInvalidText() {
-        XCTAssertEqual(PadAdjustmentPolicy.parse("99", range: -1...1, fractionDigits: 1), 1)
+    func testParseRejectsOutOfRangeValuesAndInvalidText() {
+        XCTAssertNil(PadAdjustmentPolicy.parse("99", range: -1...1, fractionDigits: 1))
         XCTAssertNil(PadAdjustmentPolicy.parse("not a number", range: -1...1, fractionDigits: 1))
         XCTAssertNil(PadAdjustmentPolicy.parse("", range: -1...1, fractionDigits: 1))
+    }
+
+    func testParseExactPreservesAValidValueBeyondDisplayPrecision() {
+        XCTAssertEqual(
+            PadAdjustmentPolicy.parseExact("4536.72802734375", range: 2_000...50_000) ?? 0,
+            4536.72802734375,
+            accuracy: 0.0000001
+        )
     }
 
     func testFormattedUsesStableDecimalPlaces() {
@@ -40,14 +49,59 @@ final class AdjustmentValueInputTests: XCTestCase {
         XCTAssertEqual(PadAdjustmentPolicy.formatted(-0.25, fractionDigits: 1), "-0.2")
     }
 
-    func testNumericInputKeepsFineAdjustmentButtonsVisible() throws {
+    func testNumericInputKeepsFineAdjustmentButtonsVisibleOnTouchPlatforms() throws {
         let source = try Self.loadSource("Sources/AdjustmentUI/AdjustmentValueInput.swift")
 
         XCTAssertTrue(source.contains("systemName: \"minus\""), "each numeric field needs a visible decrease button")
         XCTAssertTrue(source.contains("systemName: \"plus\""), "each numeric field needs a visible increase button")
+        XCTAssertTrue(source.contains("#if os(iOS)"), "visible nudge buttons are a touch-platform affordance")
         XCTAssertTrue(source.contains("step: Double = 0.1"), "fine controls need an explicit step size")
         XCTAssertTrue(source.contains("accessibilityKey: \"Increase\""))
         XCTAssertTrue(source.contains("accessibilityKey: \"Decrease\""))
+    }
+
+    func testMacNumericInputHidesPermanentNudgesAndExposesAnAccessibleAdjustmentAction() throws {
+        let source = try Self.loadSource("Sources/AdjustmentUI/AdjustmentValueInput.swift")
+
+        XCTAssertTrue(source.contains(".accessibilityAdjustableAction"), "macOS needs an accessible increment/decrement path when the buttons are hidden")
+        XCTAssertTrue(source.contains("case .increment"))
+        XCTAssertTrue(source.contains("case .decrement"))
+        XCTAssertTrue(source.contains("#if os(macOS)"), "the compact Mac control must be distinct from the iPad touch layout")
+    }
+
+    @MainActor
+    func testExternalAuthoritativeUpdatesReplaceAnActiveDraftWithoutIgnoringTheBinding() {
+        var value = 6500.0
+        var writes = 0
+        let controller = AdjustmentInputController(value: Binding(get: { value }, set: { value = $0; writes += 1 }),
+            range: 2000...50000, fractionDigits: 0, identity: "photo", revision: 0, unit: "K")
+        controller.focus()
+        controller.edit("7000")
+        value = 5500
+        controller.submit()
+        XCTAssertEqual(value, 5500)
+        XCTAssertEqual(writes, 0)
+        XCTAssertEqual(controller.state.draft, "5500")
+        XCTAssertFalse(controller.state.isEditing)
+    }
+
+    @MainActor
+    func testNumericInputHasAOneShotCommitAndEscapeCancellationPath() {
+        var value = 6500.0
+        var writes: [Double] = []
+        let controller = AdjustmentInputController(value: Binding(get: { value }, set: { value = $0; writes.append($0) }),
+            range: 2000...50000, fractionDigits: 0, identity: "photo", revision: 0, unit: "K")
+        controller.focus()
+        controller.edit("7000.125")
+        controller.submit()
+        controller.submit()
+        XCTAssertEqual(writes, [7000.125])
+        controller.focus()
+        controller.edit("8000")
+        controller.cancel()
+        controller.submit()
+        XCTAssertEqual(value, 7000.125)
+        XCTAssertEqual(writes.count, 1)
     }
 
     func testNudgePolicyIsDefinedForButtonActions() throws {

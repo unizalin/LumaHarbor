@@ -20,10 +20,32 @@ public enum PadAdjustmentPolicy {
         guard !normalized.isEmpty, let value = Double(normalized), value.isFinite else {
             return nil
         }
+        guard range.contains(value) else {
+            return nil
+        }
 
         let scale = pow(10.0, Double(max(0, fractionDigits)))
         let rounded = (value * scale).rounded() / scale
-        return clamp(rounded, to: range)
+        guard range.contains(rounded) else {
+            return nil
+        }
+        return rounded
+    }
+
+    /// Parses a submitted value without applying display-only rounding.
+    /// The inspector may show fewer digits when idle, but a valid edit must
+    /// not silently quantize the stored value to that presentation precision.
+    public static func parseExact(
+        _ text: String,
+        range: ClosedRange<Double>
+    ) -> Double? {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty, let value = Double(normalized), value.isFinite else {
+            return nil
+        }
+        return range.contains(value) ? value : nil
     }
 
     public static func formatted(_ value: Double, fractionDigits: Int) -> String {
@@ -44,5 +66,19 @@ public enum PadAdjustmentPolicy {
         let rounded = (candidate * scale).rounded() / scale
         // Avoid exposing a signed zero after a decrement crosses zero.
         return clamp(rounded == 0 ? 0 : rounded, to: range)
+    }
+
+    /// Nudge from the exact value currently in the field.  Display rounding
+    /// belongs to the idle formatter; applying it here would make a precise
+    /// typed value jump before the user has asked for a rounded presentation.
+    public static func adjustedExact(
+        _ value: Double,
+        by delta: Double,
+        range: ClosedRange<Double>,
+        fractionDigits: Int
+    ) -> Double {
+        guard delta.isFinite else { return clamp(value, to: range) }
+        let candidate = clamp(value + delta, to: range)
+        return candidate == 0 ? 0 : candidate
     }
 }

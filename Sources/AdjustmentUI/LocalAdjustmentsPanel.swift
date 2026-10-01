@@ -106,6 +106,8 @@ public struct LocalAdjustmentsPanel: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+        .id(editor.photo?.id)
+        .adjustmentEditingContext(editor)
     }
 
     private func row(for gradient: LocalAdjustment) -> some View {

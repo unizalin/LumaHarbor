@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import XCTest
 @testable import EditorCore
 import PhotoLibraryCore
@@ -37,9 +38,8 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
         return root
     }
 
-    private func makeEditor(store: PhotoDocumentStore) -> EditorSession {
+    private func makeEditor(store: PhotoDocumentStore, renderer: any PreviewRendering = NeverPreviewRenderer()) -> EditorSession {
         let editor = EditorSession()
-        let renderer = NeverPreviewRenderer()
         editor.attach(dependencies: EditorDependencies(
             previewScheduler: PreviewScheduler(renderer: renderer),
             previewRenderer: renderer,
@@ -75,6 +75,92 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
     }
 
     // MARK: - Tests
+
+    func testLegacyWhiteBalanceEditUndoRedoSaveAndReopenPreserveTheRightRawValue() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("fixture.ARW")
+        let original = Data(repeating: 0x42, count: 4096)
+        try original.write(to: source)
+        let storeRoot = root.appendingPathComponent("Store")
+        let store = PhotoDocumentStore(rootURL: storeRoot)
+        let document = try await store.openInPlace(source, bookmarkData: nil).document
+        var legacy = PhotoAdjustments.neutral
+        legacy.temperature = -2000
+        legacy.tint = 12
+        try await store.saveAdjustments(legacy, documentID: document.id)
+        let editor = makeEditor(store: store, renderer: BaselinePreviewRenderer())
+        let frame = expectation(description: "baseline")
+        let subscription = editor.$previewImage.compactMap { $0 }.first().sink { _ in frame.fulfill() }
+        editor.open(photo: photo(for: document), sourceURL: source, adjustments: legacy, isReadOnly: false)
+        await fulfillment(of: [frame], timeout: 2)
+        XCTAssertEqual(editor.whiteBalanceDiagnostic, .clamped)
+        XCTAssertEqual(editor.saveState, .unchanged)
+        editor.setAdjustment(.exposure, to: 1)
+        await editor.save()
+        var saved = try await store.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(saved.temperature, -2000, "unrelated edits cannot migrate a legacy offset")
+        editor.setAdjustment(.temperature, to: -100)
+        XCTAssertEqual(editor.adjustments.temperature, (2000 - 5500) / 45.0, accuracy: 1e-9)
+        XCTAssertEqual(editor.adjustments.tint, 12)
+        await editor.save()
+        editor.undo()
+        XCTAssertEqual(editor.adjustments.temperature, -2000)
+        XCTAssertEqual(editor.whiteBalanceDiagnostic, .clamped)
+        await editor.save()
+        saved = try await store.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(saved.temperature, -2000)
+        editor.redo()
+        await editor.save()
+        editor.close()
+        let reopened = PhotoDocumentStore(rootURL: storeRoot)
+        let restored = try await reopened.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(restored.temperature, (2000 - 5500) / 45.0, accuracy: 1e-9)
+        XCTAssertEqual(restored.tint, 12)
+        XCTAssertEqual(restored.exposure, 1)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testEyedropperPreviewDoesNotSaveAndOneCommitSurvivesUndoRedoAndReopen() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("fixture.ARW")
+        let original = Data(repeating: 0x42, count: 4096)
+        try original.write(to: source)
+        let storeRoot = root.appendingPathComponent("Store")
+        let store = PhotoDocumentStore(rootURL: storeRoot)
+        let document = try await store.openInPlace(source, bookmarkData: nil).document
+        let editor = makeEditor(store: store, renderer: BaselinePreviewRenderer())
+        let frame = expectation(description: "baseline")
+        let subscription = editor.$previewImage.compactMap { $0 }.first().sink { _ in frame.fulfill() }
+        editor.open(photo: photo(for: document), sourceURL: source, adjustments: .neutral, isReadOnly: false)
+        await fulfillment(of: [frame], timeout: 2)
+        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
+        editor.previewEyedropper(sample: .init(red: 0.55, green: 0.6, blue: 0.45))
+        let candidate = editor.displayedAdjustments
+        XCTAssertNotEqual(candidate, .neutral)
+        XCTAssertFalse(editor.canUndo)
+        await editor.save()
+        let beforeCommit = try await store.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(beforeCommit, .neutral)
+        XCTAssertEqual(editor.saveState, .unchanged)
+        XCTAssertTrue(editor.commitEyedropper())
+        XCTAssertFalse(editor.commitEyedropper(), "a repeated release cannot record another step")
+        XCTAssertEqual(editor.adjustments, candidate)
+        editor.undo()
+        XCTAssertEqual(editor.adjustments, .neutral)
+        XCTAssertFalse(editor.canUndo)
+        editor.redo()
+        XCTAssertEqual(editor.adjustments, candidate)
+        await editor.save()
+        editor.close()
+        let reopened = PhotoDocumentStore(rootURL: storeRoot)
+        let saved = try await reopened.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(saved, candidate)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        withExtendedLifetime(subscription) {}
+    }
 
     /// 1 & 2: autosave through a real `EditorSession` + `PhotoDocumentStore`
     /// persists the edit, and the RAW bytes it was opened from are
