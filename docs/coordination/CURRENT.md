@@ -1,8 +1,48 @@
+# iPad 白平衡滴管入口與畫布接線（2026-10-01, Codex）
+
+- **推送前最終驗證**：完整 `swift test`（含私有 RAW fixture）→ **2027 executed／1 skipped／1 failure**；唯一 failure 已單獨重跑確認為本機 signing-only `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier`（`0 != 2`）。`AdjustmentValueInputNativeTests` 原先以 hidden `NSHostingView` 的 AppKit accessibility children 讀 SwiftUI `Text`，會穩定得到空陣列；改由 `BasicAdjustmentPanelModel` 提供狀態→本地化說明的單一資料來源，畫面與測試共用，該回歸專項 **1/1 PASS**。unsigned iPad Simulator build、`git diff --check` 均 exit 0。實體 iPad 仍為 **NOT RUN**。
+- **提交／推送策略**：產品與測試已提交為 `d9041d7`（`fix: harden white balance editing and iPad parity`）。使用者已授權先推一版；遠端既有 `codex/open-source-release-prep` 與本機歷史無共同祖先，禁止 force push，故改推新的 `codex/` 遠端分支。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的本機簽章差異明確排除，不 merge／rebase。
+- **狀態／所有權**：沿用 `codex/open-source-release-prep` 工作樹，主代理單一寫入；保留 2026-09-30 白平衡／數值輸入修正的所有 dirty／untracked 變更，未覆蓋、未提交、未 push、未 merge、未 rebase。`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的本機 signing／Xcode 產生差異仍保持原樣，沒有納入本輪。
+- **本輪實作**：iPad Color inspector 的兩個入口（`PadInspectorHost.swift` 與 `PadEditorView.swift` 內嵌 host）加入共用 `PadWhiteBalanceEyedropperButton`；入口固定至少 44 pt，啟用／取消均走同一 `EditorSession` tool 與 `cancelEyedropperPreview()`。畫布加入 `PadEyedropperOverlayView`，取樣時固定當下 `displayedImage`、`EyedropperSamplingContext` 與 fitted frame；移動只 preview，放開才以同一 context 單次 commit；拒絕／取消沿用既有 diagnostics。滴管模式顯示編輯後照片並暫停一般 MagnificationGesture，避免座標在取樣中漂移。
+- **TDD 與 build 驗證**：先新增 `PadWhiteBalanceWiringTests` 並確認目前缺入口／overlay／停用縮放而失敗；接線後 `swift test --filter PadWhiteBalanceWiringTests` → **4 executed／0 failures**。再跑滴管／延遲回歸合併 filter → **34 executed／0 failures**。`xcodebuild ... -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` → **exit 0**；Simulator generic build → **exit 0**；`git diff --check` → **exit 0**。
+- **iPad Simulator 驗收**：在 iPad Pro 11-inch (M4)／iOS 18.6 以真實 RAW 操作。色溫 5000 正常提交；99999 被拒絕且保留 5000，accessibility help 顯示 2000–50000 K。滴管可啟用／取消；取樣把 5000/0 改為 2000/+8 並顯示範圍診斷；Undo／Redo 可往返，App 重啟後仍保存 2000/+8。直向 popover 與橫向 sidebar 均可操作。系統 Files picker 因自動化介面限制未納入，測試文件用公開 `PhotoDocumentStore` API 預先建立。
+- **Info 橫向回歸修正**：Simulator 驗收發現橫向 320 pt dock 的 Info 頁整體被裁掉左側。比對版本後確認 `f5c5ab4` 新增整理控制時，`120 pt` 固定評分標籤加六個 `32 pt` 按鈕把 padded content 撐到約 340 pt。先新增 `PadBatchContractTests.testInfoRatingControlsDoNotForceTheTrailingInspectorWiderThanItsDock` 並取得 2 個預期失敗，再把評分標題與按鈕改成上下排列；PadBatchContractTests **7/7 PASS**。重建、安裝後在同一台 Simulator 實際確認橫向所有 Info 標題／欄位完整可見，直向展開面板也正常。
+- **仍未完成**：實體 iPad inventory 當時為 unavailable；VoiceOver、Apple Pencil／外接鍵盤、系統 Files picker、全部拒絕原因與移出圖片／無像素矩陣仍未跑。EYE-01/02/06、PARITY-01 與完整 PARITY-02 仍是 NOT RUN；EYE-05 已有 Simulator UI＋session 證據可標 PASS。真實灰卡／四色偏與 Lightroom 色差校準仍維持 NOT RUN。完整 suite 的既有 signing-only failure 不因本輪而改動。
+
+### Next action
+
+待實體 iPad 可用時重播數值輸入、滴管取消／取樣／release、旋轉、VoiceOver、Apple Pencil／外接鍵盤與 Files picker；另補 EYE-01/02/06 的拒絕／移出影像矩陣及 PARITY-01 色差量測。Simulator 主要路徑已通過，但不得因此宣稱完整跨平台驗收完成。
+
 # Current Coordination State
 
-Updated: 2026-09-15
+## 白平衡與數值輸入第二輪修正（2026-09-30, Codex）
 
-Updated by: Codex（iPad 直向非侵入式 Inspector）
+- **狀態／所有權**：主代理單一寫入；先前 core 子代理因額度錯誤停止，已中止，不再擁有檔案。已實作 RF-01～06 的可執行修正與失敗回歸測試，但未完整驗收。未 commit、push、merge、rebase，保留既有 dirty／untracked 與 signing-only 差異。
+- **基準**：產品工作樹 `codex-open-source-release-prep`；branch `codex/open-source-release-prep`；HEAD `8b8afa4ba2deb9a275234591f6493cb44ef047a0` 未變。本輪起點 56 個 dirty/untracked，後續增加本輪程式／測試；不能把整個 dirty diff 都當本輪新增。簽章檔案雜湊與起點一致。
+- **主要修正**：新 Temperature 寫入與滴管最後 candidate 依 baseline 限幅並保留診斷；native/XMP 缺能力拒絕；有限 legacy raw 值、Undo／Redo／重開不遷移。滴管 photo／revision／frame 固定；render/error/histogram 的意圖識別在 actor hop 前註冊，晚到結果拒絕。AppKit/UIKit 輸入橋接同步可見草稿；同值 reset／換照片也使舊事件失效。iPad 兩個色彩入口補回 WB 基本欄位。
+- **驗證**：focused **213 executed／1 skipped／0 failures，exit 0**；完整 **2023 executed／1 skipped／1 failure，exit 1**。唯一 failure 仍為既有 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier` signing contract，不改 signing。私有 RAW **11/11 PASS、無 skip**；strict-concurrency/macOS build、iPad generic device 與 Simulator build（`CODE_SIGNING_ALLOWED=NO`）、`git diff --check` 均 exit 0。
+- **真實輸入與還原證據**：不顯示的 XCTest NSWindow 引用產品元件，native suite 12 項、11 通過、1 SKIPPED（合成雙擊連普通 AppKit 對照欄位也無法選字）。未再啟動 LumaInputHost。Enter／blur／Escape、精確值、reset／Undo／Redo／preset／同值照片、範圍錯誤及實際 sidecar/像素均已測。受控 renderer/histogram 已自行建立，18 個順序情境比對真正像素與完整 bins，不再要求使用者提供。
+- **報告**：[第二輪修正驗證報告](../testing/reports/2026-09-29-white-balance-and-input-review-followup.md)；第一輪報告已新增明確反證更正，歷史數字不取代本輪證據。
+- **26 項狀態（2026-10-01 更新）**：16 PASS／9 NOT RUN／1 FAIL。`EYE-05` 由 iPad Simulator overlay＋Undo／Redo＋重啟持久化證據改為 PASS；`PARITY-02` 的產品缺功能 FAIL 已修正，但因實體 iPad unavailable 改列 NOT RUN；`REG-01` 仍是既有 signing failure。灰卡 ROI、preview/export 指定色差量測、前景雙擊、完整拒絕矩陣與實體 iPad 操作仍未完成。
+
+### Next action
+
+確認 iPad 滴管的共用元件設計後，先補失敗測試，再接入 44 pt 入口／取消與固定快照取樣；取樣時顯示編輯後照片、暫停縮放，放開單次提交。設計已提出，待使用者確認。後續須分別操作前景 Mac、Simulator 與實體 iPad；不要再反覆開臨時測試 App，也不可宣稱 26 項已通過。
+
+## 白平衡與數值輸入正確性修正（2026-09-29, Codex）
+
+- **狀態**：依 `docs/superpowers/specs/2026-09-29-white-balance-and-input-correctness-repair-spec.md` 完成可執行的 A～F 修正；未 commit、未 push、未 merge，保留既有 signing 與 dirty 變更。
+- **核心修正**：共用 baseline-aware Kelvin resolver、decoder 最後防線、舊 sidecar 有限越界值保留與 no-autosave、preset invalid-baseline 診斷、baseline 尚未取得時的相對調整提示、滴管 Tint 正負方向、無效 sample release 狀態、no-op 影像／histogram 還原、精確數值草稿與外部更新同步。
+- **驗證**：完整 `swift test` **1975 executed／9 skipped／1 failure**；唯一 failure 是既有 `AppIconAssetContractTests.testIPadProjectDoesNotContainPersonalBundleIdentifier` 的 signing-only project 差異。focused 修正套件 **152/152 PASS**；RAW fixture **9/9 PASS**；strict-concurrency build、iOS device／Simulator generic build **PASS**；`git diff --check` **PASS**。
+- **驗收報告**：`docs/testing/reports/2026-09-29-white-balance-and-input-correctness-repair.md` 已逐項記錄 26 項結果；WB-07、TINT-02、真實 TextField INPUT-01～04、延遲排程 EYE-04／06、preview/export 像素 PARITY-01、macOS／iPad 手動 PARITY-02 等仍標為 **NOT RUN**。
+
+### Next action
+
+保留工作樹供 review；若要閉合 NOT RUN gate，需在隔離測試圖庫重播真實 TextField／iPad 操作、建立可控延遲 renderer 測試、取得固定 RAW 灰卡 ROI 並量測 E 指標，以及完成 session sidecar Undo／Redo／重開流程。不得修改 signing-only project、commit、push 或 merge。
+
+Updated: 2026-09-29
+
+Updated by: Codex（白平衡與數值輸入正確性修正）
 
 ## 調整數值微調按鈕回復（2026-09-15, Codex）
 
