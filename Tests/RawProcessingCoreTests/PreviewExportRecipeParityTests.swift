@@ -1,9 +1,25 @@
 import Foundation
 import CoreImage
+import CoreGraphics
 import XCTest
 @testable import RawProcessingCore
 
 final class PreviewExportRecipeParityTests: XCTestCase {
+    private func pixel(_ image: CGImage, x: Int, y: Int) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(
+            data: &bytes, width: 1, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return bytes }
+        context.draw(image, in: CGRect(
+            x: -CGFloat(x), y: -(CGFloat(image.height) - CGFloat(y) - 1),
+            width: CGFloat(image.width), height: CGFloat(image.height)
+        ))
+        return bytes
+    }
+
     func testPreviewAndExportReceiveTheSameFullQualityRecipe() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RecipeParity-\(UUID().uuidString)", isDirectory: true)
@@ -55,6 +71,13 @@ final class PreviewExportRecipeParityTests: XCTestCase {
         let exportedCG = try ImageRenderService().makeCGImage(exportedImage)
         XCTAssertEqual(exportedCG.width, preview.cgImage.width)
         XCTAssertEqual(exportedCG.height, preview.cgImage.height)
+        for point in [(10, 8), (22, 15)] {
+            let previewPixel = pixel(preview.cgImage, x: point.0, y: point.1)
+            let exportPixel = pixel(exportedCG, x: point.0, y: point.1)
+            XCTAssertLessThanOrEqual(abs(Int(previewPixel[0]) - Int(exportPixel[0])), 25)
+            XCTAssertLessThanOrEqual(abs(Int(previewPixel[1]) - Int(exportPixel[1])), 25)
+            XCTAssertLessThanOrEqual(abs(Int(previewPixel[2]) - Int(exportPixel[2])), 25)
+        }
         XCTAssertEqual(
             preview.rawRenderRecipe?.workingColorSpaceID,
             RawWorkingColorSpaceID.nativeExtendedLinearSRGBV1.rawValue
