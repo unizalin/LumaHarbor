@@ -351,6 +351,26 @@ public final class EditorSession: ObservableObject {
     internal func advanceEyedropperGenerationForTesting() {
         lastDisplayedGeneration &+= 1
     }
+
+    internal func enableComparisonForTesting() {
+        var pixel: [UInt8] = [0, 0, 0, 255]
+        let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        originalImage = context?.makeImage()
+    }
+
+    @discardableResult
+    internal func beginEyedropperForTesting() -> EyedropperSamplingContext? {
+        guard let photo, whiteBalanceCapability == .valid else { return nil }
+        let context = EyedropperSamplingContext(
+            photoID: photo.id, revision: editRevision,
+            generation: lastDisplayedGeneration, id: UUID()
+        )
+        activeEyedropperContext = context
+        requiresFreshEyedropperGesture = false
+        return context
+    }
     #endif
 
     // MARK: - Opening
@@ -618,7 +638,22 @@ public final class EditorSession: ObservableObject {
     /// so leaving a comparison layout never gets stuck.
     public func setCompareMode(_ mode: CompareMode) {
         guard mode == .single || canCompareWithOriginal else { return }
+        guard mode != compareMode else { return }
         compareMode = mode
+        invalidateEyedropperInteraction()
+        requestInteractivePreview()
+    }
+
+    private func invalidateEyedropperInteraction() {
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
+        eyedropperIssue = nil
+        previewIntentVersion &+= 1
+        previewImageReflectsAPreview = false
+        refreshWhiteBalanceDiagnostic()
     }
 
     /// Moves the vertical wipe divider (spec §6.1: "wipe 分隔位置要可由拖曳調整並
@@ -655,6 +690,7 @@ public final class EditorSession: ObservableObject {
     /// submission actually renders.
     public func previewPreset(_ preset: PresetDocument, mode: PresetApplicationMode) {
         guard photo != nil else { return }
+        invalidateEyedropperInteraction()
         previewIntentVersion += 1
         let result = applying(preset, mode: mode)
         previewedPresetAdjustments = result.adjustments
@@ -766,6 +802,7 @@ public final class EditorSession: ObservableObject {
         let snapshotName = trimmed.isEmpty ? "\(L10n.t("Snapshot")) \(snapshots.count + 1)" : trimmed
         let snapshot = EditSnapshot(name: snapshotName, adjustments: history.current)
         snapshots.append(snapshot)
+        invalidateEyedropperInteraction()
         persistSnapshots(for: photo)
     }
 
@@ -812,6 +849,7 @@ public final class EditorSession: ObservableObject {
     /// Purely preview state; never saved to sidecar or export.
     public func setPreviewOptions(_ options: ProfessionalPreviewOptions) {
         previewOptions = options
+        invalidateEyedropperInteraction()
         requestInteractivePreview()
         scheduleSettledPreview()
     }
@@ -820,6 +858,7 @@ public final class EditorSession: ObservableObject {
     /// Purely session state; never mutates adjustments or saves to sidecar.
     public func setComparisonSnapshot(_ snapshot: EditSnapshot?) {
         comparisonSnapshot = snapshot
+        invalidateEyedropperInteraction()
         requestInteractivePreview()
         scheduleSettledPreview()
     }
@@ -1004,6 +1043,10 @@ public final class EditorSession: ObservableObject {
             guard isCurrent(context) else { return false }
         } else if let activeEyedropperContext {
             guard isCurrent(activeEyedropperContext) else { return false }
+        }
+        guard let baselineKelvin = whiteBalanceBaseline?.temperatureKelvin,
+              WhiteBalancePresentation.isValidBaseline(baselineKelvin) else {
+            return false
         }
         guard let previewed = previewedEyedropperAdjustments,
               eyedropperCandidateRevision == editRevision,

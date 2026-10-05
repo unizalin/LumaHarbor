@@ -40,6 +40,35 @@ final class PreviewSchedulerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(superseded, 1)
     }
 
+    func testDelayedFailureFromASupersededRequestIsDiscarded() async {
+        let gate = ManualPreviewRenderer.Gate()
+        let scheduler = PreviewScheduler(
+            renderer: ManualPreviewRenderer(
+                gate: gate, respectsCancellation: false, failingKeys: ["1.0"]
+            )
+        )
+        let subject = makeSubject()
+
+        _ = await scheduler.submit(.stub(subject: subject, exposure: 1))
+        let newer = await scheduler.submit(.stub(subject: subject, exposure: 2))
+
+        // The old request fails after the newer one superseded it. Its error
+        // must be dropped just like its image would be.
+        await gate.release("1.0")
+        await waitUntil("the stale failure to be discarded") {
+            await scheduler.discardedStaleCount >= 1
+        }
+        let failed = await scheduler.failedCount
+        XCTAssertEqual(failed, 0)
+
+        await gate.release("2.0")
+        await waitUntil("the current render to be delivered") {
+            await scheduler.deliveredCount == 1
+        }
+        let produced = await firstProducedResult(from: scheduler)
+        XCTAssertEqual(produced?.token, newer)
+    }
+
     func testOnlyOneRenderIsInFlightPerPhoto() async {
         let gate = ManualPreviewRenderer.Gate()
         let scheduler = PreviewScheduler(

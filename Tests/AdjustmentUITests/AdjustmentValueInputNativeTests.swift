@@ -5,6 +5,15 @@ import XCTest
 
 @MainActor
 final class AdjustmentValueInputNativeTests: XCTestCase {
+    func testMacNativeInputKeepsVisiblePointerNudgeButtons() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Sources/AdjustmentUI/AdjustmentValueInput.swift"), encoding: .utf8)
+        XCTAssertGreaterThanOrEqual(source.components(separatedBy: "stepButton(systemName:").count - 1, 3)
+        XCTAssertFalse(source.contains("#if os(iOS)\n            stepButton"))
+        XCTAssertTrue(source.contains(".foregroundStyle(Color.white)"))
+    }
+
     func testControllerSubmitsChangedNativeDraftOnceAndBlurIsIdempotent() {
         var value = 6500.0
         var writes: [Double] = []

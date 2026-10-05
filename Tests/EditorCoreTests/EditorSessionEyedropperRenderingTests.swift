@@ -32,20 +32,64 @@ final class EditorSessionEyedropperRenderingTests: XCTestCase {
             fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "fixture"), status: .ready)
         editor.open(photo: photo, sourceURL: URL(fileURLWithPath: "/tmp/fixture.ARW"),
             adjustments: .neutral, isReadOnly: false)
-        let deadline = Date().addingTimeInterval(2)
-        while editor.previewImage == nil && Date() < deadline {
-            try await Task.sleep(for: .milliseconds(5))
+        let initialReady = await waitUntil("initial preview and histogram") {
+            editor.previewImage != nil && editor.histogram != nil
         }
+        XCTAssertTrue(initialReady)
         let image = try XCTUnwrap(editor.previewImage)
-        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
-        while editor.displayedImage?.dataProvider?.data.map({ CFDataGetBytePtr($0)?[0] }) != 220 &&
-            Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
-        editor.previewEyedropper(sample: .init(red: 0.5, green: 0.5, blue: 0.5))
-        while editor.displayedImage?.dataProvider?.data.map({ CFDataGetBytePtr($0)?[0] }) != 100 &&
-            Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        let baselineHistogram = try XCTUnwrap(editor.histogram)
+        let baselineRed = try XCTUnwrap(red(of: image))
+        XCTAssertEqual(baselineRed, 100)
+        let samplingContext = try XCTUnwrap(editor.beginEyedropperSampling(sourceImage: image))
+        editor.previewEyedropper(
+            sample: .init(red: 0.6, green: 0.5, blue: 0.4), context: samplingContext
+        )
+        let warmReady = await waitUntil("warm eyedropper preview") {
+            self.red(of: editor.displayedImage) == 220 && editor.histogram != baselineHistogram
+        }
+        XCTAssertTrue(warmReady)
+        XCTAssertEqual(red(of: editor.displayedImage), 220)
+        let warmHistogram = try XCTUnwrap(editor.histogram)
+        XCTAssertNotEqual(warmHistogram, baselineHistogram)
+        let neutralContext = try XCTUnwrap(editor.beginEyedropperForTesting())
+        editor.previewEyedropper(
+            sample: .init(red: 0.5, green: 0.5, blue: 0.5), context: neutralContext
+        )
+        let neutralReady = await waitUntil("neutral restored preview") {
+            self.red(of: editor.displayedImage) == 100 && editor.histogram == baselineHistogram
+        }
+        XCTAssertTrue(neutralReady)
+        XCTAssertEqual(red(of: editor.displayedImage), 100)
+        let restoredHistogram = try XCTUnwrap(editor.histogram)
+        XCTAssertEqual(restoredHistogram.red, baselineHistogram.red)
+        XCTAssertEqual(restoredHistogram.green, baselineHistogram.green)
+        XCTAssertEqual(restoredHistogram.blue, baselineHistogram.blue)
+        XCTAssertNotEqual(warmHistogram, restoredHistogram)
         XCTAssertEqual(editor.displayedAdjustments, editor.adjustments)
         XCTAssertFalse(editor.canUndo)
         XCTAssertNotNil(image)
         editor.close()
+    }
+
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 2,
+        condition: @escaping () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        if !condition() {
+            XCTFail("Timed out waiting for \(description)")
+            return false
+        }
+        return true
+    }
+
+    private func red(of image: CGImage?) -> UInt8? {
+        guard let data = image?.dataProvider?.data,
+              let pointer = CFDataGetBytePtr(data) else { return nil }
+        return pointer[0]
     }
 }

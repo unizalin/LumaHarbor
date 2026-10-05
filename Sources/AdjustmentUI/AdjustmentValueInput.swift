@@ -38,9 +38,7 @@ public struct AdjustmentValueInput: View {
 
     public var body: some View {
         HStack(spacing: AdjustmentControlMetrics.actionSpacing) {
-            #if os(iOS)
             stepButton(systemName: "minus", accessibilityKey: "Decrease", delta: -step)
-            #endif
 
             AdjustmentNativeTextField(controller: controller, label: label, value: $value,
                 range: range, fractionDigits: fractionDigits, identity: identity,
@@ -49,9 +47,7 @@ public struct AdjustmentValueInput: View {
                 .frame(width: AdjustmentControlMetrics.numericFieldWidth)
                 .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
-            #if os(iOS)
             stepButton(systemName: "plus", accessibilityKey: "Increase", delta: step)
-            #endif
 
             Button {
                 controller.cancel()

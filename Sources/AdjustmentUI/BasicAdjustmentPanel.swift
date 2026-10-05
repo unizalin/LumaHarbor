@@ -139,7 +139,7 @@ public struct BasicAdjustmentPanel: View {
                     in: sliderRange,
                     onEditingChanged: { editing in
                         if editing { editor.beginAdjustmentGesture() }
-                        else { editor.commitContinuousEdit() }
+                        else { editor.commitContinuousEdit(); editor.endAdjustmentGesture() }
                     }
                 )
                 .accessibilityLabel(Text(definition.kind.displayName))

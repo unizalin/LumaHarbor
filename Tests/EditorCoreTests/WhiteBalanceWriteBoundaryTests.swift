@@ -45,6 +45,17 @@ final class WhiteBalanceWriteBoundaryTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.temperature, 1066.6666666666667, accuracy: 1e-9)
         editor.close()
     }
+
+    func testValidCandidateCannotReleaseAfterBaselineBecomesInvalid() async {
+        let editor = await editor(baseline: 5500)
+        editor.beginEyedropperForTesting()
+        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
+        XCTAssertTrue(editor.hasEyedropperPreview)
+        editor.setWhiteBalanceBaselineForTesting(.init(temperatureKelvin: .nan, tint: 0))
+        XCTAssertFalse(editor.commitEyedropper())
+        XCTAssertEqual(editor.adjustments, .neutral)
+        editor.close()
+    }
 }
 
 private struct BoundaryRenderer: PreviewRendering {
