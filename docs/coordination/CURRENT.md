@@ -1,5 +1,16 @@
 # Current Coordination State
 
+## Mainline white-balance and brush integration P0 freeze（2026-10-05, Codex）
+
+- **工作所有權**：`codex/mainline-wb-brush-integration`；Task 1 writer 為 Codex。本工作樹以 `origin/main` 的 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319` 為 base；產品檔案起點乾淨，既有未追蹤的整合 plan 保留但不屬於本任務提交。
+- **來源保全**：`codex/open-source-release-prep` 的來源 HEAD 為 `5a80e969fbae94d8ee6db4842f3a2def781329f3`；P0 私有 manifest 已記錄 24 個 tracked modified 與 10 個 untracked 路徑及 hash。SOURCE 僅供讀取；`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的 local-only signing 差異排除，不得移入。
+- **整合階段**：P1 文件與基準凍結；尚未宣稱產品實作或本分支功能驗證。提供的主線基線證據為完整 `swift test` 2,574 executed、17 skipped、0 failures；Task 1 未重新執行產品測試。
+- **下一步**：在本分支先為 Task 2 撰寫 `WhiteBalancePresentationTests`、`WhiteBalanceEyedropperTests`、`RawDecodingTests`、`PresetApplicatorTests` 的失敗邊界／方向測試，再執行 `swift test --filter 'WhiteBalancePresentationTests|WhiteBalanceEyedropperTests|RawDecodingTests|PresetApplicatorTests'`。
+
+Updated: 2026-10-05
+
+Updated by: Codex（mainline integration Task 1 P0 freeze）
+
 ## Semantic release versioning landed（2026-09-29, Codex）
 
 - **整合狀態**：`codex/semver-release-versioning` 已以 fast-forward 合併並推送至 `origin/main`，正式產品基準為 `2905314872686aa836848ebe27a8e82cddfee658`；工作樹在推送前後均乾淨。
