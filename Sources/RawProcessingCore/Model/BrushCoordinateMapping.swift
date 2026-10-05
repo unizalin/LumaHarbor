@@ -30,59 +30,13 @@ public struct BrushCoordinateMapping: Equatable, Sendable {
         self.sourceExtent = sourceExtent
         self.geometry = geometry
 
-        var matrix = Matrix3x3.identity
-        if geometry.flipHorizontal { matrix = Matrix3x3.scale(x: -1, y: 1, around: CGPoint(x: 0.5, y: 0.5)) * matrix }
-        if geometry.flipVertical { matrix = Matrix3x3.scale(x: 1, y: -1, around: CGPoint(x: 0.5, y: 0.5)) * matrix }
-        if geometry.rotationDegrees != 0 {
-            matrix = Matrix3x3.rotationClockwise(degrees: geometry.rotationDegrees) * matrix
-        }
-        if geometry.straightenDegrees != 0 {
-            matrix = Matrix3x3.rotationClockwise(degrees: geometry.straightenDegrees) * matrix
-        }
-        if geometry.perspectiveHorizontal != 0 || geometry.perspectiveVertical != 0 {
-            let shortSide = min(sourceExtent.width, sourceExtent.height)
-            let h = CGFloat(geometry.perspectiveHorizontal / 100) * shortSide * 0.25 / sourceExtent.width
-            let v = CGFloat(geometry.perspectiveVertical / 100) * shortSide * 0.25 / sourceExtent.height
-            let destination = [
-                CGPoint(x: h, y: v), CGPoint(x: 1 - h, y: -v),
-                CGPoint(x: 1 + h, y: 1 + v), CGPoint(x: -h, y: 1 - v)
-            ]
-            matrix = try Matrix3x3.homography(
-                from: [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)],
-                to: destination
-            ) * matrix
-        }
-        if let pins = geometry.cornerPins, !pins.isIdentity {
-            matrix = try Matrix3x3.homography(
-                from: [
-                    CGPoint(x: pins.topLeft.x, y: pins.topLeft.y),
-                    CGPoint(x: pins.topRight.x, y: pins.topRight.y),
-                    CGPoint(x: pins.bottomRight.x, y: pins.bottomRight.y),
-                    CGPoint(x: pins.bottomLeft.x, y: pins.bottomLeft.y)
-                ],
-                to: [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
-            ) * matrix
-        }
-        if let crop = geometry.crop, !crop.isFull {
-            let cropMatrix = Matrix3x3.translation(x: -crop.x, y: -crop.y)
-                * Matrix3x3.scale(x: 1 / crop.width, y: 1 / crop.height)
-            matrix = cropMatrix * matrix
-        }
-        guard let inverse = matrix.inverted else { throw BrushCoordinateMappingError.nonInvertible }
-        self.sourceToDisplayMatrix = matrix
-        self.displayToSourceMatrix = inverse
-
-        var displayWidth = sourceExtent.width
-        var displayHeight = sourceExtent.height
-        if geometry.rotationDegrees == 90 || geometry.rotationDegrees == 270 {
-            swap(&displayWidth, &displayHeight)
-        }
-        if let crop = geometry.crop, !crop.isFull {
-            displayWidth *= crop.width
-            displayHeight *= crop.height
-        }
-        self.displayExtent = CGRect(x: sourceExtent.minX, y: sourceExtent.minY,
-                                    width: displayWidth, height: displayHeight)
+        let transform = try GeometryRenderer.makeBrushGeometryTransform(
+            sourceExtent: sourceExtent,
+            geometry: geometry
+        )
+        self.sourceToDisplayMatrix = transform.sourceToDisplay
+        self.displayToSourceMatrix = transform.displayToSource
+        self.displayExtent = transform.displayExtent
     }
 
     public init(sourceSize: CGSize, geometry: GeometryAdjustments = .neutral) throws {
@@ -143,14 +97,20 @@ public struct BrushCoordinateMapping: Equatable, Sendable {
                        y: sourceExtent.minY + point.y * sourceExtent.height)
     }
 
-    private struct Matrix3x3: Equatable, Sendable {
-        var m: [Double]
+    internal struct Matrix3x3: Equatable, Sendable {
+        var a: Double; var b: Double; var c: Double
+        var d: Double; var e: Double; var f: Double
+        var g: Double; var h: Double; var i: Double
+        init(m: [Double]) { a=m[0]; b=m[1]; c=m[2]; d=m[3]; e=m[4]; f=m[5]; g=m[6]; h=m[7]; i=m[8] }
         static let identity = Matrix3x3(m: [1,0,0, 0,1,0, 0,0,1])
+        subscript(index: Int) -> Double {
+            switch index { case 0:return a; case 1:return b; case 2:return c; case 3:return d; case 4:return e; case 5:return f; case 6:return g; case 7:return h; default:return i }
+        }
 
         static func * (lhs: Matrix3x3, rhs: Matrix3x3) -> Matrix3x3 {
             var out = [Double](repeating: 0, count: 9)
             for row in 0..<3 { for col in 0..<3 {
-                out[row * 3 + col] = (0..<3).reduce(0) { $0 + lhs.m[row * 3 + $1] * rhs.m[$1 * 3 + col] }
+                out[row * 3 + col] = (0..<3).reduce(0) { $0 + lhs[row * 3 + $1] * rhs[$1 * 3 + col] }
             }}
             return Matrix3x3(m: out)
         }
@@ -174,14 +134,14 @@ public struct BrushCoordinateMapping: Equatable, Sendable {
 
         func apply(_ point: CGPoint) -> CGPoint {
             let x = Double(point.x), y = Double(point.y)
-            let w = m[6] * x + m[7] * y + m[8]
+            let w = self[6] * x + self[7] * y + self[8]
             let safeW = abs(w) < 1e-12 ? (w < 0 ? -1e-12 : 1e-12) : w
-            return CGPoint(x: (m[0] * x + m[1] * y + m[2]) / safeW,
-                           y: (m[3] * x + m[4] * y + m[5]) / safeW)
+            return CGPoint(x: (self[0] * x + self[1] * y + self[2]) / safeW,
+                           y: (self[3] * x + self[4] * y + self[5]) / safeW)
         }
 
         var inverted: Matrix3x3? {
-            let a=m[0], b=m[1], c=m[2], d=m[3], e=m[4], f=m[5], g=m[6], h=m[7], i=m[8]
+            let a=self[0], b=self[1], c=self[2], d=self[3], e=self[4], f=self[5], g=self[6], h=self[7], i=self[8]
             let determinant = a*(e*i-f*h) - b*(d*i-f*g) + c*(d*h-e*g)
             guard determinant.isFinite, abs(determinant) > 1e-12 else { return nil }
             let inv = [

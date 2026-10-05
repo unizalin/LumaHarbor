@@ -4,6 +4,84 @@ import XCTest
 @testable import RawProcessingCore
 
 final class BrushCoordinateMappingTests: XCTestCase {
+    private func renderedRedCentroid(
+        sourcePoint: CGPoint,
+        sourceSize: CGSize,
+        geometry: GeometryAdjustments
+    ) throws -> CGPoint {
+        let sourceExtent = CGRect(origin: .zero, size: sourceSize)
+        let sourcePixel = CGPoint(
+            x: sourcePoint.x * sourceSize.width,
+            y: (1 - sourcePoint.y) * sourceSize.height
+        )
+        let marker = CIImage(color: .red).cropped(to: CGRect(
+            x: sourcePixel.x - 1.5, y: sourcePixel.y - 1.5, width: 3, height: 3
+        ))
+        let source = marker
+            .composited(over: CIImage(color: .black).cropped(to: sourceExtent))
+            .cropped(to: sourceExtent)
+        let output = GeometryRenderer.apply(geometry, to: source)
+        let cgImage = try ImageRenderService().makeCGImage(output)
+        guard let provider = cgImage.dataProvider,
+              let data = provider.data as Data? else {
+            throw BrushCoordinateMappingError.invalidExtent
+        }
+        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 4)
+        let bytes = [UInt8](data)
+        var sumX = 0.0
+        var sumY = 0.0
+        var count = 0.0
+        for y in 0..<cgImage.height {
+            for x in 0..<cgImage.width {
+                let index = y * cgImage.bytesPerRow + x * bytesPerPixel
+                guard index + 2 < bytes.count else { continue }
+                if bytes[index] > 180, bytes[index + 1] < 100, bytes[index + 2] < 100 {
+                    sumX += Double(x) + 0.5
+                    sumY += Double(y) + 0.5
+                    count += 1
+                }
+            }
+        }
+        guard count > 0 else { throw BrushCoordinateMappingError.outsideDisplay }
+        return CGPoint(x: sumX / count, y: sumY / count)
+    }
+
+    func testMappingUsesGeometryRendererPixelOracleAcrossGeometryFamilies() throws {
+        let sourceSize = CGSize(width: 64, height: 48)
+        let source = CGPoint(x: 0.37, y: 0.28)
+        let crop = NormalizedCropRect(x: 0.1, y: 0.08, width: 0.8, height: 0.84)
+        let pins = PerspectiveCornerPins(
+            topLeft: NormalizedPoint(x: 0.08, y: 0.10),
+            topRight: NormalizedPoint(x: 0.92, y: 0.04),
+            bottomLeft: NormalizedPoint(x: 0.04, y: 0.90),
+            bottomRight: NormalizedPoint(x: 0.96, y: 0.84)
+        )
+        let cases: [GeometryAdjustments] = [
+            GeometryAdjustments(flipHorizontal: true),
+            GeometryAdjustments(flipVertical: true),
+            GeometryAdjustments(flipHorizontal: true, flipVertical: true),
+            GeometryAdjustments(rotationDegrees: 180),
+            GeometryAdjustments(rotationDegrees: 270),
+            GeometryAdjustments(crop: crop),
+            GeometryAdjustments(straightenDegrees: 10),
+            GeometryAdjustments(straightenDegrees: -10),
+            GeometryAdjustments(perspectiveHorizontal: 25),
+            GeometryAdjustments(perspectiveVertical: -25),
+            GeometryAdjustments(cornerPins: pins)
+        ]
+        for geometry in cases {
+            let mapping = try BrushCoordinateMapping(sourceSize: sourceSize, geometry: geometry)
+            let expected = try mapping.sourceToDisplay(source)
+            let observed = try renderedRedCentroid(sourcePoint: source, sourceSize: sourceSize, geometry: geometry)
+            let expectedPixel = CGPoint(
+                x: expected.x,
+                y: expected.y
+            )
+            XCTAssertEqual(observed.x, expectedPixel.x, accuracy: 3.5, "geometry=\(geometry)")
+            XCTAssertEqual(observed.y, expectedPixel.y, accuracy: 3.5, "geometry=\(geometry)")
+        }
+    }
+
     func testIdentityMapsNonCentralLandmarkWithNonZeroExtent() throws {
         let mapping = try BrushCoordinateMapping(
             sourceExtent: CGRect(x: 17, y: 23, width: 160, height: 80),

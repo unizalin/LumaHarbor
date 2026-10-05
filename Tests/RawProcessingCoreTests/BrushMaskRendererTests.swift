@@ -68,4 +68,41 @@ final class BrushMaskRendererTests: XCTestCase {
         )
         XCTAssertThrowsError(try BrushMaskRenderer.applyValidated([mask], to: image, mapping: mapping))
     }
+
+    func testBrushKernelIsRadialAndHonoursFeatherFlow() throws {
+        let path = BrushMaskPath(points: [BrushMaskPoint(x: 0.5, y: 0.5)])
+        let hard = BrushMaskStroke(path: path, size: 0.2, feather: 0, flow: 0.8)
+        let soft = BrushMaskStroke(path: path, size: 0.2, feather: 0.35, flow: 0.4)
+        let adjustment = BrushMaskPatch(exposure: 2)
+        let hardImage = try BrushMaskRenderer.applyValidated([BrushMask(strokes: [hard], adjustments: adjustment)], to: baseImage())
+        let softImage = try BrushMaskRenderer.applyValidated([BrushMask(strokes: [soft], adjustments: adjustment)], to: baseImage())
+        let center = try sample(hardImage, at: CGPoint(x: 50, y: 30))
+        let hardEdge = try sample(hardImage, at: CGPoint(x: 56, y: 30))
+        let hardCorner = try sample(hardImage, at: CGPoint(x: 55, y: 25))
+        let softEdge = try sample(softImage, at: CGPoint(x: 57, y: 30))
+        XCTAssertGreaterThan(center.0, 128)
+        XCTAssertEqual(hardEdge.0, 128, accuracy: 3, "outside radial radius must be untouched")
+        XCTAssertEqual(hardCorner.0, 128, accuracy: 3, "square corners must not receive paint")
+        XCTAssertGreaterThan(softEdge.0, 128)
+        XCTAssertLessThan(softEdge.0, center.0)
+    }
+
+    func testArcSpacingKeepsOneRemainingDistanceAcrossTurns() throws {
+        let sparse = BrushMaskPath(points: [
+            BrushMaskPoint(x: 0.1, y: 0.2), BrushMaskPoint(x: 0.9, y: 0.2),
+            BrushMaskPoint(x: 0.9, y: 0.8)
+        ])
+        let dense = BrushMaskPath(points: [
+            BrushMaskPoint(x: 0.1, y: 0.2), BrushMaskPoint(x: 0.5, y: 0.2), BrushMaskPoint(x: 0.9, y: 0.2),
+            BrushMaskPoint(x: 0.9, y: 0.5), BrushMaskPoint(x: 0.9, y: 0.8)
+        ])
+        let adjustment = BrushMaskPatch(exposure: 1)
+        let a = BrushMaskRenderer.apply([BrushMask(strokes: [BrushMaskStroke(path: sparse, size: 0.08)], adjustments: adjustment)], to: baseImage())
+        let b = BrushMaskRenderer.apply([BrushMask(strokes: [BrushMaskStroke(path: dense, size: 0.08)], adjustments: adjustment)], to: baseImage())
+        for p in [CGPoint(x: 50, y: 12), CGPoint(x: 88, y: 30), CGPoint(x: 88, y: 48)] {
+            let pa = try sample(a, at: p)
+            let pb = try sample(b, at: p)
+            XCTAssertLessThanOrEqual(abs(Int(pa.0) - Int(pb.0)), 8)
+        }
+    }
 }

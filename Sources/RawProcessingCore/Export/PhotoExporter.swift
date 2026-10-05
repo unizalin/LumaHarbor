@@ -328,7 +328,7 @@ public actor PhotoExporter {
                 recipe: decoded.rawRenderRecipe ?? resolvedRecipe,
                 scaleFactor: decoded.scaleFactor
             )
-            let brushMapping = try BrushCoordinateMapping(
+            let brushMapping = try GeometryRenderer.brushCoordinateMapping(
                 sourceExtent: decoded.image.extent,
                 geometry: request.adjustments.geometry
             )

@@ -7,6 +7,7 @@ import Foundation
 /// composited in array order and each mask's local adjustment is evaluated once
 /// against the image produced by the preceding mask.
 public enum BrushMaskRenderer {
+    public enum Error: Swift.Error, Equatable, Sendable { case renderFailed }
     public static func apply(
         _ masks: [BrushMask],
         to image: CIImage,
@@ -32,8 +33,7 @@ public enum BrushMaskRenderer {
         if let mapping {
             coordinateMapping = mapping
         } else {
-            guard let created = try? BrushCoordinateMapping(sourceExtent: image.extent, geometry: .neutral) else { return image }
-            coordinateMapping = created
+            coordinateMapping = try BrushCoordinateMapping(sourceExtent: image.extent, geometry: .neutral)
         }
         for mask in masks {
             _ = try mask.validated()
@@ -50,14 +50,12 @@ public enum BrushMaskRenderer {
             // already run immediately before this stage and must not execute a
             // second time for each mask.
             let adjusted = AdjustmentPipeline().apply(parameters, to: working, recipe: nil, scaleFactor: scaleFactor)
-            let maskToAlpha = CIFilter.maskToAlpha()
-            maskToAlpha.inputImage = coverage
-            let normalizedCoverage = maskToAlpha.outputImage?.cropped(to: working.extent) ?? coverage
-            let blend = CIFilter.blendWithAlphaMask()
+            let blend = CIFilter.blendWithMask()
             blend.inputImage = adjusted.cropped(to: working.extent)
             blend.backgroundImage = working
-            blend.maskImage = normalizedCoverage
-            working = blend.outputImage?.cropped(to: working.extent) ?? working
+            blend.maskImage = coverage
+            guard let out = blend.outputImage else { throw Error.renderFailed }
+            working = out.cropped(to: working.extent)
         }
         return working
     }
@@ -95,39 +93,54 @@ public enum BrushMaskRenderer {
         imageExtent: CGRect,
         mapping: BrushCoordinateMapping
     ) throws -> CIImage {
-        var coverage = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: imageExtent)
+        let width = Int(imageExtent.width.rounded(.up))
+        let height = Int(imageExtent.height.rounded(.up))
+        guard width > 0, height > 0 else { return CIImage(color: .clear).cropped(to: imageExtent) }
+        var alpha = [CGFloat](repeating: 0, count: width * height)
+        let shortSide = min(imageExtent.width, imageExtent.height)
         for stroke in mask.strokes {
             let points = try stroke.validated().points
             guard !points.isEmpty, stroke.flow > 0 else { continue }
             let samples = try sample(points: points, stroke: stroke, mapping: mapping)
-            var strokeCoverage = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: imageExtent)
             for point in samples {
-                let stamp = stamp(at: point, stroke: stroke, extent: imageExtent)
-                let composite = CIFilter.sourceOverCompositing()
-                composite.inputImage = stamp
-                composite.backgroundImage = strokeCoverage
-                strokeCoverage = composite.outputImage?.cropped(to: imageExtent) ?? strokeCoverage
-            }
-            if stroke.mode == .paint {
-                let composite = CIFilter.sourceOverCompositing()
-                composite.inputImage = strokeCoverage
-                composite.backgroundImage = coverage
-                coverage = composite.outputImage?.cropped(to: imageExtent) ?? coverage
-            } else {
-                let inverse = CIFilter.colorMatrix()
-                inverse.inputImage = strokeCoverage
-                inverse.rVector = CIVector(x: -1, y: 0, z: 0, w: 0)
-                inverse.gVector = CIVector(x: 0, y: -1, z: 0, w: 0)
-                inverse.bVector = CIVector(x: 0, y: 0, z: -1, w: 0)
-                inverse.aVector = CIVector(x: 0, y: 0, z: 0, w: -1)
-                inverse.biasVector = CIVector(x: 1, y: 1, z: 1, w: 1)
-                let minimum = CIFilter.minimumCompositing()
-                minimum.inputImage = inverse.outputImage?.cropped(to: imageExtent)
-                minimum.backgroundImage = coverage
-                coverage = minimum.outputImage?.cropped(to: imageExtent) ?? coverage
+                let feather = min(max(CGFloat(stroke.feather), 0), 1)
+                // Feather is a visible falloff band; give it room outside the
+                // hard core so a soft brush still affects the boundary pixels.
+                let radius = max(CGFloat(stroke.size) * shortSide / 2 * (1 + feather), 0.5)
+                // A zero-feather brush is a filled disk. Feather reserves a
+                // falloff band outside that disk while preserving the flow
+                // value throughout the hard core.
+                let innerRadius = radius * (1 - feather)
+                let visualY = imageExtent.maxY - (point.y - imageExtent.minY)
+                let minX = max(0, Int(floor(point.x - radius - imageExtent.minX - 1)))
+                let maxX = min(width - 1, Int(ceil(point.x + radius - imageExtent.minX + 1)))
+                let minY = max(0, Int(floor(visualY - radius - imageExtent.minY - 1)))
+                let maxY = min(height - 1, Int(ceil(visualY + radius - imageExtent.minY + 1)))
+                for y in minY...maxY { for x in minX...maxX {
+                    let world = CGPoint(x: imageExtent.minX + CGFloat(x) + 0.5, y: imageExtent.minY + CGFloat(y) + 0.5)
+                    let distance = hypot(world.x - point.x, world.y - visualY)
+                    let opacity = distance <= innerRadius ? CGFloat(stroke.flow) : (distance < radius ? CGFloat(stroke.flow) * (1 - (distance - innerRadius) / max(radius - innerRadius, 0.0001)) : 0)
+                    guard opacity > 0 else { continue }
+                    let index = y * width + x
+                    alpha[index] = stroke.mode == .paint ? 1 - (1 - alpha[index]) * (1 - opacity) : alpha[index] * (1 - opacity)
+                }}
             }
         }
-        return coverage
+        // CIImage bitmap rows are top-down for R8; the coverage array uses
+        // Core Image's y-up pixel rows, so flip exactly once here.
+        let bytes = (0..<height).flatMap { row in
+            let sourceRow = height - 1 - row
+            return (0..<width).map { x in
+                UInt8((min(max(alpha[sourceRow * width + x], 0), 1) * 255).rounded())
+            }
+        }
+        let gray = CGColorSpace(name: CGColorSpace.linearGray)
+            ?? CGColorSpaceCreateDeviceGray()
+        return CIImage(bitmapData: Data(bytes), bytesPerRow: width,
+                        size: CGSize(width: width, height: height), format: .R8,
+                        colorSpace: gray)
+            .transformed(by: CGAffineTransform(translationX: imageExtent.minX, y: imageExtent.minY))
+            .cropped(to: imageExtent)
     }
 
     private static func sample(
@@ -160,20 +173,4 @@ public enum BrushMaskRenderer {
         return output
     }
 
-    private static func stamp(at point: CGPoint, stroke: BrushMaskStroke, extent: CGRect) -> CIImage {
-        let shortSide = min(extent.width, extent.height)
-        let radius = max(CGFloat(stroke.size) * shortSide / 2, 0.5)
-        // Brush points are persisted/displayed in top-left visual coordinates;
-        // Core Image's extent uses a bottom-left origin.
-        let center = CGPoint(x: point.x, y: extent.maxY - (point.y - extent.minY))
-        let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-        var stamp = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(stroke.flow))).cropped(to: rect)
-        if stroke.feather > 0 {
-            let blur = CIFilter.gaussianBlur()
-            blur.inputImage = stamp
-            blur.radius = Float(max(radius * CGFloat(stroke.feather), 0.25))
-            stamp = blur.outputImage?.cropped(to: extent) ?? stamp
-        }
-        return stamp.cropped(to: extent)
-    }
 }

@@ -64,7 +64,7 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                 recipe: decoded.rawRenderRecipe ?? recipe,
                 scaleFactor: decoded.scaleFactor
             )
-            let brushMapping = try BrushCoordinateMapping(
+            let brushMapping: BrushCoordinateMapping? = try GeometryRenderer.brushCoordinateMapping(
                 sourceExtent: decoded.image.extent,
                 geometry: request.adjustments.geometry
             )
