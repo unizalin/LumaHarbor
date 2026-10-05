@@ -69,6 +69,9 @@ public struct LocalAdjustmentsPanel: View {
             }
 
             Divider()
+            adjustmentBrushSection
+
+            Divider()
 
             spotHealToolbar
 
@@ -944,5 +947,173 @@ public struct LocalAdjustmentsPanel: View {
             .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel(Text(L10n.t("Delete Spot Heal")))
         }
+    }
+
+    // MARK: - Independent source-coordinate adjustment brush
+
+    private var adjustmentBrushes: [BrushMask] {
+        editor.adjustments.brushMasks
+    }
+
+    private var selectedAdjustmentBrush: BrushMask? {
+        guard let id = editor.selectedBrushMaskID else { return nil }
+        return adjustmentBrushes.first(where: { $0.id == id })
+    }
+
+    private var adjustmentBrushSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.t("Adjustment Brush"))
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+
+            Button {
+                _ = editor.addBrushMask(
+                    name: L10n.t("Adjustment Brush"),
+                    adjustments: BrushMaskPatch(exposure: editor.brushMaskGestureSettings.adjustments.exposure)
+                )
+                editor.setToolMode(.brushMask)
+            } label: {
+                Label(L10n.t("Add Adjustment Brush"), systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("add-adjustment-brush")
+
+            if adjustmentBrushes.isEmpty {
+                Text(L10n.t("No adjustment brushes yet."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(adjustmentBrushes) { brush in
+                    adjustmentBrushRow(brush)
+                }
+            }
+
+            if let brush = selectedAdjustmentBrush {
+                adjustmentBrushControls(for: brush)
+            }
+        }
+        .accessibilityIdentifier("adjustment-brush-section")
+    }
+
+    private func adjustmentBrushRow(_ brush: BrushMask) -> some View {
+        let selected = brush.id == editor.selectedBrushMaskID
+        return HStack(spacing: 4) {
+            Button {
+                editor.selectBrushMask(id: brush.id)
+                editor.setToolMode(.brushMask)
+            } label: {
+                Label(
+                    brush.name.isEmpty ? L10n.t("Adjustment Brush") : brush.name,
+                    systemImage: "paintbrush.pointed"
+                )
+                .fontWeight(selected ? .semibold : .regular)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: 44, alignment: .leading)
+            .accessibilityLabel(Text(brush.name.isEmpty ? L10n.t("Adjustment Brush") : brush.name))
+            .accessibilityIdentifier("adjustment-brush-\(brush.id.uuidString)")
+
+            Toggle(L10n.t("Enabled"), isOn: Binding(
+                get: { brush.isEnabled },
+                set: { value in
+                    editor.updateAdjustments { adjustments in
+                        guard let index = adjustments.brushMasks.firstIndex(where: { $0.id == brush.id }) else { return }
+                        adjustments.brushMasks[index].isEnabled = value
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityIdentifier("adjustment-brush-enabled-\(brush.id.uuidString)")
+
+            Button(role: .destructive) {
+                _ = editor.deleteBrushMask(id: brush.id)
+                if editor.toolMode == .brushMask, editor.selectedBrushMaskID == nil {
+                    editor.setToolMode(.adjust)
+                }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel(Text(L10n.t("Delete Adjustment Brush")))
+            .accessibilityIdentifier("delete-adjustment-brush-\(brush.id.uuidString)")
+        }
+        .padding(4)
+        .background(selected ? Color.accentColor.opacity(0.1) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func adjustmentBrushControls(for brush: BrushMask) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker(L10n.t("Mode"), selection: brushModeBinding) {
+                Text(L10n.t("Paint")).tag(BrushMaskStrokeMode.paint)
+                Text(L10n.t("Erase")).tag(BrushMaskStrokeMode.erase)
+            }
+            .pickerStyle(.segmented)
+            .frame(minHeight: 44)
+            .accessibilityLabel(Text(L10n.t("Brush Mode")))
+            .accessibilityIdentifier("adjustment-brush-mode")
+
+            brushSlider(label: "Size", keyPath: \.size, range: 0.005...1, value: editor.brushMaskGestureSettings.size)
+            brushSlider(label: "Feather", keyPath: \.feather, range: 0...1, value: editor.brushMaskGestureSettings.feather)
+            brushSlider(label: "Flow", keyPath: \.flow, range: 0...1, value: editor.brushMaskGestureSettings.flow)
+            brushSlider(label: "Density", keyPath: \.density, range: 0...1, value: editor.brushMaskGestureSettings.density)
+
+            AdjustmentSliderRow(
+                label: L10n.t("Exposure"),
+                value: brush.adjustments.exposure ?? 0,
+                range: -5...5,
+                fractionDigits: 1,
+                onChange: { value in
+                    editor.updateAdjustments { adjustments in
+                        guard let index = adjustments.brushMasks.firstIndex(where: { $0.id == brush.id }) else { return }
+                        adjustments.brushMasks[index].adjustments.exposure = value
+                    }
+                },
+                onReset: {
+                    editor.updateAdjustments { adjustments in
+                        guard let index = adjustments.brushMasks.firstIndex(where: { $0.id == brush.id }) else { return }
+                        adjustments.brushMasks[index].adjustments.exposure = nil
+                    }
+                },
+                onPreview: { value in
+                    editor.previewContinuousEdit { adjustments in
+                        guard let index = adjustments.brushMasks.firstIndex(where: { $0.id == brush.id }) else { return }
+                        adjustments.brushMasks[index].adjustments.exposure = value
+                    }
+                },
+                onCommitPreview: { editor.commitContinuousEdit() }
+            )
+        }
+        .padding(.leading, 8)
+    }
+
+    private var brushModeBinding: Binding<BrushMaskStrokeMode> {
+        Binding(
+            get: { editor.brushMaskGestureSettings.mode },
+            set: { editor.brushMaskGestureSettings.mode = $0 }
+        )
+    }
+
+    private func brushSlider(
+        label: String,
+        keyPath: WritableKeyPath<BrushMaskGestureSettings, Double>,
+        range: ClosedRange<Double>,
+        value: Double
+    ) -> some View {
+        AdjustmentSliderRow(
+            label: L10n.t(label),
+            value: value,
+            range: range,
+            fractionDigits: 2,
+            onChange: { value in editor.brushMaskGestureSettings[keyPath: keyPath] = value },
+            onReset: { editor.brushMaskGestureSettings[keyPath: keyPath] = BrushMaskGestureSettings()[keyPath: keyPath] },
+            onPreview: { value in editor.brushMaskGestureSettings[keyPath: keyPath] = value },
+            onCommitPreview: { }
+        )
     }
 }

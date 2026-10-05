@@ -168,6 +168,10 @@ struct EditorView: View {
                                 }
 
                                 if model.editor.toolMode == .brush {
+                                    LegacyBrushMaskOverlayView(editor: model.editor, imageFrame: imageFrame)
+                                }
+
+                                if model.editor.toolMode == .brushMask {
                                     BrushMaskOverlayView(editor: model.editor, imageFrame: imageFrame)
                                 }
 

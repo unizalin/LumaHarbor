@@ -207,11 +207,9 @@ public struct RadialMaskOverlayView: View {
     }
 }
 
-/// On-canvas brush painting shared by Mac and iPad. Existing strokes remain
-/// visible, and a drag appends normalized points to the selected brush mask.
-/// The panel still owns size and feather so a stroke can be refined without
-/// making the canvas gesture ambiguous.
-public struct BrushMaskOverlayView: View {
+/// Legacy `LocalAdjustmentKind.brush` canvas overlay.  The independent
+/// source-coordinate adjustment brush lives in `BrushMaskOverlayView.swift`.
+public struct LegacyBrushMaskOverlayView: View {
     @ObservedObject private var editor: EditorSession
     private let imageFrame: CGRect
 

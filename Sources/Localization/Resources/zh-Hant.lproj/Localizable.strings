@@ -743,3 +743,12 @@
 "Choose a brighter neutral area." = "請選擇較明亮的中性區域。";
 "Choose a neutral area without clipped highlights." = "請選擇沒有高光溢出的中性區域。";
 "Wait for the current preview before sampling." = "請等待目前預覽完成後再取樣。";
+"Adjustment Brush" = "調整筆刷";
+"Add Adjustment Brush" = "新增調整筆刷";
+"No adjustment brushes yet." = "尚無調整筆刷。";
+"Paint" = "繪製";
+"Erase" = "擦除";
+"Brush Mode" = "筆刷模式";
+"Delete Adjustment Brush" = "刪除調整筆刷";
+"Flow" = "流量";
+"Density" = "密度";

@@ -743,3 +743,12 @@
 "Choose a brighter neutral area." = "더 밝은 중성 영역을 선택하세요.";
 "Choose a neutral area without clipped highlights." = "하이라이트가 클리핑되지 않은 중성 영역을 선택하세요.";
 "Wait for the current preview before sampling." = "현재 미리보기가 표시될 때까지 기다린 후 샘플링하세요.";
+"Adjustment Brush" = "조정 브러시";
+"Add Adjustment Brush" = "조정 브러시 추가";
+"No adjustment brushes yet." = "조정 브러시가 없습니다.";
+"Paint" = "칠하기";
+"Erase" = "지우기";
+"Brush Mode" = "브러시 모드";
+"Delete Adjustment Brush" = "조정 브러시 삭제";
+"Flow" = "흐름";
+"Density" = "밀도";

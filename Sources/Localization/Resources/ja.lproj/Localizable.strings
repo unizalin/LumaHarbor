@@ -743,3 +743,12 @@
 "Choose a brighter neutral area." = "より明るいニュートラルな領域を選択してください。";
 "Choose a neutral area without clipped highlights." = "ハイライトが白飛びしていないニュートラルな領域を選択してください。";
 "Wait for the current preview before sampling." = "現在のプレビューが表示されるまで待ってからサンプリングしてください。";
+"Adjustment Brush" = "調整ブラシ";
+"Add Adjustment Brush" = "調整ブラシを追加";
+"No adjustment brushes yet." = "調整ブラシはまだありません。";
+"Paint" = "描画";
+"Erase" = "消去";
+"Brush Mode" = "ブラシモード";
+"Delete Adjustment Brush" = "調整ブラシを削除";
+"Flow" = "流量";
+"Density" = "密度";

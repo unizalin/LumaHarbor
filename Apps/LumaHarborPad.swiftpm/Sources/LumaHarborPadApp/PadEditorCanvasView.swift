@@ -153,6 +153,9 @@ struct PadEditorCanvasView: View {
                 RadialMaskOverlayView(editor: editor, imageFrame: imageFrame)
             }
             if editor.toolMode == .brush {
+                LegacyBrushMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+            if editor.toolMode == .brushMask {
                 BrushMaskOverlayView(editor: editor, imageFrame: imageFrame)
             }
             if editor.toolMode == .linearGradient {

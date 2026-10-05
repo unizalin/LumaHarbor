@@ -223,6 +223,11 @@ public final class EditorSession: ObservableObject {
         }
     }
 
+    /// Presentation-only controls for the independent adjustment brush. The
+    /// values are captured into a `BrushMaskGestureContext` at press time;
+    /// changing them while a stroke is in flight cannot mutate that stroke.
+    @Published public var brushMaskGestureSettings = BrushMaskGestureSettings()
+
     /// Snapshots saved on this photo (spec §6.6).
     @Published public private(set) var snapshots: [EditSnapshot] = []
 
@@ -548,6 +553,7 @@ public final class EditorSession: ObservableObject {
         self.selectedLocalAdjustmentID = nil
         self.selectedBrushMaskID = nil
         self.selectedAdjustmentIdentity = nil
+        self.brushMaskGestureSettings = BrushMaskGestureSettings()
         self.activeBrushMaskGesture = nil
         refreshUndoState()
 
@@ -602,6 +608,7 @@ public final class EditorSession: ObservableObject {
         selectedLocalAdjustmentID = nil
         selectedBrushMaskID = nil
         selectedAdjustmentIdentity = nil
+        brushMaskGestureSettings = BrushMaskGestureSettings()
         activeBrushMaskGesture = nil
         refreshUndoState()
         if let scheduler = services?.previewScheduler {

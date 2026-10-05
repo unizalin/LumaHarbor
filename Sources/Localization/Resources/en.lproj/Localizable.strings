@@ -743,3 +743,12 @@
 "Choose a brighter neutral area." = "Choose a brighter neutral area.";
 "Choose a neutral area without clipped highlights." = "Choose a neutral area without clipped highlights.";
 "Wait for the current preview before sampling." = "Wait for the current preview before sampling.";
+"Adjustment Brush" = "Adjustment Brush";
+"Add Adjustment Brush" = "Add Adjustment Brush";
+"No adjustment brushes yet." = "No adjustment brushes yet.";
+"Paint" = "Paint";
+"Erase" = "Erase";
+"Brush Mode" = "Brush Mode";
+"Delete Adjustment Brush" = "Delete Adjustment Brush";
+"Flow" = "Flow";
+"Density" = "Density";

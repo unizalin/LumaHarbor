@@ -743,3 +743,12 @@
 "Choose a brighter neutral area." = "Wählen Sie einen helleren neutralen Bereich.";
 "Choose a neutral area without clipped highlights." = "Wählen Sie einen neutralen Bereich ohne überstrahlte Lichter.";
 "Wait for the current preview before sampling." = "Warten Sie auf die aktuelle Vorschau, bevor Sie abtasten.";
+"Adjustment Brush" = "Korrekturpinsel";
+"Add Adjustment Brush" = "Korrekturpinsel hinzufügen";
+"No adjustment brushes yet." = "Noch keine Korrekturpinsel.";
+"Paint" = "Malen";
+"Erase" = "Löschen";
+"Brush Mode" = "Pinselmodus";
+"Delete Adjustment Brush" = "Korrekturpinsel löschen";
+"Flow" = "Fluss";
+"Density" = "Dichte";
