@@ -320,7 +320,10 @@ final class EditorWorkflowUXContractTests: XCTestCase {
             source.contains("let frozenSelection = selectedPhotoIDs"),
             "the target set must be captured into a local value synchronously, before any `await`, so a selection change mid-sync cannot retarget it"
         )
-        XCTAssertTrue(source.contains("await batchSyncService.syncPatch(clipboard.patch, sourcePhotoID: source, targetPhotoIDs: targets)"))
+        XCTAssertTrue(source.contains("batchSyncService.syncPatch("), "sync must call the batch service")
+        XCTAssertTrue(source.contains("sourcePhotoID: source"))
+        XCTAssertTrue(source.contains("targetPhotoIDs: targets"))
+        XCTAssertTrue(source.contains("brushMasks: clipboard.brushMasks"))
     }
 
     func testSteppedScaleWalksTheFixedZoomLadderAndClampsAtTheEnds() {
