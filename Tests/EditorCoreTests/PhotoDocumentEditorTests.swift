@@ -1121,9 +1121,16 @@ final class PhotoDocumentEditorTests: XCTestCase {
             .appendingPathComponent("Sidecars", isDirectory: true)
             .appendingPathComponent(documentAID.uuidString, isDirectory: true)
         let repository = FileSidecarRepository(libraryRootURL: repositoryRoot)
-        var newerSidecar = try XCTUnwrap(try repository.loadSidecar(for: PhotoID(documentAID)))
-        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
-        try repository.write(sidecar: newerSidecar)
+        let newerSidecar = try XCTUnwrap(try repository.loadSidecar(for: PhotoID(documentAID)))
+        let sidecarURL = repository.sidecarURL(for: newerSidecar.photoID)
+        var newerObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SidecarCoding.encode(newerSidecar)) as? [String: Any]
+        )
+        // Foreign v6 input is seeded directly. Production writers reject
+        // creating it, which is the boundary this switch/flush test relies on.
+        newerObject["schemaVersion"] = PhotoSidecar.currentSchemaVersion + 1
+        try JSONSerialization.data(withJSONObject: newerObject, options: [.sortedKeys])
+            .write(to: sidecarURL, options: .atomic)
 
         editor.editor.setAdjustment(.exposure, to: 0.5)
 
