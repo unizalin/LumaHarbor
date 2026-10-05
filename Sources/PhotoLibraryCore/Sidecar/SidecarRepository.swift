@@ -277,9 +277,23 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     }
 
     public func write(sidecar: PhotoSidecar) throws {
+        // Version admission happens before any replacement (including the
+        // first write). A newer valid file is foreign data and must remain
+        // byte-for-byte untouched.
+        guard sidecar.schemaVersion <= PhotoSidecar.currentSchemaVersion else {
+            throw SidecarError.unsupportedSchemaVersion(
+                found: sidecar.schemaVersion,
+                supported: PhotoSidecar.currentSchemaVersion
+            )
+        }
         try requireWritable()
+        var writable = sidecar
+        // An actual save is the shared upgrade boundary. Merely loading a
+        // v1-v4 sidecar never calls this method, so no-op reads remain free of
+        // version writes.
+        writable.schemaVersion = PhotoSidecar.currentSchemaVersion
         do {
-            let data = try encodedSidecarPreservingUnknownTopLevelFields(sidecar)
+            let data = try encodedSidecarPreservingUnknownTopLevelFields(writable)
             try AtomicFileWriter.write(
                 data,
                 to: sidecarURL(for: sidecar.photoID),
@@ -372,7 +386,7 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
         // portable data and remain untouched.
         let knownKeys = [
             "schemaVersion", "photoID", "sourceRelativePath", "sourceFingerprint",
-            "decoder", "adjustments", "curation", "createdAt", "modifiedAt", "variantOf"
+            "decoder", "adjustments", "curation", "snapshots", "createdAt", "modifiedAt", "variantOf"
         ]
         for key in knownKeys { existingObject.removeValue(forKey: key) }
         for (key, value) in encodedObject { existingObject[key] = value }

@@ -1258,13 +1258,15 @@ final class PhotoDocumentStoreTests: TemporaryDirectoryTestCase {
 
         let repositoryRoot = rootURL.appendingPathComponent("Sidecars/\(document.id.uuidString)", isDirectory: true)
         let repository = FileSidecarRepository(libraryRootURL: repositoryRoot)
-        guard var newerSidecar = try repository.loadSidecar(for: PhotoID(document.id)) else {
-            XCTFail("Expected the sidecar just saved to be readable")
-            return
-        }
-        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
-        try repository.write(sidecar: newerSidecar)
         let sidecarURL = repository.sidecarURL(for: PhotoID(document.id))
+        var newerObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: sidecarURL)) as? [String: Any]
+        )
+        // A newer-schema file is foreign input. Seed it directly so the test
+        // exercises save rejection; every production writer must reject this
+        // same replacement before touching the existing bytes.
+        newerObject["schemaVersion"] = PhotoSidecar.currentSchemaVersion + 1
+        try JSONSerialization.data(withJSONObject: newerObject, options: [.sortedKeys]).write(to: sidecarURL)
         let bytesBeforeSave = try Data(contentsOf: sidecarURL)
 
         do {

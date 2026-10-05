@@ -36,7 +36,7 @@ final class CurationMigrationDecisionTests: XCTestCase {
 
     // Row 1: v3 sidecar always wins, even when SQLite disagrees.
     func testSchemaV3SidecarWinsEvenWhenSQLiteDisagrees() {
-        let sidecar = makeSidecar(curation: PhotoCuration(rating: 2))
+        let sidecar = makeSidecar(schemaVersion: 3, curation: PhotoCuration(rating: 2))
         let decision = CurationMigration.decide(
             existingSidecar: sidecar,
             existingSQLiteCuration: PhotoCuration(rating: 5, flag: .pick),
@@ -50,7 +50,7 @@ final class CurationMigrationDecisionTests: XCTestCase {
     }
 
     func testSchemaV3SidecarWithNeutralCurationWinsOverNonNeutralSQLite() {
-        let sidecar = makeSidecar(curation: .neutral)
+        let sidecar = makeSidecar(schemaVersion: 3, curation: .neutral)
         let decision = CurationMigration.decide(
             existingSidecar: sidecar,
             existingSQLiteCuration: PhotoCuration(rating: 5),
@@ -61,6 +61,47 @@ final class CurationMigrationDecisionTests: XCTestCase {
             now: fixedNow
         )
         XCTAssertEqual(decision, .sidecarAuthoritative(.neutral))
+    }
+
+    func testSchemaV4CurationWinsRegardlessOfCurrentV5Schema() {
+        let sidecar = makeSidecar(schemaVersion: 4, curation: PhotoCuration(rating: 1, flag: .reject))
+        let decision = CurationMigration.decide(
+            existingSidecar: sidecar,
+            existingSQLiteCuration: PhotoCuration(rating: 5, flag: .pick),
+            photoID: sidecar.photoID,
+            sourceRelativePath: sidecar.sourceRelativePath,
+            sourceFingerprint: sidecar.sourceFingerprint,
+            decoder: sidecar.decoder,
+            now: fixedNow
+        )
+        XCTAssertEqual(decision, .sidecarAuthoritative(sidecar.curation))
+    }
+
+    func testExperimentalV3BrushWithoutCurationDoesNotAutoMigrateSQLite() throws {
+        let id = PhotoID()
+        let json = Data("""
+        {
+          "schemaVersion": 3,
+          "photoID": "\(id.rawValue.uuidString)",
+          "sourceRelativePath": "RAW/a.ARW",
+          "sourceFingerprint": {"fileSize": 1, "edgeDigest": "a"},
+          "adjustments": {"brushMasks": [{"rendererVersion": 1}]},
+          "createdAt": "2023-11-14T22:13:20Z",
+          "modifiedAt": "2023-11-14T22:13:20Z"
+        }
+        """.utf8)
+        let sidecar = try SidecarCoding.decode(PhotoSidecar.self, from: json)
+        let sqlite = PhotoCuration(rating: 4)
+        let decision = CurationMigration.decide(
+            existingSidecar: sidecar,
+            existingSQLiteCuration: sqlite,
+            photoID: id,
+            sourceRelativePath: sidecar.sourceRelativePath,
+            sourceFingerprint: sidecar.sourceFingerprint,
+            decoder: sidecar.decoder,
+            now: fixedNow
+        )
+        XCTAssertEqual(decision, .unchanged(sqlite))
     }
 
     // Row 2: legacy sidecar, nothing worth migrating.

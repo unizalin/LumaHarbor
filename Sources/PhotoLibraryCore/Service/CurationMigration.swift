@@ -32,11 +32,29 @@ enum CurationMigration {
         decoder: DecoderDescriptor,
         now: Date
     ) -> CurationMigrationDecision {
-        if let sidecar = existingSidecar, sidecar.schemaVersion >= PhotoSidecar.currentSchemaVersion {
+        // Curation became part of the portable contract in v3. Keep that
+        // semantic boundary stable as later sidecar versions are introduced;
+        // comparing against `currentSchemaVersion` would incorrectly treat a
+        // valid v3/v4 curation as legacy when this build reads v5.
+        if let sidecar = existingSidecar,
+           sidecar.schemaVersion >= 3,
+           sidecar.hasCurationField {
             return .sidecarAuthoritative(sidecar.curation)
         }
 
         let sqliteCuration = existingSQLiteCuration ?? .neutral
+
+        // The experimental v3 brush dialect predates the mainline curation
+        // key. Its missing key is not an explicit neutral choice, so keep the
+        // SQLite projection only for the in-memory scan and never auto-write
+        // or upgrade the file during hydration.
+        if let sidecar = existingSidecar,
+           sidecar.schemaVersion == 3,
+           !sidecar.hasCurationField,
+           !sidecar.adjustments.brushMasks.isEmpty {
+            return .unchanged(sqliteCuration)
+        }
+
         guard !sqliteCuration.isNeutral else {
             return .unchanged(.neutral)
         }

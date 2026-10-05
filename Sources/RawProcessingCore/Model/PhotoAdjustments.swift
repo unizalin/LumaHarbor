@@ -28,6 +28,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     /// 4.2/4.4 wire up rendering. Order is significant and must survive a
     /// round trip, unlike every other field here which is a single value.
     public var localAdjustments: [LocalAdjustment]
+    /// Independent source-coordinate adjustment brushes. This intentionally
+    /// remains separate from the legacy `LocalAdjustmentKind.brush` model.
+    public var brushMasks: [BrushMask]
     public var presence: PresenceAdjustments
     public var colorGrading: ColorGradingAdjustments
     public var monochrome: MonochromeAdjustments
@@ -60,6 +63,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         grain: Grain = .neutral,
         geometry: GeometryAdjustments = .neutral,
         localAdjustments: [LocalAdjustment] = [],
+        brushMasks: [BrushMask] = [],
         presence: PresenceAdjustments = .neutral,
         colorGrading: ColorGradingAdjustments = .neutral,
         monochrome: MonochromeAdjustments = .neutral,
@@ -87,6 +91,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.grain = grain
         self.geometry = geometry
         self.localAdjustments = localAdjustments
+        self.brushMasks = brushMasks
         self.presence = presence
         self.colorGrading = colorGrading
         self.monochrome = monochrome
@@ -169,6 +174,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
             grain: grain, geometry: geometry, localAdjustments: localAdjustments,
+            brushMasks: brushMasks,
             presence: presence, colorGrading: colorGrading, monochrome: monochrome,
             renderingProfile: renderingProfile, rawCameraProfile: rawCameraProfile,
             lensCorrection: lensCorrection,
@@ -197,7 +203,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         case shadows, whites, blacks, vibrance, saturation
         case advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
         case geometry
-        case localAdjustments
+        case localAdjustments, brushMasks
         case presence, colorGrading, monochrome, renderingProfile, lensCorrection
         case rawCameraProfile
         case rawRenderingCompatibility
@@ -244,6 +250,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         // all — the same absent-key-means-empty convention `geometry`
         // itself used when it was the newly added field in Phase 2.
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustment].self, forKey: .localAdjustments) ?? []
+        // Sidecars before v5 have no independent adjustment-brush collection.
+        // When present, BrushMask decoding enforces the strict v1 contract.
+        self.brushMasks = try container.decodeIfPresent([BrushMask].self, forKey: .brushMasks) ?? []
         // A sidecar written before P4 has none of these five keys.
         self.presence = try container.decodeIfPresent(PresenceAdjustments.self, forKey: .presence) ?? .neutral
         self.colorGrading = try container.decodeIfPresent(ColorGradingAdjustments.self, forKey: .colorGrading) ?? .neutral
@@ -277,6 +286,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(grain, forKey: .grain)
         try container.encode(geometry, forKey: .geometry)
         try container.encode(localAdjustments, forKey: .localAdjustments)
+        try container.encode(brushMasks, forKey: .brushMasks)
         try container.encode(presence, forKey: .presence)
         try container.encode(colorGrading, forKey: .colorGrading)
         try container.encode(monochrome, forKey: .monochrome)
