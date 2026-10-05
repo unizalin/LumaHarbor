@@ -31,6 +31,9 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     /// Independent source-coordinate adjustment brushes. This intentionally
     /// remains separate from the legacy `LocalAdjustmentKind.brush` model.
     public var brushMasks: [BrushMask]
+    /// Source-shape bookkeeping used by experimental v3 curation migration.
+    /// It is deliberately excluded from value equality and encoding.
+    public private(set) var hasBrushMasksField: Bool
     public var presence: PresenceAdjustments
     public var colorGrading: ColorGradingAdjustments
     public var monochrome: MonochromeAdjustments
@@ -92,6 +95,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.geometry = geometry
         self.localAdjustments = localAdjustments
         self.brushMasks = brushMasks
+        self.hasBrushMasksField = true
         self.presence = presence
         self.colorGrading = colorGrading
         self.monochrome = monochrome
@@ -103,6 +107,66 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
 
     /// All sliders at their documented default with the native rendering policy.
     public static let neutral = PhotoAdjustments()
+
+    public static func == (lhs: PhotoAdjustments, rhs: PhotoAdjustments) -> Bool {
+        lhs.exposure == rhs.exposure
+            && lhs.temperature == rhs.temperature
+            && lhs.tint == rhs.tint
+            && lhs.contrast == rhs.contrast
+            && lhs.highlights == rhs.highlights
+            && lhs.shadows == rhs.shadows
+            && lhs.whites == rhs.whites
+            && lhs.blacks == rhs.blacks
+            && lhs.vibrance == rhs.vibrance
+            && lhs.saturation == rhs.saturation
+            && lhs.advancedToneCurve == rhs.advancedToneCurve
+            && lhs.hsl == rhs.hsl
+            && lhs.splitToning == rhs.splitToning
+            && lhs.sharpening == rhs.sharpening
+            && lhs.noiseReduction == rhs.noiseReduction
+            && lhs.vignette == rhs.vignette
+            && lhs.grain == rhs.grain
+            && lhs.geometry == rhs.geometry
+            && lhs.localAdjustments == rhs.localAdjustments
+            && lhs.brushMasks == rhs.brushMasks
+            && lhs.presence == rhs.presence
+            && lhs.colorGrading == rhs.colorGrading
+            && lhs.monochrome == rhs.monochrome
+            && lhs.renderingProfile == rhs.renderingProfile
+            && lhs.rawCameraProfile == rhs.rawCameraProfile
+            && lhs.lensCorrection == rhs.lensCorrection
+            && lhs.rawRenderingCompatibility == rhs.rawRenderingCompatibility
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(exposure)
+        hasher.combine(temperature)
+        hasher.combine(tint)
+        hasher.combine(contrast)
+        hasher.combine(highlights)
+        hasher.combine(shadows)
+        hasher.combine(whites)
+        hasher.combine(blacks)
+        hasher.combine(vibrance)
+        hasher.combine(saturation)
+        hasher.combine(advancedToneCurve)
+        hasher.combine(hsl)
+        hasher.combine(splitToning)
+        hasher.combine(sharpening)
+        hasher.combine(noiseReduction)
+        hasher.combine(vignette)
+        hasher.combine(grain)
+        hasher.combine(geometry)
+        hasher.combine(localAdjustments)
+        hasher.combine(brushMasks)
+        hasher.combine(presence)
+        hasher.combine(colorGrading)
+        hasher.combine(monochrome)
+        hasher.combine(renderingProfile)
+        hasher.combine(rawCameraProfile)
+        hasher.combine(lensCorrection)
+        hasher.combine(rawRenderingCompatibility)
+    }
 
     /// All sliders at their documented default under the requested baseline policy.
     public static func neutral(using policy: RawRenderingCompatibility) -> Self {
@@ -250,6 +314,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         // all — the same absent-key-means-empty convention `geometry`
         // itself used when it was the newly added field in Phase 2.
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustment].self, forKey: .localAdjustments) ?? []
+        self.hasBrushMasksField = container.contains(.brushMasks)
         // Sidecars before v5 have no independent adjustment-brush collection.
         // When present, BrushMask decoding enforces the strict v1 contract.
         self.brushMasks = try container.decodeIfPresent([BrushMask].self, forKey: .brushMasks) ?? []

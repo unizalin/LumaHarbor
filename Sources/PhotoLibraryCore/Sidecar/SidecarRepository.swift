@@ -245,6 +245,17 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
         }
 
         do {
+            // Admit the schema before decoding any version-specific payload.
+            // A newer sidecar may contain fields this build cannot decode at
+            // all (for example an unknown brush renderer), but it still must
+            // be reported as foreign data and left byte-for-byte in place.
+            if let found = minimalSchemaVersion(in: data),
+               found > PhotoSidecar.currentSchemaVersion {
+                throw SidecarError.unsupportedSchemaVersion(
+                    found: found,
+                    supported: PhotoSidecar.currentSchemaVersion
+                )
+            }
             let sidecar = try SidecarCoding.decode(PhotoSidecar.self, from: data)
             guard !sidecar.isFromNewerSchema else {
                 // Deliberately *not* quarantined: the file is valid, just newer.
@@ -395,6 +406,20 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
             withJSONObject: existingObject,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         )
+    }
+
+    /// Reads only the top-level schema marker. This intentionally does not
+    /// decode `PhotoSidecar` or any nested brush data: schema admission must
+    /// happen before version-specific payload validation.
+    private func minimalSchemaVersion(in data: Data) -> Int? {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any],
+              let number = dictionary["schemaVersion"] as? NSNumber else {
+            return nil
+        }
+        let value = number.doubleValue
+        guard value.isFinite, value.rounded() == value else { return nil }
+        return Int(value)
     }
 
     private func requireWritable() throws {

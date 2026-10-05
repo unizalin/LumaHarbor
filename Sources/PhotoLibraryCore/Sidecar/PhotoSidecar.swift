@@ -48,6 +48,11 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
     /// experimental v3 brush files (which omit curation) distinguishable from
     /// an explicit neutral curation value during migration.
     public private(set) var hasCurationField: Bool
+    /// Whether the source adjustments object carried the brushMasks key. An
+    /// experimental v3 file may intentionally carry an empty array; that key
+    /// is still evidence of the brush dialect and must not be inferred from
+    /// the decoded array's count.
+    public private(set) var hasBrushMasksField: Bool
     /// Portable snapshot history milestones (spec §6.6). Missing on pre-v4
     /// sidecars; decodes to empty array `[]` rather than failing.
     public var snapshots: [EditSnapshot]
@@ -102,6 +107,7 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         self.adjustments = adjustments
         self.curation = curation
         self.hasCurationField = true
+        self.hasBrushMasksField = true
         self.snapshots = snapshots
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
@@ -122,6 +128,7 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         self.decoder = try container.decodeIfPresent(DecoderDescriptor.self, forKey: .decoder) ?? .coreImageDefault
         adjustments = try container.decodeIfPresent(PhotoAdjustments.self, forKey: .adjustments) ?? .neutral
         hasCurationField = container.contains(.curation)
+        hasBrushMasksField = adjustments.hasBrushMasksField
         curation = try container.decodeIfPresent(PhotoCuration.self, forKey: .curation) ?? .neutral
         snapshots = try container.decodeIfPresent([EditSnapshot].self, forKey: .snapshots) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)

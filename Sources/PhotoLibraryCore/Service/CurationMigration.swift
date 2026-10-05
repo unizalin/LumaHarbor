@@ -51,7 +51,7 @@ enum CurationMigration {
         if let sidecar = existingSidecar,
            sidecar.schemaVersion == 3,
            !sidecar.hasCurationField,
-           !sidecar.adjustments.brushMasks.isEmpty {
+           sidecar.hasBrushMasksField {
             return .unchanged(sqliteCuration)
         }
 

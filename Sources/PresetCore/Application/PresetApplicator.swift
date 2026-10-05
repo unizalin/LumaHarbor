@@ -92,6 +92,10 @@ public struct PresetApplicator: Sendable {
         var result = mode == .replace
             ? .neutral(using: current.rawRenderingCompatibility)
             : current
+        // Presets/XMP describe global and professional fields only. A replace
+        // therefore resets those fields but must leave both local mask
+        // collections owned by the current photo untouched.
+        result.brushMasks = current.brushMasks
         // Replace starts from neutral for ordinary leaves, but a white-balance
         // leaf that cannot be resolved must leave the current legacy value
         // intact. This includes finite out-of-range sidecar values; assigning

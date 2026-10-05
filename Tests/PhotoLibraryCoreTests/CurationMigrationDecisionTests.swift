@@ -104,6 +104,34 @@ final class CurationMigrationDecisionTests: XCTestCase {
         XCTAssertEqual(decision, .unchanged(sqlite))
     }
 
+    func testExperimentalV3EmptyBrushKeyWithoutCurationDoesNotMigrateSQLite() throws {
+        let id = PhotoID()
+        let json = Data("""
+        {
+          "schemaVersion": 3,
+          "photoID": "\(id.rawValue.uuidString)",
+          "sourceRelativePath": "RAW/empty-brush.ARW",
+          "sourceFingerprint": {"fileSize": 1, "edgeDigest": "empty"},
+          "adjustments": {"brushMasks": []},
+          "createdAt": "2023-11-14T22:13:20Z",
+          "modifiedAt": "2023-11-14T22:13:20Z"
+        }
+        """.utf8)
+        let sidecar = try SidecarCoding.decode(PhotoSidecar.self, from: json)
+        XCTAssertTrue(sidecar.hasBrushMasksField)
+        let sqlite = PhotoCuration(rating: 4)
+        let decision = CurationMigration.decide(
+            existingSidecar: sidecar,
+            existingSQLiteCuration: sqlite,
+            photoID: id,
+            sourceRelativePath: sidecar.sourceRelativePath,
+            sourceFingerprint: sidecar.sourceFingerprint,
+            decoder: sidecar.decoder,
+            now: fixedNow
+        )
+        XCTAssertEqual(decision, .unchanged(sqlite))
+    }
+
     // Row 2: legacy sidecar, nothing worth migrating.
     func testLegacySidecarWithNilSQLiteCurationIsUnchanged() {
         let legacy = makeSidecar(schemaVersion: 2)

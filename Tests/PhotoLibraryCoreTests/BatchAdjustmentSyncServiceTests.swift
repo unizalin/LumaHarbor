@@ -148,6 +148,34 @@ final class BatchAdjustmentSyncServiceTests: XCTestCase {
         XCTAssertTrue(saveCalls.isEmpty)
     }
 
+    func testCommitAndUndoSyncBrushMasksAsAnIndependentBatchField() async throws {
+        let source = PhotoID()
+        let target = PhotoID()
+        let sourceMask = BrushMask(name: "source")
+        let targetMask = BrushMask(name: "target")
+        var targetOwn = PhotoAdjustments.neutral
+        targetOwn.localAdjustments = [LocalAdjustment(kind: .brush)]
+        targetOwn.brushMasks = [targetMask]
+        let store = Store([target: targetOwn])
+        let service = makeService(store)
+        var after = PhotoAdjustments.neutral
+        after.brushMasks = [sourceMask]
+
+        await service.beginGesture(sourcePhotoID: source, targetPhotoIDs: [target], sourceBaseline: .neutral)
+        let committed = await service.commitGesture(sourceAfter: after)
+        let transaction = try XCTUnwrap(committed)
+        XCTAssertTrue(transaction.brushMasksChanged)
+        let synced = await store.current(target)
+        XCTAssertEqual(synced.brushMasks, [sourceMask])
+        XCTAssertEqual(synced.localAdjustments, targetOwn.localAdjustments)
+
+        let undo = await service.undo(transaction)
+        XCTAssertEqual(undo.affected, 1)
+        let reverted = await store.current(target)
+        XCTAssertEqual(reverted.brushMasks, [targetMask])
+        XCTAssertEqual(reverted.localAdjustments, targetOwn.localAdjustments)
+    }
+
     func testCommitGestureSyncsOnlyTheModifiedFieldsPreservingEachTargetsOwnOtherValues() async throws {
         let source = PhotoID()
         let target = PhotoID()

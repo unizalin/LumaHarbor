@@ -776,7 +776,12 @@ public final class EditorSession: ObservableObject {
     /// caller passes them (the clipboard's own opt-in checkboxes), never
     /// partially or inferred; passing `nil` for either leaves this photo's
     /// own current value untouched.
-    public func pasteAdjustments(patch: AdjustmentPatch, geometry: GeometryAdjustments?, localAdjustments: [LocalAdjustment]?) {
+    public func pasteAdjustments(
+        patch: AdjustmentPatch,
+        geometry: GeometryAdjustments?,
+        localAdjustments: [LocalAdjustment]?,
+        brushMasks: [BrushMask]? = nil
+    ) {
         guard photo != nil else { return }
         let context = PresetApplicationContext(
             baselineTemperatureKelvin: whiteBalanceBaseline?.temperatureKelvin,
@@ -788,6 +793,9 @@ public final class EditorSession: ObservableObject {
         }
         if let localAdjustments {
             result.localAdjustments = localAdjustments
+        }
+        if let brushMasks {
+            result.brushMasks = brushMasks
         }
         guard history.record(result) else { return }
         didChangeAdjustments()

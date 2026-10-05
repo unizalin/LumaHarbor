@@ -644,7 +644,8 @@ public final class LibraryViewModel: ObservableObject {
         adjustmentClipboard = AdjustmentClipboard(
             patch: AdjustmentPatch.extracting(modifiedFields, from: current),
             geometry: copyIncludesGeometry ? current.geometry : nil,
-            localAdjustments: copyIncludesLocalAdjustments ? current.localAdjustments : nil
+            localAdjustments: copyIncludesLocalAdjustments ? current.localAdjustments : nil,
+            brushMasks: copyIncludesLocalAdjustments ? current.brushMasks : nil
         )
     }
 
@@ -656,7 +657,8 @@ public final class LibraryViewModel: ObservableObject {
         editor.pasteAdjustments(
             patch: clipboard.patch,
             geometry: clipboard.geometry,
-            localAdjustments: clipboard.localAdjustments
+            localAdjustments: clipboard.localAdjustments,
+            brushMasks: clipboard.brushMasks
         )
     }
 

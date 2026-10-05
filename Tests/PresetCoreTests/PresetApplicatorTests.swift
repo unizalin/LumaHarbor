@@ -25,6 +25,17 @@ final class PresetApplicatorTests: XCTestCase {
         XCTAssertEqual(result.adjustments.contrast, 0)
     }
 
+    func testNativePresetMergeAndReplacePreserveCurrentBrushMasks() {
+        let mask = BrushMask(name: "keep")
+        let current = PhotoAdjustments(brushMasks: [mask])
+        let patch = AdjustmentPatch(basic: .init(exposure: 1))
+
+        for mode in [PresetApplicationMode.merge, .replace] {
+            let result = applicator.apply(patch, to: current, mode: mode, context: .none)
+            XCTAssertEqual(result.adjustments.brushMasks, [mask], "mode=\(mode)")
+        }
+    }
+
     func testReplaceKeepsLegacyTemperatureWhenNativePatchHasNoBaseline() throws {
         let current = try JSONDecoder().decode(PhotoAdjustments.self, from: Data(#"{"temperature":5000}"#.utf8))
         let patch = AdjustmentPatch(basic: .init(temperature: 12))

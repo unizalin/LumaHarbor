@@ -3,6 +3,21 @@ import XCTest
 @testable import RawProcessingCore
 
 final class SidecarV5BrushContractTests: TemporaryDirectoryTestCase {
+    private struct FrozenV4Reader: Decodable {
+        let schemaVersion: Int
+
+        private enum CodingKeys: String, CodingKey { case schemaVersion }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let found = try container.decode(Int.self, forKey: .schemaVersion)
+            guard found <= 4 else {
+                throw SidecarError.unsupportedSchemaVersion(found: found, supported: 4)
+            }
+            schemaVersion = found
+        }
+    }
+
     private var repository: FileSidecarRepository!
     private var root: URL!
 
@@ -35,6 +50,16 @@ final class SidecarV5BrushContractTests: TemporaryDirectoryTestCase {
         let loaded = try XCTUnwrap(try repository.loadSidecar(for: original.photoID))
         XCTAssertEqual(loaded, original)
         XCTAssertEqual(loaded.adjustments.brushMasks.count, 1)
+    }
+
+    func testFrozenV4ReaderRejectsExecutableV5Sidecar() throws {
+        let sidecar = sidecar().updating(
+            adjustments: PhotoAdjustments(brushMasks: [BrushMask(name: "v5")])
+        )
+        let bytes = try SidecarCoding.encode(sidecar)
+        XCTAssertThrowsError(try SidecarCoding.decode(FrozenV4Reader.self, from: bytes)) { error in
+            XCTAssertEqual(error as? SidecarError, .unsupportedSchemaVersion(found: 5, supported: 4))
+        }
     }
 
     func testV1ThroughV4MissingBrushMasksDecodeAsEmpty() throws {
@@ -106,6 +131,38 @@ final class SidecarV5BrushContractTests: TemporaryDirectoryTestCase {
         let afterDate = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
         XCTAssertEqual(afterDate, beforeDate)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testNewerSchemaWinsBeforeMalformedBrushPayloadIsDecoded() throws {
+        let original = sidecar()
+        let url = repository.sidecarURL(for: original.photoID)
+        var newer = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SidecarCoding.encode(original)) as? [String: Any]
+        )
+        newer["schemaVersion"] = 6
+        newer["adjustments"] = [
+            "brushMasks": [[
+                "rendererVersion": 2,
+                "adjustments": ["exposure": 6]
+            ]]
+        ]
+        let bytes = try JSONSerialization.data(withJSONObject: newer, options: [.sortedKeys])
+        try writeFile(bytes, at: url)
+        let beforeDate = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+
+        XCTAssertThrowsError(try repository.loadSidecar(for: original.photoID)) { error in
+            guard case SidecarError.unsupportedSchemaVersion(let found, let supported) = error else {
+                return XCTFail("Expected newer-schema rejection before brush decoding, got \(error)")
+            }
+            XCTAssertEqual(found, 6)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date,
+            beforeDate
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
     }
 
     func testDeletingLastSnapshotRemovesKnownKeyAndUnknownKeysSurvive() throws {

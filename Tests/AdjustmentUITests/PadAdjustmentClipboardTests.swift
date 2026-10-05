@@ -35,4 +35,22 @@ final class PadAdjustmentClipboardTests: XCTestCase {
         XCTAssertFalse(mirror.children.contains { $0.label == "keyword" })
         XCTAssertFalse(mirror.children.contains { $0.label == "sourceURL" })
     }
+
+    func testLocalOptInClipboardCarriesLegacyAndNewBrushCollectionsIndependently() {
+        var adjustments = PhotoAdjustments.neutral
+        let legacy = LocalAdjustment(kind: .brush)
+        let brushMask = BrushMask(name: "new")
+        adjustments.localAdjustments = [legacy]
+        adjustments.brushMasks = [brushMask]
+
+        let clipboard = PadAdjustmentClipboard.copying(
+            from: adjustments,
+            fields: [],
+            includeGeometry: false,
+            includeLocalAdjustments: true
+        )
+
+        XCTAssertEqual(clipboard.localAdjustments, [legacy])
+        XCTAssertEqual(clipboard.brushMasks, [brushMask])
+    }
 }

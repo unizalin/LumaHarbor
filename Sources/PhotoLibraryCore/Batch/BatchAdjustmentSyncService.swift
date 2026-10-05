@@ -29,6 +29,12 @@ public struct BatchAdjustmentTransaction: Sendable, Equatable {
     public var modifiedFieldIDs: [AdjustmentFieldID]
     public var before: [PhotoID: AdjustmentPatch]
     public var after: [PhotoID: AdjustmentPatch]
+    /// New source-coordinate brushes are a separate batch field group from
+    /// legacy `localAdjustments`; these snapshots make their sync/undo path
+    /// explicit without smuggling them into a global preset patch.
+    public var brushMasksChanged: Bool
+    public var brushMasksBefore: [PhotoID: [BrushMask]]
+    public var brushMasksAfter: [PhotoID: [BrushMask]]
     public var results: [PhotoID: BatchWriteResult]
 
     public init(
@@ -38,6 +44,9 @@ public struct BatchAdjustmentTransaction: Sendable, Equatable {
         modifiedFieldIDs: [AdjustmentFieldID],
         before: [PhotoID: AdjustmentPatch],
         after: [PhotoID: AdjustmentPatch],
+        brushMasksChanged: Bool = false,
+        brushMasksBefore: [PhotoID: [BrushMask]] = [:],
+        brushMasksAfter: [PhotoID: [BrushMask]] = [:],
         results: [PhotoID: BatchWriteResult]
     ) {
         self.id = id
@@ -46,6 +55,9 @@ public struct BatchAdjustmentTransaction: Sendable, Equatable {
         self.modifiedFieldIDs = modifiedFieldIDs
         self.before = before
         self.after = after
+        self.brushMasksChanged = brushMasksChanged
+        self.brushMasksBefore = brushMasksBefore
+        self.brushMasksAfter = brushMasksAfter
         self.results = results
     }
 }
@@ -141,7 +153,8 @@ public actor BatchAdjustmentSyncService {
         activeGesture = nil
 
         let modifiedFields = AdjustmentPatch.modifiedFields(in: sourceAfter, comparedTo: gesture.sourceBaseline)
-        guard !modifiedFields.isEmpty else {
+        let brushMasksChanged = sourceAfter.brushMasks != gesture.sourceBaseline.brushMasks
+        guard !modifiedFields.isEmpty || brushMasksChanged else {
             return BatchAdjustmentTransaction(
                 sourcePhotoID: gesture.sourcePhotoID,
                 targetPhotoIDs: gesture.targetPhotoIDs,
@@ -155,6 +168,8 @@ public actor BatchAdjustmentSyncService {
         let syncedPatch = AdjustmentPatch.extracting(modifiedFields, from: sourceAfter)
         var before: [PhotoID: AdjustmentPatch] = [:]
         var after: [PhotoID: AdjustmentPatch] = [:]
+        var brushMasksBefore: [PhotoID: [BrushMask]] = [:]
+        var brushMasksAfter: [PhotoID: [BrushMask]] = [:]
         var results: [PhotoID: BatchWriteResult] = [:]
 
         for targetID in gesture.targetPhotoIDs {
@@ -167,7 +182,12 @@ public actor BatchAdjustmentSyncService {
             do {
                 let current = try await loadAdjustments(targetID)
                 before[targetID] = AdjustmentPatch.extracting(modifiedFields, from: current)
-                let merged = applicator.apply(syncedPatch, to: current, mode: .merge, context: .none).adjustments
+                var merged = applicator.apply(syncedPatch, to: current, mode: .merge, context: .none).adjustments
+                if brushMasksChanged {
+                    brushMasksBefore[targetID] = current.brushMasks
+                    merged.brushMasks = sourceAfter.brushMasks
+                    brushMasksAfter[targetID] = merged.brushMasks
+                }
                 try await saveAdjustments(merged, targetID)
                 after[targetID] = AdjustmentPatch.extracting(modifiedFields, from: merged)
                 results[targetID] = .success
@@ -182,6 +202,9 @@ public actor BatchAdjustmentSyncService {
             modifiedFieldIDs: Array(modifiedFields),
             before: before,
             after: after,
+            brushMasksChanged: brushMasksChanged,
+            brushMasksBefore: brushMasksBefore,
+            brushMasksAfter: brushMasksAfter,
             results: results
         )
     }
@@ -237,16 +260,17 @@ public actor BatchAdjustmentSyncService {
     /// nothing safe to conclude yet, and `failed` is what invites a retry.
     public func undo(_ transaction: BatchAdjustmentTransaction) async -> BatchUndoSummary {
         var summary = BatchUndoSummary()
-        guard !transaction.modifiedFieldIDs.isEmpty else { return summary }
+        guard !transaction.modifiedFieldIDs.isEmpty || transaction.brushMasksChanged else { return summary }
         let modifiedFields = Set(transaction.modifiedFieldIDs)
 
         for targetID in transaction.targetPhotoIDs {
             guard transaction.results[targetID] == .success,
-                  let priorPatch = transaction.before[targetID],
-                  let syncedPatch = transaction.after[targetID] else {
+                  (!transaction.modifiedFieldIDs.isEmpty ? transaction.before[targetID] != nil && transaction.after[targetID] != nil : true) else {
                 summary.skipped += 1
                 continue
             }
+            let priorPatch = transaction.before[targetID] ?? AdjustmentPatch()
+            let syncedPatch = transaction.after[targetID] ?? AdjustmentPatch()
             guard !targetsInFlight.contains(targetID) else {
                 summary.failed += 1
                 continue
@@ -255,11 +279,15 @@ public actor BatchAdjustmentSyncService {
             defer { targetsInFlight.remove(targetID) }
             do {
                 let current = try await loadAdjustments(targetID)
-                guard AdjustmentPatch.extracting(modifiedFields, from: current) == syncedPatch else {
+                guard AdjustmentPatch.extracting(modifiedFields, from: current) == syncedPatch,
+                      (!transaction.brushMasksChanged || transaction.brushMasksAfter[targetID] == current.brushMasks) else {
                     summary.skipped += 1
                     continue
                 }
-                let reverted = applicator.apply(priorPatch, to: current, mode: .merge, context: .none).adjustments
+                var reverted = applicator.apply(priorPatch, to: current, mode: .merge, context: .none).adjustments
+                if transaction.brushMasksChanged, let priorBrushMasks = transaction.brushMasksBefore[targetID] {
+                    reverted.brushMasks = priorBrushMasks
+                }
                 try await saveAdjustments(reverted, targetID)
                 summary.affected += 1
             } catch {
