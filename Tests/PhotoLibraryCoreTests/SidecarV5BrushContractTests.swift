@@ -165,6 +165,89 @@ final class SidecarV5BrushContractTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
     }
 
+    func testExtremePositiveSchemaIsRejectedWithoutQuarantineOrMutation() throws {
+        let original = sidecar()
+        let url = repository.sidecarURL(for: original.photoID)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SidecarCoding.encode(original)) as? [String: Any]
+        )
+        object["schemaVersion"] = 1e100
+        let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        try writeFile(bytes, at: url)
+        let fixedDate = Date(timeIntervalSince1970: 1_600_000_000)
+        try FileManager.default.setAttributes([.modificationDate: fixedDate], ofItemAtPath: url.path)
+
+        XCTAssertThrowsError(try repository.loadSidecar(for: original.photoID)) { error in
+            guard case SidecarError.unsupportedSchemaVersion(let found, let supported) = error else {
+                return XCTFail("Expected bounded newer-schema rejection, got \(error)")
+            }
+            XCTAssertGreaterThan(found, PhotoSidecar.currentSchemaVersion)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date,
+            fixedDate
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
+    }
+
+    func testExtremeNegativeSchemaIsRejectedWithoutQuarantineOrMutation() throws {
+        let original = sidecar()
+        let url = repository.sidecarURL(for: original.photoID)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SidecarCoding.encode(original)) as? [String: Any]
+        )
+        object["schemaVersion"] = -1e100
+        let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        try writeFile(bytes, at: url)
+        let fixedDate = Date(timeIntervalSince1970: 1_600_000_001)
+        try FileManager.default.setAttributes([.modificationDate: fixedDate], ofItemAtPath: url.path)
+
+        XCTAssertThrowsError(try repository.loadSidecar(for: original.photoID)) { error in
+            guard case SidecarError.unsupportedSchemaVersion(let found, let supported) = error else {
+                return XCTFail("Expected bounded invalid-schema rejection, got \(error)")
+            }
+            XCTAssertLessThan(found, 1)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date,
+            fixedDate
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
+    }
+
+    func testWriterGateRejectsExistingExtremeSchemaWithoutReplacingIt() throws {
+        let original = sidecar()
+        let url = repository.sidecarURL(for: original.photoID)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SidecarCoding.encode(original)) as? [String: Any]
+        )
+        object["schemaVersion"] = 1e100
+        let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        try writeFile(bytes, at: url)
+        let fixedDate = Date(timeIntervalSince1970: 1_600_000_002)
+        try FileManager.default.setAttributes([.modificationDate: fixedDate], ofItemAtPath: url.path)
+
+        XCTAssertThrowsError(
+            try repository.write(sidecar: original.updating(adjustments: .neutral.setting(.exposure, to: 1)))
+        ) { error in
+            guard case SidecarError.unsupportedSchemaVersion(let found, let supported) = error else {
+                return XCTFail("Expected existing newer-schema rejection, got \(error)")
+            }
+            XCTAssertGreaterThan(found, PhotoSidecar.currentSchemaVersion)
+            XCTAssertEqual(supported, PhotoSidecar.currentSchemaVersion)
+        }
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date,
+            fixedDate
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
+    }
+
     func testDeletingLastSnapshotRemovesKnownKeyAndUnknownKeysSurvive() throws {
         let original = sidecar()
         let url = repository.sidecarURL(for: original.photoID)

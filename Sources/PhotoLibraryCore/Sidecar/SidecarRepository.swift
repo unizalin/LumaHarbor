@@ -250,7 +250,7 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
             // all (for example an unknown brush renderer), but it still must
             // be reported as foreign data and left byte-for-byte in place.
             if let found = minimalSchemaVersion(in: data),
-               found > PhotoSidecar.currentSchemaVersion {
+               (found > PhotoSidecar.currentSchemaVersion || found < 1) {
                 throw SidecarError.unsupportedSchemaVersion(
                     found: found,
                     supported: PhotoSidecar.currentSchemaVersion
@@ -419,6 +419,12 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
         }
         let value = number.doubleValue
         guard value.isFinite, value.rounded() == value else { return nil }
+
+        // JSON numbers have a wider range than Swift's Int. Never feed an
+        // out-of-range Double into Int(_:), which traps; clamp to a sentinel
+        // that the admission gate rejects without decoding or quarantining.
+        if value >= Double(Int.max) { return Int.max }
+        if value <= Double(Int.min) { return Int.min }
         return Int(value)
     }
 
