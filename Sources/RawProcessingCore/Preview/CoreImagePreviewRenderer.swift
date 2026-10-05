@@ -64,7 +64,18 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                 recipe: decoded.rawRenderRecipe ?? recipe,
                 scaleFactor: decoded.scaleFactor
             )
-            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
+            let brushMapping = try BrushCoordinateMapping(
+                sourceExtent: decoded.image.extent,
+                geometry: request.adjustments.geometry
+            )
+            let withBrushMasks = try BrushMaskRenderer.applyValidated(
+                request.adjustments.brushMasks,
+                to: adjusted,
+                mapping: brushMapping,
+                recipe: decoded.rawRenderRecipe ?? recipe,
+                scaleFactor: decoded.scaleFactor
+            )
+            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: withBrushMasks)
             let withLocalAdjustments = LocalAdjustmentRenderer.apply(request.adjustments.localAdjustments, to: withGeometry)
             let withPreviewOptions = ProfessionalPreviewRenderer.apply(request.previewOptions, to: withLocalAdjustments)
 
@@ -78,7 +89,8 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                     temperatureKelvin: decoded.baselineTemperature,
                     tint: decoded.baselineTint
                 ),
-                rawRenderRecipe: decoded.rawRenderRecipe ?? recipe
+                rawRenderRecipe: decoded.rawRenderRecipe ?? recipe,
+                brushCoordinateMapping: brushMapping
             )
         }
     }

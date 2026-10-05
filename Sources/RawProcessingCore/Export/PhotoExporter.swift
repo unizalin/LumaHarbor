@@ -328,7 +328,18 @@ public actor PhotoExporter {
                 recipe: decoded.rawRenderRecipe ?? resolvedRecipe,
                 scaleFactor: decoded.scaleFactor
             )
-            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
+            let brushMapping = try BrushCoordinateMapping(
+                sourceExtent: decoded.image.extent,
+                geometry: request.adjustments.geometry
+            )
+            let withBrushMasks = try BrushMaskRenderer.applyValidated(
+                request.adjustments.brushMasks,
+                to: adjusted,
+                mapping: brushMapping,
+                recipe: decoded.rawRenderRecipe ?? resolvedRecipe,
+                scaleFactor: decoded.scaleFactor
+            )
+            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: withBrushMasks)
             // Local adjustments (Phase 4 Task 4.2) run after geometry, same
             // as the preview path (`CoreImagePreviewRenderer`) and for the
             // same reason: a gradient's anchor point is placed on the

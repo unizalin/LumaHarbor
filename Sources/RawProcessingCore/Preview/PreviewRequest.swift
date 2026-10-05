@@ -99,6 +99,10 @@ public struct PreviewImage: @unchecked Sendable {
     /// `PreviewImage(cgImage:pixelSize:)` call site stay source-compatible.
     public let whiteBalanceBaseline: RawWhiteBalanceBaseline?
     public let rawRenderRecipe: ResolvedRawRenderRecipe?
+    /// The exact source/display transform used by the brush stage for this
+    /// rendered revision. Kept optional for synthetic callers that construct a
+    /// bitmap directly without geometry metadata.
+    public let brushCoordinateMapping: BrushCoordinateMapping?
 
     public init(
         cgImage: CGImage,
@@ -110,6 +114,21 @@ public struct PreviewImage: @unchecked Sendable {
         self.pixelSize = pixelSize
         self.whiteBalanceBaseline = whiteBalanceBaseline
         self.rawRenderRecipe = rawRenderRecipe
+        self.brushCoordinateMapping = nil
+    }
+
+    public init(
+        cgImage: CGImage,
+        pixelSize: CGSize,
+        whiteBalanceBaseline: RawWhiteBalanceBaseline? = nil,
+        rawRenderRecipe: ResolvedRawRenderRecipe? = nil,
+        brushCoordinateMapping: BrushCoordinateMapping?
+    ) {
+        self.cgImage = cgImage
+        self.pixelSize = pixelSize
+        self.whiteBalanceBaseline = whiteBalanceBaseline
+        self.rawRenderRecipe = rawRenderRecipe
+        self.brushCoordinateMapping = brushCoordinateMapping
     }
 }
 

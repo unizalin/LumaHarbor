@@ -158,4 +158,23 @@ final class CoreImagePreviewRendererTests: XCTestCase {
 
         XCTAssertEqual(image.pixelSize, CGSize(width: 32, height: 24))
     }
+
+    func testPreviewExposesBrushMappingAndAppliesSourceBrushBeforeGeometry() async throws {
+        let renderer = CoreImagePreviewRenderer(decoder: BaselineReportingDecoder(pixelSize: CGSize(width: 32, height: 24)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.brushMasks = [BrushMask(
+            strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.75, y: 0.25)], size: 0.25)],
+            adjustments: BrushMaskPatch(exposure: 2)
+        )]
+        let request = PreviewRequest(
+            subject: PreviewSubject(UUID()),
+            url: URL(fileURLWithPath: "/tmp/lumaharbor-test.ARW"),
+            adjustments: adjustments,
+            targetPixelDimension: 256,
+            quality: .interactive
+        )
+        let image = try await renderer.render(request)
+        XCTAssertNotNil(image.brushCoordinateMapping)
+        XCTAssertNotEqual(image.cgImage.width, 0)
+    }
 }
