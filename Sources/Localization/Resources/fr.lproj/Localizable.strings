@@ -735,3 +735,11 @@
 "White balance is unavailable for this photo." = "La balance des blancs n’est pas disponible pour cette photo.";
 "White balance baseline is still loading." = "La référence de balance des blancs est en cours de chargement.";
 "White balance baseline is invalid; Kelvin adjustment is unavailable." = "La référence de balance des blancs est invalide ; le réglage Kelvin n’est pas disponible.";
+"Enter a finite number." = "Saisissez un nombre fini.";
+"Value out of range." = "Valeur hors plage.";
+"Allowed range: %@–%@ %@." = "Plage autorisée : %@–%@ %@.";
+"The sampled color is unavailable." = "La couleur échantillonnée n’est pas disponible.";
+"Choose a visible pixel inside the photo." = "Choisissez un pixel visible dans la photo.";
+"Choose a brighter neutral area." = "Choisissez une zone neutre plus claire.";
+"Choose a neutral area without clipped highlights." = "Choisissez une zone neutre sans hautes lumières écrêtées.";
+"Wait for the current preview before sampling." = "Attendez l’aperçu actuel avant l’échantillonnage.";

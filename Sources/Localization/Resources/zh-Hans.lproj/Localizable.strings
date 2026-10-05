@@ -735,3 +735,11 @@
 "White balance is unavailable for this photo." = "这张照片无法使用白平衡调整。";
 "White balance baseline is still loading." = "正在加载白平衡基准。";
 "White balance baseline is invalid; Kelvin adjustment is unavailable." = "白平衡基准无效，无法使用开尔文调整。";
+"Enter a finite number." = "请输入有限数值。";
+"Value out of range." = "数值超出范围。";
+"Allowed range: %@–%@ %@." = "允许范围：%@–%@ %@。";
+"The sampled color is unavailable." = "无法使用采样的颜色。";
+"Choose a visible pixel inside the photo." = "请选择照片中可见的像素。";
+"Choose a brighter neutral area." = "请选择更明亮的中性区域。";
+"Choose a neutral area without clipped highlights." = "请选择没有高光溢出的中性区域。";
+"Wait for the current preview before sampling." = "请等待当前预览完成后再取样。";

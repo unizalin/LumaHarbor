@@ -347,6 +347,10 @@ public final class EditorSession: ObservableObject {
             baseline: baseline.temperatureKelvin
         )
     }
+
+    internal func advanceEyedropperGenerationForTesting() {
+        lastDisplayedGeneration &+= 1
+    }
     #endif
 
     // MARK: - Opening
@@ -902,6 +906,7 @@ public final class EditorSession: ObservableObject {
     private func isCurrent(_ context: EyedropperSamplingContext) -> Bool {
         context == activeEyedropperContext && context.photoID == photo?.id
             && context.revision == editRevision
+            && context.generation == lastDisplayedGeneration
     }
 
     public func previewEyedropper(sample: WhiteBalanceEyedropper.Sample,
@@ -995,7 +1000,11 @@ public final class EditorSession: ObservableObject {
     /// the no-op guard, same as every other edit path in this class).
     @discardableResult
     public func commitEyedropper(context: EyedropperSamplingContext? = nil) -> Bool {
-        if let context, !isCurrent(context) { return false }
+        if let context {
+            guard isCurrent(context) else { return false }
+        } else if let activeEyedropperContext {
+            guard isCurrent(activeEyedropperContext) else { return false }
+        }
         guard let previewed = previewedEyedropperAdjustments,
               eyedropperCandidateRevision == editRevision,
               eyedropperCandidatePhotoID == photo?.id else { return false }

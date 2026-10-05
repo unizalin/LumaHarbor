@@ -108,7 +108,22 @@ final class LocalizationSmokeTest: XCTestCase {
     func testEveryEyedropperStringHasAChineseTranslation() {
         let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
         let keys = [
-            "White Balance Eyedropper", "Cancel Eyedropper", "Click a point that should be neutral gray"
+            "White Balance Eyedropper", "Cancel Eyedropper", "Click a point that should be neutral gray",
+            "The sampled color is unavailable.", "Choose a visible pixel inside the photo.",
+            "Choose a brighter neutral area.", "Choose a neutral area without clipped highlights.",
+            "Wait for the current preview before sampling."
+        ]
+        for key in keys {
+            let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")
+            XCTAssertNotEqual(value, key, "\"\(key)\" has no Traditional Chinese translation")
+        }
+    }
+
+    func testEveryNativeAdjustmentInputStringHasATraditionalChineseTranslation() {
+        let bundle = L10n.resolveBundle(preferences: ["zh-Hant-TW"])
+        let keys = [
+            "Enter a finite number.", "Value out of range.",
+            "Allowed range: %@–%@ %@."
         ]
         for key in keys {
             let value = bundle.localizedString(forKey: key, value: nil, table: "Localizable")

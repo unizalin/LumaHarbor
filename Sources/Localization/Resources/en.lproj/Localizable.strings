@@ -735,3 +735,11 @@
 "White balance is unavailable for this photo." = "White balance is unavailable for this photo.";
 "White balance baseline is still loading." = "White balance baseline is still loading.";
 "White balance baseline is invalid; Kelvin adjustment is unavailable." = "White balance baseline is invalid; Kelvin adjustment is unavailable.";
+"Enter a finite number." = "Enter a finite number.";
+"Value out of range." = "Value out of range.";
+"Allowed range: %@–%@ %@." = "Allowed range: %@–%@ %@.";
+"The sampled color is unavailable." = "The sampled color is unavailable.";
+"Choose a visible pixel inside the photo." = "Choose a visible pixel inside the photo.";
+"Choose a brighter neutral area." = "Choose a brighter neutral area.";
+"Choose a neutral area without clipped highlights." = "Choose a neutral area without clipped highlights.";
+"Wait for the current preview before sampling." = "Wait for the current preview before sampling.";

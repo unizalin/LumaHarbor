@@ -31,6 +31,33 @@ final class EyedropperDeferredResultTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.temperature, 0)
         editor.close()
     }
+
+    func testContextIsRejectedAfterANewerDisplayedFrameGeneration() async throws {
+        let renderer = DeferredWBRenderer()
+        let editor = EditorSession()
+        editor.attach(dependencies: EditorDependencies(
+            previewScheduler: PreviewScheduler(renderer: renderer),
+            previewRenderer: renderer, loadAdjustments: { _ in .neutral },
+            saveAdjustments: { _, _ in }
+        ))
+        let photo = PhotoAsset(id: PhotoID(), libraryID: LibraryID(), relativePath: "fixture.ARW",
+            fingerprint: FileFingerprint(fileSize: 4, edgeDigest: "fixture"), status: .ready)
+        editor.open(photo: photo, sourceURL: URL(fileURLWithPath: "/tmp/fixture.ARW"),
+            adjustments: .neutral, isReadOnly: false)
+        let request = await renderer.next()
+        try await renderer.finish(request)
+        let deadline = Date().addingTimeInterval(1)
+        while editor.previewImage == nil && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        editor.setWhiteBalanceBaselineForTesting(
+            RawWhiteBalanceBaseline(temperatureKelvin: 5_500, tint: 0)
+        )
+        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
+        editor.advanceEyedropperGenerationForTesting()
+        XCTAssertFalse(editor.commitEyedropper())
+        editor.close()
+    }
 }
 
 private actor DeferredWBRenderer: PreviewRendering {

@@ -44,7 +44,7 @@ final class EyedropperOverlayContractTests: XCTestCase {
         XCTAssertTrue(source.contains("editor.previewEyedropper("), "a drag in progress must only preview, never write to history")
         XCTAssertTrue(source.contains(".onChanged"))
         XCTAssertTrue(source.contains(".onEnded"))
-        XCTAssertTrue(source.contains("editor.commitEyedropper()"), "release must be the one place that commits")
+        XCTAssertTrue(source.contains("editor.commitEyedropper(context: snapshot.context)"), "release must be the one place that commits the captured frame context")
         XCTAssertTrue(source.contains("PixelSampler.sample("), "must sample the actually-displayed image, not a hardcoded/mocked colour")
         XCTAssertTrue(source.contains("AspectFitRect.imagePixel("), "must map the click location to a pixel coordinate through the shared, tested helper")
     }
