@@ -161,6 +161,9 @@ struct PadEditorCanvasView: View {
             if editor.toolMode == .spotHeal {
                 SpotHealMaskOverlayView(editor: editor, imageFrame: imageFrame)
             }
+            if editor.toolMode == .whiteBalance {
+                WhiteBalanceEyedropperOverlay(editor: editor, imageFrame: imageFrame, image: image)
+            }
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
     }

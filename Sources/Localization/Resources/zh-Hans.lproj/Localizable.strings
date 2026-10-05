@@ -731,3 +731,7 @@
 "Profile Preserved, Not Applied" = "配置文件已保留，未套用";
 "Approximate fallback" = "近似回退";
 "Fallback" = "回退";
+"White balance baseline is still loading; relative adjustment remains available." = "白平衡基准仍在加载；目前仍可使用相对调整。";
+"White balance is unavailable for this photo." = "这张照片无法使用白平衡调整。";
+"White balance baseline is still loading." = "正在加载白平衡基准。";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "白平衡基准无效，无法使用开尔文调整。";

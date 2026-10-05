@@ -5,6 +5,15 @@ import CoreGraphics
 /// inspector has room for the full localized label, while iPad keeps the
 /// required 44pt minimum touch target.
 public enum AdjustmentControlMetrics {
+    #if os(macOS)
+    public static let resetHitTarget: CGFloat = 30
+    public static let resetVisualDiameter: CGFloat = 22
+    public static let actionSpacing: CGFloat = 4
+    #else
+    public static let resetHitTarget: CGFloat = 44
+    public static let resetVisualDiameter: CGFloat = 30
+    public static let actionSpacing: CGFloat = 6
+    #endif
     /// Nudge/reset tappable region. Spec: "28 to 32 pt" on macOS, "At least
     /// 44 pt" on iPad.
     public static var nudgeHitTarget: CGFloat {

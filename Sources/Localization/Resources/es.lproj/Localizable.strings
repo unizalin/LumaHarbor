@@ -731,3 +731,7 @@
 "Profile Preserved, Not Applied" = "Perfil conservado, no aplicado";
 "Approximate fallback" = "Alternativa aproximada";
 "Fallback" = "Alternativa";
+"White balance baseline is still loading; relative adjustment remains available." = "La referencia del balance de blancos aún se está cargando; el ajuste relativo sigue disponible.";
+"White balance is unavailable for this photo." = "El balance de blancos no está disponible para esta foto.";
+"White balance baseline is still loading." = "Se está cargando la referencia del balance de blancos.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "La referencia del balance de blancos no es válida; el ajuste Kelvin no está disponible.";

@@ -50,6 +50,11 @@ public final class EditorSession: ObservableObject {
     /// Provenance for the frame currently displayed. Cleared on photo changes
     /// and failures so diagnostics cannot leak from a previous RAW.
     @Published public private(set) var latestRawRenderRecipe: ResolvedRawRenderRecipe?
+    /// Monotonic editing context used by native input and async frame guards.
+    @Published public private(set) var adjustmentRevision: UInt64 = 0
+    @Published public private(set) var whiteBalanceCapability: WhiteBalancePresentation.Capability = .unavailable
+    @Published public private(set) var whiteBalanceDiagnostic: WhiteBalancePresentation.ResolutionDiagnostic = .none
+    @Published public private(set) var eyedropperIssue: WhiteBalanceEyedropper.SampleIssue?
 
     /// True once a decode has failed and nothing since -- a new photo
     /// opened, a fresh frame produced -- has superseded that outcome. Lets
@@ -157,7 +162,31 @@ public final class EditorSession: ObservableObject {
     /// Kelvin/tint into LumaHarbor's relative offsets (spec §5.3); cleared on
     /// every `open()`/`close()` so a preset previewed for one photo can never
     /// be resolved against another's baseline.
-    private var whiteBalanceBaseline: RawWhiteBalanceBaseline?
+    @Published public private(set) var whiteBalanceBaseline: RawWhiteBalanceBaseline?
+    private var editRevision: UInt64 = 0
+    private var eyedropperCandidateRevision: UInt64?
+    private var eyedropperCandidatePhotoID: PhotoID?
+    private var eyedropperCandidateDiagnostic: WhiteBalancePresentation.ResolutionDiagnostic = .none
+    private var committedWhiteBalanceDiagnostic: WhiteBalancePresentation.ResolutionDiagnostic = .none
+
+    public struct EyedropperSamplingContext: Equatable {
+        public let photoID: PhotoID
+        public let revision: UInt64
+        public let generation: UInt64
+        fileprivate let id: UUID
+    }
+    private var activeEyedropperContext: EyedropperSamplingContext?
+    private var requiresFreshEyedropperGesture = false
+    private struct FrameContext {
+        let revision: UInt64
+        let intent: UInt64
+        let recipe: PhotoAdjustments
+        let isPreview: Bool
+    }
+    private var frameContexts: [UUID: FrameContext] = [:]
+    private var displayedFrameContext: FrameContext?
+
+    public var hasEyedropperPreview: Bool { previewedEyedropperAdjustments != nil }
 
     /// A preset applied via `previewPreset(_:mode:)`, not yet committed.
     /// Transient by construction: nothing here ever reaches `history`,
@@ -308,6 +337,18 @@ public final class EditorSession: ObservableObject {
         startObservingPreviews(scheduler: dependencies.previewScheduler)
     }
 
+    #if DEBUG
+    /// Test support for editor-only interaction tests that do not run a real
+    /// preview renderer. Production paths always obtain this value from the
+    /// rendered frame, so a missing baseline remains fail-closed.
+    internal func setWhiteBalanceBaselineForTesting(_ baseline: RawWhiteBalanceBaseline) {
+        whiteBalanceBaseline = baseline
+        whiteBalanceCapability = WhiteBalancePresentation.capability(
+            baseline: baseline.temperatureKelvin
+        )
+    }
+    #endif
+
     // MARK: - Opening
 
     public func open(
@@ -337,7 +378,19 @@ public final class EditorSession: ObservableObject {
         self.wipePosition = 0.5
         self.saveState = .unchanged
         self.lastDisplayedGeneration = 0
+        self.adjustmentRevision &+= 1
         self.whiteBalanceBaseline = nil
+        self.whiteBalanceCapability = .loading
+        self.whiteBalanceDiagnostic = .none
+        self.eyedropperIssue = nil
+        self.editRevision &+= 1
+        self.activeEyedropperContext = nil
+        self.requiresFreshEyedropperGesture = false
+        self.displayedFrameContext = nil
+        self.frameContexts.removeAll()
+        self.committedWhiteBalanceDiagnostic = .none
+        self.eyedropperCandidateRevision = nil
+        self.eyedropperCandidatePhotoID = nil
         self.previewedPresetAdjustments = nil
         self.previewedEyedropperAdjustments = nil
         self.previewedContinuousAdjustments = nil
@@ -375,10 +428,22 @@ public final class EditorSession: ObservableObject {
         comparisonSnapshot = nil
         history = EditHistory(initial: .neutral)
         saveState = .unchanged
+        adjustmentRevision &+= 1
         whiteBalanceBaseline = nil
+        whiteBalanceCapability = .unavailable
+        whiteBalanceDiagnostic = .none
+        eyedropperIssue = nil
         previewedPresetAdjustments = nil
         previewedEyedropperAdjustments = nil
         previewedContinuousAdjustments = nil
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        displayedFrameContext = nil
+        frameContexts.removeAll()
+        committedWhiteBalanceDiagnostic = .none
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         presetPreviewDiagnostics = []
         previewRenderFailureMessage = nil
         previewIntentVersion += 1
@@ -395,9 +460,28 @@ public final class EditorSession: ObservableObject {
     // MARK: - Editing
 
     public func setAdjustment(_ kind: AdjustmentKind, to value: Double) {
-        guard photo != nil else { return }
-        guard history.setAdjustment(kind, to: value) else { return }
+        guard photo != nil, value.isFinite else { return }
+        adjustmentRevision &+= 1
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
+        var requested = value
+        var diagnostic: WhiteBalancePresentation.ResolutionDiagnostic?
+        if kind == .temperature {
+            guard let resolution = resolveNewTemperature(value),
+                  let resolved = resolution.effectiveStoredOffset else { return }
+            requested = resolved
+            diagnostic = resolution.diagnostic
+        }
+        guard history.setAdjustment(kind, to: requested) else { return }
         didChangeAdjustments()
+        if let diagnostic {
+            committedWhiteBalanceDiagnostic = diagnostic
+            refreshWhiteBalanceDiagnostic()
+        }
     }
 
     /// Independent review of Task 3.3: a batch's other selected photos must
@@ -410,6 +494,13 @@ public final class EditorSession: ObservableObject {
     /// value from just before the reset as the baseline.
     public func resetAdjustment(_ kind: AdjustmentKind) {
         guard photo != nil else { return }
+        adjustmentRevision &+= 1
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         let baseline = history.current
         guard history.resetAdjustment(kind) else { return }
         services?.onBeginAdjustmentGesture?(baseline)
@@ -419,6 +510,13 @@ public final class EditorSession: ObservableObject {
 
     public func resetAll() {
         guard photo != nil else { return }
+        adjustmentRevision &+= 1
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         let baseline = history.current
         guard history.resetToNeutral() else { return }
         services?.onBeginAdjustmentGesture?(baseline)
@@ -436,13 +534,37 @@ public final class EditorSession: ObservableObject {
     /// caller-supplied out-of-range value from reaching the render pipeline.
     public func updateAdjustments(_ transform: (inout PhotoAdjustments) -> Void) {
         guard photo != nil else { return }
+        adjustmentRevision &+= 1
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         var updated = history.current
         transform(&updated)
+        var resolution: WhiteBalancePresentation.Resolution?
+        if updated.temperature != history.current.temperature {
+            resolution = resolveNewTemperature(updated.temperature)
+            updated.temperature = resolution?.effectiveStoredOffset ?? history.current.temperature
+        }
+        if !updated.tint.isFinite { updated.tint = history.current.tint }
         guard history.record(updated.clamped()) else { return }
         didChangeAdjustments()
+        if let resolution {
+            committedWhiteBalanceDiagnostic = resolution.diagnostic
+            refreshWhiteBalanceDiagnostic()
+        }
     }
 
     public func undo() {
+        adjustmentRevision &+= 1
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         guard history.undo() != nil else { return }
         didChangeAdjustments()
     }
@@ -502,6 +624,13 @@ public final class EditorSession: ObservableObject {
     }
 
     public func redo() {
+        adjustmentRevision &+= 1
+        editRevision &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         guard history.redo() != nil else { return }
         didChangeAdjustments()
     }
@@ -759,23 +888,97 @@ public final class EditorSession: ObservableObject {
     /// photo before releasing) refines the previous preview rather than
     /// compounding onto it -- each call replaces `previewedEyedropperAdjustments`
     /// from `history.current`, never from the previous preview.
-    public func previewEyedropper(sample: WhiteBalanceEyedropper.Sample) {
+    public func beginEyedropperSampling(sourceImage: CGImage) -> EyedropperSamplingContext? {
+        guard let photo, whiteBalanceCapability == .valid,
+              sourceImage === previewImage, let frame = displayedFrameContext,
+              frame.recipe == history.current, frame.revision == editRevision else { return nil }
+        let context = EyedropperSamplingContext(photoID: photo.id, revision: editRevision,
+            generation: lastDisplayedGeneration, id: UUID())
+        activeEyedropperContext = context
+        requiresFreshEyedropperGesture = false
+        return context
+    }
+
+    private func isCurrent(_ context: EyedropperSamplingContext) -> Bool {
+        context == activeEyedropperContext && context.photoID == photo?.id
+            && context.revision == editRevision
+    }
+
+    public func previewEyedropper(sample: WhiteBalanceEyedropper.Sample,
+                                  context: EyedropperSamplingContext? = nil) {
         guard photo != nil else { return }
+        if let context {
+            guard isCurrent(context) else { return }
+        } else {
+            guard !requiresFreshEyedropperGesture else { return }
+            if activeEyedropperContext == nil {
+                if let image = previewImage {
+                    guard beginEyedropperSampling(sourceImage: image) != nil else {
+                        rejectEyedropperSample(whiteBalanceCapability == .valid ? .staleFrame : .unavailableBaseline)
+                        return
+                    }
+                } else if whiteBalanceCapability == .valid, let photo {
+                    activeEyedropperContext = EyedropperSamplingContext(
+                        photoID: photo.id, revision: editRevision,
+                        generation: lastDisplayedGeneration, id: UUID()
+                    )
+                    requiresFreshEyedropperGesture = false
+                } else {
+                    rejectEyedropperSample(whiteBalanceCapability == .valid ? .staleFrame : .unavailableBaseline)
+                    return
+                }
+            }
+        }
+        if let issue = WhiteBalanceEyedropper.issue(for: sample) {
+            rejectEyedropperSample(issue)
+            return
+        }
         previewIntentVersion += 1
+        eyedropperIssue = nil
         let delta = WhiteBalanceEyedropper.delta(neutralizing: sample)
-        var updated = history.current
-        updated[.temperature] = history.current[.temperature] + delta.temperature
-        updated[.tint] = history.current[.tint] + delta.tint
-        previewedEyedropperAdjustments = updated
-        guard updated != history.current else { return }
+        guard let result = WhiteBalanceEyedropper.applyingResolved(
+            delta: delta, to: history.current,
+            baselineKelvin: whiteBalanceBaseline?.temperatureKelvin
+        ) else {
+            rejectEyedropperSample(.unavailableBaseline)
+            return
+        }
+        previewedEyedropperAdjustments = result.adjustments
+        eyedropperCandidateRevision = editRevision
+        eyedropperCandidatePhotoID = photo?.id
+        eyedropperCandidateDiagnostic = result.diagnostic
+        whiteBalanceDiagnostic = result.diagnostic
+        guard result.adjustments != history.current else {
+            restoreAuthoritativePreview()
+            return
+        }
         requestInteractivePreview()
     }
 
     /// Restores the render to the committed edit. Safe to call even if no
     /// eyedropper preview is active.
-    public func cancelEyedropperPreview() {
-        guard previewedEyedropperAdjustments != nil else { return }
+    public func rejectEyedropperSample(_ issue: WhiteBalanceEyedropper.SampleIssue,
+                                       context: EyedropperSamplingContext? = nil) {
+        guard photo != nil else { return }
+        if let context, !isCurrent(context) { return }
+        previewIntentVersion += 1
+        eyedropperIssue = issue
         previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
+        refreshWhiteBalanceDiagnostic()
+        restoreAuthoritativePreview()
+    }
+
+    public func cancelEyedropperPreview() {
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        guard previewedEyedropperAdjustments != nil || eyedropperIssue != nil else { return }
+        previewedEyedropperAdjustments = nil
+        eyedropperIssue = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
+        refreshWhiteBalanceDiagnostic()
         previewIntentVersion += 1
         // Same reasoning as `cancelPresetPreview()`: only submit a
         // restoring decode if the preview actually changed what's on
@@ -790,13 +993,66 @@ public final class EditorSession: ObservableObject {
     /// if nothing is being previewed, or if the sample happened to resolve
     /// to exactly the current temperature/tint (`history.record` itself is
     /// the no-op guard, same as every other edit path in this class).
-    public func commitEyedropper() {
-        guard let previewed = previewedEyedropperAdjustments else { return }
+    @discardableResult
+    public func commitEyedropper(context: EyedropperSamplingContext? = nil) -> Bool {
+        if let context, !isCurrent(context) { return false }
+        guard let previewed = previewedEyedropperAdjustments,
+              eyedropperCandidateRevision == editRevision,
+              eyedropperCandidatePhotoID == photo?.id else { return false }
         previewedEyedropperAdjustments = nil
+        eyedropperIssue = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
         previewIntentVersion += 1
         previewImageReflectsAPreview = false
-        guard history.record(previewed.clamped()) else { return }
-        didChangeAdjustments()
+        let diagnostic = eyedropperCandidateDiagnostic
+        if history.record(previewed.clamped()) {
+            didChangeAdjustments()
+        } else {
+            restoreAuthoritativePreview()
+        }
+        committedWhiteBalanceDiagnostic = diagnostic
+        whiteBalanceDiagnostic = diagnostic
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = false
+        return true
+    }
+
+    private func refreshWhiteBalanceDiagnostic() {
+        if previewedEyedropperAdjustments != nil {
+            whiteBalanceDiagnostic = eyedropperCandidateDiagnostic
+            return
+        }
+        if committedWhiteBalanceDiagnostic == .clamped {
+            whiteBalanceDiagnostic = .clamped
+            return
+        }
+        guard let baseline = whiteBalanceBaseline?.temperatureKelvin else {
+            whiteBalanceDiagnostic = .none
+            return
+        }
+        whiteBalanceDiagnostic = WhiteBalancePresentation.resolve(
+            storedOffset: history.current.temperature, baselineKelvin: baseline
+        ).diagnostic
+    }
+
+    private func resolveNewTemperature(_ value: Double) -> WhiteBalancePresentation.Resolution? {
+        guard value.isFinite, let baseline = whiteBalanceBaseline?.temperatureKelvin,
+              WhiteBalancePresentation.isValidBaseline(baseline) else { return nil }
+        return WhiteBalancePresentation.resolve(storedOffset: value, baselineKelvin: baseline)
+    }
+
+    private func restoreAuthoritativePreview() {
+        guard let frame = displayedFrameContext, frame.recipe == history.current,
+              let image = previewImage else {
+            requestInteractivePreview()
+            scheduleSettledPreview()
+            return
+        }
+        displayedFrameContext = FrameContext(revision: editRevision,
+            intent: previewIntentVersion, recipe: history.current, isPreview: false)
+        previewImageReflectsAPreview = false
+        scheduleHistogramComputation(for: image, generation: lastDisplayedGeneration)
     }
 
     /// Live preview for one continuous-adjustment gesture (slider drag,
@@ -857,6 +1113,17 @@ public final class EditorSession: ObservableObject {
     }
 
     private func didChangeAdjustments() {
+        editRevision &+= 1
+        adjustmentRevision &+= 1
+        previewIntentVersion &+= 1
+        activeEyedropperContext = nil
+        requiresFreshEyedropperGesture = true
+        previewedEyedropperAdjustments = nil
+        eyedropperCandidateRevision = nil
+        eyedropperCandidatePhotoID = nil
+        eyedropperIssue = nil
+        committedWhiteBalanceDiagnostic = .none
+        refreshWhiteBalanceDiagnostic()
         refreshUndoState()
         // Interactive first so the slider keeps up (spec §11), then the good one
         // once the user stops -- the preview always follows the sliders,
@@ -896,6 +1163,11 @@ public final class EditorSession: ObservableObject {
         // submission).
         let isPreviewContext = previewedPresetAdjustments != nil || previewedEyedropperAdjustments != nil || previewedContinuousAdjustments != nil
         let intentVersion = previewIntentVersion
+        let contextID = UUID()
+        let frame = FrameContext(revision: editRevision, intent: intentVersion,
+            recipe: displayedAdjustments, isPreview: isPreviewContext)
+        frameContexts = frameContexts.filter { $0.value.revision == editRevision && $0.value.intent == intentVersion }
+        frameContexts[contextID] = frame
         let request = PreviewRequest(
             subject: PreviewSubject(photo.id.rawValue),
             url: sourceURL,
@@ -905,9 +1177,11 @@ public final class EditorSession: ObservableObject {
             previewOptions: previewOptions,
             cameraProfileRequest: displayedAdjustments.rawCameraProfile.requestedName.map {
                 RawCameraProfileRequest(sourceName: $0)
-            }
+            },
+            contextID: contextID
         )
         Task {
+            guard frame.revision == editRevision, frame.intent == previewIntentVersion else { return }
             let token = await services.previewScheduler.submit(request)
             if isPreviewContext {
                 previewRequestGeneration = (schedulerGeneration: token.generation, intentVersion: intentVersion)
@@ -990,11 +1264,13 @@ public final class EditorSession: ObservableObject {
     /// doc comment on `previewIntentVersion`. `nil` means "not preview
     /// context at all" (a normal/committed request); `false` means "was
     /// preview context, but it's stale now and must be silently ignored".
-    private func previewContextRelevance(for generation: UInt64) -> Bool? {
-        guard let pending = previewRequestGeneration, pending.schedulerGeneration == generation else {
-            return nil
+    private func previewContextRelevance(for token: PreviewToken) -> Bool? {
+        guard let id = token.contextID else { return nil }
+        guard let frame = frameContexts[id],
+              frame.revision == editRevision, frame.intent == previewIntentVersion else {
+            return false
         }
-        return pending.intentVersion == previewIntentVersion
+        return frame.isPreview ? true : nil
     }
 
     private func handle(_ event: PreviewEvent) {
@@ -1005,7 +1281,7 @@ public final class EditorSession: ObservableObject {
             // photo currently open (spec §9).
             guard let photo, result.token.subject.rawValue == photo.id.rawValue else { return }
             guard result.token.generation > lastDisplayedGeneration else { return }
-            switch previewContextRelevance(for: result.token.generation) {
+            switch previewContextRelevance(for: result.token) {
             case .some(false):
                 // A newer preview intent (possibly a no-op with nothing to
                 // render) has since superseded this frame -- applying it now
@@ -1016,27 +1292,39 @@ public final class EditorSession: ObservableObject {
                 break
             }
             lastDisplayedGeneration = result.token.generation
+            displayedFrameContext = result.token.contextID.flatMap { frameContexts[$0] }
             previewImage = result.image.cgImage
             latestRawRenderRecipe = result.image.rawRenderRecipe
             decodeFailed = false
             scheduleHistogramComputation(for: result.image.cgImage, generation: result.token.generation)
             previewQuality = result.quality
-            if let baseline = result.image.whiteBalanceBaseline {
-                whiteBalanceBaseline = baseline
+            let baseline = result.image.whiteBalanceBaseline
+            if whiteBalanceBaseline?.temperatureKelvin.bitPattern != baseline?.temperatureKelvin.bitPattern
+                || whiteBalanceBaseline?.tint.bitPattern != baseline?.tint.bitPattern {
+                adjustmentRevision &+= 1
+                activeEyedropperContext = nil
+                requiresFreshEyedropperGesture = true
+                previewedEyedropperAdjustments = nil
             }
+            whiteBalanceBaseline = baseline
+            whiteBalanceCapability = WhiteBalancePresentation.capability(
+                baseline: baseline?.temperatureKelvin
+            )
+            refreshWhiteBalanceDiagnostic()
             // An interactive frame means the settled render is still to come.
             isRendering = result.quality == .interactive
             // Recomputed from this specific frame's own origin every time,
             // rather than only ever set `true` -- a *non*-preview frame
             // landing (e.g. `cancelPresetPreview`'s restore, or a real edit)
             // correctly means the screen no longer reflects a preview.
-            previewImageReflectsAPreview = previewContextRelevance(for: result.token.generation) == true
+            previewImageReflectsAPreview = previewContextRelevance(for: result.token) == true
 
         case .failed(let token, let error):
             guard let photo, token.subject.rawValue == photo.id.rawValue else { return }
+            guard token.generation > lastDisplayedGeneration else { return }
             isRendering = false
             latestRawRenderRecipe = nil
-            switch previewContextRelevance(for: token.generation) {
+            switch previewContextRelevance(for: token) {
             case .some(true):
                 // Round 3: a preset preview that genuinely changes the
                 // picture, but the RAW decode it needed failed -- shown
@@ -1060,6 +1348,7 @@ public final class EditorSession: ObservableObject {
             // keeps the modal alert: spec requires a real error stay visible
             // here, not just the preview-only path above.
             previewImage = nil
+            displayedFrameContext = nil
             decodeFailed = true
             histogramTask?.cancel()
             histogram = nil
@@ -1090,10 +1379,13 @@ public final class EditorSession: ObservableObject {
         guard let services else { return }
         histogramTask?.cancel()
         let compute = services.computeHistogram
+        let revision = editRevision
+        let intent = previewIntentVersion
         histogramTask = Task { [weak self] in
             let computed = await compute(image)
             guard let self, !Task.isCancelled else { return }
             guard generation == self.lastDisplayedGeneration else { return }
+            guard revision == self.editRevision, intent == self.previewIntentVersion else { return }
             self.histogram = computed
         }
     }

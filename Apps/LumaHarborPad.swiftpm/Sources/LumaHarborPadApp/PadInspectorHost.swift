@@ -385,6 +385,24 @@ struct PadInspectorHost: View {
         case .color:
             adjustmentSection(.hsl, titleKey: "Color", summarySections: [.whiteBalance, .hsl]) {
                 Level2Section(L10n.t("White Balance")) {
+                    Button {
+                        if editor.toolMode == .whiteBalance {
+                            editor.cancelEyedropperPreview()
+                            editor.setToolMode(.adjust)
+                        } else {
+                            editor.setToolMode(.whiteBalance)
+                        }
+                    } label: {
+                        Label(
+                            editor.toolMode == .whiteBalance
+                                ? L10n.t("Cancel Eyedropper")
+                                : L10n.t("White Balance Eyedropper"),
+                            systemImage: "eyedropper"
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(editor.photo == nil || (editor.toolMode != .whiteBalance && editor.whiteBalanceCapability != .valid))
                     BasicAdjustmentPanel(editor: editor, kinds: InspectorCatalog.section(.whiteBalance).adjustmentKinds)
                 }
                 ColorAdjustmentPanel(editor: editor)

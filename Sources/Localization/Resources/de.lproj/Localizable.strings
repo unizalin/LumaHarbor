@@ -731,3 +731,7 @@
 "Profile Preserved, Not Applied" = "Profil erhalten, nicht angewendet";
 "Approximate fallback" = "Ungefähre Ausweichlösung";
 "Fallback" = "Ausweichlösung";
+"White balance baseline is still loading; relative adjustment remains available." = "Der Weißabgleich-Basiswert wird noch geladen; die relative Anpassung ist weiterhin verfügbar.";
+"White balance is unavailable for this photo." = "Für dieses Foto ist kein Weißabgleich verfügbar.";
+"White balance baseline is still loading." = "Die Weißabgleichsbasis wird noch geladen.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "Die Weißabgleichsbasis ist ungültig; eine Kelvin-Anpassung ist nicht verfügbar.";

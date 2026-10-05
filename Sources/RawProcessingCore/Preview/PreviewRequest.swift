@@ -35,10 +35,14 @@ public enum PreviewQuality: Int, Comparable, Sendable, CaseIterable {
 public struct PreviewToken: Hashable, Sendable {
     public let subject: PreviewSubject
     public let generation: UInt64
+    /// Session context captured at submission so late actor-hop results can
+    /// be rejected even when the scheduler generation is still monotonic.
+    public let contextID: UUID?
 
-    public init(subject: PreviewSubject, generation: UInt64) {
+    public init(subject: PreviewSubject, generation: UInt64, contextID: UUID? = nil) {
         self.subject = subject
         self.generation = generation
+        self.contextID = contextID
     }
 }
 
@@ -51,6 +55,7 @@ public struct PreviewRequest: Sendable {
     public var quality: PreviewQuality
     public var previewOptions: ProfessionalPreviewOptions
     public var cameraProfileRequest: RawCameraProfileRequest?
+    public var contextID: UUID?
 
     public init(
         subject: PreviewSubject,
@@ -59,7 +64,8 @@ public struct PreviewRequest: Sendable {
         targetPixelDimension: Int,
         quality: PreviewQuality,
         previewOptions: ProfessionalPreviewOptions = .standard,
-        cameraProfileRequest: RawCameraProfileRequest? = nil
+        cameraProfileRequest: RawCameraProfileRequest? = nil,
+        contextID: UUID? = nil
     ) {
         self.subject = subject
         self.url = url
@@ -68,6 +74,7 @@ public struct PreviewRequest: Sendable {
         self.quality = quality
         self.previewOptions = previewOptions
         self.cameraProfileRequest = cameraProfileRequest
+        self.contextID = contextID
     }
 
     public var decodeQuality: DecodeQuality {

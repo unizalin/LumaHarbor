@@ -63,6 +63,9 @@ final class EditorSessionEditingTests: XCTestCase {
             adjustments: .neutral,
             isReadOnly: false
         )
+        editor.setWhiteBalanceBaselineForTesting(
+            RawWhiteBalanceBaseline(temperatureKelvin: 5_500, tint: 0)
+        )
         return editor
     }
 

@@ -731,3 +731,7 @@
 "Profile Preserved, Not Applied" = "프로필 보존됨, 적용 안 함";
 "Approximate fallback" = "근사 대체";
 "Fallback" = "대체";
+"White balance baseline is still loading; relative adjustment remains available." = "화이트 밸런스 기준값을 불러오는 중이며 상대 조정은 계속 사용할 수 있습니다.";
+"White balance is unavailable for this photo." = "이 사진에서는 화이트 밸런스를 조정할 수 없습니다.";
+"White balance baseline is still loading." = "화이트 밸런스 기준을 불러오는 중입니다.";
+"White balance baseline is invalid; Kelvin adjustment is unavailable." = "화이트 밸런스 기준이 유효하지 않아 켈빈 조정을 사용할 수 없습니다.";
