@@ -105,4 +105,25 @@ final class BrushMaskRendererTests: XCTestCase {
             XCTAssertLessThanOrEqual(abs(Int(pa.0) - Int(pb.0)), 8)
         }
     }
+
+    func testTwoBrushesRenderExactlyOnceInPipelineOrder() throws {
+        let first = BrushMask(
+            strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.5, y: 0.5)], size: 0.3)],
+            adjustments: BrushMaskPatch(exposure: 1)
+        )
+        let second = BrushMask(
+            strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.5, y: 0.5)], size: 0.3)],
+            adjustments: BrushMaskPatch(blacks: 1)
+        )
+        let source = baseImage()
+        let combined = try BrushMaskRenderer.applyValidated([first, second], to: source)
+        let sequential = try BrushMaskRenderer.applyValidated(
+            [second],
+            to: try BrushMaskRenderer.applyValidated([first], to: source)
+        )
+        let combinedPixel = try sample(combined, at: CGPoint(x: 50, y: 30))
+        let sequentialPixel = try sample(sequential, at: CGPoint(x: 50, y: 30))
+        XCTAssertEqual(combinedPixel.0, sequentialPixel.0, accuracy: 1)
+        XCTAssertEqual(combinedPixel.1, sequentialPixel.1, accuracy: 1)
+    }
 }

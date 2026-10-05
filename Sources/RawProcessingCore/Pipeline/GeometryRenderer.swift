@@ -101,8 +101,8 @@ public enum GeometryRenderer {
             ) * matrix
         }
         if let crop = geometry.crop, !crop.isFull {
-            matrix = BrushCoordinateMapping.Matrix3x3.translation(x: -crop.x, y: -crop.y)
-                * BrushCoordinateMapping.Matrix3x3.scale(x: 1 / crop.width, y: 1 / crop.height)
+            matrix = BrushCoordinateMapping.Matrix3x3.scale(x: 1 / crop.width, y: 1 / crop.height)
+                * BrushCoordinateMapping.Matrix3x3.translation(x: -crop.x, y: -crop.y)
                 * matrix
         }
         guard let inverse = matrix.inverted else {
@@ -303,7 +303,15 @@ public enum GeometryRenderer {
         let scaleX = extent.width / output.extent.width
         let scaleY = extent.height / output.extent.height
         let scaled = output.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        return scaled.cropped(to: extent)
+        // CIPerspectiveCorrection can return an extent whose origin and size
+        // reflect the pinned quadrilateral. Re-anchor the scaled result to
+        // the input canvas before cropping so downstream crop dimensions are
+        // independent of the pin values and agree with brush mapping.
+        let aligned = scaled.transformed(by: CGAffineTransform(
+            translationX: extent.minX - scaled.extent.minX,
+            y: extent.minY - scaled.extent.minY
+        ))
+        return aligned.cropped(to: extent)
     }
 
     private static func imagePoint(for point: NormalizedPoint, extent: CGRect) -> CGPoint {

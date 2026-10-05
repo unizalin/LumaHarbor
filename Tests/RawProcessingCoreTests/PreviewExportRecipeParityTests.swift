@@ -14,6 +14,16 @@ final class PreviewExportRecipeParityTests: XCTestCase {
         var adjustments = PhotoAdjustments.neutral
         adjustments.rawRenderingCompatibility = .adobeProcess2012V1
         adjustments.lensCorrection = LensCorrectionAdjustments(mode: .automatic)
+        adjustments.brushMasks = [
+            BrushMask(
+                strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.3, y: 0.35)], size: 0.2)],
+                adjustments: BrushMaskPatch(exposure: 1)
+            ),
+            BrushMask(
+                strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.7, y: 0.65)], size: 0.2)],
+                adjustments: BrushMaskPatch(blacks: 1)
+            )
+        ]
 
         let decoder = SyntheticRawDecoder()
         let preview = try await CoreImagePreviewRenderer(decoder: decoder).render(
@@ -38,6 +48,7 @@ final class PreviewExportRecipeParityTests: XCTestCase {
         XCTAssertEqual(preview.rawRenderRecipe, outcome.rawRenderRecipe)
         XCTAssertEqual(preview.rawRenderRecipe?.policy, .adobeProcess2012V1)
         XCTAssertEqual(preview.rawRenderRecipe?.effectivePolicy, .native)
+        XCTAssertEqual(preview.pixelSize, outcome.pixelSize)
         XCTAssertEqual(
             preview.rawRenderRecipe?.workingColorSpaceID,
             RawWorkingColorSpaceID.nativeExtendedLinearSRGBV1.rawValue

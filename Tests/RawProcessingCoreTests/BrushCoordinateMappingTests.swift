@@ -67,7 +67,10 @@ final class BrushCoordinateMappingTests: XCTestCase {
             GeometryAdjustments(straightenDegrees: -10),
             GeometryAdjustments(perspectiveHorizontal: 25),
             GeometryAdjustments(perspectiveVertical: -25),
-            GeometryAdjustments(cornerPins: pins)
+            GeometryAdjustments(cornerPins: pins),
+            GeometryAdjustments(crop: crop, rotationDegrees: 90, straightenDegrees: -10,
+                                perspectiveHorizontal: 25, perspectiveVertical: -25,
+                                cornerPins: pins)
         ]
         for geometry in cases {
             let mapping = try BrushCoordinateMapping(sourceSize: sourceSize, geometry: geometry)
