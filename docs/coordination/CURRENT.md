@@ -1,15 +1,19 @@
 # Current Coordination State
 
-## Mainline white-balance and brush integration P0 freeze（2026-10-05, Codex）
+## Mainline white-balance and brush integration（2026-10-06, Codex）
 
-- **工作所有權**：`codex/mainline-wb-brush-integration`；Task 1 writer 為 Codex。本工作樹以 `origin/main` 的 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319` 為 base；產品檔案起點乾淨，既有未追蹤的整合 plan 保留但不屬於本任務提交。
-- **來源保全**：`codex/open-source-release-prep` 的來源 HEAD 為 `5a80e969fbae94d8ee6db4842f3a2def781329f3`；P0 私有 manifest 已記錄 24 個 tracked modified 與 10 個 untracked 路徑及 hash。SOURCE 僅供讀取；`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 的 local-only signing 差異排除，不得移入。
-- **整合階段**：P1 文件與基準凍結；尚未宣稱產品實作或本分支功能驗證。提供的主線基線證據為完整 `swift test` 2,574 executed、17 skipped、0 failures；Task 1 未重新執行產品測試。
-- **下一步**：在本分支先為 Task 2 撰寫 `WhiteBalancePresentationTests`、`WhiteBalanceEyedropperTests`、`RawDecodingTests`、`PresetApplicatorTests` 的失敗邊界／方向測試，再執行 `swift test --filter 'WhiteBalancePresentationTests|WhiteBalanceEyedropperTests|RawDecodingTests|PresetApplicatorTests'`。
+- **狀態**：`DONE_WITH_CONCERNS`。白平衡輸入／滴管、Sidecar v5、獨立 adjustment brush 模型、座標映射、預覽／匯出、Editor session、批次／剪貼簿／快照保存及 Mac／iPad 共用 UI 已整合至 `codex/mainline-wb-brush-integration`。
+- **Git 基線**：本工作樹由 `origin/main` `82542e73aae8f16b0ba7e4d9d36a8a42451a7319` 建立；產品與測試實作 HEAD 為 `0cd6eba4a8c75746f7c7cefa24a4c7a85f6b114d`。分支尚未 push、merge 或 rebase，`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 未修改。
+- **來源保全**：唯讀來源 `codex/open-source-release-prep` 仍停在 `5a80e969fbae94d8ee6db4842f3a2def781329f3`，維持原有 24 個 tracked modified 與 10 個 untracked 路徑；未覆蓋、回復或刪除其內容。
+- **自動驗證**：完整 `swift test` 2,687 executed、17 skipped、0 failures；strict-concurrency build、Mac Release app、generic iPad Simulator／device build、10 項私人 RAW fixture 測試（1 skip）、release privacy、未發布 ZIP 解壓與 checksum 全部通過。iPad Simulator 安裝、啟動、首屏截圖與清理通過。
+- **效能 concern**：同一 renderer 的空筆刷 1600px 預覽兩輪 p50 為 151.6／153.8 ms，未比 baseline 159.3／154.1 ms 超出預算；固定一個 mask 的 p50 為 933.9／943.8 ms，十個 mask 為 7,993.1／8,008.0 ms。6000×4000 原尺寸匯出一個／十個 mask 分別約 9.1／87.2 秒，十 mask 峰值約 691 MiB。有效筆刷負載不符合互動目標，需另案優化 rasterizer。
+- **人工限制**：Mac 主機鎖定，Mac 視覺操作未執行；iPad 僅完成 Simulator 首屏 smoke。實體 iPad、Apple Pencil、旋轉／Split View、VoiceOver、鍵盤、灰卡 D65 Lab／ΔE00 與正式 Lightroom Gate 2 均為 `NOT RUN`。
+- **證據**：完整矩陣、命令、像素／效能結果與限制見 `docs/testing/reports/2026-10-05-mainline-white-balance-brush-integration.md`。
+- **下一步**：以獨立任務優化 `BrushMaskRenderer` 的 coverage rasterization，先保留相同像素與取消契約，再重跑一／十 mask 的 1600px 與原尺寸效能矩陣；未獲授權前不得 push、merge、rebase 或修改唯讀來源工作樹。
 
-Updated: 2026-10-05
+Updated: 2026-10-06
 
-Updated by: Codex（mainline integration Task 1 P0 freeze）
+Updated by: Codex（mainline white-balance and brush integration Task 8）
 
 ## Semantic release versioning landed（2026-09-29, Codex）
 
