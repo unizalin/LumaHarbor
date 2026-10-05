@@ -128,7 +128,7 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         self.decoder = try container.decodeIfPresent(DecoderDescriptor.self, forKey: .decoder) ?? .coreImageDefault
         adjustments = try container.decodeIfPresent(PhotoAdjustments.self, forKey: .adjustments) ?? .neutral
         hasCurationField = container.contains(.curation)
-        hasBrushMasksField = adjustments.hasBrushMasksField
+        hasBrushMasksField = container.contains(.adjustments) && adjustments.hasBrushMasksField
         curation = try container.decodeIfPresent(PhotoCuration.self, forKey: .curation) ?? .neutral
         snapshots = try container.decodeIfPresent([EditSnapshot].self, forKey: .snapshots) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
