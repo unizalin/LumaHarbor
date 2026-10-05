@@ -92,6 +92,15 @@ public struct PresetApplicator: Sendable {
         var result = mode == .replace
             ? .neutral(using: current.rawRenderingCompatibility)
             : current
+        // Replace starts from neutral for ordinary leaves, but a white-balance
+        // leaf that cannot be resolved must leave the current legacy value
+        // intact. This includes finite out-of-range sidecar values; assigning
+        // it directly avoids the normal slider subscript clamp.
+        if mode == .replace,
+           patch.basic?.temperature != nil,
+           current.temperature.isFinite {
+            result.temperature = current.temperature
+        }
         var diagnostics: [PresetDiagnostic] = []
         var didApplyAdobeLeaf = false
 

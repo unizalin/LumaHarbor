@@ -56,11 +56,6 @@ public enum WhiteBalancePresentation {
     public static let minimumStoredOffset = -1_200.0
     public static let maximumStoredOffset = 1_200.0
 
-    public static func kelvin(forStoredOffset offset: Double, baselineKelvin: Double) -> Double {
-        resolve(storedOffset: offset, baselineKelvin: baselineKelvin).effectiveKelvin
-            ?? clampedKelvin(defaultBaselineKelvin + clampedStoredOffset(offset) * kelvinPerStoredUnit)
-    }
-
     public static func kelvinIfResolvable(
         forStoredOffset offset: Double,
         baselineKelvin: Double
@@ -70,10 +65,6 @@ public enum WhiteBalancePresentation {
 
     public static func isValidBaseline(_ value: Double) -> Bool {
         validBaseline(value) != nil
-    }
-
-    public static func storedOffset(forKelvin kelvin: Double, baselineKelvin: Double) -> Double {
-        storedOffsetIfResolvable(forKelvin: kelvin, baselineKelvin: baselineKelvin) ?? 0
     }
 
     public static func storedOffsetIfResolvable(

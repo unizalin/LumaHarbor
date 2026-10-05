@@ -2,17 +2,17 @@ import XCTest
 @testable import RawProcessingCore
 
 final class WhiteBalancePresentationTests: XCTestCase {
-    func testStoredOffsetCanBePresentedAsAbsoluteKelvin() {
+    func testStoredOffsetCanBePresentedAsAbsoluteKelvinWhenBaselineIsValid() throws {
         XCTAssertEqual(
-            WhiteBalancePresentation.kelvin(forStoredOffset: 20, baselineKelvin: 5_500),
+            try XCTUnwrap(WhiteBalancePresentation.kelvinIfResolvable(forStoredOffset: 20, baselineKelvin: 5_500)),
             6_400,
             accuracy: 0.001
         )
     }
 
-    func testAbsoluteKelvinCanBeStoredAsBaselineRelativeOffset() {
+    func testAbsoluteKelvinCanBeStoredAsBaselineRelativeOffsetWhenBaselineIsValid() throws {
         XCTAssertEqual(
-            WhiteBalancePresentation.storedOffset(forKelvin: 3_200, baselineKelvin: 5_500),
+            try XCTUnwrap(WhiteBalancePresentation.storedOffsetIfResolvable(forKelvin: 3_200, baselineKelvin: 5_500)),
             -51.1111111111,
             accuracy: 0.000001
         )
@@ -38,11 +38,11 @@ final class WhiteBalancePresentationTests: XCTestCase {
         XCTAssertEqual(WhiteBalancePresentation.clampedKelvin(100_000), 50_000)
     }
 
-    func testExtremeKelvinInputRemainsRepresentableAgainstALowRawBaseline() {
-        let stored = WhiteBalancePresentation.storedOffset(forKelvin: 50_000, baselineKelvin: 3_000)
+    func testExtremeKelvinInputRemainsRepresentableAgainstALowRawBaseline() throws {
+        let stored = try XCTUnwrap(WhiteBalancePresentation.storedOffsetIfResolvable(forKelvin: 50_000, baselineKelvin: 3_000))
         XCTAssertLessThanOrEqual(stored, WhiteBalancePresentation.maximumStoredOffset)
         XCTAssertEqual(
-            WhiteBalancePresentation.kelvin(forStoredOffset: stored, baselineKelvin: 3_000),
+            try XCTUnwrap(WhiteBalancePresentation.kelvinIfResolvable(forStoredOffset: stored, baselineKelvin: 3_000)),
             50_000,
             accuracy: 0.001
         )

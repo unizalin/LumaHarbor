@@ -25,6 +25,30 @@ final class PresetApplicatorTests: XCTestCase {
         XCTAssertEqual(result.adjustments.contrast, 0)
     }
 
+    func testReplaceKeepsLegacyTemperatureWhenNativePatchHasNoBaseline() throws {
+        let current = try JSONDecoder().decode(PhotoAdjustments.self, from: Data(#"{"temperature":5000}"#.utf8))
+        let patch = AdjustmentPatch(basic: .init(temperature: 12))
+        let result = applicator.apply(patch, to: current, mode: .replace, context: .none)
+
+        XCTAssertEqual(result.adjustments.temperature, 5000)
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "missingWhiteBalanceBaseline" })
+    }
+
+    func testReplaceKeepsLegacyTemperatureWhenAbsolutePatchHasInvalidBaseline() throws {
+        let current = try JSONDecoder().decode(PhotoAdjustments.self, from: Data(#"{"temperature":5000}"#.utf8))
+        let patch = AdjustmentPatch(basic: .init(temperature: 6_000))
+        let result = applicator.apply(
+            patch,
+            to: current,
+            mode: .replace,
+            context: PresetApplicationContext(baselineTemperatureKelvin: .nan),
+            temperatureIsAbsoluteKelvin: true
+        )
+
+        XCTAssertEqual(result.adjustments.temperature, 5000)
+        XCTAssertTrue(result.diagnostics.contains { $0.code == "invalidWhiteBalanceBaseline" })
+    }
+
     func testEmptyPatchIsANoOpUnderMerge() throws {
         let current = PhotoAdjustments(exposure: 1, contrast: 20)
         let result = applicator.apply(AdjustmentPatch(), to: current, mode: .merge, context: .none)
