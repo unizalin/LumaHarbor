@@ -249,10 +249,11 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
             // A newer sidecar may contain fields this build cannot decode at
             // all (for example an unknown brush renderer), but it still must
             // be reported as foreign data and left byte-for-byte in place.
-            if let found = minimalSchemaVersion(in: data),
-               (found > PhotoSidecar.currentSchemaVersion || found < 1) {
+            if let schema = minimalSchemaVersion(in: data),
+               schema.value > PhotoSidecar.currentSchemaVersion
+                || (schema.value < 1 && schema.isOutOfRange) {
                 throw SidecarError.unsupportedSchemaVersion(
-                    found: found,
+                    found: schema.value,
                     supported: PhotoSidecar.currentSchemaVersion
                 )
             }
@@ -411,7 +412,12 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     /// Reads only the top-level schema marker. This intentionally does not
     /// decode `PhotoSidecar` or any nested brush data: schema admission must
     /// happen before version-specific payload validation.
-    private func minimalSchemaVersion(in data: Data) -> Int? {
+    private struct MinimalSchemaVersion {
+        let value: Int
+        let isOutOfRange: Bool
+    }
+
+    private func minimalSchemaVersion(in data: Data) -> MinimalSchemaVersion? {
         guard let object = try? JSONSerialization.jsonObject(with: data),
               let dictionary = object as? [String: Any],
               let number = dictionary["schemaVersion"] as? NSNumber else {
@@ -423,9 +429,9 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
         // JSON numbers have a wider range than Swift's Int. Never feed an
         // out-of-range Double into Int(_:), which traps; clamp to a sentinel
         // that the admission gate rejects without decoding or quarantining.
-        if value >= Double(Int.max) { return Int.max }
-        if value <= Double(Int.min) { return Int.min }
-        return Int(value)
+        if value >= Double(Int.max) { return MinimalSchemaVersion(value: Int.max, isOutOfRange: true) }
+        if value <= Double(Int.min) { return MinimalSchemaVersion(value: Int.min, isOutOfRange: true) }
+        return MinimalSchemaVersion(value: Int(value), isOutOfRange: false)
     }
 
     private func requireWritable() throws {

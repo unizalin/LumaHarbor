@@ -219,6 +219,29 @@ final class SidecarV5BrushContractTests: TemporaryDirectoryTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
     }
 
+    func testOrdinaryInvalidSchemaStillQuarantinesAsCorrupt() throws {
+        let original = sidecar()
+        let url = repository.sidecarURL(for: original.photoID)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: SidecarCoding.encode(original)) as? [String: Any]
+        )
+        object["schemaVersion"] = 0
+        try writeFile(
+            JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+            at: url
+        )
+
+        XCTAssertThrowsError(try repository.loadSidecar(for: original.photoID)) { error in
+            guard case SidecarError.corruptSidecar(let photoID, let quarantinedAt, _) = error else {
+                return XCTFail("Expected schemaVersion=0 corruption, got \(error)")
+            }
+            XCTAssertEqual(photoID, original.photoID)
+            XCTAssertNotNil(quarantinedAt)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repository.quarantineDirectoryURL.path))
+    }
+
     func testWriterGateRejectsExistingExtremeSchemaWithoutReplacingIt() throws {
         let original = sidecar()
         let url = repository.sidecarURL(for: original.photoID)
