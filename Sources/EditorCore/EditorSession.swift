@@ -231,7 +231,7 @@ public final class EditorSession: ObservableObject {
 
     /// Transient snapshot reference used for A/B comparison.
     /// Toggling comparison changes session state only; never mutates adjustments or writes sidecar.
-    @Published public var comparisonSnapshot: EditSnapshot?
+    @Published public private(set) var comparisonSnapshot: EditSnapshot?
 
     /// Longest edge the preview should cover, in backing-store pixels.
     @Published public var previewPixelDimension = 1_600
@@ -252,6 +252,10 @@ public final class EditorSession: ObservableObject {
     /// `.pending` unconditionally, there was no way back to a clean state and
     /// therefore no way to navigate away at all (found manually 2026-08-18).
     private var lastSavedAdjustments: PhotoAdjustments = .neutral
+    /// Monotonic token for in-flight sidecar writes.  Every edit, photo
+    /// transition, and save submission advances it so an older completion
+    /// cannot claim a newer document is saved.
+    private var saveOperationGeneration: UInt64 = 0
     private var services: EditorDependencies?
     private var eventTask: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
@@ -499,6 +503,7 @@ public final class EditorSession: ObservableObject {
         snapshots: [EditSnapshot] = []
     ) {
         cancelPendingWork()
+        saveOperationGeneration &+= 1
 
         self.photo = photo
         self.sourceURL = sourceURL
@@ -557,6 +562,7 @@ public final class EditorSession: ObservableObject {
     /// — this drops `history`, so anything unsaved at this point is gone.
     public func close() {
         cancelPendingWork()
+        saveOperationGeneration &+= 1
         photo = nil
         sourceURL = nil
         previewImage = nil
@@ -1192,6 +1198,7 @@ public final class EditorSession: ObservableObject {
         guard let photo, let index = snapshots.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        activeBrushMaskGesture = nil
         snapshots[index].name = trimmed
         persistSnapshots(for: photo)
     }
@@ -1551,6 +1558,7 @@ public final class EditorSession: ObservableObject {
 
     private func didChangeAdjustments() {
         activeBrushMaskGesture = nil
+        saveOperationGeneration &+= 1
         editRevision &+= 1
         adjustmentRevision &+= 1
         previewIntentVersion &+= 1
@@ -1584,6 +1592,13 @@ public final class EditorSession: ObservableObject {
         canUndo = history.canUndo
         canRedo = history.canRedo
     }
+
+    #if DEBUG
+    /// Exact history depths used by editor-core regression tests.  The
+    /// production surface continues to expose only the boolean affordances.
+    internal var undoCountForTesting: Int { history.undoCount }
+    internal var redoCountForTesting: Int { history.redoCount }
+    #endif
 
     // MARK: - Preview
 
@@ -1851,9 +1866,15 @@ public final class EditorSession: ObservableObject {
             return
         }
         let adjustments = history.current
+        saveOperationGeneration &+= 1
+        let operationGeneration = saveOperationGeneration
+        let photoID = photo.id
         saveState = .saving
         do {
             try await services.saveAdjustments(adjustments, photo)
+            guard operationGeneration == saveOperationGeneration,
+                  self.photo?.id == photoID,
+                  history.current == adjustments else { return }
             lastSavedAdjustments = adjustments
             // Only report success once the atomic write actually returned.
             if history.current == adjustments {
@@ -1861,6 +1882,9 @@ public final class EditorSession: ObservableObject {
             }
             onSaved?(photo.id, !adjustments.isNeutral)
         } catch {
+            guard operationGeneration == saveOperationGeneration,
+                  self.photo?.id == photoID,
+                  history.current == adjustments else { return }
             saveState = .failed(SafeErrorPresentation.message(for: error))
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't save your edits"), for: error)
         }

@@ -50,12 +50,15 @@ final class EditorSessionBrushMaskGestureTests: XCTestCase {
         let editor = makeEditor()
         editor.setToolMode(.brushMask)
         XCTAssertFalse(editor.canUndo)
+        XCTAssertEqual(editor.undoCountForTesting, 0)
         let mapper = try mapping()
         XCTAssertNil(editor.beginBrushMaskGesture(at: CGPoint(x: -1, y: -1), mapping: mapper))
         XCTAssertFalse(editor.endBrushMaskGesture())
         XCTAssertFalse(editor.canUndo)
+        XCTAssertEqual(editor.undoCountForTesting, 0)
         editor.cancelBrushMaskGesture()
         XCTAssertFalse(editor.canUndo)
+        XCTAssertEqual(editor.undoCountForTesting, 0)
         XCTAssertNil(editor.beginBrushMaskGesture(
             at: CGPoint(x: 10, y: 10), mapping: mapper,
             settings: BrushMaskGestureSettings(size: .nan)
@@ -86,13 +89,19 @@ final class EditorSessionBrushMaskGestureTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.brushMasks.count, 1)
         XCTAssertEqual(editor.adjustments.brushMasks[0].strokes.count, 2)
         XCTAssertTrue(editor.canUndo)
+        XCTAssertEqual(editor.undoCountForTesting, 1)
+        XCTAssertEqual(editor.redoCountForTesting, 0)
         XCTAssertFalse(editor.canRedo)
         editor.undo()
         XCTAssertTrue(editor.adjustments.brushMasks.isEmpty)
+        XCTAssertEqual(editor.undoCountForTesting, 0)
+        XCTAssertEqual(editor.redoCountForTesting, 1)
         XCTAssertTrue(editor.canRedo)
         editor.redo()
         XCTAssertEqual(editor.adjustments.brushMasks.count, 1)
         XCTAssertEqual(editor.adjustments.brushMasks[0].strokes.count, 2)
+        XCTAssertEqual(editor.undoCountForTesting, 1)
+        XCTAssertEqual(editor.redoCountForTesting, 0)
     }
 
     func testCompetingEditInvalidatesReleaseAndDoesNotAddHistory() throws {
@@ -105,6 +114,7 @@ final class EditorSessionBrushMaskGestureTests: XCTestCase {
         XCTAssertTrue(editor.adjustments.brushMasks.isEmpty)
         editor.undo()
         XCTAssertFalse(editor.canUndo)
+        XCTAssertEqual(editor.undoCountForTesting, 0)
     }
 
     func testPhotoGeometryUndoSnapshotAndCancelInvalidateOldRelease() throws {
@@ -209,6 +219,21 @@ final class EditorSessionBrushMaskGestureTests: XCTestCase {
         ))
         editor.setComparisonSnapshot(snapshot)
         XCTAssertFalse(editor.endBrushMaskGesture(context: compareGesture))
+        XCTAssertTrue(editor.adjustments.brushMasks.isEmpty)
+    }
+
+    func testRenamingSnapshotInvalidatesAnInFlightGesture() throws {
+        let editor = makeEditor()
+        editor.setToolMode(.brushMask)
+        let mapper = try mapping()
+        editor.createSnapshot(name: "base")
+        let snapshot = try XCTUnwrap(editor.snapshots.first)
+        let context = try XCTUnwrap(editor.beginBrushMaskGesture(at: CGPoint(x: 10, y: 10), mapping: mapper))
+
+        editor.renameSnapshot(id: snapshot.id, newName: "renamed")
+
+        XCTAssertFalse(editor.endBrushMaskGesture(context: context))
+        XCTAssertEqual(editor.undoCountForTesting, 0)
         XCTAssertTrue(editor.adjustments.brushMasks.isEmpty)
     }
 

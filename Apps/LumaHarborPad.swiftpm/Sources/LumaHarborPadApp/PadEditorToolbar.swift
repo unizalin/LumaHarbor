@@ -119,9 +119,9 @@ struct PadEditorToolbar: ToolbarContent {
                     ForEach(editor.snapshots) { snap in
                         Button {
                             if editor.comparisonSnapshot?.id == snap.id {
-                                editor.comparisonSnapshot = nil
+                                editor.setComparisonSnapshot(nil)
                             } else {
-                                editor.comparisonSnapshot = snap
+                                editor.setComparisonSnapshot(snap)
                             }
                         } label: {
                             HStack {
@@ -135,7 +135,7 @@ struct PadEditorToolbar: ToolbarContent {
                     if editor.comparisonSnapshot != nil {
                         Divider()
                         Button(L10n.t("Exit Compare")) {
-                            editor.comparisonSnapshot = nil
+                            editor.setComparisonSnapshot(nil)
                         }
                     }
                 }
@@ -170,7 +170,8 @@ struct PadEditorToolbar: ToolbarContent {
                 editor.pasteAdjustments(
                     patch: adjustmentClipboard.patch,
                     geometry: adjustmentClipboard.geometry,
-                    localAdjustments: adjustmentClipboard.localAdjustments
+                    localAdjustments: adjustmentClipboard.localAdjustments,
+                    brushMasks: adjustmentClipboard.brushMasks
                 )
             } label: {
                 Label(L10n.t("Paste Adjustments"), systemImage: "doc.on.clipboard")
