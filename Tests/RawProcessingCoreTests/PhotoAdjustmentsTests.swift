@@ -92,6 +92,13 @@ final class PhotoAdjustmentsTests: XCTestCase {
         XCTAssertEqual(decoded.contrast, -100)
     }
 
+    func testFiniteLegacyTemperatureOutsideTheCurrentSliderRangeIsPreservedOnLoad() throws {
+        let json = Data(#"{"temperature": 350}"#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.temperature, 350)
+        XCTAssertEqual(decoded.clamped().temperature, 350)
+    }
+
     func testEncodingIsStableForIdenticalValues() throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

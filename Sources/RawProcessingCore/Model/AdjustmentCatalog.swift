@@ -53,11 +53,15 @@ public enum AdjustmentCatalog {
             kind: .exposure, defaultValue: 0, minimumValue: -5, maximumValue: 5,
             step: 0.1, fractionDigits: 1
         ),
-        // Every other slider is a neutral-at-zero, ±100 percentage-style control.
+        // Temperature is stored as a decoder-relative unit, while its RAW UI
+        // is presented as absolute Kelvin. The wider persistence range covers
+        // the documented 2,000–50,000 K presentation interval around ordinary
+        // camera baselines; the resolver narrows it per photo.
         AdjustmentDefinition(
-            kind: .temperature, defaultValue: 0, minimumValue: -100, maximumValue: 100,
-            step: 0.1, fractionDigits: 1
+            kind: .temperature, defaultValue: 0, minimumValue: -1_200, maximumValue: 1_200,
+            step: 1, fractionDigits: 0
         ),
+        // Every remaining slider is a neutral-at-zero, ±100 percentage-style control.
         AdjustmentDefinition(
             kind: .tint, defaultValue: 0, minimumValue: -100, maximumValue: 100,
             step: 0.1, fractionDigits: 1

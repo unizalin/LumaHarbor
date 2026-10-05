@@ -73,10 +73,10 @@ public struct RenderParameters: Equatable, Sendable {
 /// need a later source-to-decode contract. Vignette derives its radii from the
 /// image's own `extent`, so it is already resolution-independent.
 public enum AdjustmentMapping {
-    /// ±100 on the temperature slider spans ±4500 K around the as-shot neutral,
-    /// which covers tungsten-to-shade without letting the slider reach values
-    /// `CIRAWFilter` clips anyway.
-    public static let kelvinPerTemperatureUnit = 45.0
+    /// One stored temperature unit spans 45 K around the decoder's as-shot
+    /// neutral. The presentation resolver applies the per-photo Kelvin bounds
+    /// before the offset reaches a decoder.
+    public static let kelvinPerTemperatureUnit = WhiteBalancePresentation.kelvinPerStoredUnit
     /// ±100 tint spans ±150, matching the usable range of `CIRAWFilter.neutralTint`.
     public static let tintPerUnit = 1.5
     /// ±100 contrast maps to 0.5...1.5 in `CIColorControls`.

@@ -162,8 +162,8 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     }
 
     public func clamped() -> PhotoAdjustments {
-        PhotoAdjustments(
-            exposure: exposure, temperature: temperature, tint: tint, contrast: contrast,
+        var copy = PhotoAdjustments(
+            exposure: exposure, temperature: 0, tint: tint, contrast: contrast,
             highlights: highlights, shadows: shadows, whites: whites, blacks: blacks,
             vibrance: vibrance, saturation: saturation,
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
@@ -174,6 +174,13 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
             lensCorrection: lensCorrection,
             rawRenderingCompatibility: rawRenderingCompatibility
         )
+        // A finite out-of-range temperature may be a legacy sidecar value.
+        // Preserve it until the baseline-aware resolver sees the actual RAW;
+        // only non-finite corruption collapses to neutral here.
+        copy.temperature = temperature.isFinite
+            ? temperature
+            : AdjustmentCatalog.definition(for: .temperature).defaultValue
+        return copy
     }
 
     /// Kinds that currently differ from their default.
@@ -209,7 +216,14 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         }
 
         self.exposure = try value(.exposure, .exposure)
-        self.temperature = try value(.temperature, .temperature)
+        // Temperature is decoder-relative; its safety depends on the RAW
+        // baseline, which is unavailable while decoding the sidecar. Preserve
+        // every finite legacy value and defer clamping to the resolver.
+        let temperatureDefinition = AdjustmentCatalog.definition(for: .temperature)
+        let rawTemperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+        self.temperature = rawTemperature?.isFinite == true
+            ? rawTemperature!
+            : temperatureDefinition.defaultValue
         self.tint = try value(.tint, .tint)
         self.contrast = try value(.contrast, .contrast)
         self.highlights = try value(.highlights, .highlights)
