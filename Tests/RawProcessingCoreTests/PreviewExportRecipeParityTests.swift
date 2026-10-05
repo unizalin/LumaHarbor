@@ -1,4 +1,5 @@
 import Foundation
+import CoreImage
 import XCTest
 @testable import RawProcessingCore
 
@@ -49,6 +50,11 @@ final class PreviewExportRecipeParityTests: XCTestCase {
         XCTAssertEqual(preview.rawRenderRecipe?.policy, .adobeProcess2012V1)
         XCTAssertEqual(preview.rawRenderRecipe?.effectivePolicy, .native)
         XCTAssertEqual(preview.pixelSize, outcome.pixelSize)
+        let exportedImage = try XCTUnwrap(CIImage(contentsOf: outcome.url))
+        XCTAssertEqual(exportedImage.extent.size, preview.pixelSize)
+        let exportedCG = try ImageRenderService().makeCGImage(exportedImage)
+        XCTAssertEqual(exportedCG.width, preview.cgImage.width)
+        XCTAssertEqual(exportedCG.height, preview.cgImage.height)
         XCTAssertEqual(
             preview.rawRenderRecipe?.workingColorSpaceID,
             RawWorkingColorSpaceID.nativeExtendedLinearSRGBV1.rawValue
