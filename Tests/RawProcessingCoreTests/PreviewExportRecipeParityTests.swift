@@ -38,7 +38,7 @@ final class PreviewExportRecipeParityTests: XCTestCase {
             ),
             BrushMask(
                 strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.7, y: 0.65)], size: 0.2)],
-                adjustments: BrushMaskPatch(blacks: 1)
+                adjustments: BrushMaskPatch(exposure: -1)
             )
         ]
 
@@ -71,12 +71,22 @@ final class PreviewExportRecipeParityTests: XCTestCase {
         let exportedCG = try ImageRenderService().makeCGImage(exportedImage)
         XCTAssertEqual(exportedCG.width, preview.cgImage.width)
         XCTAssertEqual(exportedCG.height, preview.cgImage.height)
-        for point in [(10, 8), (22, 15)] {
+        var unbrushed = adjustments
+        unbrushed.brushMasks = []
+        let baseline = try await CoreImagePreviewRenderer(decoder: decoder).render(
+            PreviewRequest(subject: PreviewSubject(UUID()), url: source, adjustments: unbrushed,
+                           targetPixelDimension: 64, quality: .full)
+        )
+        let brushCenters = [(20, 17), (45, 31)]
+        for point in brushCenters {
             let previewPixel = pixel(preview.cgImage, x: point.0, y: point.1)
             let exportPixel = pixel(exportedCG, x: point.0, y: point.1)
+            let baselinePixel = pixel(baseline.cgImage, x: point.0, y: point.1)
             XCTAssertLessThanOrEqual(abs(Int(previewPixel[0]) - Int(exportPixel[0])), 25)
             XCTAssertLessThanOrEqual(abs(Int(previewPixel[1]) - Int(exportPixel[1])), 25)
             XCTAssertLessThanOrEqual(abs(Int(previewPixel[2]) - Int(exportPixel[2])), 25)
+            XCTAssertGreaterThan(abs(Int(previewPixel[0]) - Int(baselinePixel[0])), 4,
+                                 "brush center \(point) must differ from unbrushed baseline")
         }
         XCTAssertEqual(
             preview.rawRenderRecipe?.workingColorSpaceID,

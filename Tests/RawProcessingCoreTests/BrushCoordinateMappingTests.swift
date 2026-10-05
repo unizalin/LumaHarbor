@@ -98,6 +98,24 @@ final class BrushCoordinateMappingTests: XCTestCase {
         XCTAssertEqual(source.y, 0.25, accuracy: 1e-6)
     }
 
+    func testIdentityPixelOracleRejectsFlippedLandmark() throws {
+        let sourceSize = CGSize(width: 64, height: 48)
+        let source = CGPoint(x: 0.17, y: 0.31)
+        let observed = try renderedRedCentroid(sourcePoint: source, sourceSize: sourceSize, geometry: .neutral)
+        let identity = try BrushCoordinateMapping(sourceSize: sourceSize, geometry: .neutral)
+        let expected = try identity.sourceToDisplay(source)
+        XCTAssertEqual(observed.x, expected.x, accuracy: 3.5)
+        XCTAssertEqual(observed.y, expected.y, accuracy: 3.5)
+
+        let flipped = try BrushCoordinateMapping(
+            sourceSize: sourceSize,
+            geometry: GeometryAdjustments(flipHorizontal: true)
+        )
+        let flippedExpected = try flipped.sourceToDisplay(source)
+        let distance = hypot(observed.x - flippedExpected.x, observed.y - flippedExpected.y)
+        XCTAssertGreaterThan(distance, 20, "identity must not land on the flipped pixel")
+    }
+
     func testHorizontalFlipDoesNotUseIdentityFallback() throws {
         let mapping = try BrushCoordinateMapping(
             sourceExtent: CGRect(x: 0, y: 0, width: 160, height: 80),

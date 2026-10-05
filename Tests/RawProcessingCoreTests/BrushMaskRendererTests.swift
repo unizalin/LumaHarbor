@@ -40,6 +40,21 @@ final class BrushMaskRendererTests: XCTestCase {
         XCTAssertEqual(affectedBottom.0, untouched.0, accuracy: 2)
     }
 
+    func testEraseOverlapRemovesPaintAtTheStrokeCentre() throws {
+        let mask = BrushMask(
+            strokes: [
+                BrushMaskStroke(points: [BrushMaskPoint(x: 0.5, y: 0.5)], size: 0.3),
+                BrushMaskStroke(points: [BrushMaskPoint(x: 0.5, y: 0.5)], mode: .erase, size: 0.1)
+            ],
+            adjustments: BrushMaskPatch(exposure: 2)
+        )
+        let output = try BrushMaskRenderer.applyValidated([mask], to: baseImage())
+        let centre = try sample(output, at: CGPoint(x: 50, y: 30))
+        let paintedBand = try sample(output, at: CGPoint(x: 58, y: 30))
+        XCTAssertEqual(centre.0, 128, accuracy: 3, "erase overlap must clear the painted centre")
+        XCTAssertGreaterThan(paintedBand.0, 128, "paint outside the erase overlap must remain")
+    }
+
     func testSparseAndDenseCollinearPathsProduceComparablePixels() throws {
         let sparse = BrushMaskPath(points: [BrushMaskPoint(x: 0.1, y: 0.8), BrushMaskPoint(x: 0.9, y: 0.8)])
         let dense = BrushMaskPath(points: stride(from: 0.1, through: 0.9, by: 0.05).map { BrushMaskPoint(x: $0, y: 0.8) })
