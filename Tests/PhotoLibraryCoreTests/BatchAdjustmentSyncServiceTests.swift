@@ -148,6 +148,30 @@ final class BatchAdjustmentSyncServiceTests: XCTestCase {
         XCTAssertTrue(saveCalls.isEmpty)
     }
 
+    func testSyncPatchReplacesBrushMasksAndUndoHonorsConflictGuard() async throws {
+        let source = PhotoID()
+        let target = PhotoID()
+        let oldMask = BrushMask(name: "old")
+        let newMask = BrushMask(name: "new")
+        let store = Store([target: PhotoAdjustments(brushMasks: [oldMask])])
+        let service = makeService(store)
+
+        let transaction = await service.syncPatch(
+            AdjustmentPatch(), sourcePhotoID: source, targetPhotoIDs: [target], brushMasks: [newMask]
+        )
+        XCTAssertTrue(transaction.brushMasksChanged)
+        let syncedMasks = await store.current(target).brushMasks
+        XCTAssertEqual(syncedMasks, [newMask])
+
+        // An unrelated target edit after sync makes the brush field stale;
+        // guarded undo must leave that newer value untouched.
+        try await store.save(PhotoAdjustments(brushMasks: [BrushMask(name: "newer")]), target)
+        let summary = await service.undo(transaction)
+        XCTAssertEqual(summary.skipped, 1)
+        let currentNames = await store.current(target).brushMasks.map(\.name)
+        XCTAssertEqual(currentNames, ["newer"])
+    }
+
     func testCommitAndUndoSyncBrushMasksAsAnIndependentBatchField() async throws {
         let source = PhotoID()
         let target = PhotoID()

@@ -23,6 +23,88 @@ public enum SaveState: Equatable, Sendable {
     }
 }
 
+/// The identity of a selected local editing object.  A UUID alone is not
+/// sufficient because legacy local masks and adjustment brushes can legally
+/// carry the same UUID while belonging to different collections.
+public enum EditorSelectionIdentity: Equatable, Sendable {
+    case localAdjustment(UUID)
+    case brushMask(UUID)
+
+    /// Compatibility spelling for callers that describe the old collection
+    /// as a legacy brush selection.
+    public static func legacyLocal(_ id: UUID) -> Self { .localAdjustment(id) }
+}
+
+public typealias BrushMaskSelection = EditorSelectionIdentity
+
+/// Settings frozen at brush press time.  Every point in one gesture uses the
+/// same settings; changing a control while the pointer is down cannot mutate
+/// the pending stroke behind the editor's back.
+public struct BrushMaskGestureSettings: Equatable, Sendable {
+    public var mode: BrushMaskStrokeMode
+    public var size: Double
+    public var feather: Double
+    public var flow: Double
+    public var density: Double
+    public var adjustments: BrushMaskPatch
+    public var name: String
+
+    public init(
+        mode: BrushMaskStrokeMode = .paint,
+        size: Double = 0.05,
+        feather: Double = 0,
+        flow: Double = 1,
+        density: Double = 1,
+        adjustments: BrushMaskPatch = .neutral,
+        name: String = ""
+    ) {
+        self.mode = mode
+        self.size = size
+        self.feather = feather
+        self.flow = flow
+        self.density = density
+        self.adjustments = adjustments
+        self.name = name
+    }
+
+    fileprivate func validated() -> Self? {
+        let stroke = BrushMaskStroke(
+            mode: mode, size: size, feather: feather, flow: flow, density: density
+        )
+        guard (try? stroke.validated()) != nil, (try? adjustments.validated()) != nil else {
+            return nil
+        }
+        return self
+    }
+}
+
+/// Frozen identity for one brush gesture.  The token is intentionally
+/// value-typed and must be supplied by UI clients when they keep a gesture
+/// alive across callbacks; stale tokens are rejected at release.
+public struct BrushMaskGestureContext: Equatable, Sendable {
+    public let photoID: PhotoID
+    public let revision: UInt64
+    public let mapping: BrushCoordinateMapping
+    public let settings: BrushMaskGestureSettings
+    fileprivate let id: UUID
+
+    fileprivate init(
+        photoID: PhotoID,
+        revision: UInt64,
+        mapping: BrushCoordinateMapping,
+        settings: BrushMaskGestureSettings,
+        id: UUID = UUID()
+    ) {
+        self.photoID = photoID
+        self.revision = revision
+        self.mapping = mapping
+        self.settings = settings
+        self.id = id
+    }
+}
+
+public typealias BrushMaskGestureToken = BrushMaskGestureContext
+
 /// Drives the editing surface for one photo.
 @MainActor
 public final class EditorSession: ObservableObject {
@@ -113,7 +195,33 @@ public final class EditorSession: ObservableObject {
     /// every `open()`/`close()` for the same reason: switching photos must
     /// never leave a selection pointed at an entry that belongs to the
     /// photo just left behind.
-    @Published public var selectedLocalAdjustmentID: UUID?
+    @Published public var selectedLocalAdjustmentID: UUID? {
+        didSet {
+            guard selectedLocalAdjustmentID != oldValue else { return }
+            if let id = selectedLocalAdjustmentID {
+                selectedAdjustmentIdentity = .localAdjustment(id)
+                selectedBrushMaskID = nil
+            } else if case .localAdjustment = selectedAdjustmentIdentity {
+                selectedAdjustmentIdentity = nil
+            }
+        }
+    }
+
+    /// Typed selection for the two independent local-edit collections.  The
+    /// legacy UUID property above remains source-compatible with existing UI;
+    /// new brush-mask clients should use this discriminator.
+    @Published public private(set) var selectedAdjustmentIdentity: EditorSelectionIdentity?
+    @Published public private(set) var selectedBrushMaskID: UUID? {
+        didSet {
+            guard selectedBrushMaskID != oldValue else { return }
+            if let id = selectedBrushMaskID {
+                selectedAdjustmentIdentity = .brushMask(id)
+                selectedLocalAdjustmentID = nil
+            } else if case .brushMask = selectedAdjustmentIdentity {
+                selectedAdjustmentIdentity = nil
+            }
+        }
+    }
 
     /// Snapshots saved on this photo (spec §6.6).
     @Published public private(set) var snapshots: [EditSnapshot] = []
@@ -185,6 +293,14 @@ public final class EditorSession: ObservableObject {
     }
     private var frameContexts: [UUID: FrameContext] = [:]
     private var displayedFrameContext: FrameContext?
+
+    private struct ActiveBrushMaskGesture {
+        let context: BrushMaskGestureContext
+        let targetMaskID: UUID?
+        var paths: [BrushMaskPath]
+        var acceptsNextPoint: Bool
+    }
+    private var activeBrushMaskGesture: ActiveBrushMaskGesture?
 
     public var hasEyedropperPreview: Bool { previewedEyedropperAdjustments != nil }
 
@@ -425,6 +541,9 @@ public final class EditorSession: ObservableObject {
         self.previewImageReflectsAPreview = false
         self.toolMode = .adjust
         self.selectedLocalAdjustmentID = nil
+        self.selectedBrushMaskID = nil
+        self.selectedAdjustmentIdentity = nil
+        self.activeBrushMaskGesture = nil
         refreshUndoState()
 
         submitInteractivePreview()
@@ -475,6 +594,9 @@ public final class EditorSession: ObservableObject {
         previewImageReflectsAPreview = false
         toolMode = .adjust
         selectedLocalAdjustmentID = nil
+        selectedBrushMaskID = nil
+        selectedAdjustmentIdentity = nil
+        activeBrushMaskGesture = nil
         refreshUndoState()
         if let scheduler = services?.previewScheduler {
             Task { await scheduler.cancelAll() }
@@ -582,6 +704,7 @@ public final class EditorSession: ObservableObject {
     }
 
     public func undo() {
+        activeBrushMaskGesture = nil
         adjustmentRevision &+= 1
         editRevision &+= 1
         activeEyedropperContext = nil
@@ -626,7 +749,254 @@ public final class EditorSession: ObservableObject {
     /// touches `history`, `saveState` or the preview, unlike every other
     /// method in this section.
     public func setToolMode(_ mode: EditorToolMode) {
+        if mode != .brushMask, activeBrushMaskGesture != nil {
+            cancelBrushMaskGesture()
+        }
         toolMode = mode
+    }
+
+    /// Selects one legacy local adjustment.  The explicit discriminator keeps
+    /// a UUID collision from routing an edit to the independent brush array.
+    public func selectLocalAdjustment(id: UUID?) {
+        selectedLocalAdjustmentID = id
+    }
+
+    /// Selects one independent adjustment brush.  Selection alone is UI state
+    /// and never creates an undo entry or schedules a save.
+    public func selectBrushMask(id: UUID?) {
+        guard id == nil || history.current.brushMasks.contains(where: { $0.id == id }) else { return }
+        selectedBrushMaskID = id
+    }
+
+    /// Compatibility name used by canvas clients.
+    public func selectBrushMask(_ id: UUID?) { selectBrushMask(id: id) }
+
+    // MARK: - Adjustment brush gestures
+
+    public var hasActiveBrushMaskGesture: Bool { activeBrushMaskGesture != nil }
+
+    /// Captures the photo, revision, mapper and brush controls at press time.
+    /// No model/history mutation occurs until `endBrushMaskGesture` receives a
+    /// valid release, so activating the tool or pressing outside the frame is
+    /// a true no-op.
+    @discardableResult
+    public func beginBrushMaskGesture(
+        at displayPoint: CGPoint,
+        mapping: BrushCoordinateMapping,
+        settings: BrushMaskGestureSettings = BrushMaskGestureSettings()
+    ) -> BrushMaskGestureContext? {
+        guard let photo, let settings = settings.validated(),
+              let sourcePoint = try? mapping.displayToSource(displayPoint) else {
+            return nil
+        }
+        let point = BrushMaskPoint(x: sourcePoint.x, y: sourcePoint.y)
+        let targetMaskID: UUID?
+        if case let .brushMask(id) = selectedAdjustmentIdentity,
+           history.current.brushMasks.contains(where: { $0.id == id }) {
+            targetMaskID = id
+        } else {
+            targetMaskID = nil
+        }
+        let context = BrushMaskGestureContext(
+            photoID: photo.id,
+            revision: editRevision,
+            mapping: mapping,
+            settings: settings
+        )
+        activeBrushMaskGesture = ActiveBrushMaskGesture(
+            context: context,
+            targetMaskID: targetMaskID,
+            paths: [BrushMaskPath(points: [point])],
+            acceptsNextPoint: true
+        )
+        return context
+    }
+
+    /// Alias matching the stroke terminology used by some platform overlays.
+    @discardableResult
+    public func beginBrushMaskStroke(
+        at displayPoint: CGPoint,
+        mapping: BrushCoordinateMapping,
+        settings: BrushMaskGestureSettings = BrushMaskGestureSettings()
+    ) -> BrushMaskGestureContext? {
+        beginBrushMaskGesture(at: displayPoint, mapping: mapping, settings: settings)
+    }
+
+    /// Adds a transient point.  A point after an out-of-frame gap starts a
+    /// fresh path, ensuring the renderer never bridges across the gap.
+    @discardableResult
+    public func updateBrushMaskGesture(
+        at displayPoint: CGPoint,
+        context: BrushMaskGestureContext? = nil
+    ) -> Bool {
+        guard var active = activeBrushMaskGesture,
+              isCurrentBrushMaskGesture(active, context: context) else {
+            return false
+        }
+        guard let sourcePoint = try? active.context.mapping.displayToSource(displayPoint) else {
+            active.acceptsNextPoint = false
+            activeBrushMaskGesture = active
+            return false
+        }
+        let point = BrushMaskPoint(x: sourcePoint.x, y: sourcePoint.y)
+        if !active.acceptsNextPoint || active.paths.isEmpty {
+            active.paths.append(BrushMaskPath(points: [point]))
+        } else {
+            guard var path = active.paths.popLast() else { return false }
+            if let last = path.points.last,
+               abs(last.x - point.x) + abs(last.y - point.y) < 0.000_001 {
+                active.paths.append(path)
+                activeBrushMaskGesture = active
+                return true
+            }
+            path.points.append(point)
+            active.paths.append(path)
+        }
+        active.acceptsNextPoint = true
+        activeBrushMaskGesture = active
+        return true
+    }
+
+    @discardableResult
+    public func appendBrushMaskPoint(
+        at displayPoint: CGPoint,
+        context: BrushMaskGestureContext? = nil
+    ) -> Bool {
+        updateBrushMaskGesture(at: displayPoint, context: context)
+    }
+
+    /// Commits one valid gesture as one history entry and one autosave intent.
+    /// A stale token, invalid release, empty path, or cancelled gesture is a
+    /// strict no-op.
+    @discardableResult
+    public func endBrushMaskGesture(context: BrushMaskGestureContext? = nil) -> Bool {
+        guard let active = activeBrushMaskGesture,
+              isCurrentBrushMaskGesture(active, context: context) else {
+            return false
+        }
+        activeBrushMaskGesture = nil
+        let strokes = active.paths.compactMap { path -> BrushMaskStroke? in
+            guard !path.points.isEmpty else { return nil }
+            return BrushMaskStroke(
+                path: path,
+                mode: active.context.settings.mode,
+                size: active.context.settings.size,
+                feather: active.context.settings.feather,
+                flow: active.context.settings.flow,
+                density: active.context.settings.density
+            )
+        }
+        guard !strokes.isEmpty else { return false }
+
+        var updated = history.current
+        let maskID: UUID
+        if let targetID = active.targetMaskID,
+           let index = updated.brushMasks.firstIndex(where: { $0.id == targetID }) {
+            maskID = targetID
+            updated.brushMasks[index].strokes.append(contentsOf: strokes)
+        } else {
+            let mask = BrushMask(
+                name: active.context.settings.name,
+                strokes: strokes,
+                adjustments: active.context.settings.adjustments
+            )
+            maskID = mask.id
+            updated.brushMasks.append(mask)
+        }
+        guard history.record(updated) else { return false }
+        selectedBrushMaskID = maskID
+        didChangeAdjustments()
+        return true
+    }
+
+    /// Release variant used by pointer/touch clients that report the final
+    /// location.  Releasing outside the visible frame is invalid and drops
+    /// the transient gesture rather than committing a partial stroke.
+    @discardableResult
+    public func endBrushMaskGesture(
+        at displayPoint: CGPoint,
+        context: BrushMaskGestureContext? = nil
+    ) -> Bool {
+        guard let active = activeBrushMaskGesture,
+              isCurrentBrushMaskGesture(active, context: context),
+              (try? active.context.mapping.displayToSource(displayPoint)) != nil else {
+            activeBrushMaskGesture = nil
+            return false
+        }
+        return endBrushMaskGesture(context: context)
+    }
+
+    @discardableResult
+    public func commitBrushMaskGesture(context: BrushMaskGestureContext? = nil) -> Bool {
+        endBrushMaskGesture(context: context)
+    }
+
+    @discardableResult
+    public func endBrushMaskStroke(context: BrushMaskGestureContext? = nil) -> Bool {
+        endBrushMaskGesture(context: context)
+    }
+
+    @discardableResult
+    public func endBrushMaskStroke(
+        at displayPoint: CGPoint,
+        context: BrushMaskGestureContext? = nil
+    ) -> Bool {
+        endBrushMaskGesture(at: displayPoint, context: context)
+    }
+
+    /// Cancelling discards all transient paths and never touches history or
+    /// save state.  It also invalidates any token retained by a late release.
+    public func cancelBrushMaskGesture() {
+        activeBrushMaskGesture = nil
+    }
+
+    public func cancelBrushMaskStroke() { cancelBrushMaskGesture() }
+
+    /// Adds an empty adjustment brush explicitly from a panel.  This is an
+    /// intentional edit (unlike tool activation) and therefore is undoable.
+    @discardableResult
+    public func addBrushMask(
+        name: String = "",
+        adjustments: BrushMaskPatch = .neutral
+    ) -> UUID? {
+        guard photo != nil, (try? adjustments.validated()) != nil else { return nil }
+        var updated = history.current
+        let mask = BrushMask(name: name, adjustments: adjustments)
+        updated.brushMasks.append(mask)
+        guard history.record(updated) else { return nil }
+        selectedBrushMaskID = mask.id
+        didChangeAdjustments()
+        return mask.id
+    }
+
+    @discardableResult
+    public func deleteBrushMask(id: UUID) -> Bool {
+        guard photo != nil, history.current.brushMasks.contains(where: { $0.id == id }) else { return false }
+        var updated = history.current
+        updated.brushMasks.removeAll { $0.id == id }
+        guard history.record(updated) else { return false }
+        if selectedBrushMaskID == id { selectedBrushMaskID = nil }
+        didChangeAdjustments()
+        return true
+    }
+
+    @discardableResult
+    public func deleteSelectedBrushMask() -> Bool {
+        guard let id = selectedBrushMaskID else { return false }
+        return deleteBrushMask(id: id)
+    }
+
+    private func isCurrentBrushMaskGesture(
+        _ active: ActiveBrushMaskGesture,
+        context: BrushMaskGestureContext?
+    ) -> Bool {
+        guard context.map({ $0.id == active.context.id }) ?? true,
+              let photo, photo.id == active.context.photoID,
+              active.context.revision == editRevision else {
+            activeBrushMaskGesture = nil
+            return false
+        }
+        return true
     }
 
     /// Switches the before/after comparison layout (spec §6.1). Entering
@@ -639,6 +1009,7 @@ public final class EditorSession: ObservableObject {
     public func setCompareMode(_ mode: CompareMode) {
         guard mode == .single || canCompareWithOriginal else { return }
         guard mode != compareMode else { return }
+        activeBrushMaskGesture = nil
         compareMode = mode
         invalidateEyedropperInteraction()
         requestInteractivePreview()
@@ -663,6 +1034,7 @@ public final class EditorSession: ObservableObject {
     }
 
     public func redo() {
+        activeBrushMaskGesture = nil
         adjustmentRevision &+= 1
         editRevision &+= 1
         activeEyedropperContext = nil
@@ -806,6 +1178,7 @@ public final class EditorSession: ObservableObject {
     /// Captures the current adjustments as a new snapshot (spec §6.6).
     public func createSnapshot(name: String) {
         guard let photo else { return }
+        activeBrushMaskGesture = nil
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let snapshotName = trimmed.isEmpty ? "\(L10n.t("Snapshot")) \(snapshots.count + 1)" : trimmed
         let snapshot = EditSnapshot(name: snapshotName, adjustments: history.current)
@@ -826,6 +1199,7 @@ public final class EditorSession: ObservableObject {
     /// Duplicates an existing snapshot.
     public func duplicateSnapshot(id: UUID) {
         guard let photo, let snapshot = snapshots.first(where: { $0.id == id }) else { return }
+        activeBrushMaskGesture = nil
         let copy = EditSnapshot(
             name: "\(snapshot.name) \(L10n.t("Copy"))",
             adjustments: snapshot.adjustments
@@ -837,6 +1211,7 @@ public final class EditorSession: ObservableObject {
     /// Deletes a snapshot by ID.
     public func deleteSnapshot(id: UUID) {
         guard let photo, let index = snapshots.firstIndex(where: { $0.id == id }) else { return }
+        activeBrushMaskGesture = nil
         snapshots.remove(at: index)
         if comparisonSnapshot?.id == id {
             comparisonSnapshot = nil
@@ -865,6 +1240,7 @@ public final class EditorSession: ObservableObject {
     /// Sets or clears the comparison snapshot for A/B preview.
     /// Purely session state; never mutates adjustments or saves to sidecar.
     public func setComparisonSnapshot(_ snapshot: EditSnapshot?) {
+        activeBrushMaskGesture = nil
         comparisonSnapshot = snapshot
         invalidateEyedropperInteraction()
         requestInteractivePreview()
@@ -873,6 +1249,7 @@ public final class EditorSession: ObservableObject {
 
     /// Toggles A/B compare against the first snapshot or clears comparison.
     public func toggleABCompare() {
+        activeBrushMaskGesture = nil
         if comparisonSnapshot != nil {
             comparisonSnapshot = nil
         } else if let first = snapshots.first {
@@ -1173,6 +1550,7 @@ public final class EditorSession: ObservableObject {
     }
 
     private func didChangeAdjustments() {
+        activeBrushMaskGesture = nil
         editRevision &+= 1
         adjustmentRevision &+= 1
         previewIntentVersion &+= 1
@@ -1468,6 +1846,10 @@ public final class EditorSession: ObservableObject {
     /// Writes the sidecar now. Also used by ⌘S and by "close photo".
     public func save() async {
         guard let photo, let services, saveState.isDirty else { return }
+        guard !isReadOnlyLibrary else {
+            saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
+            return
+        }
         let adjustments = history.current
         saveState = .saving
         do {

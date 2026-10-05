@@ -23,6 +23,8 @@ public enum InspectorSmartFollow {
             return .local
         case .brush:
             return .local
+        case .brushMask:
+            return .local
         case .spotHeal:
             return .local
         }

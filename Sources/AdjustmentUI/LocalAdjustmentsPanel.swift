@@ -732,7 +732,7 @@ public struct LocalAdjustmentsPanel: View {
 
     private func canvasToolMode(for mode: EditorToolMode) -> EditorToolMode? {
         switch mode {
-        case .linearGradient, .radialGradient, .brush: return mode
+        case .linearGradient, .radialGradient, .brush, .brushMask: return mode
         case .adjust, .crop, .whiteBalance, .spotHeal: return nil
         }
     }

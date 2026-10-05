@@ -667,11 +667,9 @@ public final class LibraryViewModel: ObservableObject {
     /// `BatchAdjustmentSyncService`'s existing per-target snapshot/merge/
     /// fault-tolerance machinery via `syncPatch(_:sourcePhotoID:targetPhotoIDs:)`
     /// -- the explicit-action sibling of the slider-drag gesture's
-    /// `commitGesture`. Geometry/Local Adjustments in the clipboard are
-    /// never part of this: `BatchAdjustmentSyncService` only understands
-    /// `AdjustmentPatch`'s stable field IDs, and giving it a second,
-    /// parallel safety model for those fields is out of scope for this
-    /// round (see `docs/coordination/CURRENT.md`).
+    /// `commitGesture`. Geometry remains opt-in local UI state; both legacy
+    /// local adjustments and independent brush masks are carried when the
+    /// clipboard explicitly includes local adjustments.
     ///
     /// The target set is frozen synchronously -- `selectedPhotoIDs` is read
     /// into a local `let` before the `await` below, the same guarantee
@@ -688,7 +686,12 @@ public final class LibraryViewModel: ObservableObject {
         guard !targets.isEmpty else { return nil }
         let skipped = frozenSelection.count - targets.count
 
-        let transaction = await batchSyncService.syncPatch(clipboard.patch, sourcePhotoID: source, targetPhotoIDs: targets)
+        let transaction = await batchSyncService.syncPatch(
+            clipboard.patch,
+            sourcePhotoID: source,
+            targetPhotoIDs: targets,
+            brushMasks: clipboard.brushMasks
+        )
         lastBatchTransaction = transaction
         for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
             updateEditBadge(photoID: targetID, hasEdits: true)

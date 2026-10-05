@@ -315,11 +315,13 @@ public actor BatchAdjustmentSyncService {
     public func syncPatch(
         _ patch: AdjustmentPatch,
         sourcePhotoID: PhotoID,
-        targetPhotoIDs: Set<PhotoID>
+        targetPhotoIDs: Set<PhotoID>,
+        brushMasks: [BrushMask]? = nil
     ) async -> BatchAdjustmentTransaction {
         let fields = Set(AdjustmentFieldID.allCases.filter(patch.contains))
+        let brushMasksChanged = brushMasks != nil
         let targets = Array(targetPhotoIDs.subtracting([sourcePhotoID]))
-        guard !fields.isEmpty, !targets.isEmpty else {
+        guard (!fields.isEmpty || brushMasksChanged), !targets.isEmpty else {
             return BatchAdjustmentTransaction(
                 sourcePhotoID: sourcePhotoID,
                 targetPhotoIDs: targets,
@@ -332,6 +334,8 @@ public actor BatchAdjustmentSyncService {
 
         var before: [PhotoID: AdjustmentPatch] = [:]
         var after: [PhotoID: AdjustmentPatch] = [:]
+        var brushMasksBefore: [PhotoID: [BrushMask]] = [:]
+        var brushMasksAfter: [PhotoID: [BrushMask]] = [:]
         var results: [PhotoID: BatchWriteResult] = [:]
 
         for targetID in targets {
@@ -344,7 +348,12 @@ public actor BatchAdjustmentSyncService {
             do {
                 let current = try await loadAdjustments(targetID)
                 before[targetID] = AdjustmentPatch.extracting(fields, from: current)
-                let merged = applicator.apply(patch, to: current, mode: .merge, context: .none).adjustments
+                var merged = applicator.apply(patch, to: current, mode: .merge, context: .none).adjustments
+                if let brushMasks {
+                    brushMasksBefore[targetID] = current.brushMasks
+                    merged.brushMasks = brushMasks
+                    brushMasksAfter[targetID] = merged.brushMasks
+                }
                 try await saveAdjustments(merged, targetID)
                 after[targetID] = AdjustmentPatch.extracting(fields, from: merged)
                 results[targetID] = .success
@@ -359,6 +368,9 @@ public actor BatchAdjustmentSyncService {
             modifiedFieldIDs: Array(fields),
             before: before,
             after: after,
+            brushMasksChanged: brushMasksChanged,
+            brushMasksBefore: brushMasksBefore,
+            brushMasksAfter: brushMasksAfter,
             results: results
         )
     }

@@ -106,6 +106,26 @@ final class SnapshotWorkflowTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.contrast, 30)
     }
 
+    func testSnapshotRestoreAndComparePreserveAdjustmentBrushes() throws {
+        let (editor, _) = makeOpenEditor()
+        let mask = BrushMask(
+            name: "Subject",
+            strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.2, y: 0.3)])],
+            adjustments: BrushMaskPatch(exposure: 1)
+        )
+        editor.updateAdjustments { $0.brushMasks = [mask] }
+        editor.createSnapshot(name: "Brush look")
+        let snapshot = try XCTUnwrap(editor.snapshots.first)
+        XCTAssertEqual(snapshot.adjustments.brushMasks, [mask])
+
+        editor.updateAdjustments { $0.brushMasks = [] }
+        editor.setComparisonSnapshot(snapshot)
+        XCTAssertEqual(editor.displayedAdjustments.brushMasks, [mask])
+        editor.setComparisonSnapshot(nil)
+        editor.restoreSnapshot(id: snapshot.id)
+        XCTAssertEqual(editor.adjustments.brushMasks, [mask])
+    }
+
     func testABComparisonDoesNotMutateActiveAdjustmentsOrSidecar() {
         let (editor, _) = makeOpenEditor()
         editor.setAdjustment(.exposure, to: 2.0)
