@@ -1,5 +1,18 @@
 # Current Coordination State
 
+## Brush performance and acceptance repair（2026-10-06, Codex）
+
+- **狀態**：`DONE_WITH_CONCERNS`。branch `codex/brush-performance-acceptance-repair` 以 candidate `1de07dcfeb2ed217a75d1c04978da6a5936f379a` 為基準；實作 commit `26c3390` 已完成 bounded tiled coverage、取消檢查、async preview／export、context reuse 與 deterministic acceptance harness。尚未 push、merge 或 rebase。
+- **自動驗證**：完整 `swift test` 2,696 executed、18 skipped、0 failures；strict-concurrency build exit 0；scalar oracle 最大 R8 byte 差 0；cancellation、sync／async composition、context identity/isolation focused tests 全部通過；`git diff --check` PASS。
+- **Release synthetic O**：1600×1067、16 samples、0／1／10 masks 的 coverage p50 為 0.002／11.058／19.964 ms，p95 為 0.004／11.202／21.321 ms；端到端 p50 為 2.274／13.635／25.561 ms，p95 為 2.431／13.815／26.417 ms。absolute coverage 與 preview incremental 目標通過；150 ms 目標仍另列。
+- **未完成**：candidate B/O ABBA delta、原尺寸 export／peak RSS、50 次取消／切圖、Mac／實體 iPad／輸入矩陣、灰卡 ΔE00、獨立 reviewer 均為 `NOT RUN`；因此不能宣稱整合 READY。rendererVersion 1 的 density／pressure 可見語意 concern 維持原狀。
+- **證據**：實作與限制見 `docs/testing/reports/2026-10-06-brush-performance-and-acceptance-repair.md`；正式 spec 見 `docs/superpowers/specs/2026-10-06-brush-performance-and-acceptance-repair-spec.md`；交接見 `docs/coordination/2026-10-06-brush-performance-acceptance-repair-handoff.md`。
+- **下一步**：在同一參考機器完成 candidate B 與 branch O 的 ABBA Release workload，再補原尺寸 export／RSS；此動作前維持 `DONE_WITH_CONCERNS`，不得以 synthetic O 結果取代產品驗收。
+
+Updated: 2026-10-06
+
+Updated by: Codex（brush performance and acceptance repair）
+
 ## Mainline white-balance and brush integration（2026-10-06, Codex）
 
 - **狀態**：`DONE_WITH_CONCERNS`。白平衡輸入／滴管、Sidecar v5、獨立 adjustment brush 模型、座標映射、預覽／匯出、Editor session、批次／剪貼簿／快照保存及 Mac／iPad 共用 UI 已整合至 `codex/mainline-wb-brush-integration`。
