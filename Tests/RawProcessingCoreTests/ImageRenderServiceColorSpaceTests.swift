@@ -2,6 +2,31 @@ import XCTest
 @testable import RawProcessingCore
 
 final class ImageRenderServiceColorSpaceTests: XCTestCase {
+    func testConfiguredReusesServiceForIdenticalRecipeColorSpace() {
+        let recipe = RawRenderRecipeResolver().resolve(
+            RawRenderRecipeInput(policy: .native),
+            capabilities: RawDecoderCapabilities()
+        )
+        let service = ImageRenderService(preferMetal: false, recipe: recipe)
+
+        XCTAssertTrue(service.configured(for: recipe) === service)
+    }
+
+    func testConfiguredCreatesIsolatedServiceWhenOutputTransformChanges() {
+        let resolver = RawRenderRecipeResolver()
+        let recipe = resolver.resolve(
+            RawRenderRecipeInput(policy: .native),
+            capabilities: RawDecoderCapabilities()
+        )
+        let alternate = recipe.replacingOutputTransform(RawOutputTransformID.referenceTIFFSRGB16V1.rawValue)
+        let service = ImageRenderService(preferMetal: false, recipe: recipe)
+        let configured = service.configured(for: alternate)
+
+        XCTAssertFalse(configured === service)
+        XCTAssertEqual(configured.outputTransformID, alternate.outputTransformID)
+        XCTAssertEqual(configured.workingColorSpaceID, alternate.workingColorSpaceID)
+    }
+
     func testServiceUsesTheRecipeWorkingSpaceRatherThanInferringFromTheCallSite() {
         let resolver = RawRenderRecipeResolver()
         let nativeRecipe = resolver.resolve(

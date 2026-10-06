@@ -91,7 +91,11 @@ public final class ImageRenderService: @unchecked Sendable {
     /// used by tests and callers while ensuring preview/export do not infer a
     /// different transform from their call site.
     public func configured(for recipe: ResolvedRawRenderRecipe) -> ImageRenderService {
-        ImageRenderService(preferMetal: preferMetal, recipe: recipe)
+        if recipe.workingColorSpaceID == workingColorSpaceID,
+           recipe.outputTransformID == outputTransformID {
+            return self
+        }
+        return ImageRenderService(preferMetal: preferMetal, recipe: recipe)
     }
 
     public func makeCGImage(_ image: CIImage) throws -> CGImage {

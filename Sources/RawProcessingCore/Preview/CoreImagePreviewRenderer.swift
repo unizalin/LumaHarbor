@@ -68,7 +68,7 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                 sourceExtent: decoded.image.extent,
                 geometry: request.adjustments.geometry
             )
-            let withBrushMasks = try BrushMaskRenderer.applyValidated(
+            let withBrushMasks = try await BrushMaskRenderer.applyValidatedAsync(
                 request.adjustments.brushMasks,
                 to: adjusted,
                 mapping: brushMapping,
