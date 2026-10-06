@@ -462,7 +462,6 @@ public final class EditorSession: ObservableObject {
         startObservingPreviews(scheduler: dependencies.previewScheduler)
     }
 
-    #if DEBUG
     /// Test support for editor-only interaction tests that do not run a real
     /// preview renderer. Production paths always obtain this value from the
     /// rendered frame, so a missing baseline remains fail-closed.
@@ -496,7 +495,6 @@ public final class EditorSession: ObservableObject {
         requiresFreshEyedropperGesture = false
         return context
     }
-    #endif
 
     // MARK: - Opening
 
@@ -1600,12 +1598,10 @@ public final class EditorSession: ObservableObject {
         canRedo = history.canRedo
     }
 
-    #if DEBUG
     /// Exact history depths used by editor-core regression tests.  The
     /// production surface continues to expose only the boolean affordances.
     internal var undoCountForTesting: Int { history.undoCount }
     internal var redoCountForTesting: Int { history.redoCount }
-    #endif
 
     // MARK: - Preview
 

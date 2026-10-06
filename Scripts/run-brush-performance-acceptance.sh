@@ -15,12 +15,9 @@ fi
 mkdir -p "${SCRATCH_PATH}"
 cd "${REPO_ROOT}"
 
-# The product is still optimized as Release. `-DDEBUG` only exposes the
-# existing EditorCore test helpers that are DEBUG-gated while SwiftPM builds
-# every test target for `swift test -c release`.
 LUMAHARBOR_RUN_BRUSH_PERF_ACCEPTANCE=1 \
 LUMAHARBOR_BRUSH_PERF_SAMPLES="${SAMPLES}" \
 LUMAHARBOR_BRUSH_PERF_PREFER_METAL="${LUMAHARBOR_BRUSH_PERF_PREFER_METAL:-1}" \
-swift test -c release -Xswiftc -DDEBUG \
+swift test -c release \
     --scratch-path "${SCRATCH_PATH}" \
     --filter 'BrushMaskPerformanceTests.testOptInWorkloadPrintsMachineReadableSamples'
