@@ -1,18 +1,18 @@
 # Current Coordination State
 
-## Brush correctness follow-up spec（2026-10-06, Codex；目前有效）
+## Brush raster correctness follow-up（2026-10-06, Codex；目前有效）
 
-- **狀態**：本次文件 `SPEC ONLY`；產品維持 `DONE_WITH_CONCERNS`。跨垂直 tile 列位置有讀碼確認的缺陷，標準 Release integration 編譯 FAIL，不能以既有 Debug／synthetic 成功視為整合 READY。
-- **工作樹與 owner**：Codex 延續 `codex/brush-performance-acceptance-repair` 的單一 writer 文件工作。B=`1de07dcfeb2ed217a75d1c04978da6a5936f379a`；產品 U=`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`；核對 HEAD=`37d1580b4a1924fce58d688ff668ba6b536d3868`，U 至該 HEAD 僅文件差異。本機 main=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`，未連線查遠端。
-- **變更範圍**：開始時乾淨；本輪只新增追補 spec 並更新原 spec、report、handoff 與 CURRENT，共五份文件。產品、測試與 build settings 沒有變更；文件 commit 不改變上述產品 SHA。
-- **更正**：舊 oracle 是180×120的 blend bytes，未涵蓋垂直跨 tile或直接R8；callback第九次拋錯不代表真正父 Task 取消。Release synthetic 使用全域 `-DDEBUG`，屬診斷樣本。RAW 141～148 ms 是空筆刷 production preview，不能推論有效筆刷互動 gate。
-- **驗證邊界**：前次完整 Debug 2,696／18／0、focused 186／2／0、RAW 10／1／0、build／封裝成功仍是歷史證據；本次未重跑產品測試。正式 B/O、export／RSS、取消生命週期、人工操作／灰卡與獨立審查仍未完成。
-- **文件**：[追補規格](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)、[更正報告](../testing/reports/2026-10-06-brush-performance-and-acceptance-repair.md)、[目前交接](2026-10-06-brush-performance-acceptance-repair-handoff.md)。下方2026-10-06舊區塊保留為歷史；相衝突的結論與下一步由本節取代。
-- **唯一下一步**：依追補 F1，先在 height=240／257 的非對稱跨垂直 tile 測試確認像素 assertion failure，再修正全圖 row mapping。其後依序標準 Release→真實取消→正式 B/O／RSS→最終驗收；本輪沒有執行這些產品修正。
+- **狀態**：`DONE_WITH_CONCERNS`。F1 全圖 row mapping、F2 標準 Release testability、F3 真正父 Task 取消與 F4 warm synthetic B/O ABBA 均已完成；真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer 仍未完成，因此不是整合 READY。
+- **工作樹與 SHA**：branch `codex/brush-performance-acceptance-repair`；B=`1de07dcfeb2ed217a75d1c04978da6a5936f379a`；原 U=`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`；最終已驗產品／證據 SHA=`4e74bf3`。未 push、merge、rebase 或 deploy。
+- **實作**：`29718d2` 修正跨垂直 tile row mapping；`bc89693` 移除全域 `-DDEBUG` workaround；`1ded16a` 加入 per-invocation cancellation observer 與 preview/export lifecycle tests；`c425cb7` 加入 B/O ABBA／schema／取消與 RSS 診斷；`4e74bf3` 使 analyzer 對缺欄位與不一致 metadata fail closed。
+- **最終驗證**：完整 Debug 與標準 Release 各 2,708 executed／21 skipped／0 failures；strict-concurrency、Mac Release app、generic iOS Simulator/device、codesign、privacy、未發布 ZIP/checksum 全部 PASS。正式 warm synthetic ABBA 96 records，兩輪 0/1/10 masks preview 與 preview RSS gates PASS。
+- **限制**：最終 SHA 的 RawFixtureTests 因私有 fixture 環境未提供而 NOT RUN。真實 RAW INTERACTIVE-150、原尺寸 export/RSS、cold/changed/appended/stress 正式 ABBA、B/O coverage stage、完整 scheduler 50-cycle、GUI heartbeat、人工 Mac／實體 iPad／灰卡與獨立 reviewer仍為 NOT RUN 或 partial。
+- **文件**：[追補規格](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)、[最終驗收報告](../testing/reports/2026-10-06-brush-raster-correctness-followup.md)、[目前交接](2026-10-06-brush-raster-correctness-followup-handoff.md)。下方舊區塊保留為歷史；相衝突的狀態與下一步由本節取代。
+- **唯一下一步**：提供私有 RAW fixture 環境後，在同一參考機器跑 B/O 真實 RAW 0/1/10 masks preview，以及一／十 mask 原尺寸 export 與 peak RSS；再補 cold、changed、appended、stress 正式矩陣。
 
 Updated: 2026-10-06
 
-Updated by: Codex（brush correctness follow-up spec）
+Updated by: Codex（brush raster correctness follow-up implementation）
 
 ## Brush performance and acceptance repair（2026-10-06, Codex）
 
