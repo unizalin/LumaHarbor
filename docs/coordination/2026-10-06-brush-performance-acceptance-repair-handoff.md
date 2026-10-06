@@ -1,5 +1,18 @@
 # Brush performance and acceptance repair handoff
 
+## 2026-10-06 追補交接（目前有效）
+
+- **狀態與 owner**：Codex 延續 `codex/brush-performance-acceptance-repair`，本次只寫文件，產品仍為 `DONE_WITH_CONCERNS`。開始時工作樹乾淨；未修改其他來源工作樹或 push／merge／rebase。
+- **基準**：B=`1de07dcfeb2ed217a75d1c04978da6a5936f379a`；產品 U=`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`；撰寫前 HEAD=`37d1580b4a1924fce58d688ff668ba6b536d3868`，U 至 HEAD 僅文件差異。後續文件 commit 不改變產品 SHA。
+- **本次變更**：新增[追補 spec](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)，更新原 spec、report、本 handoff 與 CURRENT。這五份文件構成本輪全部變更；以文件提交後的 `git status --short` 核對 dirty state。
+- **修正證據解讀**：跨垂直 tile 的全圖 row mapping 有讀碼確認的缺陷，RED 像素測試尚未執行；oracle 只有水平跨 tile／blend bytes，並未直接證明 R8 相同；取消測試只是注入錯誤。原始 Release integration 編譯 FAIL，`-DDEBUG` 結果不能覆蓋它。RAW 141～148 ms 是空筆刷 production preview，不能代表一／十 mask。
+- **驗證邊界**：前次 full Debug 2,696／18／0、focused 186／2／0、RAW 10／1／0 與 build／封裝結果保留為歷史證據；本次只核對文件、連結與 diff，沒有重跑產品 gate。正式 B/O、export／RSS、真實取消、操作／灰卡與獨立 review 仍未完成。
+- **唯一下一步**：依追補 F1，在 height=240／257 的非對稱 coverage 測試先重現 U 的像素失敗，再修正全圖列位置；之後依序處理 Release、真實取消與效能。不要直接從正式 B/O 開始。
+
+以下為首次交付快照；其中 row flip／R8／取消與下一步的結論由以上更正取代，歷史樣本保留。
+
+## 首次交付快照
+
 日期：2026-10-06
 作者：Codex
 分支：`codex/brush-performance-acceptance-repair`

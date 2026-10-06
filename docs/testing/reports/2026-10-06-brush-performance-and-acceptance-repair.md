@@ -1,5 +1,19 @@
 # Brush performance and acceptance repair report
 
+## 2026-10-06 追補更正（優先於下方歷史結論）
+
+目前產品仍為 `DONE_WITH_CONCERNS`。本次只新增[後續修正规格](../../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)，沒有修改產品或重跑產品測試；先前檢測的結果與本次讀碼核對範圍見該規格 §2。
+
+- **列位置缺陷**：`BrushMaskRenderer.renderCoverage` 只翻轉 tile 內列，未翻轉 tile 的全圖位置；height=240 的索引反例已核對，新增失敗像素測試仍為 `NOT RUN`。下方「保留 row flip」不可視為已證明。
+- **Oracle 範圍**：180×120 案例只跨水平 tile，量的是 blend 後 CGImage bytes；下方「R8 差 0」不是直接 R8 比較證據。sync／async 相等也不能排除兩者共用的錯誤。
+- **取消範圍**：既有測試在 callback 計數到9時自行拋錯，未呼叫父 Task.cancel，且 async 為單 mask；真實 raster 中段取消、平行 worker 結束與無晚到發布仍需驗證。
+- **Release 範圍**：前次原始 Release integration 命令因 DEBUG-only helper 缺失而編譯 FAIL（exit 1、0 tests）。加 `-Xswiftc -DDEBUG` 後才通過；下方 Release synthetic 數字須解讀為該組態的診斷樣本，不是標準 Release 或正式 B/O gate PASS。
+- **RAW 範圍**：前次 141～148 ms 為空筆刷的 production preview，包含 decode、adjust 與 CGImage 產生；並非單獨 decode，也不能代表一／十 mask 的互動效能。
+
+後續依 F1 像素→F2 Release→F3 真實取消→F4 B/O 與 RSS→F5 驗收交接執行。以下保留首次交付的命令、樣本與文字作歷史紀錄；與本區塊衝突時以更正為準。
+
+## 首次交付紀錄
+
 日期：2026-10-06
 狀態：`DONE_WITH_CONCERNS`
 分支：`codex/brush-performance-acceptance-repair`

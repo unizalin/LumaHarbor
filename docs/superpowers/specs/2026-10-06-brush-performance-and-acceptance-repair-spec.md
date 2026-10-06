@@ -3,7 +3,7 @@
 - 日期：2026-10-06（Asia/Taipei）
 - 任務識別：`LH-BRUSH-PERF-ACCEPTANCE-20261006`
 - 版本：v1.0
-- 狀態：`SPEC ONLY`；本輪只建立文件，未修改產品或重跑產品驗收。
+- 狀態：已有候選實作 `26c3390ba59e0e2ae416618d6e832a5c0eeba98d`，產品維持 `DONE_WITH_CONCERNS`；後續修正依[跨 tile 正確性與驗收追補規格](2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)。最初撰寫時為 SPEC ONLY，以下保留原始要求與門檻。
 - 目的：讓已整合的新調整筆刷降低運算與記憶體成本，能在繪製中途確實取消，並補齊操作、色彩與獨立審查證據。
 - 本文件提出的新數值門檻是後續實作的驗收要求，不是已達成結果。
 
@@ -246,4 +246,4 @@ git diff --check
 
 保留修正前 baseline 與測試資料。出現像素、持久化、色彩或取消回歸時，停止發布該候選，依可審查提交回退本輪 renderer/context 改動；不得 destructive reset、刪 dirty files、降 sidecar v5、刪 brushMasks 或取消已合法保存的使用者編輯。回退後重跑對應 gate。
 
-唯一下一步：在確認後續實作授權與 TARGET 基準後，先完成 P0 的可提交量測 harness、scalar oracle 與 Release baseline，再開始優化。
+目前唯一下一步：依[追補規格](2026-10-06-brush-raster-correctness-and-verification-followup-spec.md) F1，先建立 height=240／257 的非對稱跨垂直 tile 失敗像素測試，再修正全圖 row mapping。原先優先 P0／B/O 的順序由追補規格取代；像素、標準 Release 與真實取消驗證通過後，才進入正式效能量測。
