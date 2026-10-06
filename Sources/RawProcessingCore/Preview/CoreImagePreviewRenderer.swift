@@ -11,6 +11,7 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
     private let decoder: any RawDecoding
     private let pipeline: AdjustmentPipeline
     private let renderService: ImageRenderService
+    private let brushRenderObserverFactory: @Sendable () -> BrushMaskRenderObserver?
 
     public init(
         decoder: any RawDecoding = CoreImageRawDecoder(),
@@ -20,6 +21,19 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         self.decoder = decoder
         self.pipeline = pipeline
         self.renderService = renderService
+        self.brushRenderObserverFactory = { nil }
+    }
+
+    internal init(
+        decoder: any RawDecoding,
+        pipeline: AdjustmentPipeline = AdjustmentPipeline(),
+        renderService: ImageRenderService = ImageRenderService(),
+        brushRenderObserverFactory: @escaping @Sendable () -> BrushMaskRenderObserver?
+    ) {
+        self.decoder = decoder
+        self.pipeline = pipeline
+        self.renderService = renderService
+        self.brushRenderObserverFactory = brushRenderObserverFactory
     }
 
     public func render(_ request: PreviewRequest) async throws -> PreviewImage {
@@ -50,6 +64,7 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         let decoder = self.decoder
         let pipeline = self.pipeline
         let renderService = self.renderService.configured(for: recipe)
+        let brushRenderObserver = brushRenderObserverFactory()
 
         return try await runOffActor(
             priority: request.quality == .interactive ? .userInitiated : .utility
@@ -68,12 +83,13 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
                 sourceExtent: decoded.image.extent,
                 geometry: request.adjustments.geometry
             )
-            let withBrushMasks = try await BrushMaskRenderer.applyValidatedAsync(
+            let withBrushMasks = try await BrushMaskRenderer._applyValidatedAsync(
                 request.adjustments.brushMasks,
                 to: adjusted,
                 mapping: brushMapping,
                 recipe: decoded.rawRenderRecipe ?? recipe,
-                scaleFactor: decoded.scaleFactor
+                scaleFactor: decoded.scaleFactor,
+                observer: brushRenderObserver
             )
             let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: withBrushMasks)
             let withLocalAdjustments = LocalAdjustmentRenderer.apply(request.adjustments.localAdjustments, to: withGeometry)

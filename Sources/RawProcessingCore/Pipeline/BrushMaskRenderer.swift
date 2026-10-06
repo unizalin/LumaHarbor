@@ -3,6 +3,55 @@ import CoreImage.CIFilterBuiltins
 import CoreGraphics
 import Foundation
 
+internal struct BrushMaskRenderEvent: Sendable {
+    internal enum Kind: Sendable {
+        case workerStarted
+        case progress
+        case workerFinished
+    }
+
+    internal enum Stage: Sendable {
+        case validation
+        case sampling
+        case rasterization
+        case conversion
+    }
+
+    let requestID: UUID
+    let maskIndex: Int
+    let kind: Kind
+    let stage: Stage?
+    let completedIterations: Int
+}
+
+internal struct BrushMaskRenderObserver: Sendable {
+    let requestID: UUID
+    private let handler: @Sendable (BrushMaskRenderEvent) -> Void
+
+    init(
+        requestID: UUID = UUID(),
+        handler: @escaping @Sendable (BrushMaskRenderEvent) -> Void
+    ) {
+        self.requestID = requestID
+        self.handler = handler
+    }
+
+    func emit(
+        maskIndex: Int,
+        kind: BrushMaskRenderEvent.Kind,
+        stage: BrushMaskRenderEvent.Stage? = nil,
+        completedIterations: Int = 0
+    ) {
+        handler(BrushMaskRenderEvent(
+            requestID: requestID,
+            maskIndex: maskIndex,
+            kind: kind,
+            stage: stage,
+            completedIterations: completedIterations
+        ))
+    }
+}
+
 /// Renders the independent source-coordinate brush-mask pipeline. Masks are
 /// composited in array order and each mask's local adjustment is evaluated once
 /// against the image produced by the preceding mask.
@@ -30,6 +79,26 @@ public enum BrushMaskRenderer {
         scaleFactor: Double = 1,
         cancellationCheck: @escaping CancellationCheck = { try Task.checkCancellation() }
     ) throws -> CIImage {
+        try _applyValidated(
+            masks,
+            to: image,
+            mapping: mapping,
+            recipe: recipe,
+            scaleFactor: scaleFactor,
+            observer: nil,
+            cancellationCheck: cancellationCheck
+        )
+    }
+
+    internal static func _applyValidated(
+        _ masks: [BrushMask],
+        to image: CIImage,
+        mapping: BrushCoordinateMapping? = nil,
+        recipe: ResolvedRawRenderRecipe? = nil,
+        scaleFactor: Double = 1,
+        observer: BrushMaskRenderObserver?,
+        cancellationCheck: @escaping CancellationCheck = { try Task.checkCancellation() }
+    ) throws -> CIImage {
         guard !masks.isEmpty, image.extent.width > 0, image.extent.height > 0 else { return image }
         try cancellationCheck()
         var working = image
@@ -39,17 +108,13 @@ public enum BrushMaskRenderer {
         } else {
             coordinateMapping = try BrushCoordinateMapping(sourceExtent: image.extent, geometry: .neutral)
         }
-        for mask in masks {
-            try cancellationCheck()
-            _ = try mask.validated()
-            for stroke in mask.strokes where !stroke.points.isEmpty {
-                for point in stroke.points {
-                    try cancellationCheck()
-                    _ = try coordinateMapping.sourceToDisplay(point)
-                }
-            }
-        }
-        for mask in masks where mask.isEnabled {
+        try validate(
+            masks,
+            mapping: coordinateMapping,
+            observer: observer,
+            cancellationCheck: cancellationCheck
+        )
+        for (maskIndex, mask) in masks.enumerated() where mask.isEnabled {
             try cancellationCheck()
             guard mask.rendererVersion == BrushMask.currentRendererVersion,
                   !mask.adjustments.isNeutral else { continue }
@@ -57,7 +122,9 @@ public enum BrushMaskRenderer {
                 mask,
                 imageExtent: image.extent,
                 mapping: coordinateMapping,
-                cancellationCheck: cancellationCheck
+                cancellationCheck: cancellationCheck,
+                maskIndex: maskIndex,
+                observer: observer
             )
             try cancellationCheck()
             let parameters = parameters(for: mask.adjustments)
@@ -88,6 +155,26 @@ public enum BrushMaskRenderer {
         scaleFactor: Double = 1,
         cancellationCheck: @escaping CancellationCheck = { try Task.checkCancellation() }
     ) async throws -> CIImage {
+        try await _applyValidatedAsync(
+            masks,
+            to: image,
+            mapping: mapping,
+            recipe: recipe,
+            scaleFactor: scaleFactor,
+            observer: nil,
+            cancellationCheck: cancellationCheck
+        )
+    }
+
+    internal static func _applyValidatedAsync(
+        _ masks: [BrushMask],
+        to image: CIImage,
+        mapping: BrushCoordinateMapping? = nil,
+        recipe: ResolvedRawRenderRecipe? = nil,
+        scaleFactor: Double = 1,
+        observer: BrushMaskRenderObserver?,
+        cancellationCheck: @escaping CancellationCheck = { try Task.checkCancellation() }
+    ) async throws -> CIImage {
         guard !masks.isEmpty, image.extent.width > 0, image.extent.height > 0 else { return image }
         try cancellationCheck()
         let coordinateMapping: BrushCoordinateMapping
@@ -97,16 +184,12 @@ public enum BrushMaskRenderer {
             coordinateMapping = try BrushCoordinateMapping(sourceExtent: image.extent, geometry: .neutral)
         }
 
-        for mask in masks {
-            try cancellationCheck()
-            _ = try mask.validated()
-            for stroke in mask.strokes where !stroke.points.isEmpty {
-                for point in stroke.points {
-                    try cancellationCheck()
-                    _ = try coordinateMapping.sourceToDisplay(point)
-                }
-            }
-        }
+        try validate(
+            masks,
+            mapping: coordinateMapping,
+            observer: observer,
+            cancellationCheck: cancellationCheck
+        )
 
         let activeMasks = masks.enumerated().filter { _, mask in
             mask.isEnabled
@@ -125,7 +208,9 @@ public enum BrushMaskRenderer {
                 mask,
                 imageExtent: image.extent,
                 mapping: coordinateMapping,
-                cancellationCheck: cancellationCheck
+                cancellationCheck: cancellationCheck,
+                maskIndex: index,
+                observer: observer
             )
         } else {
             try await withThrowingTaskGroup(of: CoverageResult.self) { group in
@@ -136,7 +221,9 @@ public enum BrushMaskRenderer {
                             mask,
                             imageExtent: image.extent,
                             mapping: coordinateMapping,
-                            cancellationCheck: cancellationCheck
+                            cancellationCheck: cancellationCheck,
+                            maskIndex: index,
+                            observer: observer
                         )
                         try cancellationCheck()
                         return CoverageResult(index: index, image: coverage)
@@ -228,6 +315,49 @@ public enum BrushMaskRenderer {
         return bitmap
     }
 
+    private static func validate(
+        _ masks: [BrushMask],
+        mapping: BrushCoordinateMapping,
+        observer: BrushMaskRenderObserver?,
+        cancellationCheck: @escaping CancellationCheck
+    ) throws {
+        for (maskIndex, mask) in masks.enumerated() {
+            try cancellationCheck()
+            guard mask.rendererVersion == BrushMask.currentRendererVersion else {
+                throw BrushMaskValidationError.unsupportedRendererVersion(mask.rendererVersion)
+            }
+            _ = try mask.adjustments.validated()
+            var validatedPointCount = 0
+            for stroke in mask.strokes {
+                for (name, value, range) in [
+                    ("size", stroke.size, 0.000_001...1.0),
+                    ("feather", stroke.feather, 0.0...1.0),
+                    ("flow", stroke.flow, 0.0...1.0),
+                    ("density", stroke.density, 0.0...1.0)
+                ] {
+                    guard value.isFinite, range.contains(value) else {
+                        throw BrushMaskValidationError.invalidStrokeParameter(name, value)
+                    }
+                }
+                for point in stroke.points {
+                    _ = try point.validated()
+                    _ = try mapping.sourceToDisplay(point)
+                    validatedPointCount += 1
+                    if validatedPointCount.isMultiple(of: 4_096) {
+                        observer?.emit(
+                            maskIndex: maskIndex,
+                            kind: .progress,
+                            stage: .validation,
+                            completedIterations: validatedPointCount
+                        )
+                        try cancellationCheck()
+                    }
+                }
+            }
+            try cancellationCheck()
+        }
+    }
+
     private static func parameters(for patch: BrushMaskPatch) -> PhotoAdjustments {
         var adjustments = PhotoAdjustments.neutral
         if let value = patch.exposure { adjustments.exposure = value }
@@ -247,8 +377,12 @@ public enum BrushMaskRenderer {
         imageExtent: CGRect,
         mapping: BrushCoordinateMapping,
         cancellationCheck: @escaping CancellationCheck,
-        bitmapObserver: ((Data) -> Void)? = nil
+        bitmapObserver: ((Data) -> Void)? = nil,
+        maskIndex: Int = 0,
+        observer: BrushMaskRenderObserver? = nil
     ) throws -> CIImage {
+        observer?.emit(maskIndex: maskIndex, kind: .workerStarted)
+        defer { observer?.emit(maskIndex: maskIndex, kind: .workerFinished) }
         guard imageExtent.width.isFinite, imageExtent.height.isFinite,
               imageExtent.width > 0, imageExtent.height > 0,
               imageExtent.width < CGFloat(Int.max), imageExtent.height < CGFloat(Int.max)
@@ -292,13 +426,15 @@ public enum BrushMaskRenderer {
         let shortSide = min(imageExtent.width, imageExtent.height)
         for stroke in mask.strokes {
             try cancellationCheck()
-            let points = try stroke.validated().points
+            let points = stroke.points
             guard !points.isEmpty, stroke.flow > 0 else { continue }
             let samples = try sample(
                 points: points,
                 stroke: stroke,
                 mapping: mapping,
-                cancellationCheck: cancellationCheck
+                cancellationCheck: cancellationCheck,
+                maskIndex: maskIndex,
+                observer: observer
             )
             for (sampleIndex, point) in samples.enumerated() {
                 if sampleIndex.isMultiple(of: 4096) { try cancellationCheck() }
@@ -383,6 +519,12 @@ public enum BrushMaskRenderer {
                         for x in startX...endX {
                             pixelIterations += 1
                             if pixelIterations == 4096 {
+                                observer?.emit(
+                                    maskIndex: maskIndex,
+                                    kind: .progress,
+                                    stage: .rasterization,
+                                    completedIterations: 4_096
+                                )
                                 try cancellationCheck()
                                 pixelIterations = 0
                             }
@@ -415,7 +557,15 @@ public enum BrushMaskRenderer {
                     let bitmapRow = height - 1 - globalY
                     for column in 0..<tileWidth {
                         conversionIterations += 1
-                        if conversionIterations.isMultiple(of: 4096) { try cancellationCheck() }
+                        if conversionIterations.isMultiple(of: 4096) {
+                            observer?.emit(
+                                maskIndex: maskIndex,
+                                kind: .progress,
+                                stage: .conversion,
+                                completedIterations: conversionIterations
+                            )
+                            try cancellationCheck()
+                        }
                         let value = min(max(alpha[localRow * tileWidth + column], 0), 1)
                         bytes[bitmapRow * width + tileStartX + column] = UInt8((value * 255).rounded())
                     }
@@ -437,7 +587,9 @@ public enum BrushMaskRenderer {
         points: [BrushMaskPoint],
         stroke: BrushMaskStroke,
         mapping: BrushCoordinateMapping,
-        cancellationCheck: @escaping CancellationCheck
+        cancellationCheck: @escaping CancellationCheck,
+        maskIndex: Int,
+        observer: BrushMaskRenderObserver?
     ) throws -> [CGPoint] {
         try cancellationCheck()
         guard let first = points.first else { return [] }
@@ -447,7 +599,15 @@ public enum BrushMaskRenderer {
         var remaining = 0.0
         var previous = firstPoint
         for (pointIndex, point) in points.dropFirst().enumerated() {
-            if pointIndex.isMultiple(of: 4096) { try cancellationCheck() }
+            if pointIndex > 0, pointIndex.isMultiple(of: 4096) {
+                observer?.emit(
+                    maskIndex: maskIndex,
+                    kind: .progress,
+                    stage: .sampling,
+                    completedIterations: pointIndex
+                )
+                try cancellationCheck()
+            }
             let current = try mapping.sourceToSourcePixel(point)
             let dx = Double(current.x - previous.x), dy = Double(current.y - previous.y)
             let segment = (dx * dx + dy * dy).squareRoot() / Double(min(mapping.displayExtent.width, mapping.displayExtent.height))
@@ -458,7 +618,15 @@ public enum BrushMaskRenderer {
                 output.append(CGPoint(x: previous.x + CGFloat(t) * (current.x - previous.x),
                                       y: previous.y + CGFloat(t) * (current.y - previous.y)))
                 travelled += spacing
-                if output.count.isMultiple(of: 4096) { try cancellationCheck() }
+                if output.count.isMultiple(of: 4096) {
+                    observer?.emit(
+                        maskIndex: maskIndex,
+                        kind: .progress,
+                        stage: .sampling,
+                        completedIterations: output.count
+                    )
+                    try cancellationCheck()
+                }
             }
             remaining = travelled - segment
             previous = current
