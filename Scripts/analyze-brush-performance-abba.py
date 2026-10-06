@@ -11,9 +11,10 @@ from pathlib import Path
 REQUIRED_FIELDS = {
     "schemaVersion", "productSHA", "harnessSHA", "instrumentationDigest",
     "configuration", "defines", "scenario", "variant", "round", "order",
-    "sampleOrdinal", "seed", "nativeSize", "decodedSize", "outputSize",
+    "sampleOrdinal", "seed", "maskCount", "nativeSize", "decodedSize", "outputSize",
     "recipeIDs", "stageDurationsSeconds", "totalDurationSeconds", "pixelError",
     "workerCounts", "cancelOutcome", "rssBytes", "thermalState", "result",
+    "unavailableReasons",
 }
 
 
@@ -51,13 +52,37 @@ def main():
         missing = sorted(REQUIRED_FIELDS - record.keys())
         if missing:
             errors.append(f"line {line_number}: missing {','.join(missing)}")
+            continue
+        unexpected = sorted(record.keys() - REQUIRED_FIELDS)
+        if unexpected:
+            errors.append(f"line {line_number}: unexpected {','.join(unexpected)}")
         if record.get("schemaVersion") != 2:
             errors.append(f"line {line_number}: schemaVersion must be 2")
         if record.get("configuration") != "release" or record.get("defines") != []:
             errors.append(f"line {line_number}: expected standard Release with no defines")
+        if record.get("variant") not in {"B", "O"}:
+            errors.append(f"line {line_number}: variant must be B or O")
+        if record.get("round") not in {1, 2}:
+            errors.append(f"line {line_number}: round must be 1 or 2")
+        if record.get("maskCount") not in {0, 1, 10}:
+            errors.append(f"line {line_number}: maskCount must be 0, 1, or 10")
         if record.get("result") != "MEASURED":
             errors.append(f"line {line_number}: non-measured result must be investigated")
         records.append(record)
+
+    orders = [record["order"] for record in records]
+    if sorted(orders) != list(range(len(records))):
+        errors.append("order values must be unique and contiguous from zero")
+    if len({record["harnessSHA"] for record in records}) > 1:
+        errors.append("all samples must use one harnessSHA")
+    if len({record["instrumentationDigest"] for record in records}) > 1:
+        errors.append("all samples must use one instrumentationDigest")
+    for variant in ("B", "O"):
+        product_shas = {
+            record["productSHA"] for record in records if record["variant"] == variant
+        }
+        if len(product_shas) != 1:
+            errors.append(f"variant {variant} must use exactly one productSHA")
 
     grouped = defaultdict(list)
     for record in records:
