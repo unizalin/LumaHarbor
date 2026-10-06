@@ -68,8 +68,9 @@ final class BrushMaskPerformanceTests: XCTestCase {
             }
 
             let record: [String: Any] = [
-                "schemaVersion": 1,
+                "schemaVersion": 3,
                 "scenario": "synthetic-1600px",
+                "variant": "O",
                 "maskCount": maskCount,
                 "width": width,
                 "height": height,
@@ -78,6 +79,17 @@ final class BrushMaskPerformanceTests: XCTestCase {
                 "sampleCount": samples.count,
                 "coverageDurationsSeconds": coverageSamples,
                 "durationsSeconds": samples,
+                "stageDurationsSeconds": [
+                    "validationSampling": NSNull(),
+                    "coverageRaster": NSNull(),
+                    "coverageIncludingSampling": coverageSamples,
+                    "blendMaterialization": NSNull(),
+                    "totalMaterialized": samples
+                ],
+                "stageIsolation": [
+                    "result": "NOT RUN",
+                    "reason": "the shared production entry point does not expose non-overlapping validation, sampling, raster, and materialization wall-time boundaries"
+                ],
                 "preferMetal": preferMetal,
                 "seed": "LH-BRUSH-PERF-ACCEPTANCE-20261006"
             ]
@@ -99,6 +111,10 @@ final class BrushMaskPerformanceTests: XCTestCase {
         let clock = ContinuousClock()
         var previewSamples: [Double] = []
         var exportSamples: [Double] = []
+        var previewStarted = 0
+        var previewFinished = 0
+        var exportStarted = 0
+        var exportFinished = 0
 
         for sampleOrdinal in 0..<sampleCount {
             let probe = CancellationLatencyProbe(stage: .rasterization)
@@ -106,6 +122,7 @@ final class BrushMaskPerformanceTests: XCTestCase {
                 decoder: SyntheticRawDecoder(pixelSize: CGSize(width: width, height: height)),
                 brushRenderObserverFactory: { probe.observer }
             )
+            let scheduler = PreviewScheduler(renderer: renderer)
             let request = PreviewRequest(
                 subject: PreviewSubject(UUID()),
                 url: URL(fileURLWithPath: "/tmp/brush-perf-preview.raw"),
@@ -113,19 +130,23 @@ final class BrushMaskPerformanceTests: XCTestCase {
                 targetPixelDimension: width,
                 quality: .interactive
             )
-            let task = Task { try await renderer.render(request) }
+            _ = await scheduler.submit(request)
             await waitUntil("preview cancellation barrier \(sampleOrdinal)") { probe.reached }
             let start = clock.now
-            task.cancel()
+            await scheduler.cancelAll()
             probe.release()
-            do {
-                _ = try await task.value
-                XCTFail("cancelled preview returned a frame")
-            } catch {
-                XCTAssertTrue(error is CancellationError)
-            }
+            await scheduler.waitUntilQuiescent()
             previewSamples.append(seconds(start.duration(to: clock.now)))
             probe.assertBalanced()
+            let counts = probe.workerCounts
+            previewStarted += counts.started
+            previewFinished += counts.finished
+            let delivered = await scheduler.deliveredCount
+            let failed = await scheduler.failedCount
+            let discarded = await scheduler.discardedStaleCount
+            XCTAssertEqual(delivered, 0)
+            XCTAssertEqual(failed, 0)
+            XCTAssertEqual(discarded, 1)
         }
 
         let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
@@ -160,22 +181,30 @@ final class BrushMaskPerformanceTests: XCTestCase {
             }
             exportSamples.append(seconds(start.duration(to: clock.now)))
             probe.assertBalanced()
+            let counts = probe.workerCounts
+            exportStarted += counts.started
+            exportFinished += counts.finished
         }
 
         let previewP95 = nearestRankP95(previewSamples)
         let exportP95 = nearestRankP95(exportSamples)
         XCTAssertLessThanOrEqual(previewP95, 0.1)
         XCTAssertLessThanOrEqual(exportP95, 0.1)
-        for (scenario, samples) in [("preview-cancel", previewSamples), ("export-cancel-24mp", exportSamples)] {
+        for (scenario, samples, started, finished) in [
+            ("preview-cancel", previewSamples, previewStarted, previewFinished),
+            ("export-cancel-24mp", exportSamples, exportStarted, exportFinished)
+        ] {
             let record: [String: Any] = [
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "scenario": scenario,
                 "variant": "O",
                 "sampleCount": samples.count,
                 "durationsSeconds": samples,
                 "p95Seconds": nearestRankP95(samples),
-                "workerCounts": ["startedMinimum": 1, "activeAfterJoin": 0],
+                "workerCounts": ["started": started, "finished": finished, "activeAfterJoin": 0],
                 "cancelOutcome": "cancelled-and-joined",
+                "timingBoundary": "coverage barrier release through parent and worker join",
+                "nonPreemptibleSectionsExcluded": ["raw-decode", "cgimage-destination-encode"],
                 "result": nearestRankP95(samples) <= 0.1 ? "PASS" : "FAIL"
             ]
             let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
@@ -189,23 +218,61 @@ final class BrushMaskPerformanceTests: XCTestCase {
         }
 
         let mask = makeMasks(count: 1)[0]
+        let observerFactory = QueuedObserverFactory()
+        let renderer = CoreImagePreviewRenderer(
+            decoder: SyntheticRawDecoder(pixelSize: CGSize(width: width, height: height)),
+            brushRenderObserverFactory: { observerFactory.take() }
+        )
+        let scheduler = PreviewScheduler(renderer: renderer)
+        var eventIterator = scheduler.events.makeAsyncIterator()
         var totalStarted = 0
+        var totalFinished = 0
+        var histogramChecks = 0
         for cycle in 0..<5 {
-            totalStarted += try await runCancelledPreviewCycle(cycle, mask: mask)
+            let counts = try await runCancelledSchedulerCycle(
+                cycle,
+                mask: mask,
+                scheduler: scheduler,
+                observerFactory: observerFactory,
+                eventIterator: &eventIterator
+            )
+            totalStarted += counts.started
+            totalFinished += counts.finished
+            histogramChecks += 1
         }
         try await Task.sleep(for: .milliseconds(100))
         let warmPlateau = try currentResidentSizeBytes()
 
         for cycle in 5..<55 {
-            totalStarted += try await runCancelledPreviewCycle(cycle, mask: mask)
+            let counts = try await runCancelledSchedulerCycle(
+                cycle,
+                mask: mask,
+                scheduler: scheduler,
+                observerFactory: observerFactory,
+                eventIterator: &eventIterator
+            )
+            totalStarted += counts.started
+            totalFinished += counts.finished
+            histogramChecks += 1
         }
+        await scheduler.cancelAll()
+        await scheduler.waitUntilQuiescent()
         try await Task.sleep(for: .milliseconds(100))
         let settled = try currentResidentSizeBytes()
         let limit = warmPlateau + 32 * 1_024 * 1_024
+        let delivered = await scheduler.deliveredCount
+        let discarded = await scheduler.discardedStaleCount
+        let failed = await scheduler.failedCount
+        let inFlight = await scheduler.inFlightCount
         XCTAssertLessThanOrEqual(settled, limit)
+        XCTAssertEqual(totalFinished, totalStarted)
+        XCTAssertEqual(delivered, 55)
+        XCTAssertEqual(discarded, 55)
+        XCTAssertEqual(failed, 0)
+        XCTAssertEqual(inFlight, 0)
 
         let record: [String: Any] = [
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "scenario": "50-cancel-switch-preview",
             "variant": "O",
             "warmupCycles": 5,
@@ -213,9 +280,13 @@ final class BrushMaskPerformanceTests: XCTestCase {
             "warmPlateauRSSBytes": warmPlateau,
             "settledRSSBytes": settled,
             "rssLimitBytes": limit,
-            "workerCounts": ["started": totalStarted, "finished": totalStarted, "activeAfterJoin": 0],
+            "workerCounts": ["started": totalStarted, "finished": totalFinished, "activeAfterJoin": 0],
+            "schedulerCounts": ["deliveredB": delivered, "discardedA": discarded, "failed": failed],
+            "mappingChecks": 55,
+            "histogramChecks": histogramChecks,
             "cancelOutcome": "all-cancelled-and-joined",
-            "result": settled <= limit ? "PASS" : "FAIL"
+            "result": settled <= limit && totalFinished == totalStarted
+                && delivered == 55 && discarded == 55 && failed == 0 ? "PASS" : "FAIL"
         ]
         let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
         print(String(decoding: data, as: UTF8.self))
@@ -240,38 +311,79 @@ final class BrushMaskPerformanceTests: XCTestCase {
         return sorted[index]
     }
 
-    private func runCancelledPreviewCycle(_ cycle: Int, mask: BrushMask) async throws -> Int {
+    private func runCancelledSchedulerCycle(
+        _ cycle: Int,
+        mask: BrushMask,
+        scheduler: PreviewScheduler,
+        observerFactory: QueuedObserverFactory,
+        eventIterator: inout AsyncStream<PreviewEvent>.Iterator
+    ) async throws -> (started: Int, finished: Int) {
         let probe = CancellationLatencyProbe(stage: .rasterization)
-        let renderer = CoreImagePreviewRenderer(
-            decoder: SyntheticRawDecoder(pixelSize: CGSize(width: width, height: height)),
-            brushRenderObserverFactory: { probe.observer }
-        )
-        let subjectSuffix = cycle.isMultiple(of: 2) ? 1 : 2
-        let request = PreviewRequest(
-            subject: PreviewSubject(UUID(uuidString: String(
-                format: "00000000-0000-4000-c000-%012d",
-                subjectSuffix
-            ))!),
-            url: URL(fileURLWithPath: "/tmp/brush-perf-switch-\(subjectSuffix).raw"),
+        observerFactory.enqueue(probe.observer)
+        let abandonedSubject = PreviewSubject(UUID(uuidString: String(
+            format: "00000000-0000-4000-a000-%012d",
+            cycle + 1
+        ))!)
+        let currentSubject = PreviewSubject(UUID(uuidString: String(
+            format: "00000000-0000-4000-b000-%012d",
+            cycle + 1
+        ))!)
+        let abandonedToken = await scheduler.submit(PreviewRequest(
+            subject: abandonedSubject,
+            url: URL(fileURLWithPath: "/tmp/brush-perf-switch-a.raw"),
             adjustments: PhotoAdjustments(
                 exposure: cycle.isMultiple(of: 2) ? 0.05 : -0.05,
                 brushMasks: [mask]
             ),
             targetPixelDimension: width,
             quality: .interactive
-        )
-        let task = Task { try await renderer.render(request) }
+        ))
         await waitUntil("50-cycle cancellation barrier \(cycle)") { probe.reached }
-        task.cancel()
+        let geometry = GeometryAdjustments(rotationDegrees: 90)
+        let currentContext = UUID(uuidString: String(
+            format: "00000000-0000-4000-c000-%012d",
+            cycle + 1
+        ))!
+        let currentToken = await scheduler.submit(PreviewRequest(
+            subject: currentSubject,
+            url: URL(fileURLWithPath: "/tmp/brush-perf-switch-b.raw"),
+            adjustments: PhotoAdjustments(exposure: cycle.isMultiple(of: 2) ? -0.1 : 0.1, geometry: geometry),
+            targetPixelDimension: width,
+            quality: .interactive,
+            contextID: currentContext
+        ))
+        XCTAssertGreaterThan(currentToken.generation, abandonedToken.generation)
         probe.release()
-        do {
-            _ = try await task.value
-            XCTFail("cancelled switch cycle returned a frame")
-        } catch {
-            XCTAssertTrue(error is CancellationError)
+
+        await waitUntil("scheduler cycle \(cycle) to deliver B and discard A") {
+            let delivered = await scheduler.deliveredCount
+            let discarded = await scheduler.discardedStaleCount
+            return delivered >= cycle + 1 && discarded >= cycle + 1
         }
+        await scheduler.waitUntilQuiescent()
+
+        let event = await eventIterator.next()
+        guard case .produced(let result)? = event else {
+            XCTFail("cycle \(cycle) did not publish B's image")
+            return probe.workerCounts
+        }
+        XCTAssertEqual(result.token, currentToken)
+        XCTAssertEqual(result.token.subject, currentSubject)
+        XCTAssertEqual(result.token.contextID, currentContext)
+        let resultIsCurrent = await scheduler.isCurrent(result.token)
+        XCTAssertTrue(resultIsCurrent)
+        let expectedMapping = try BrushCoordinateMapping(
+            sourceSize: CGSize(width: width, height: height),
+            geometry: geometry
+        )
+        XCTAssertEqual(result.image.brushCoordinateMapping, expectedMapping)
+        let histogram = try XCTUnwrap(HistogramComputer.histogram(for: result.image.cgImage))
+        XCTAssertEqual(histogram.red.reduce(0, +), result.image.cgImage.width * result.image.cgImage.height)
+        let failedCount = await scheduler.failedCount
+        XCTAssertEqual(failedCount, 0)
         probe.assertBalanced()
-        return probe.workerCounts.started
+        XCTAssertEqual(probe.workerCounts.started - probe.workerCounts.finished, 0)
+        return probe.workerCounts
     }
 
     private func currentResidentSizeBytes() throws -> UInt64 {
@@ -404,6 +516,24 @@ final class BrushMaskPerformanceTests: XCTestCase {
                 shouldWait = !isReleased
                 lock.unlock()
             }
+        }
+    }
+
+    private final class QueuedObserverFactory: @unchecked Sendable {
+        private let lock = NSLock()
+        private var observers: [BrushMaskRenderObserver] = []
+
+        func enqueue(_ observer: BrushMaskRenderObserver) {
+            lock.lock()
+            observers.append(observer)
+            lock.unlock()
+        }
+
+        func take() -> BrushMaskRenderObserver? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !observers.isEmpty else { return nil }
+            return observers.removeFirst()
         }
     }
 }

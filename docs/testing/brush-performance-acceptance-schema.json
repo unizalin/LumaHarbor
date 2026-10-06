@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lumaharbor.invalid/schemas/brush-performance-acceptance-v1.json",
+  "title": "LumaHarbor brush scheduler and cancellation acceptance artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "productSHA",
+    "harnessSHA",
+    "configuration",
+    "sampleCount",
+    "records",
+    "gates",
+    "result"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "productSHA": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "harnessSHA": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "configuration": { "const": "release" },
+    "sampleCount": { "type": "integer", "minimum": 1 },
+    "records": {
+      "type": "array",
+      "minItems": 6,
+      "items": { "type": "object" }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["gate", "result"],
+        "properties": {
+          "gate": { "type": "string" },
+          "result": { "enum": ["PASS", "FAIL", "NOT RUN"] }
+        }
+      }
+    },
+    "result": { "enum": ["FAIL", "DONE_WITH_CONCERNS"] }
+  }
+}
