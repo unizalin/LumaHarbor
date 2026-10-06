@@ -10,10 +10,10 @@
 - Scalar baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`
 - 原 optimized candidate U：`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`
 - 追補規格：`a2cf22266828f16a68d857df92c3a6c2c2cbf654`
-- 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
+- ABBA 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
 - ABBA 產品 O／harness SHA：`c425cb7fdc93442e915c13eee913bf175fc15758`；後者到最終回歸版本只修改 analyzer，未改 renderer。
 - 完整五情境 ABBA／parity SHA：`a4278c15606ed6e79d414fcf646acb37c30b223f`；此 commit 只修正 changed benchmark 的 neutral 0-mask control 並新增契約測試，產品 renderer 與 `4e74bf3` 相同。
-- Scheduler quiescence SHA：`2b3acc4dbab87d91684ef127608a873173fbf7e5`；Release cancellation／50-cycle artifact SHA：`cf50e5695c2ee02e8fd006e50160293f834c7a0a`。
+- Scheduler quiescence SHA：`2b3acc4dbab87d91684ef127608a873173fbf7e5`；production-route harness SHA：`cf50e5695c2ee02e8fd006e50160293f834c7a0a`；Release acceptance analyzer／artifact SHA：`5170fb18d06b49415dc6b1c56bf9dca250c05abd`。
 - 狀態沒有提升為 READY：必要的真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer gate 尚未全部執行。
 
 ## 2. 實作結果
@@ -26,7 +26,7 @@
 | F4 可重現證據 | `c425cb7` | PARTIAL PASS | 新增 B/O ABBA runner、schema、baseline testability patch、取消延遲及記憶體診斷；正式 warm synthetic ABBA 通過，其他必要情境仍有 NOT RUN。 |
 | F4 證據完整性 | `4e74bf3` | PASS | analyzer 改為拒絕缺 mandatory 欄位、unexpected 欄位、錯誤 order/round/maskCount，以及不一致的 harness、instrumentation 或 product SHA。 |
 | F4 完整 synthetic matrix | `a4278c1` | PARTIAL PASS | 五情境 480 records validation PASS；pixel parity PASS，cold/warm/changed/appended 通過，stress preview 延遲四個 gate FAIL。 |
-| F5 scheduler／取消驗收 | `2b3acc4`、`cf50e56` | PARTIAL PASS | scheduler 可等待所有 superseded live tasks join；production-route 50-cycle、8+8 cancellation 與 settled RSS PASS。公平 B/O stage coverage 仍 NOT RUN。 |
+| F5 scheduler／取消驗收 | `2b3acc4`、`cf50e56`、`5170fb1` | PARTIAL PASS | scheduler 可等待所有 superseded live tasks join；production-route 50-cycle、8+8 cancellation 與 settled RSS PASS；acceptance analyzer／schema 已 fail closed。公平 B/O stage coverage 仍 NOT RUN。 |
 
 F1 的 RED 是實際像素 assertion failure：U 上兩個案例分別有 61,680 與 66,049 bytes 差異。修正後 focused matrix 19/19 PASS。這不是編譯失敗或 sync/async 互相比對。
 
@@ -82,11 +82,13 @@ analyzer 的 fail-closed 測試另以完整 96 筆資料得到 exit 0；移除�
 
 完整 allowlist artifact、checksum、TDD RED/GREEN 與量測邊界見 [scheduler cancellation evidence](../evidence/2026-10-06-brush-scheduler-cancellation/README.md)。`testPreviewSchedulerQuiescenceWaitsForCancelledProductionWorkerToJoin` 在修正前為 1 test／2 failures：scheduler 的最新請求字典已清空，但 raster worker 仍 active。`2b3acc4` 另追蹤所有已啟動 generation，並提供 `waitUntilQuiescent()`；`BrushMaskCancellationTests|PreviewSchedulerTests` 隨後 19/19 PASS。
 
-`cf50e56` 的 Release runner 在同一 scheduler 先做 5 次 warmup，再做 50 次 A raster barrier → submit B/cancel A → release → await/join。B image 55/55 delivered、A 55/55 discarded、error 0；subject/generation/context/mapping 與 rendered histogram 各 55/55 通過。workers 55/55、active 0；warm plateau 69,730,304 bytes，settled 77,021,184 bytes，低於 103,284,736 bytes 上限，因此 `PERF-MEM-50-CANCEL` PASS。
+`cf50e56` 的 Release runner 在同一 scheduler 先做 5 次 warmup，再做 50 次 A raster barrier → submit B/cancel A → release → await/join；`5170fb1` 收緊 analyzer／schema 後重新量測。B image 55/55 delivered、A 55/55 discarded、error 0；subject/generation/context/mapping 與 rendered histogram 各 55/55 通過。workers 55/55、active 0；warm plateau 77,135,872 bytes，settled 69,959,680 bytes，低於 110,690,304 bytes 上限，因此 `PERF-MEM-50-CANCEL` PASS。
 
-preview 與 6000×4000 export 各 8 次，由 coverage barrier release 到 parent/worker join 的 p95 分別為 0.047625 ms 與 0.238416 ms，workers 各 8/8、active 0，`PERF-CANCEL` PASS。此數字明確排除 barrier 前已完成的 synthetic decode，以及未進入的 CGImageDestination encode；它不代表 decode/encode 本身可被搶占。
+preview 與 6000×4000 export 各 8 次，由 coverage barrier release 到 parent/worker join 的 p95 分別為 0.052000 ms 與 0.370416 ms，workers 各 8/8、active 0，`PERF-CANCEL` PASS。此數字明確排除 barrier 前已完成的 synthetic decode，以及未進入的 CGImageDestination encode；它不代表 decode/encode 本身可被搶占。
 
-`PERF-COVERAGE` 仍為 NOT RUN。B 的 scalar renderer 與 O 的 tiled/parallel renderer沒有共同且互斥的 validation、sampling、raster、blend/materialization wall-time 邊界；sampling 位於 worker 內且 mask 可平行重疊。artifact 只保存 O-only `coverageIncludingSampling` 診斷，一／十 masks p50 為 10.482／20.831 ms；其餘 stage 欄位為 null，未拿混合數字判定正式 coverage gate。
+`5170fb1` 的 analyzer TDD 先以 4 個 RED 案例證明舊版本會接受缺欄位、unexpected 私密欄位、損壞 JSON 與短 SHA；修正後 6/6 PASS。正式 raw log 再獨立重算，結果與 artifact 逐位元相同，SHA-256 為 `b79e0d238be7d885c12dde38a760aa7bcf89fad5b20f043439b2396214da8b1d`。
+
+`PERF-COVERAGE` 仍為 NOT RUN。B 的 scalar renderer 與 O 的 tiled/parallel renderer沒有共同且互斥的 validation、sampling、raster、blend/materialization wall-time 邊界；sampling 位於 worker 內且 mask 可平行重疊。artifact 只保存 O-only `coverageIncludingSampling` 診斷，一／十 masks p50 為 11.503／21.438 ms；其餘 stage 欄位為 null，未拿混合數字判定正式 coverage gate。
 
 ## 6. 最終 SHA 自動驗證
 
@@ -150,12 +152,12 @@ git diff a2cf222..HEAD --check
 | CAN-A～E | PASS | 真正父 Task 取消、worker join、stale suppression、export cleanup 已自動驗證。 |
 | PERF-EMPTY / preview RSS | PASS（五情境 synthetic） | empty 10/10、preview RSS 30/30 PASS。 |
 | PERF-PREVIEW | FAIL（stress） | 20 個五情境 gate 中 16 PASS；stress 一／十 mask 兩輪共四個 FAIL。 |
-| PERF-COVERAGE | NOT RUN | B/O 無共同且互斥的 stage wall-time 入口；O-only coverageIncludingSampling 一／十 masks p50 10.482／20.831 ms 只作診斷。 |
+| PERF-COVERAGE | NOT RUN | B/O 無共同且互斥的 stage wall-time 入口；O-only coverageIncludingSampling 一／十 masks p50 11.503／21.438 ms 只作診斷。 |
 | cold / warm / changed / appended / stress ABBA | EXECUTED | 正式 480 records validation PASS；stress 延遲 gate FAIL。 |
 | INTERACTIVE-150 | NOT RUN | 缺真實 RAW production preview 的 0/1/10 masks、cold/warm/changed matrix。 |
 | PERF-EXPORT / PERF-MEM-EXPORT | NOT RUN | 缺 B/O 原尺寸真實 RAW export 與程序 peak RSS。 |
 | PERF-MEM-50-CANCEL | PASS | 完整 production PreviewScheduler：5 warmup＋50 measured，A/B 發布與 mapping/histogram 正確，workers 55/55、active 0，settled 在 +32 MiB 內。 |
-| PERF-CANCEL | PASS（synthetic coverage boundary） | preview/export 各 8 次 p95 0.047625／0.238416 ms，worker 全 join、無晚到發布；decode/encode 不可搶占區段另列。 |
+| PERF-CANCEL | PASS（synthetic coverage boundary） | preview/export 各 8 次 p95 0.052000／0.370416 ms，worker 全 join、無晚到發布；decode/encode 不可搶占區段另列。 |
 | PERF-UI | NOT RUN | 未在 GUI 裝置執行 heartbeat 與 30 次操作。 |
 | RawFixtureTests（最終 SHA） | NOT RUN | 本次環境未提供 `LUMAHARBOR_RAW_FIXTURE_DIR`；未把私人路徑寫入文件或 Git。 |
 | Mac／實體 iPad／Pencil／輸入矩陣／灰卡 | NOT RUN | 無人工解鎖與實體驗收。Simulator/device generic build 不能取代操作驗收。 |

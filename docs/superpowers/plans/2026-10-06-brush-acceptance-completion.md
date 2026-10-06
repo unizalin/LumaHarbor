@@ -16,7 +16,7 @@
 - 起始 HEAD：`2fdc2562be099490068456074defbd4c2907e276`；起始工作樹乾淨。
 - B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
 - 既有 ABBA 的 O 與 harness：`c425cb7fdc93442e915c13eee913bf175fc15758`。
-- 最終回歸／分析器版本：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`；其後既有提交僅更新文件。
+- ABBA 最終回歸／分析器版本：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`；scheduler 產品修正為 `2b3acc4dbab87d91684ef127608a873173fbf7e5`，Task 3 最終 harness／analyzer／artifact 綁定 `5170fb18d06b49415dc6b1c56bf9dca250c05abd`。
 - 此輪未查詢遠端；本機 `origin/main` 為 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。延續未合併候選的證據工作，不以此宣稱 main 已整合。
 
 ## Global Constraints
@@ -86,14 +86,15 @@ Scripts/run-brush-performance-abba.sh
 
 - [x] 以既有 production-route 測試新增 worker join RED；原 scheduler 出現 1 test／2 failures，`2b3acc4` 新增 live-task quiescence 後 focused 19/19 PASS。
 - [x] 同程序先做 5 次 warmup，再做 50 次 A raster barrier → cancel → 切換 B → await/join；B image／histogram／subject／generation／context／mapping 55/55 正確，A 55/55 discarded，error 0。
-- [x] teardown 解除 barrier、cancel、join；workers 55/55、active 0，settled 77,021,184 bytes ≤ plateau 69,730,304 +32 MiB。
-- [x] preview 8 次與 6000×4000 export 8 次取消 p95 0.047625／0.238416 ms；父子 worker 均 join，decode/encode 明列在量測邊界外。
-- [x] 新增 schema、allowlist analyzer 與 fail-closed artifact。B/O 缺相同的互斥 stage wall-time 入口；O-only `coverageIncludingSampling` 只作診斷，validation/sampling、coverage raster、blend/materialization 保持 null，`PERF-COVERAGE` 明確維持 NOT RUN，未把 worker time 相加冒充 wall time。
+- [x] teardown 解除 barrier、cancel、join；workers 55/55、active 0，settled 69,959,680 bytes ≤ plateau 77,135,872 +32 MiB。
+- [x] preview 8 次與 6000×4000 export 8 次取消 p95 0.052000／0.370416 ms；父子 worker 均 join，decode/encode 明列在量測邊界外。
+- [x] 新增 schema、exact allowlist analyzer 與 fail-closed artifact。RED 證明舊 analyzer 會接受 4 類不合格輸入；修正後 6/6 單元測試 PASS，raw log 獨立重算與正式 artifact 逐位元相同。B/O 缺相同的互斥 stage wall-time 入口；O-only `coverageIncludingSampling` 只作診斷，validation/sampling、coverage raster、blend/materialization 保持 null，`PERF-COVERAGE` 明確維持 NOT RUN，未把 worker time 相加冒充 wall time。
 
 ```sh
 swift test --scratch-path "$TASK_DEBUG_SCRATCH" \
   --filter 'BrushMaskCancellationTests|PreviewSchedulerTests'
 LUMAHARBOR_BRUSH_PERF_SCRATCH_PATH="$TASK_PERF_SCRATCH" \
+LUMAHARBOR_BRUSH_PERF_RUN_ROOT="$TASK_PERF_RUN_ROOT" \
 LUMAHARBOR_BRUSH_PERF_SAMPLES=8 Scripts/run-brush-performance-acceptance.sh
 ```
 
