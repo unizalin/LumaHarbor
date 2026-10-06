@@ -9,6 +9,7 @@
 - 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
 - ABBA 產品 O／harness SHA：`c425cb7fdc93442e915c13eee913bf175fc15758`
 - 完整五情境 benchmark／parity SHA：`a4278c15606ed6e79d414fcf646acb37c30b223f`；只修改 test harness，產品 renderer 等同 `4e74bf3`。
+- Scheduler quiescence SHA：`2b3acc4dbab87d91684ef127608a873173fbf7e5`；Release scheduler／cancellation artifact SHA：`cf50e5695c2ee02e8fd006e50160293f834c7a0a`。
 - 文件更新起始 HEAD：`2fdc2562be099490068456074defbd4c2907e276`；本次純文件／證據提交不改產品基準（D-003）。
 - Owner：Codex，延續既有候選的單一 writer；起始 dirty files 為零。
 - 本機 main 基準：`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`；起始 ahead 34、behind 0，無 upstream，未查遠端。
@@ -26,7 +27,7 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 - Mac app codesign、release privacy、未發布 ZIP 與 checksum PASS；notarization skipped。
 - warm synthetic B/O ABBA 共 96 records，兩輪 empty／1 mask／10 masks preview 與 preview RSS gates PASS，validation PASS。
 - 完整五情境正式 ABBA 480 records validation PASS：56 gates PASS、4 FAIL、7 NOT RUN；四個 FAIL 均為 stress preview 延遲。18 preview 與 66 direct R8 B/O 最大 byte error 0。
-- preview cancellation p95 0.080 ms、24MP export cancellation p95 0.309 ms；50-cycle direct renderer 診斷 workers 55/55、active 0，settled RSS 增加 16 KiB。
+- 目前正式 preview cancellation p95 0.047625 ms、6000×4000 export cancellation p95 0.238416 ms；完整 production PreviewScheduler 5 warmup＋50 measured：B 55/55 delivered、A 55/55 discarded、errors 0、mapping/histogram 55/55、workers 55/55、active 0，settled RSS 在 plateau＋32 MiB 內。
 - 完整測試數字、ABBA 表格與 gate 邊界見[驗收報告](../testing/reports/2026-10-06-brush-raster-correctness-followup.md)。規格見[追補規格](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)。
 
 ## 尚未完成
@@ -35,10 +36,10 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 - 真實 RAW 0/1/10 masks production preview 與 INTERACTIVE-150。
 - B/O 原尺寸真實 RAW export、peak RSS、正式 PERF-EXPORT／PERF-MEM-EXPORT。
 - stress preview 效能修正：一 mask 約 81 ms，十 masks 約 133 ms 的 p50 增量超標；其餘四情境通過。
-- B/O coverage-stage gate、完整 scheduler 50 次切圖 gate、GUI heartbeat。
+- B/O coverage-stage gate與 GUI heartbeat。Scheduler 50 次切圖 gate 已完成。
 - Mac 與實體 iPad／Pencil 操作、輸入矩陣、灰卡與獨立 reviewer。
 
-50-cycle 現有測試直接交替 subject 並取消 renderer，不可描述成 50 次完整 PreviewScheduler 切圖；A→B scheduler stale suppression 另有單次 production-route 測試。公開文件不得加入私人 RAW 名稱、路徑或 digest。
+`PERF-COVERAGE` 維持 NOT RUN：B/O 沒有共同且互斥的 validation、sampling、raster、blend/materialization wall-time 入口；O-only `coverageIncludingSampling` 不可冒充正式 B/O stage gate。公開文件不得加入私人 RAW 名稱、路徑或 digest。
 
 ## 本次文件／證據更新
 
@@ -47,6 +48,8 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 - 新增 `docs/testing/evidence/2026-10-06-brush-warm-abba/samples.jsonl`、`gates.json`、`README.md`；96 筆既有樣本原樣保存，重算 exit 0、validation PASS、overall DONE_WITH_CONCERNS。
 - `a4278c1` 新增 changed neutral-control 契約測試；RED 1 test／16 assertions failure，GREEN 2 tests／1 skipped／0 failures。
 - 新增 `Scripts/run-brush-output-parity.py` 與完整 ABBA evidence；第一次與修正後各 480 筆均保留，正式矩陣 56 PASS／4 FAIL／7 NOT RUN，pixel parity 84/84 PASS。
+- `2b3acc4` 新增 scheduler live-task quiescence；RED 1 test／2 failures，GREEN cancellation＋scheduler 19/19 PASS。
+- `cf50e56` 將 50-cycle 改為真正 production scheduler route，新增 Release allowlist analyzer／schema，保存 `docs/testing/evidence/2026-10-06-brush-scheduler-cancellation/acceptance.json`；PERF-CANCEL 與 PERF-MEM-50-CANCEL PASS，PERF-COVERAGE NOT RUN。
 - 本次未重跑完整產品 regression suites；Task 2 另執行 Release focused harness、完整 synthetic ABBA 與 untimed parity capture。文件連結、差異格式、樣本數、checksum、隱私 allowlist 與 gate 重算一致性也已核對。
 - 原始 build/test log 與取消延遲診斷仍屬先前本機證據；沒有新的獨立覆核。
 
@@ -56,8 +59,8 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 
 ## 下一個有界動作
 
-執行[後續計畫 Task 3](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：補 B/O stage coverage 與完整 PreviewScheduler 50-cycle 取消／切圖，核對 started/finished workers、stale result、settled RSS 與 cancellation p95。
+執行[後續計畫 Task 4](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：先確認既有私有 RAW fixture 設定，再補真實 RAW 0/1/10 masks preview 與原尺寸 export/RSS，維持公開 artifact 去識別化。
 
-此步不需私人 RAW 或實體裝置。完成 stage 證據後，另立最小效能修正；Task 4 再補 RAW/export，Task 5 安排非原作者審查與人工裝置，Task 6 最終回歸。
+Task 4 需要私有 RAW；若 fixture 不可用，依計畫保持 NOT RUN 並繼續可執行的 24MP synthetic export。公平 stage coverage 另需 B/O 共同 production stage clock；Task 5 安排非原作者審查與人工裝置，Task 6 最終回歸。
 
 維持 `DONE_WITH_CONCERNS`。禁止未授權的 push、merge、rebase、破壞性清理與覆寫其他工作樹。下一步使用 `executing-plans` 執行、`verification-before-completion` 核對結果。

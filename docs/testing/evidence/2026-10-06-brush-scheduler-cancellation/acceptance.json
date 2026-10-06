@@ -1,0 +1,307 @@
+{
+  "configuration": "release",
+  "gates": [
+    {
+      "gate": "PERF-COVERAGE",
+      "reason": "B/O production code has no non-overlapping validation, sampling, raster, blend/materialization wall-time boundaries; coverageIncludingSampling is diagnostic only",
+      "result": "NOT RUN"
+    },
+    {
+      "budgetP95Seconds": 0.1,
+      "gate": "PERF-CANCEL",
+      "measurements": [
+        {
+          "p95Seconds": 4.7625e-05,
+          "scenario": "preview-cancel"
+        },
+        {
+          "p95Seconds": 0.000238416,
+          "scenario": "export-cancel-24mp"
+        }
+      ],
+      "result": "PASS"
+    },
+    {
+      "gate": "PERF-MEM-50-CANCEL",
+      "result": "PASS",
+      "rssLimitBytes": 103284736,
+      "settledRSSBytes": 77021184,
+      "warmPlateauRSSBytes": 69730304
+    }
+  ],
+  "harnessSHA": "cf50e5695c2ee02e8fd006e50160293f834c7a0a",
+  "productSHA": "cf50e5695c2ee02e8fd006e50160293f834c7a0a",
+  "records": [
+    {
+      "cancelOutcome": "cancelled-and-joined",
+      "durationsSeconds": [
+        3.4166e-05,
+        4.7625e-05,
+        4.5833e-05,
+        4.7542e-05,
+        4.4708e-05,
+        4.4084e-05,
+        4.3625e-05,
+        4.3834e-05
+      ],
+      "nonPreemptibleSectionsExcluded": [
+        "raw-decode",
+        "cgimage-destination-encode"
+      ],
+      "p95Seconds": 4.7625e-05,
+      "result": "PASS",
+      "sampleCount": 8,
+      "scenario": "preview-cancel",
+      "schemaVersion": 3,
+      "timingBoundary": "coverage barrier release through parent and worker join",
+      "variant": "O",
+      "workerCounts": {
+        "activeAfterJoin": 0,
+        "finished": 8,
+        "started": 8
+      }
+    },
+    {
+      "cancelOutcome": "cancelled-and-joined",
+      "durationsSeconds": [
+        0.000238416,
+        0.000197,
+        0.000169125,
+        0.000177083,
+        0.000174042,
+        0.000163375,
+        0.000167125,
+        0.000185791
+      ],
+      "nonPreemptibleSectionsExcluded": [
+        "raw-decode",
+        "cgimage-destination-encode"
+      ],
+      "p95Seconds": 0.000238416,
+      "result": "PASS",
+      "sampleCount": 8,
+      "scenario": "export-cancel-24mp",
+      "schemaVersion": 3,
+      "timingBoundary": "coverage barrier release through parent and worker join",
+      "variant": "O",
+      "workerCounts": {
+        "activeAfterJoin": 0,
+        "finished": 8,
+        "started": 8
+      }
+    },
+    {
+      "cancelOutcome": "all-cancelled-and-joined",
+      "histogramChecks": 55,
+      "mappingChecks": 55,
+      "measuredCycles": 50,
+      "result": "PASS",
+      "rssLimitBytes": 103284736,
+      "scenario": "50-cancel-switch-preview",
+      "schedulerCounts": {
+        "deliveredB": 55,
+        "discardedA": 55,
+        "failed": 0
+      },
+      "schemaVersion": 3,
+      "settledRSSBytes": 77021184,
+      "variant": "O",
+      "warmPlateauRSSBytes": 69730304,
+      "warmupCycles": 5,
+      "workerCounts": {
+        "activeAfterJoin": 0,
+        "finished": 55,
+        "started": 55
+      }
+    },
+    {
+      "coverageDurationsSeconds": [
+        3.6875e-05,
+        8.083e-06,
+        8.834e-06,
+        6.541e-06,
+        5.25e-06,
+        2.709e-06,
+        7.334e-06,
+        7.875e-06
+      ],
+      "durationsSeconds": [
+        0.005103042,
+        0.003906,
+        0.004106042,
+        0.004153084,
+        0.005214042,
+        0.003727791,
+        0.003952333,
+        0.00363175
+      ],
+      "height": 1067,
+      "maskCount": 0,
+      "pointCountPerStroke": 100,
+      "preferMetal": true,
+      "sampleCount": 8,
+      "scenario": "synthetic-1600px",
+      "schemaVersion": 3,
+      "seed": "LH-BRUSH-PERF-ACCEPTANCE-20261006",
+      "stageDurationsSeconds": {
+        "blendMaterialization": null,
+        "coverageIncludingSampling": [
+          3.6875e-05,
+          8.083e-06,
+          8.834e-06,
+          6.541e-06,
+          5.25e-06,
+          2.709e-06,
+          7.334e-06,
+          7.875e-06
+        ],
+        "coverageRaster": null,
+        "totalMaterialized": [
+          0.005103042,
+          0.003906,
+          0.004106042,
+          0.004153084,
+          0.005214042,
+          0.003727791,
+          0.003952333,
+          0.00363175
+        ],
+        "validationSampling": null
+      },
+      "stageIsolation": {
+        "reason": "the shared production entry point does not expose non-overlapping validation, sampling, raster, and materialization wall-time boundaries",
+        "result": "NOT RUN"
+      },
+      "strokeCountPerMask": 10,
+      "variant": "O",
+      "width": 1600
+    },
+    {
+      "coverageDurationsSeconds": [
+        0.013572958,
+        0.011733042,
+        0.010349375,
+        0.010526166,
+        0.0103885,
+        0.010563875,
+        0.010397834,
+        0.010437667
+      ],
+      "durationsSeconds": [
+        0.015270583,
+        0.0136715,
+        0.013705958,
+        0.013446875,
+        0.013174791,
+        0.012580792,
+        0.013053084,
+        0.013062417
+      ],
+      "height": 1067,
+      "maskCount": 1,
+      "pointCountPerStroke": 100,
+      "preferMetal": true,
+      "sampleCount": 8,
+      "scenario": "synthetic-1600px",
+      "schemaVersion": 3,
+      "seed": "LH-BRUSH-PERF-ACCEPTANCE-20261006",
+      "stageDurationsSeconds": {
+        "blendMaterialization": null,
+        "coverageIncludingSampling": [
+          0.013572958,
+          0.011733042,
+          0.010349375,
+          0.010526166,
+          0.0103885,
+          0.010563875,
+          0.010397834,
+          0.010437667
+        ],
+        "coverageRaster": null,
+        "totalMaterialized": [
+          0.015270583,
+          0.0136715,
+          0.013705958,
+          0.013446875,
+          0.013174791,
+          0.012580792,
+          0.013053084,
+          0.013062417
+        ],
+        "validationSampling": null
+      },
+      "stageIsolation": {
+        "reason": "the shared production entry point does not expose non-overlapping validation, sampling, raster, and materialization wall-time boundaries",
+        "result": "NOT RUN"
+      },
+      "strokeCountPerMask": 10,
+      "variant": "O",
+      "width": 1600
+    },
+    {
+      "coverageDurationsSeconds": [
+        0.019751375,
+        0.020158209,
+        0.021459917,
+        0.02087275,
+        0.020768917,
+        0.020879541,
+        0.020789125,
+        0.020980666
+      ],
+      "durationsSeconds": [
+        0.029992625,
+        0.026235084,
+        0.0274405,
+        0.028278917,
+        0.025558459,
+        0.026127833,
+        0.02605025,
+        0.025154
+      ],
+      "height": 1067,
+      "maskCount": 10,
+      "pointCountPerStroke": 100,
+      "preferMetal": true,
+      "sampleCount": 8,
+      "scenario": "synthetic-1600px",
+      "schemaVersion": 3,
+      "seed": "LH-BRUSH-PERF-ACCEPTANCE-20261006",
+      "stageDurationsSeconds": {
+        "blendMaterialization": null,
+        "coverageIncludingSampling": [
+          0.019751375,
+          0.020158209,
+          0.021459917,
+          0.02087275,
+          0.020768917,
+          0.020879541,
+          0.020789125,
+          0.020980666
+        ],
+        "coverageRaster": null,
+        "totalMaterialized": [
+          0.029992625,
+          0.026235084,
+          0.0274405,
+          0.028278917,
+          0.025558459,
+          0.026127833,
+          0.02605025,
+          0.025154
+        ],
+        "validationSampling": null
+      },
+      "stageIsolation": {
+        "reason": "the shared production entry point does not expose non-overlapping validation, sampling, raster, and materialization wall-time boundaries",
+        "result": "NOT RUN"
+      },
+      "strokeCountPerMask": 10,
+      "variant": "O",
+      "width": 1600
+    }
+  ],
+  "result": "DONE_WITH_CONCERNS",
+  "sampleCount": 8,
+  "schemaVersion": 1
+}

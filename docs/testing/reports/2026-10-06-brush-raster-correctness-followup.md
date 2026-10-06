@@ -13,6 +13,7 @@
 - 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
 - ABBA 產品 O／harness SHA：`c425cb7fdc93442e915c13eee913bf175fc15758`；後者到最終回歸版本只修改 analyzer，未改 renderer。
 - 完整五情境 ABBA／parity SHA：`a4278c15606ed6e79d414fcf646acb37c30b223f`；此 commit 只修正 changed benchmark 的 neutral 0-mask control 並新增契約測試，產品 renderer 與 `4e74bf3` 相同。
+- Scheduler quiescence SHA：`2b3acc4dbab87d91684ef127608a873173fbf7e5`；Release cancellation／50-cycle artifact SHA：`cf50e5695c2ee02e8fd006e50160293f834c7a0a`。
 - 狀態沒有提升為 READY：必要的真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer gate 尚未全部執行。
 
 ## 2. 實作結果
@@ -25,12 +26,13 @@
 | F4 可重現證據 | `c425cb7` | PARTIAL PASS | 新增 B/O ABBA runner、schema、baseline testability patch、取消延遲及記憶體診斷；正式 warm synthetic ABBA 通過，其他必要情境仍有 NOT RUN。 |
 | F4 證據完整性 | `4e74bf3` | PASS | analyzer 改為拒絕缺 mandatory 欄位、unexpected 欄位、錯誤 order/round/maskCount，以及不一致的 harness、instrumentation 或 product SHA。 |
 | F4 完整 synthetic matrix | `a4278c1` | PARTIAL PASS | 五情境 480 records validation PASS；pixel parity PASS，cold/warm/changed/appended 通過，stress preview 延遲四個 gate FAIL。 |
+| F5 scheduler／取消驗收 | `2b3acc4`、`cf50e56` | PARTIAL PASS | scheduler 可等待所有 superseded live tasks join；production-route 50-cycle、8+8 cancellation 與 settled RSS PASS。公平 B/O stage coverage 仍 NOT RUN。 |
 
 F1 的 RED 是實際像素 assertion failure：U 上兩個案例分別有 61,680 與 66,049 bytes 差異。修正後 focused matrix 19/19 PASS。這不是編譯失敗或 sync/async 互相比對。
 
 F2 的 RED 是移除 `-DDEBUG` 後標準 Release test target 因六個 helper 缺失而編譯失敗；GREEN filtered Release 1/1 PASS，最終完整標準 Release suite 亦通過。
 
-F3 已涵蓋 sync raster、async conversion、三個 active masks 且至少兩個 worker、validation、sampling、pre-cancel、PreviewScheduler A→B stale suppression，以及 6000×4000 export 取消後無 final/tmp 發布。50-cycle 診斷是同程序交替 subject 並直接取消 renderer；它不等同於 50 次完整 PreviewScheduler 切圖流程，因此正式 `PERF-MEM-50-CANCEL` 不以此宣告完成。
+F3 已涵蓋 sync raster、async conversion、三個 active masks 且至少兩個 worker、validation、sampling、pre-cancel、PreviewScheduler A→B stale suppression，以及 6000×4000 export 取消後無 final/tmp 發布。Task 3 後續補上 scheduler 的 live-task join 介面與完整 50-cycle production-route 證據，取代早期只直接取消 renderer 的診斷限制。
 
 ## 3. B/O warm ABBA 結果
 
@@ -72,11 +74,21 @@ analyzer 的 fail-closed 測試另以完整 96 筆資料得到 exit 0；移除�
 - PERF-PREVIEW 16/20 PASS；cold、warm、changed、appended 兩輪全部通過。
 - stress 1 mask：round 1 p50/p95 增量 81.211/82.507 ms；round 2 81.314/81.308 ms，超過 30/60 ms 預算。
 - stress 10 masks：round 1 132.794/144.226 ms；round 2 133.732/135.118 ms，p50 超過 100 ms 預算。
-- 其餘 coverage stage、RAW、export、export RSS、完整 scheduler 50-cycle、正式 cancellation artifact 與 UI 保持 NOT RUN。
+- 其餘 coverage stage、RAW、完整 export 效能、export RSS 與 UI 保持 NOT RUN；scheduler 50-cycle 與正式 synthetic cancellation artifact 已在下一節補齊。
 
 計時外 pixel parity 從 immutable B/O archive 產生相同 workload：B/O capture 各 1 executed、0 skipped、0 failures；18 份 production preview RGBA8 與 66 份 direct R8 的最大 byte error 都是 0。因此 stress 是效能 FAIL，沒有觀察到像素回歸。
 
-## 5. 最終 SHA 自動驗證
+## 5. Scheduler、取消與 settled RSS
+
+完整 allowlist artifact、checksum、TDD RED/GREEN 與量測邊界見 [scheduler cancellation evidence](../evidence/2026-10-06-brush-scheduler-cancellation/README.md)。`testPreviewSchedulerQuiescenceWaitsForCancelledProductionWorkerToJoin` 在修正前為 1 test／2 failures：scheduler 的最新請求字典已清空，但 raster worker 仍 active。`2b3acc4` 另追蹤所有已啟動 generation，並提供 `waitUntilQuiescent()`；`BrushMaskCancellationTests|PreviewSchedulerTests` 隨後 19/19 PASS。
+
+`cf50e56` 的 Release runner 在同一 scheduler 先做 5 次 warmup，再做 50 次 A raster barrier → submit B/cancel A → release → await/join。B image 55/55 delivered、A 55/55 discarded、error 0；subject/generation/context/mapping 與 rendered histogram 各 55/55 通過。workers 55/55、active 0；warm plateau 69,730,304 bytes，settled 77,021,184 bytes，低於 103,284,736 bytes 上限，因此 `PERF-MEM-50-CANCEL` PASS。
+
+preview 與 6000×4000 export 各 8 次，由 coverage barrier release 到 parent/worker join 的 p95 分別為 0.047625 ms 與 0.238416 ms，workers 各 8/8、active 0，`PERF-CANCEL` PASS。此數字明確排除 barrier 前已完成的 synthetic decode，以及未進入的 CGImageDestination encode；它不代表 decode/encode 本身可被搶占。
+
+`PERF-COVERAGE` 仍為 NOT RUN。B 的 scalar renderer 與 O 的 tiled/parallel renderer沒有共同且互斥的 validation、sampling、raster、blend/materialization wall-time 邊界；sampling 位於 worker 內且 mask 可平行重疊。artifact 只保存 O-only `coverageIncludingSampling` 診斷，一／十 masks p50 為 10.482／20.831 ms；其餘 stage 欄位為 null，未拿混合數字判定正式 coverage gate。
+
+## 6. 最終 SHA 自動驗證
 
 主要命令如下；已去除歷史私人暫存位置，以 TASK 變數表示。各變數由執行者指定新的本機 scratch／output 位置；這些完整 regression 命令是歷史命令的去識別化寫法，本次沒有重跑。Task 2 另執行 Release focused harness、完整 synthetic ABBA 與 untimed parity capture；其證據已保存至上述目錄，其餘原始 build/test log 維持本機保存。
 
@@ -128,7 +140,7 @@ git diff a2cf222..HEAD --check
 
 第一次 strict-concurrency 重跑因沙箱禁止寫入使用者 module cache 而 exit 1；將 `CLANG_MODULE_CACHE_PATH` 與 `SWIFTPM_MODULECACHE_OVERRIDE` 指向工作樹外的暫存目錄後，同一原始碼驗證 PASS。此失敗不涉及編譯器診斷或程式碼變更。
 
-## 6. Gate 狀態與限制
+## 7. Gate 狀態與限制
 
 | Gate | 狀態 | 說明 |
 | --- | --- | --- |
@@ -138,20 +150,20 @@ git diff a2cf222..HEAD --check
 | CAN-A～E | PASS | 真正父 Task 取消、worker join、stale suppression、export cleanup 已自動驗證。 |
 | PERF-EMPTY / preview RSS | PASS（五情境 synthetic） | empty 10/10、preview RSS 30/30 PASS。 |
 | PERF-PREVIEW | FAIL（stress） | 20 個五情境 gate 中 16 PASS；stress 一／十 mask 兩輪共四個 FAIL。 |
-| PERF-COVERAGE | NOT RUN | 公開 B/O harness 只量 total preview，未產生可直接比較的 B/O coverage stage。O-only coverage correctness 已有測試。 |
+| PERF-COVERAGE | NOT RUN | B/O 無共同且互斥的 stage wall-time 入口；O-only coverageIncludingSampling 一／十 masks p50 10.482／20.831 ms 只作診斷。 |
 | cold / warm / changed / appended / stress ABBA | EXECUTED | 正式 480 records validation PASS；stress 延遲 gate FAIL。 |
 | INTERACTIVE-150 | NOT RUN | 缺真實 RAW production preview 的 0/1/10 masks、cold/warm/changed matrix。 |
 | PERF-EXPORT / PERF-MEM-EXPORT | NOT RUN | 缺 B/O 原尺寸真實 RAW export 與程序 peak RSS。 |
-| PERF-MEM-50-CANCEL | NOT RUN | 有直接 renderer 50-cycle 診斷，但未完成規格要求的完整 scheduler 切圖流程 gate。 |
-| PERF-CANCEL | PARTIAL PASS | synthetic preview/export 延遲通過；真實 RAW 原尺寸與完整正式 artifact 尚未完成。 |
+| PERF-MEM-50-CANCEL | PASS | 完整 production PreviewScheduler：5 warmup＋50 measured，A/B 發布與 mapping/histogram 正確，workers 55/55、active 0，settled 在 +32 MiB 內。 |
+| PERF-CANCEL | PASS（synthetic coverage boundary） | preview/export 各 8 次 p95 0.047625／0.238416 ms，worker 全 join、無晚到發布；decode/encode 不可搶占區段另列。 |
 | PERF-UI | NOT RUN | 未在 GUI 裝置執行 heartbeat 與 30 次操作。 |
 | RawFixtureTests（最終 SHA） | NOT RUN | 本次環境未提供 `LUMAHARBOR_RAW_FIXTURE_DIR`；未把私人路徑寫入文件或 Git。 |
 | Mac／實體 iPad／Pencil／輸入矩陣／灰卡 | NOT RUN | 無人工解鎖與實體驗收。Simulator/device generic build 不能取代操作驗收。 |
 | 獨立 reviewer | NOT RUN | Sol 為主要 writer，Codex root 做整合與證據 validator review；仍不構成規格要求的非 writer 獨立覆核。 |
 | notarization | SKIPPED | 本輪只產生本機未發布 alpha 封裝。 |
 
-## 7. 判定與下一步
+## 8. 判定與下一步
 
-跨垂直 tile 像素錯位、標準 Release testability、取消生命週期與五情境 synthetic B/O 已具可重算證據。cold/warm/changed/appended 通過；stress 效能明確 FAIL。真實 RAW、原尺寸 export/RSS、完整 scheduler 取消、人工裝置與獨立審查仍缺，因此分支保持 `DONE_WITH_CONCERNS`。
+跨垂直 tile 像素錯位、標準 Release testability、取消生命週期、完整 scheduler 50-cycle 與五情境 synthetic B/O 已具可重算證據。cold/warm/changed/appended 通過；stress 效能明確 FAIL。真實 RAW、原尺寸 export/RSS、公平 B/O stage coverage、人工裝置與獨立審查仍缺，因此分支保持 `DONE_WITH_CONCERNS`。
 
-下一個有界工作是[後續計畫 Task 3](../../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：補 stage coverage 與完整 scheduler 50-cycle 取消／切圖，以定位 stress 成本與確認 worker/RSS 生命週期；產品效能修正另依該證據規劃。
+下一個有界工作是[後續計畫 Task 4](../../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：確認私有 fixture 可用性後，補真實 RAW preview 與原尺寸 export/RSS。公平 B/O stage coverage 需先提供共同的互斥 production stage clock，不能由 O-only 混合時間推論通過。

@@ -19,7 +19,18 @@ LUMAHARBOR_BRUSH_ABBA_MASK_COUNTS='0 1 10' \
 Scripts/run-brush-performance-abba.sh
 ```
 
-`Scripts/run-brush-performance-acceptance.sh` separately records optimized coverage and true cancellation latency. A complete acceptance report must combine both artifacts with real RAW preview, original-size export, export peak RSS, the 50-cycle settled-RSS workload, and device UI evidence. A passing synthetic JSONL file alone is not an overall performance pass.
+`Scripts/run-brush-performance-acceptance.sh` separately runs the Release cancellation and scheduler lifecycle workload. It requires a clean worktree, writes its raw XCTest log to a local run root, then uses `Scripts/analyze-brush-performance-acceptance.py` to emit an allowlist artifact conforming to `docs/testing/brush-performance-acceptance-schema.json`:
+
+```sh
+LUMAHARBOR_BRUSH_PERF_RUN_ROOT="$TASK_ACCEPTANCE_ROOT" \
+LUMAHARBOR_BRUSH_PERF_SCRATCH_PATH="$TASK_PERF_SCRATCH" \
+LUMAHARBOR_BRUSH_PERF_SAMPLES=8 \
+Scripts/run-brush-performance-acceptance.sh
+```
+
+The scheduler workload performs five warmups and fifty production-route A→B switches. A enters the raster barrier, B submission cancels A, the barrier is released, and the harness waits for every live scheduler task to join. It validates B's token, subject, context, brush mapping and rendered histogram, and records actual worker started/finished counts plus settled RSS.
+
+The O-only `coverageIncludingSampling` field is diagnostic. `validationSampling`, `coverageRaster`, and `blendMaterialization` intentionally remain `null`, and `PERF-COVERAGE` remains `NOT RUN`, because B and O do not expose identical non-overlapping wall-time boundaries. Parallel worker CPU durations must never be summed and reported as wall time. A complete acceptance report must still combine these artifacts with real RAW preview, original-size export, export peak RSS, and device UI evidence.
 
 ## Untimed pixel validation
 

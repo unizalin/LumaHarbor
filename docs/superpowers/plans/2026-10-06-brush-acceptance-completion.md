@@ -11,7 +11,7 @@
 ## 範圍與基準
 
 - 本計畫是[追補 spec](../specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md) §7～9 的剩餘工作，不重做已通過的 F1～F3。
-- 日期：2026-10-06；Task 1、2 已完成，Task 3～6 尚未執行。
+- 日期：2026-10-06；Task 1～3 已完成，Task 4～6 尚未執行。
 - Writer：Codex；延續已授權候選 `codex/brush-performance-acceptance-repair`，單一 writer。
 - 起始 HEAD：`2fdc2562be099490068456074defbd4c2907e276`；起始工作樹乾淨。
 - B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
@@ -78,17 +78,17 @@ Scripts/run-brush-performance-abba.sh
 
 **完成條件:** 480 筆完整、metadata 一致、像素比較可追溯、每一 gate 有結果；FAIL 也必須報告，不得以 runner exit 0 代替產品通過。
 
-## Task 3：stage coverage 與完整 scheduler 取消／切圖
+## Task 3：stage coverage 與完整 scheduler 取消／切圖（已完成，coverage 維持 NOT RUN）
 
 **Files:** `Tests/RawProcessingCoreTests/BrushMaskCancellationTests.swift`、`BrushMaskPerformanceTests.swift`、`PreviewSchedulerTests.swift`；必要時擴充 `Scripts/run-brush-performance-acceptance.sh`、schema 與 analyzer，對應更新 `docs/testing/brush-performance-abba.md`。
 
 **Interfaces:** 沿用 `BrushMaskRenderEvent` per-invocation request ID、stage、worker started/finished 事件；使用實際 PreviewScheduler production route，不能以 direct renderer 輪替冒充 scheduler。
 
-- [ ] 以既有 `testPreviewSchedulerCancelsRasterizingProductionRequestWithoutLateDelivery` 為入口，先加入能抓到 A 晚到發布、worker 未 join 或切圖 subject 錯誤的失敗案例，再做所需最小修正。
-- [ ] 在同程序先 warmup 量 plateau；每次 A 進入 raster barrier → cancel → 切換 B → await/join，執行 50 次。每次核對 image／histogram／error 沒有 A 晚到發布、B generation/mapping 正確。
-- [ ] 所有 teardown 解開 barrier、cancel、join；watchdog 只防掛死。記錄 started/finished/active 與 settle 前後 RSS，結束 active=0，settled ≤ plateau +32 MiB。
-- [ ] 分開量 preview 8 次、6000×4000 export 8 次，cancel 到父／子全部結束 p95 ≤100 ms；encode/decode 不可搶占區段另列。
-- [ ] 補 B/O test-only stage wrapper 與 allowlist patch，記 validation/sampling、coverage、blend/materialization、total wall time；不得把平行 worker 累加冒充 wall time。若無法隔離 stage，維持 NOT RUN 並說明所需接口。
+- [x] 以既有 production-route 測試新增 worker join RED；原 scheduler 出現 1 test／2 failures，`2b3acc4` 新增 live-task quiescence 後 focused 19/19 PASS。
+- [x] 同程序先做 5 次 warmup，再做 50 次 A raster barrier → cancel → 切換 B → await/join；B image／histogram／subject／generation／context／mapping 55/55 正確，A 55/55 discarded，error 0。
+- [x] teardown 解除 barrier、cancel、join；workers 55/55、active 0，settled 77,021,184 bytes ≤ plateau 69,730,304 +32 MiB。
+- [x] preview 8 次與 6000×4000 export 8 次取消 p95 0.047625／0.238416 ms；父子 worker 均 join，decode/encode 明列在量測邊界外。
+- [x] 新增 schema、allowlist analyzer 與 fail-closed artifact。B/O 缺相同的互斥 stage wall-time 入口；O-only `coverageIncludingSampling` 只作診斷，validation/sampling、coverage raster、blend/materialization 保持 null，`PERF-COVERAGE` 明確維持 NOT RUN，未把 worker time 相加冒充 wall time。
 
 ```sh
 swift test --scratch-path "$TASK_DEBUG_SCRATCH" \
@@ -142,4 +142,4 @@ swift test --scratch-path "$TASK_DEBUG_SCRATCH" --filter RawFixtureTests
 
 ## 執行順序與狀態
 
-Task 1、2 已完成；**Task 3 是下一個有界工作**。Task 2 找出 stress preview 效能 FAIL，Task 3 先補 stage coverage 與完整 scheduler 取消／切圖，為後續效能修正提供可定位資料。接著 Task 4；素材可用性可以提早查核，但量測不可彼此並行。Task 5 的程式碼審查可在候選穩定後進行，人工操作待設備可用；最後 Task 6 收尾。
+Task 1～3 已完成；**Task 4 是下一個有界工作**。Task 2 找出的 stress preview 效能 FAIL 仍保留；Task 3 已完成 scheduler／worker／RSS／取消證據，但公平的 B/O stage coverage 因缺共同互斥 wall-time 入口而維持 NOT RUN。Task 4 接著補真實 RAW 與原尺寸 export/RSS；素材可用性可以提早查核，但量測不可彼此並行。Task 5 的程式碼審查可在候選穩定後進行，人工操作待設備可用；最後 Task 6 收尾。
