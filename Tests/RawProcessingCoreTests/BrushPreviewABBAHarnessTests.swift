@@ -8,6 +8,19 @@ import XCTest
 /// One production-preview sample per process. The shell orchestrator controls
 /// B/O order so compiler work and another variant never overlap a timed sample.
 final class BrushPreviewABBAHarnessTests: XCTestCase {
+    func testChangedScenarioKeepsEmptyControlNeutralAcrossOrdinals() {
+        for ordinal in 0..<16 {
+            let empty = makeInputs(scenario: "changed", maskCount: 0, sampleOrdinal: ordinal)
+            XCTAssertEqual(empty.timed.exposure, 0, "empty control must stay neutral")
+            XCTAssertEqual(empty.warmup?.exposure, 0)
+            for count in [1, 10] {
+                let active = makeInputs(scenario: "changed", maskCount: count, sampleOrdinal: ordinal)
+                XCTAssertEqual(active.timed.exposure, ordinal.isMultiple(of: 2) ? 0.05 : -0.05)
+                XCTAssertEqual(active.timed.brushMasks.count, count)
+            }
+        }
+    }
+
     func testOptInProductionPreviewSample() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard environment["LUMAHARBOR_RUN_BRUSH_ABBA"] == "1" else {
@@ -149,7 +162,7 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
         case "warm":
             return (base, base)
         case "changed":
-            let exposure = sampleOrdinal.isMultiple(of: 2) ? 0.05 : -0.05
+            let exposure = maskCount == 0 ? 0 : (sampleOrdinal.isMultiple(of: 2) ? 0.05 : -0.05)
             return (base, PhotoAdjustments(exposure: exposure, brushMasks: baseMasks))
         case "appended":
             guard !baseMasks.isEmpty else { return (base, base) }
