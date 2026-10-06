@@ -10,7 +10,8 @@
 - Scalar baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`
 - 原 optimized candidate U：`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`
 - 追補規格：`a2cf22266828f16a68d857df92c3a6c2c2cbf654`
-- 最終產品與證據 SHA：`4e74bf3`
+- 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
+- ABBA 產品 O／harness SHA：`c425cb7fdc93442e915c13eee913bf175fc15758`；後者到最終回歸版本只修改 analyzer，未改 renderer。
 - 狀態沒有提升為 READY：必要的真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer gate 尚未全部執行。
 
 ## 2. 實作結果
@@ -30,6 +31,10 @@ F2 的 RED 是移除 `-DDEBUG` 後標準 Release test target 因六個 helper �
 F3 已涵蓋 sync raster、async conversion、三個 active masks 且至少兩個 worker、validation、sampling、pre-cancel、PreviewScheduler A→B stale suppression，以及 6000×4000 export 取消後無 final/tmp 發布。50-cycle 診斷是同程序交替 subject 並直接取消 renderer；它不等同於 50 次完整 PreviewScheduler 切圖流程，因此正式 `PERF-MEM-50-CANCEL` 不以此宣告完成。
 
 ## 3. B/O warm ABBA 結果
+
+96 筆既有樣本已原樣保存於[證據目錄](../evidence/2026-10-06-brush-warm-abba/README.md)，含 samples、重算 gates 與 checksum。此次重算 exit 0、validation PASS，不是新一輪效能量測。當時完整硬體／供電／OS／Xcode 清單未存於樣本，後續矩陣需補記。
+
+下表 incremental p50/p95 是「有遮罩組的分位數」減「empty 組的同一分位數」，不是逐筆差值的分位數；因此 round 2 一個 mask 的 incremental p95 小於 incremental p50 並非總延遲分布倒置。
 
 正式命令以 4 blocks、warm scenario、0/1/10 masks 執行兩輪；round 1 為 `B O O B`，round 2 為 `O B B O`。共接受 96 筆 record，baseline SHA、product SHA、harness SHA 與 instrumentation digest 均一致；validation `PASS`，整體仍為 `DONE_WITH_CONCERNS`。
 
@@ -57,36 +62,36 @@ analyzer 的 fail-closed 測試另以完整 96 筆資料得到 exit 0；移除�
 
 ## 4. 最終 SHA 自動驗證
 
-主要命令如下；效能 raw artifact 保存在未提交的本機暫存目錄，未加入 Git：
+主要命令如下；已去除歷史私人暫存位置，以 TASK 變數表示。各變數由執行者指定新的本機 scratch／output 位置；這些是歷史命令的去識別化寫法，本次沒有重跑產品 build/test。warm JSONL 已保存至上述證據目錄，其餘原始 build/test log 維持本機保存。
 
 ```sh
 LUMAHARBOR_BRUSH_ABBA_BLOCKS=4 \
 LUMAHARBOR_BRUSH_ABBA_SCENARIOS=warm \
 LUMAHARBOR_BRUSH_ABBA_MASK_COUNTS='0 1 10' \
-LUMAHARBOR_BRUSH_ABBA_RUN_ROOT=/private/tmp/LumaHarborBrushABBAFormal-c425cb7 \
+LUMAHARBOR_BRUSH_ABBA_RUN_ROOT="$TASK_ABBA_ROOT" \
 Scripts/run-brush-performance-abba.sh
 
-swift test --scratch-path /private/tmp/LumaHarbor-F5-Debug-4e74bf3
-swift test -c release --scratch-path /private/tmp/LumaHarbor-F5-Release-4e74bf3
-CLANG_MODULE_CACHE_PATH=/private/tmp/LumaHarbor-F5-ClangCache-4e74bf3 \
-SWIFTPM_MODULECACHE_OVERRIDE=/private/tmp/LumaHarbor-F5-SwiftPMCache-4e74bf3 \
-swift build --scratch-path /private/tmp/LumaHarbor-F5-Strict-4e74bf3 \
+swift test --scratch-path "$TASK_DEBUG_SCRATCH"
+swift test -c release --scratch-path "$TASK_RELEASE_SCRATCH"
+CLANG_MODULE_CACHE_PATH="$TASK_CLANG_CACHE" \
+SWIFTPM_MODULECACHE_OVERRIDE="$TASK_SWIFTPM_CACHE" \
+swift build --scratch-path "$TASK_STRICT_SCRATCH" \
   -Xswiftc -strict-concurrency=complete
 
-LUMAHARBOR_SCRATCH_PATH=/private/tmp/LumaHarbor-F5-Mac-4e74bf3 \
+LUMAHARBOR_SCRATCH_PATH="$TASK_MAC_SCRATCH" \
 Scripts/build-app-bundle.sh release
 xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /private/tmp/LumaHarbor-F5-Sim-4e74bf3 \
+  -derivedDataPath "$TASK_SIM_DATA" \
   CODE_SIGNING_ALLOWED=NO build
 xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad \
   -destination 'generic/platform=iOS' \
-  -derivedDataPath /private/tmp/LumaHarbor-F5-Device-4e74bf3 \
+  -derivedDataPath "$TASK_DEVICE_DATA" \
   CODE_SIGNING_ALLOWED=NO build
 
 codesign --verify --deep --strict --verbose=2 build/LumaHarbor.app
 Scripts/verify-release-privacy.sh build/LumaHarbor.app
-LUMAHARBOR_RELEASE_DIR=/private/tmp/LumaHarbor-F5-Unpublished-4e74bf3 \
+LUMAHARBOR_RELEASE_DIR="$TASK_UNPUBLISHED_RELEASE" \
 Scripts/package-mac-release.sh release
 git diff a2cf222..HEAD --check
 ```
@@ -132,4 +137,4 @@ git diff a2cf222..HEAD --check
 
 跨垂直 tile 像素錯位、標準 Release testability、取消生命週期及 warm synthetic B/O 證據已修正並通過。由於真實 RAW、原尺寸 export/RSS、完整情境 ABBA、人工裝置與獨立審查仍缺，分支保持 `DONE_WITH_CONCERNS`，不標示整合 READY。
 
-下一個有界工作是提供私有 RAW fixture 環境後，在同一參考機器對 B/O 執行 0/1/10 masks 的真實 RAW preview，以及一／十 mask 原尺寸 export 與 peak RSS；接著再跑 cold、changed、appended、stress 正式矩陣。
+下一個有界工作是[後續計畫 Task 2](../../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：完整五情境 synthetic ABBA（480 records）。接著補 scheduler 取消／切圖與 RAW/export；RAW 環境變數未設定只表示該次未注入素材，不能推論本機沒有既有 fixture。

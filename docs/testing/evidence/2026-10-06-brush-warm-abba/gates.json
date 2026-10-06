@@ -1,0 +1,237 @@
+{
+  "gates": [
+    {
+      "candidateP50Seconds": 0.0022525415,
+      "candidateP95Seconds": 0.002392333,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.009260167,
+      "p95LimitSeconds": 0.014467125,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011524708500000001,
+      "deltaP95Seconds": 0.011729626,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0242014375,
+      "deltaP95Seconds": 0.025128375,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46776320,
+      "candidatePeakRSSBytes": 46727168,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66813952,
+      "candidatePeakRSSBytes": 52953088,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 85983232,
+      "candidatePeakRSSBytes": 109625344,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0021507085,
+      "candidateP95Seconds": 0.002451916,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.0092813125,
+      "p95LimitSeconds": 0.014510125,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011719083500000001,
+      "deltaP95Seconds": 0.011524667,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0243433125,
+      "deltaP95Seconds": 0.026844583999999998,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46759936,
+      "candidatePeakRSSBytes": 46727168,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66797568,
+      "candidatePeakRSSBytes": 52969472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 85983232,
+      "candidatePeakRSSBytes": 111640576,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "gate": "PERF-COVERAGE",
+      "reason": "production B/O harness exposes total preview wall time only",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "INTERACTIVE-150",
+      "reason": "real RAW workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-50-CANCEL",
+      "reason": "50-cycle workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-CANCEL",
+      "reason": "reported by the separate cancellation acceptance record",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-UI",
+      "reason": "requires device interaction evidence",
+      "result": "NOT RUN"
+    }
+  ],
+  "overallResult": "DONE_WITH_CONCERNS",
+  "recordCount": 96,
+  "sampleArtifact": "samples.jsonl",
+  "schemaVersion": 1,
+  "summaries": {
+    "warm-unchanged-production-preview/masks-0/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.0042601670000000005,
+      "p95Seconds": 0.004467125,
+      "peakRSSBytes": 46776320
+    },
+    "warm-unchanged-production-preview/masks-0/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.0022525415,
+      "p95Seconds": 0.002392333,
+      "peakRSSBytes": 46727168
+    },
+    "warm-unchanged-production-preview/masks-0/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0042813125,
+      "p95Seconds": 0.004510125,
+      "peakRSSBytes": 46759936
+    },
+    "warm-unchanged-production-preview/masks-0/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.0021507085,
+      "p95Seconds": 0.002451916,
+      "peakRSSBytes": 46727168
+    },
+    "warm-unchanged-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.031085104,
+      "p95Seconds": 0.032676917,
+      "peakRSSBytes": 66813952
+    },
+    "warm-unchanged-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.013777250000000001,
+      "p95Seconds": 0.014121959,
+      "peakRSSBytes": 52953088
+    },
+    "warm-unchanged-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0306437915,
+      "p95Seconds": 0.033169042,
+      "peakRSSBytes": 66797568
+    },
+    "warm-unchanged-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.013869792,
+      "p95Seconds": 0.013976583,
+      "peakRSSBytes": 52969472
+    },
+    "warm-unchanged-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.26816422900000003,
+      "p95Seconds": 0.270314417,
+      "peakRSSBytes": 85983232
+    },
+    "warm-unchanged-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.026453979,
+      "p95Seconds": 0.027520708,
+      "peakRSSBytes": 109625344
+    },
+    "warm-unchanged-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.2681982295,
+      "p95Seconds": 0.269158125,
+      "peakRSSBytes": 85983232
+    },
+    "warm-unchanged-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.026494021,
+      "p95Seconds": 0.0292965,
+      "peakRSSBytes": 111640576
+    }
+  },
+  "validation": "PASS",
+  "validationErrors": []
+}
