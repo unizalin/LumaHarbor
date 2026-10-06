@@ -3,8 +3,8 @@
 - 日期：2026-10-06
 - 識別：`LH-BRUSH-CORRECTNESS-FOLLOWUP-20261006`
 - 版本：1.1（實作後狀態與後續計畫更新）
-- 文件狀態：`IMPLEMENTED`（F1～F3）；F4 部分驗證，F5 自動回歸與文件已有證據，必要驗收尚未全數完成。
-- 產品狀態：`DONE_WITH_CONCERNS`。跨 tile 列位置與標準 Release 編譯已修正，取消生命週期與 warm synthetic ABBA 已驗；真實 RAW、完整效能矩陣、人工操作與獨立審查仍待完成。
+- 文件狀態：`IMPLEMENTED`（F1～F4 自動化切片）；F5 完整回歸與文件已有歷史證據，人工與獨立審查尚未全數完成。
+- 產品狀態：`DONE_WITH_CONCERNS`。跨 tile 列位置、標準 Release、取消生命週期、完整 synthetic ABBA、真實 RAW preview 與原尺寸 export/RSS 已驗；synthetic stress 四個 gate 與 warm RAW INTERACTIVE-150 三個 gate FAIL，公平 stage、人工操作與獨立審查仍待完成。
 
 ## 1. 目的、權威與範圍
 
@@ -24,7 +24,7 @@
 
 ## 2. 已核對基準與證據邊界
 
-目前版本：O／warm ABBA harness=`c425cb7fdc93442e915c13eee913bf175fc15758`；最終回歸／analyzer=`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`。下方 §2.1～2.3 保留 F0 起草時的基準與問題，不代表缺陷仍存在。現況以[驗收報告](../../testing/reports/2026-10-06-brush-raster-correctness-followup.md)為準，執行順序見[後續計畫](../plans/2026-10-06-brush-acceptance-completion.md)。
+目前版本：O／warm ABBA harness=`c425cb7fdc93442e915c13eee913bf175fc15758`；scheduler 修正=`2b3acc4dbab87d91684ef127608a873173fbf7e5`；Task 3 analyzer／artifact=`5170fb18d06b49415dc6b1c56bf9dca250c05abd`；真實 RAW／原尺寸 export harness／analyzer=`8bc6819cae1ead2225f265116bb6822d9ecf087c`。下方 §2.1～2.3 保留 F0 起草時的基準與問題，不代表缺陷仍存在。現況以[驗收報告](../../testing/reports/2026-10-06-brush-raster-correctness-followup.md)為準，執行順序見[後續計畫](../plans/2026-10-06-brush-acceptance-completion.md)。
 
 ### 2.1 Git 與執行位置
 
@@ -192,9 +192,9 @@ PIX、REL、CAN functional gates 通過後才計正式效能。B 是 §2.1 的 s
 
 ### 8.1 文件修正
 
-舊 report／handoff 加日期明確的更正區塊，保留原表與原命令歷史；指出 direct R8未驗、僅水平跨tile、counter-only取消、全域DEBUG define與empty RAW preview範圍。舊spec更新為已有候選實作、由本追補規格約束；本新 spec 已實作 F1～F3，後續狀態更新保留原驗收門檻。
+舊 report／handoff 加日期明確的更正區塊，保留原表與原命令歷史；指出 direct R8未驗、僅水平跨tile、counter-only取消、全域DEBUG define與empty RAW preview範圍。舊spec更新為已有候選實作、由本追補規格約束；本新 spec 已完成 F1～F4 的自動化切片，後續狀態更新保留原驗收門檻與實測 FAIL。
 
-最終新增 `docs/testing/reports/2026-10-06-brush-raster-correctness-followup.md` 與對應 handoff；每個下列階段填 PASS／FAIL／SKIPPED／NOT RUN，附完整產品 SHA、exact command、exit、executed/skipped/failures、raw artifact與未完成原因。F0 時 CURRENT 的下一步為 PIX-01 失敗測試；該階段已完成，目前下一步依後續計畫 Task 2 執行完整 synthetic ABBA。歷史PASS不代表最終O沿用通過，產品變更後重驗受影響gate。
+最終新增 `docs/testing/reports/2026-10-06-brush-raster-correctness-followup.md` 與對應 handoff；每個下列階段填 PASS／FAIL／SKIPPED／NOT RUN，附完整產品 SHA、exact command、exit、executed/skipped/failures、raw artifact與未完成原因。F0～F4 已完成，目前下一步依後續計畫 Task 5 進行非原作者審查與人工項目。歷史PASS不代表最終O沿用通過，產品變更後重驗受影響gate。
 
 ### 8.2 任務順序與目標檔案
 
@@ -232,7 +232,7 @@ LUMAHARBOR_RELEASE_DIR="$TASK_UNPUBLISHED_RELEASE" Scripts/package-mac-release.s
 git diff --check
 ```
 
-F4須擴充既有script與操作說明，提供上述B/O配對、原尺寸、取消/RSS的可重現入口；單獨執行舊O-only script不能宣稱完整驗收。RAW環境由`LUMAHARBOR_RAW_FIXTURE_DIR`私有注入，optional reference export的skip與required RAW執行結果分開。封裝先核對既有bundle，避免刪除來源不明產物；使用新的未發布輸出目錄，驗checksum與ZIP解壓內容，簽署設定無差異。
+F4 已以 synthetic ABBA、scheduler/cancellation 與 RAW/export 三組版本化 artifact 提供 B/O 配對、原尺寸、取消/RSS的可重現入口；單獨執行舊O-only script不能宣稱完整驗收。各 artifact 只保存適用欄位，跨 artifact 的聯集涵蓋 §7.4 metadata；不可用的 stage 欄位使用 null 加原因，不填 0。RAW環境由`LUMAHARBOR_RAW_FIXTURE_DIR`私有注入，optional reference export的skip與required RAW執行結果分開。封裝先核對既有bundle，避免刪除來源不明產物；使用新的未發布輸出目錄，驗checksum與ZIP解壓內容，簽署設定無差異。
 
 - **此追補的程式修正通過**：PIX-A～E、REL、CAN-A～E、必要資料／recipe回歸與標準Release／Debug測試均有最終SHA證據；所有效能／memory gates逐項完成，必要build/RAW/privacy通過，獨立審查無未處理阻擋finding。
 - **整合READY**：在上述基礎上，完成前輪Mac／Simulator／實體iPad基本操作、適用輸入、灰卡與所有原必需gate；任何必要FAIL／NOT RUN仍為DONE_WITH_CONCERNS，不以文件完成冒充產品完成。
@@ -243,4 +243,4 @@ F4須擴充既有script與操作說明，提供上述B/O配對、原尺寸、取
 
 保持B與U可追溯，產品／測試與文件以可審查commit分離。若出現像素、資料或取消回歸，停止採用該候選；回退應另開可審查修正，保留使用者sidecar與已保存brush資料，不做hard reset或降schema。U含已知row defect，不能直接回退至U就稱為安全發布版本。
 
-下一個有界動作：依[後續計畫 Task 2](../plans/2026-10-06-brush-acceptance-completion.md)，執行 cold／warm／changed／appended／stress 的完整 synthetic B/O ABBA，核對 480 筆資料與逐 gate 結果。此步不依賴私人 RAW 或實體裝置；其後補 scheduler、RAW/export 與人工驗收。
+下一個有界動作：依[後續計畫 Task 5](../plans/2026-10-06-brush-acceptance-completion.md)，安排非原作者唯讀審查 B→O 的像素、allocation、取消、recipe isolation、benchmark 公平性與 fail-closed；再依設備可用性分列 Mac／實體 iPad、heartbeat、輸入與灰卡人工項目。已知 synthetic stress 與 warm RAW FAIL 必須保留，不能由 export/RSS PASS 覆蓋。

@@ -11,7 +11,7 @@
 ## 範圍與基準
 
 - 本計畫是[追補 spec](../specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md) §7～9 的剩餘工作，不重做已通過的 F1～F3。
-- 日期：2026-10-06；Task 1～3 已完成，Task 4～6 尚未執行。
+- 日期：2026-10-06；Task 1～4 已完成，Task 5～6 尚未執行。
 - Writer：Codex；延續已授權候選 `codex/brush-performance-acceptance-repair`，單一 writer。
 - 起始 HEAD：`2fdc2562be099490068456074defbd4c2907e276`；起始工作樹乾淨。
 - B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
@@ -106,20 +106,20 @@ LUMAHARBOR_BRUSH_PERF_SAMPLES=8 Scripts/run-brush-performance-acceptance.sh
 
 **Interfaces:** RAW 只由 `LUMAHARBOR_RAW_FIXTURE_DIR` 私有注入；preview 走 `CoreImagePreviewRenderer`，export 走 `PhotoExporter`；沿用相同 seed、recipe、B/O workload 與 sample metadata。
 
-- [ ] 先檢查先前已授權的 fixture 位置或本機設定；環境變數未設定不代表檔案不存在。若仍找不到，再請使用者提供目錄；不公開列印檔名與 hash。
-- [ ] 有 fixture 後跑既有 RawFixtureTests，將 required fixture 與 optional reference skip 分列。
+- [x] 先檢查先前已授權的 fixture 位置或本機設定；找到既有私有 fixture，公開輸出未列檔名、路徑或來源 digest。
+- [x] 有 fixture 後跑既有 RawFixtureTests；10 executed、1 optional reference skip、0 failures，required RAW case 全部通過。
 
 ```sh
 swift test --scratch-path "$TASK_DEBUG_SCRATCH" --filter RawFixtureTests
 ```
 
-- [ ] 先新增缺 fixture 不會誤標 PASS、原尺寸不被縮小、encode/close/publish 未結束不會停表的失敗測試；再補 preview/export benchmark 入口與相應 schema。現有 synthetic runner 尚不能宣稱支援 RAW/export，操作命令須隨該切片提供。
-- [ ] RAW preview 測 0/1/10 masks、cold/warm/changed；每輪 B/O 各至少 8 samples。記 native/decoded/output 尺寸，warm 絕對 p50/p95 均 ≤150 ms 才通過該情境。
-- [ ] 24MP synthetic 加真實 RAW 原尺寸 export；每輪 B/O 一／十 masks 各至少三次，新目的檔；time 含 encode、close、atomic publish，逐程序 peak RSS 含所有 worker。
-- [ ] export median 比 B 改善 ≥50%；若 B 已 ≤5／15秒，O 必須維持 absolute budget 且回歸 ≤5%。export RSS ≤B，24MP 同時 ≤768 MiB；preview RSS ≤B+32 MiB。
-- [ ] 保存去識別化 evidence 與來源檔未變的私有驗證結果，不提交原圖或私人識別資訊。
+- [x] 先新增缺 fixture 不會誤標 PASS、原尺寸不被縮小、encode/close/publish 未結束不會停表的失敗測試；再補 preview/export benchmark、exact allowlist analyzer、schema 與 runner。Analyzer 8/8、Release 計時邊界 1/1 PASS。
+- [x] RAW preview 測 0/1/10 masks、cold/warm/changed；每輪 B/O 各 8 samples。144 筆完整，native/decoded/output 已記錄；warm 三個 INTERACTIVE-150 gate 均 FAIL，原樣保存。
+- [x] 24MP synthetic 加真實 RAW 原尺寸 export；每輪 B/O 一／十 masks 各 4 次，新目的檔；time 含 export return、publish 與 reopen 驗證，逐程序 peak RSS 含所有 worker。
+- [x] PERF-EXPORT 4/4 PASS、PERF-MEM-EXPORT 4/4 PASS、PERF-MEM-PREVIEW 9/9 PASS；B 四組 export 已在 absolute budget 內，因此依 ≤5% regression 規則判定。
+- [x] 保存去識別化 evidence 與來源檔未變的私有驗證結果；176 筆全為 nominal、來源前後完整 digest 一致，公開 artifact privacy scan PASS。
 
-**完成條件:** synthetic／RAW、preview／export 各自判定，不能用取消測試代替完整 export 效能。缺素材不阻擋 Task 2、3、5 的可執行部分。
+**完成結果:** `8bc6819` 提供正式入口與 fail-closed analyzer；176 筆矩陣 validation PASS、17 gates PASS、3 gates FAIL，整體維持 `DONE_WITH_CONCERNS`。證據見[真實 RAW／原尺寸 export evidence](../../testing/evidence/2026-10-06-brush-raw-export/README.md)。
 
 ## Task 5：非原作者審查與人工操作
 
@@ -143,4 +143,4 @@ swift test --scratch-path "$TASK_DEBUG_SCRATCH" --filter RawFixtureTests
 
 ## 執行順序與狀態
 
-Task 1～3 已完成；**Task 4 是下一個有界工作**。Task 2 找出的 stress preview 效能 FAIL 仍保留；Task 3 已完成 scheduler／worker／RSS／取消證據，但公平的 B/O stage coverage 因缺共同互斥 wall-time 入口而維持 NOT RUN。Task 4 接著補真實 RAW 與原尺寸 export/RSS；素材可用性可以提早查核，但量測不可彼此並行。Task 5 的程式碼審查可在候選穩定後進行，人工操作待設備可用；最後 Task 6 收尾。
+Task 1～4 已完成；**Task 5 是下一個有界工作**。Task 2 的 stress preview 四個 FAIL 與 Task 4 的 warm RAW 三個 INTERACTIVE-150 FAIL 都保留；Task 3 的公平 B/O stage coverage 因缺共同互斥 wall-time 入口而維持 NOT RUN。接著安排非原作者唯讀審查，並把 Mac／實體 iPad／heartbeat／灰卡等人工項目依設備可用性分列；最後 Task 6 收尾。
