@@ -1,0 +1,997 @@
+{
+  "gates": [
+    {
+      "candidateP50Seconds": 0.005178354,
+      "candidateP95Seconds": 0.005476917,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.010589478999999999,
+      "p95LimitSeconds": 0.017450958,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011738271000000002,
+      "deltaP95Seconds": 0.011631625,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.024510729499999998,
+      "deltaP95Seconds": 0.025895916,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46727168,
+      "candidatePeakRSSBytes": 46694400,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66224128,
+      "candidatePeakRSSBytes": 52592640,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 85786624,
+      "candidatePeakRSSBytes": 98844672,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0051740625,
+      "candidateP95Seconds": 0.005231375,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.010662562,
+      "p95LimitSeconds": 0.015764625,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011649541499999999,
+      "deltaP95Seconds": 0.012102417,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0262551045,
+      "deltaP95Seconds": 0.033850041,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46776320,
+      "candidatePeakRSSBytes": 46694400,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66256896,
+      "candidatePeakRSSBytes": 52723712,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 89653248,
+      "candidatePeakRSSBytes": 99844096,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "cold-first-open-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.002613625,
+      "candidateP95Seconds": 0.003353041,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.009368771000000001,
+      "p95LimitSeconds": 0.014643125,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011482417,
+      "deltaP95Seconds": 0.011539292999999999,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0243128335,
+      "deltaP95Seconds": 0.027783542999999997,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 47087616,
+      "candidatePeakRSSBytes": 47185920,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66895872,
+      "candidatePeakRSSBytes": 53248000,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86310912,
+      "candidatePeakRSSBytes": 107528192,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0025466875,
+      "candidateP95Seconds": 0.002741334,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.009444603999999999,
+      "p95LimitSeconds": 0.016369083,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0116665625,
+      "deltaP95Seconds": 0.011831041,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0244754165,
+      "deltaP95Seconds": 0.030423207,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 47382528,
+      "candidatePeakRSSBytes": 47087616,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66895872,
+      "candidatePeakRSSBytes": 53067776,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86016000,
+      "candidatePeakRSSBytes": 109412352,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "parameter-changed-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0022707495,
+      "candidateP95Seconds": 0.002859375,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.0094665,
+      "p95LimitSeconds": 0.015648333,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0826764585,
+      "deltaP95Seconds": 0.08294820900000001,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "FAIL",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.13492525049999998,
+      "deltaP95Seconds": 0.13591375,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "FAIL",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 47464448,
+      "candidatePeakRSSBytes": 47136768,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 67010560,
+      "candidatePeakRSSBytes": 53215232,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 87818240,
+      "candidatePeakRSSBytes": 111575040,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0022530835,
+      "candidateP95Seconds": 0.002657125,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.009668187500000001,
+      "p95LimitSeconds": 0.01621825,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0815963955,
+      "deltaP95Seconds": 0.081460083,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "FAIL",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.13532072850000001,
+      "deltaP95Seconds": 0.18572487499999998,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "FAIL",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 47316992,
+      "candidatePeakRSSBytes": 47104000,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66977792,
+      "candidatePeakRSSBytes": 53215232,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 90095616,
+      "candidatePeakRSSBytes": 112066560,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0022513125,
+      "candidateP95Seconds": 0.002292667,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.0092783125,
+      "p95LimitSeconds": 0.017637,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.012364021000000001,
+      "deltaP95Seconds": 0.012513708,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.024327083,
+      "deltaP95Seconds": 0.027868790999999997,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 47087616,
+      "candidatePeakRSSBytes": 46825472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66846720,
+      "candidatePeakRSSBytes": 53084160,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86032384,
+      "candidatePeakRSSBytes": 111607808,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.002258396,
+      "candidateP95Seconds": 0.002520458,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.0092552085,
+      "p95LimitSeconds": 0.014387,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.012329604000000001,
+      "deltaP95Seconds": 0.012282709000000001,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.02482175,
+      "deltaP95Seconds": 0.029567832999999998,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46891008,
+      "candidatePeakRSSBytes": 46825472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66863104,
+      "candidatePeakRSSBytes": 53067776,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 87605248,
+      "candidatePeakRSSBytes": 109281280,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stroke-appended-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.0020762705,
+      "candidateP95Seconds": 0.002336791,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.0091316875,
+      "p95LimitSeconds": 0.014315875,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011790354500000001,
+      "deltaP95Seconds": 0.011866667000000001,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.024238958499999998,
+      "deltaP95Seconds": 0.026959583999999998,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46891008,
+      "candidatePeakRSSBytes": 46825472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66863104,
+      "candidatePeakRSSBytes": 52985856,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 87506944,
+      "candidatePeakRSSBytes": 115441664,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "candidateP50Seconds": 0.001860646,
+      "candidateP95Seconds": 0.002292666,
+      "gate": "PERF-EMPTY",
+      "p50LimitSeconds": 0.009249896,
+      "p95LimitSeconds": 0.020676458,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.011933416499999999,
+      "deltaP95Seconds": 0.011788416999999999,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.03,
+      "p95BudgetSeconds": 0.06,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "deltaP50Seconds": 0.0245431245,
+      "deltaP95Seconds": 0.027210376,
+      "gate": "PERF-PREVIEW",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.1,
+      "p95BudgetSeconds": 0.15,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 46923776,
+      "candidatePeakRSSBytes": 46825472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66846720,
+      "candidatePeakRSSBytes": 53215232,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 85983232,
+      "candidatePeakRSSBytes": 109740032,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "warm-unchanged-production-preview"
+    },
+    {
+      "gate": "PERF-COVERAGE",
+      "reason": "production B/O harness exposes total preview wall time only",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "INTERACTIVE-150",
+      "reason": "real RAW workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-50-CANCEL",
+      "reason": "50-cycle workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-CANCEL",
+      "reason": "reported by the separate cancellation acceptance record",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-UI",
+      "reason": "requires device interaction evidence",
+      "result": "NOT RUN"
+    }
+  ],
+  "overallResult": "DONE_WITH_CONCERNS",
+  "recordCount": 480,
+  "sampleArtifact": "samples.jsonl",
+  "schemaVersion": 1,
+  "summaries": {
+    "cold-first-open-production-preview/masks-0/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.005589479,
+      "p95Seconds": 0.007450958,
+      "peakRSSBytes": 46727168
+    },
+    "cold-first-open-production-preview/masks-0/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.005178354,
+      "p95Seconds": 0.005476917,
+      "peakRSSBytes": 46694400
+    },
+    "cold-first-open-production-preview/masks-0/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0056625619999999995,
+      "p95Seconds": 0.005764625,
+      "peakRSSBytes": 46776320
+    },
+    "cold-first-open-production-preview/masks-0/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.0051740625,
+      "p95Seconds": 0.005231375,
+      "peakRSSBytes": 46694400
+    },
+    "cold-first-open-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.033138020500000004,
+      "p95Seconds": 0.036111291,
+      "peakRSSBytes": 66224128
+    },
+    "cold-first-open-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.016916625,
+      "p95Seconds": 0.017108542,
+      "peakRSSBytes": 52592640
+    },
+    "cold-first-open-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0326761665,
+      "p95Seconds": 0.033324583,
+      "peakRSSBytes": 66256896
+    },
+    "cold-first-open-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.016823604,
+      "p95Seconds": 0.017333792,
+      "peakRSSBytes": 52723712
+    },
+    "cold-first-open-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.27424187499999997,
+      "p95Seconds": 0.276184625,
+      "peakRSSBytes": 85786624
+    },
+    "cold-first-open-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.029689083499999998,
+      "p95Seconds": 0.031372833,
+      "peakRSSBytes": 98844672
+    },
+    "cold-first-open-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.278784104,
+      "p95Seconds": 0.396797667,
+      "peakRSSBytes": 89653248
+    },
+    "cold-first-open-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.031429167,
+      "p95Seconds": 0.039081416,
+      "peakRSSBytes": 99844096
+    },
+    "parameter-changed-production-preview/masks-0/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.0043687710000000005,
+      "p95Seconds": 0.004643125,
+      "peakRSSBytes": 47087616
+    },
+    "parameter-changed-production-preview/masks-0/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.002613625,
+      "p95Seconds": 0.003353041,
+      "peakRSSBytes": 47185920
+    },
+    "parameter-changed-production-preview/masks-0/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.004444604,
+      "p95Seconds": 0.006369083,
+      "peakRSSBytes": 47382528
+    },
+    "parameter-changed-production-preview/masks-0/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.0025466875,
+      "p95Seconds": 0.002741334,
+      "peakRSSBytes": 47087616
+    },
+    "parameter-changed-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.031556062499999996,
+      "p95Seconds": 0.033820667,
+      "peakRSSBytes": 66895872
+    },
+    "parameter-changed-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.014096042,
+      "p95Seconds": 0.014892334,
+      "peakRSSBytes": 53248000
+    },
+    "parameter-changed-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.030771667,
+      "p95Seconds": 0.035120416,
+      "peakRSSBytes": 66895872
+    },
+    "parameter-changed-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.01421325,
+      "p95Seconds": 0.014572375,
+      "peakRSSBytes": 53067776
+    },
+    "parameter-changed-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.2727411255,
+      "p95Seconds": 0.314477167,
+      "peakRSSBytes": 86310912
+    },
+    "parameter-changed-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.0269264585,
+      "p95Seconds": 0.031136584,
+      "peakRSSBytes": 107528192
+    },
+    "parameter-changed-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.272811771,
+      "p95Seconds": 0.308556208,
+      "peakRSSBytes": 86016000
+    },
+    "parameter-changed-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.027022103999999998,
+      "p95Seconds": 0.033164541,
+      "peakRSSBytes": 109412352
+    },
+    "stress-vectors-production-preview/masks-0/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.0044665,
+      "p95Seconds": 0.005648333,
+      "peakRSSBytes": 47464448
+    },
+    "stress-vectors-production-preview/masks-0/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.0022707495,
+      "p95Seconds": 0.002859375,
+      "peakRSSBytes": 47136768
+    },
+    "stress-vectors-production-preview/masks-0/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0046681875000000005,
+      "p95Seconds": 0.00621825,
+      "peakRSSBytes": 47316992
+    },
+    "stress-vectors-production-preview/masks-0/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.0022530835,
+      "p95Seconds": 0.002657125,
+      "peakRSSBytes": 47104000
+    },
+    "stress-vectors-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.179300563,
+      "p95Seconds": 0.182424333,
+      "peakRSSBytes": 67010560
+    },
+    "stress-vectors-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.084947208,
+      "p95Seconds": 0.085807584,
+      "peakRSSBytes": 53215232
+    },
+    "stress-vectors-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.180778771,
+      "p95Seconds": 0.184581666,
+      "peakRSSBytes": 66977792
+    },
+    "stress-vectors-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.083849479,
+      "p95Seconds": 0.084117208,
+      "peakRSSBytes": 53215232
+    },
+    "stress-vectors-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 1.755068396,
+      "p95Seconds": 1.784071167,
+      "peakRSSBytes": 87818240
+    },
+    "stress-vectors-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.13719599999999998,
+      "p95Seconds": 0.138773125,
+      "peakRSSBytes": 111575040
+    },
+    "stress-vectors-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 1.7899372705,
+      "p95Seconds": 1.982007125,
+      "peakRSSBytes": 90095616
+    },
+    "stress-vectors-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.13757381200000002,
+      "p95Seconds": 0.188382,
+      "peakRSSBytes": 112066560
+    },
+    "stroke-appended-production-preview/masks-0/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.0042783125,
+      "p95Seconds": 0.007637,
+      "peakRSSBytes": 47087616
+    },
+    "stroke-appended-production-preview/masks-0/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.0022513125,
+      "p95Seconds": 0.002292667,
+      "peakRSSBytes": 46825472
+    },
+    "stroke-appended-production-preview/masks-0/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0042552085,
+      "p95Seconds": 0.004387,
+      "peakRSSBytes": 46891008
+    },
+    "stroke-appended-production-preview/masks-0/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.002258396,
+      "p95Seconds": 0.002520458,
+      "peakRSSBytes": 46825472
+    },
+    "stroke-appended-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.032506166,
+      "p95Seconds": 0.032816542,
+      "peakRSSBytes": 66846720
+    },
+    "stroke-appended-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.014615333500000001,
+      "p95Seconds": 0.014806375,
+      "peakRSSBytes": 53084160
+    },
+    "stroke-appended-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.032913021,
+      "p95Seconds": 0.036230042,
+      "peakRSSBytes": 66863104
+    },
+    "stroke-appended-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.014588,
+      "p95Seconds": 0.014803167,
+      "peakRSSBytes": 53067776
+    },
+    "stroke-appended-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.27041237549999997,
+      "p95Seconds": 0.272566875,
+      "peakRSSBytes": 86032384
+    },
+    "stroke-appended-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.026578395499999997,
+      "p95Seconds": 0.030161458,
+      "peakRSSBytes": 111607808
+    },
+    "stroke-appended-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.274203437,
+      "p95Seconds": 0.280774541,
+      "peakRSSBytes": 87605248
+    },
+    "stroke-appended-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.027080146,
+      "p95Seconds": 0.032088291,
+      "peakRSSBytes": 109281280
+    },
+    "warm-unchanged-production-preview/masks-0/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.0041316875,
+      "p95Seconds": 0.004315875,
+      "peakRSSBytes": 46891008
+    },
+    "warm-unchanged-production-preview/masks-0/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.0020762705,
+      "p95Seconds": 0.002336791,
+      "peakRSSBytes": 46825472
+    },
+    "warm-unchanged-production-preview/masks-0/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.0042498959999999995,
+      "p95Seconds": 0.010676458,
+      "peakRSSBytes": 46923776
+    },
+    "warm-unchanged-production-preview/masks-0/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.001860646,
+      "p95Seconds": 0.002292666,
+      "peakRSSBytes": 46825472
+    },
+    "warm-unchanged-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.030812375,
+      "p95Seconds": 0.034179666,
+      "peakRSSBytes": 66863104
+    },
+    "warm-unchanged-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.013866625,
+      "p95Seconds": 0.014203458,
+      "peakRSSBytes": 52985856
+    },
+    "warm-unchanged-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.031670437499999995,
+      "p95Seconds": 0.038741333,
+      "peakRSSBytes": 66846720
+    },
+    "warm-unchanged-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.013794062499999999,
+      "p95Seconds": 0.014081083,
+      "peakRSSBytes": 53215232
+    },
+    "warm-unchanged-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.2714009165,
+      "p95Seconds": 0.305442125,
+      "peakRSSBytes": 87506944
+    },
+    "warm-unchanged-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.026315229,
+      "p95Seconds": 0.029296375,
+      "peakRSSBytes": 115441664
+    },
+    "warm-unchanged-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.2709705,
+      "p95Seconds": 0.27449125,
+      "peakRSSBytes": 85983232
+    },
+    "warm-unchanged-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.0264037705,
+      "p95Seconds": 0.029503042,
+      "peakRSSBytes": 109740032
+    }
+  },
+  "validation": "PASS",
+  "validationErrors": []
+}

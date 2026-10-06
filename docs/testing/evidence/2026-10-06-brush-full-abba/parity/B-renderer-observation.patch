@@ -1,0 +1,52 @@
+--- a/Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift
++++ b/Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift
+@@ -88,0 +89,49 @@
++    }
++
++    internal static func _testRenderCoverageBytes(
++        _ mask: BrushMask,
++        imageExtent: CGRect,
++        mapping: BrushCoordinateMapping
++    ) throws -> Data {
++        let width = Int(imageExtent.width.rounded(.up))
++        let height = Int(imageExtent.height.rounded(.up))
++        guard width > 0, height > 0 else { return Data() }
++        var alpha = [CGFloat](repeating: 0, count: width * height)
++        let shortSide = min(imageExtent.width, imageExtent.height)
++        for stroke in mask.strokes {
++            let points = try stroke.validated().points
++            guard !points.isEmpty, stroke.flow > 0 else { continue }
++            let samples = try sample(points: points, stroke: stroke, mapping: mapping)
++            for point in samples {
++                let feather = min(max(CGFloat(stroke.feather), 0), 1)
++                // Feather is a visible falloff band; give it room outside the
++                // hard core so a soft brush still affects the boundary pixels.
++                let radius = max(CGFloat(stroke.size) * shortSide / 2 * (1 + feather), 0.5)
++                // A zero-feather brush is a filled disk. Feather reserves a
++                // falloff band outside that disk while preserving the flow
++                // value throughout the hard core.
++                let innerRadius = radius * (1 - feather)
++                let visualY = imageExtent.maxY - (point.y - imageExtent.minY)
++                let minX = max(0, Int(floor(point.x - radius - imageExtent.minX - 1)))
++                let maxX = min(width - 1, Int(ceil(point.x + radius - imageExtent.minX + 1)))
++                let minY = max(0, Int(floor(visualY - radius - imageExtent.minY - 1)))
++                let maxY = min(height - 1, Int(ceil(visualY + radius - imageExtent.minY + 1)))
++                for y in minY...maxY { for x in minX...maxX {
++                    let world = CGPoint(x: imageExtent.minX + CGFloat(x) + 0.5, y: imageExtent.minY + CGFloat(y) + 0.5)
++                    let distance = hypot(world.x - point.x, world.y - visualY)
++                    let opacity = distance <= innerRadius ? CGFloat(stroke.flow) : (distance < radius ? CGFloat(stroke.flow) * (1 - (distance - innerRadius) / max(radius - innerRadius, 0.0001)) : 0)
++                    guard opacity > 0 else { continue }
++                    let index = y * width + x
++                    alpha[index] = stroke.mode == .paint ? 1 - (1 - alpha[index]) * (1 - opacity) : alpha[index] * (1 - opacity)
++                }}
++            }
++        }
++        // CIImage bitmap rows are top-down for R8; the coverage array uses
++        // Core Image's y-up pixel rows, so flip exactly once here.
++        let bytes = (0..<height).flatMap { row in
++            let sourceRow = height - 1 - row
++            return (0..<width).map { x in
++                UInt8((min(max(alpha[sourceRow * width + x], 0), 1) * 255).rounded())
++            }
++        }
++        return Data(bytes)

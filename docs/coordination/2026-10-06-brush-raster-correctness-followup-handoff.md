@@ -8,6 +8,7 @@
 - Scalar baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`
 - 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
 - ABBA 產品 O／harness SHA：`c425cb7fdc93442e915c13eee913bf175fc15758`
+- 完整五情境 benchmark／parity SHA：`a4278c15606ed6e79d414fcf646acb37c30b223f`；只修改 test harness，產品 renderer 等同 `4e74bf3`。
 - 文件更新起始 HEAD：`2fdc2562be099490068456074defbd4c2907e276`；本次純文件／證據提交不改產品基準（D-003）。
 - Owner：Codex，延續既有候選的單一 writer；起始 dirty files 為零。
 - 本機 main 基準：`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`；起始 ahead 34、behind 0，無 upstream，未查遠端。
@@ -24,6 +25,7 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 - Mac Release app、generic iOS Simulator、generic iOS device build PASS。
 - Mac app codesign、release privacy、未發布 ZIP 與 checksum PASS；notarization skipped。
 - warm synthetic B/O ABBA 共 96 records，兩輪 empty／1 mask／10 masks preview 與 preview RSS gates PASS，validation PASS。
+- 完整五情境正式 ABBA 480 records validation PASS：56 gates PASS、4 FAIL、7 NOT RUN；四個 FAIL 均為 stress preview 延遲。18 preview 與 66 direct R8 B/O 最大 byte error 0。
 - preview cancellation p95 0.080 ms、24MP export cancellation p95 0.309 ms；50-cycle direct renderer 診斷 workers 55/55、active 0，settled RSS 增加 16 KiB。
 - 完整測試數字、ABBA 表格與 gate 邊界見[驗收報告](../testing/reports/2026-10-06-brush-raster-correctness-followup.md)。規格見[追補規格](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)。
 
@@ -32,7 +34,7 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 - 最終 SHA 的 `RawFixtureTests`：環境沒有私有 RAW fixture 變數。
 - 真實 RAW 0/1/10 masks production preview 與 INTERACTIVE-150。
 - B/O 原尺寸真實 RAW export、peak RSS、正式 PERF-EXPORT／PERF-MEM-EXPORT。
-- cold、changed、stroke appended、stress 的正式 ABBA 樣本。
+- stress preview 效能修正：一 mask 約 81 ms，十 masks 約 133 ms 的 p50 增量超標；其餘四情境通過。
 - B/O coverage-stage gate、完整 scheduler 50 次切圖 gate、GUI heartbeat。
 - Mac 與實體 iPad／Pencil 操作、輸入矩陣、灰卡與獨立 reviewer。
 
@@ -43,7 +45,9 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 - 更新 spec 狀態、report 的完整版本對應、CURRENT 與本交接。
 - 新增 `docs/superpowers/plans/2026-10-06-brush-acceptance-completion.md`。
 - 新增 `docs/testing/evidence/2026-10-06-brush-warm-abba/samples.jsonl`、`gates.json`、`README.md`；96 筆既有樣本原樣保存，重算 exit 0、validation PASS、overall DONE_WITH_CONCERNS。
-- 本次未重跑產品測試；文件連結、差異格式、樣本數、checksum、隱私 allowlist 與重算一致性是本次驗證範圍。
+- `a4278c1` 新增 changed neutral-control 契約測試；RED 1 test／16 assertions failure，GREEN 2 tests／1 skipped／0 failures。
+- 新增 `Scripts/run-brush-output-parity.py` 與完整 ABBA evidence；第一次與修正後各 480 筆均保留，正式矩陣 56 PASS／4 FAIL／7 NOT RUN，pixel parity 84/84 PASS。
+- 本次未重跑完整產品 regression suites；Task 2 另執行 Release focused harness、完整 synthetic ABBA 與 untimed parity capture。文件連結、差異格式、樣本數、checksum、隱私 allowlist 與 gate 重算一致性也已核對。
 - 原始 build/test log 與取消延遲診斷仍屬先前本機證據；沒有新的獨立覆核。
 
 ## Dirty files
@@ -52,8 +56,8 @@ Sol 完成四個實作切片：`29718d2` 修正全圖 row mapping、`bc89693` �
 
 ## 下一個有界動作
 
-執行[後續計畫 Task 2](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：在同一參考機器完成 cold／warm／changed／appended／stress、0/1/10 masks 的 synthetic B/O ABBA，核對 480 records 與逐 gate 結果，保存去識別化證據。
+執行[後續計畫 Task 3](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：補 B/O stage coverage 與完整 PreviewScheduler 50-cycle 取消／切圖，核對 started/finished workers、stale result、settled RSS 與 cancellation p95。
 
-此步不需私人 RAW 或實體裝置。接著 Task 3 補完整 scheduler 50-cycle 與 coverage-stage，Task 4 補 RAW/export，Task 5 安排非原作者審查與人工裝置，Task 6 最終回歸。先查核既有已授權 RAW 素材位置；找不到再索取目錄，不能由環境變數未設定推論素材不存在。
+此步不需私人 RAW 或實體裝置。完成 stage 證據後，另立最小效能修正；Task 4 再補 RAW/export，Task 5 安排非原作者審查與人工裝置，Task 6 最終回歸。
 
 維持 `DONE_WITH_CONCERNS`。禁止未授權的 push、merge、rebase、破壞性清理與覆寫其他工作樹。下一步使用 `executing-plans` 執行、`verification-before-completion` 核對結果。

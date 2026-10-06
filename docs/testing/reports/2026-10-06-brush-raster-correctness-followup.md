@@ -12,6 +12,7 @@
 - 追補規格：`a2cf22266828f16a68d857df92c3a6c2c2cbf654`
 - 最終回歸／analyzer SHA：`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`
 - ABBA 產品 O／harness SHA：`c425cb7fdc93442e915c13eee913bf175fc15758`；後者到最終回歸版本只修改 analyzer，未改 renderer。
+- 完整五情境 ABBA／parity SHA：`a4278c15606ed6e79d414fcf646acb37c30b223f`；此 commit 只修正 changed benchmark 的 neutral 0-mask control 並新增契約測試，產品 renderer 與 `4e74bf3` 相同。
 - 狀態沒有提升為 READY：必要的真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer gate 尚未全部執行。
 
 ## 2. 實作結果
@@ -23,6 +24,7 @@
 | F3 取消生命週期 | `1ded16a` | PASS | 新增 per-invocation stage/worker observer、validation/sampling cooperative cancellation、preview/export 注入點與真正父 Task 取消測試。 |
 | F4 可重現證據 | `c425cb7` | PARTIAL PASS | 新增 B/O ABBA runner、schema、baseline testability patch、取消延遲及記憶體診斷；正式 warm synthetic ABBA 通過，其他必要情境仍有 NOT RUN。 |
 | F4 證據完整性 | `4e74bf3` | PASS | analyzer 改為拒絕缺 mandatory 欄位、unexpected 欄位、錯誤 order/round/maskCount，以及不一致的 harness、instrumentation 或 product SHA。 |
+| F4 完整 synthetic matrix | `a4278c1` | PARTIAL PASS | 五情境 480 records validation PASS；pixel parity PASS，cold/warm/changed/appended 通過，stress preview 延遲四個 gate FAIL。 |
 
 F1 的 RED 是實際像素 assertion failure：U 上兩個案例分別有 61,680 與 66,049 bytes 差異。修正後 focused matrix 19/19 PASS。這不是編譯失敗或 sync/async 互相比對。
 
@@ -60,9 +62,23 @@ F3 已涵蓋 sync raster、async conversion、三個 active masks 且至少兩�
 
 analyzer 的 fail-closed 測試另以完整 96 筆資料得到 exit 0；移除一個 mandatory 欄位後得到 exit 1、validation `FAIL`，僅接受 95 筆資料。
 
-## 4. 最終 SHA 自動驗證
+## 4. 完整五情境 ABBA 與像素核對
 
-主要命令如下；已去除歷史私人暫存位置，以 TASK 變數表示。各變數由執行者指定新的本機 scratch／output 位置；這些是歷史命令的去識別化寫法，本次沒有重跑產品 build/test。warm JSONL 已保存至上述證據目錄，其餘原始 build/test log 維持本機保存。
+完整證據、checksum 與重算結果見[full ABBA evidence](../evidence/2026-10-06-brush-full-abba/README.md)。第一次 480 筆矩陣找出 changed 的 0-mask 對照也套用 ±0.05 exposure；該資料保留為診斷，不用於正式 changed 判定。新增契約測試先在原 harness 出現 16 assertions failure，修正後 Release focused suite 2 executed、1 skipped、0 failures。
+
+修正後正式矩陣以 `a4278c15606ed6e79d414fcf646acb37c30b223f` 執行 480 筆，兩輪順序、B/O sample ordinal、1600×1067 輸出與 metadata 一致；所有 sample thermal state 為 nominal。analyzer exit 0、validation PASS，結果為 56 PASS、4 FAIL、7 NOT RUN：
+
+- PERF-EMPTY 10/10 PASS；PERF-MEM-PREVIEW 30/30 PASS。
+- PERF-PREVIEW 16/20 PASS；cold、warm、changed、appended 兩輪全部通過。
+- stress 1 mask：round 1 p50/p95 增量 81.211/82.507 ms；round 2 81.314/81.308 ms，超過 30/60 ms 預算。
+- stress 10 masks：round 1 132.794/144.226 ms；round 2 133.732/135.118 ms，p50 超過 100 ms 預算。
+- 其餘 coverage stage、RAW、export、export RSS、完整 scheduler 50-cycle、正式 cancellation artifact 與 UI 保持 NOT RUN。
+
+計時外 pixel parity 從 immutable B/O archive 產生相同 workload：B/O capture 各 1 executed、0 skipped、0 failures；18 份 production preview RGBA8 與 66 份 direct R8 的最大 byte error 都是 0。因此 stress 是效能 FAIL，沒有觀察到像素回歸。
+
+## 5. 最終 SHA 自動驗證
+
+主要命令如下；已去除歷史私人暫存位置，以 TASK 變數表示。各變數由執行者指定新的本機 scratch／output 位置；這些完整 regression 命令是歷史命令的去識別化寫法，本次沒有重跑。Task 2 另執行 Release focused harness、完整 synthetic ABBA 與 untimed parity capture；其證據已保存至上述目錄，其餘原始 build/test log 維持本機保存。
 
 ```sh
 LUMAHARBOR_BRUSH_ABBA_BLOCKS=4 \
@@ -112,7 +128,7 @@ git diff a2cf222..HEAD --check
 
 第一次 strict-concurrency 重跑因沙箱禁止寫入使用者 module cache 而 exit 1；將 `CLANG_MODULE_CACHE_PATH` 與 `SWIFTPM_MODULECACHE_OVERRIDE` 指向工作樹外的暫存目錄後，同一原始碼驗證 PASS。此失敗不涉及編譯器診斷或程式碼變更。
 
-## 5. Gate 狀態與限制
+## 6. Gate 狀態與限制
 
 | Gate | 狀態 | 說明 |
 | --- | --- | --- |
@@ -120,9 +136,10 @@ git diff a2cf222..HEAD --check
 | PIX-E | PASS WITH EXISTING COVERAGE | 既有 geometry mapping 回歸與完整 suites 通過；本輪沒有新增完整人工 landmark corpus。 |
 | REL | PASS | 不需全域 DEBUG define 的完整標準 Release suite 通過。 |
 | CAN-A～E | PASS | 真正父 Task 取消、worker join、stale suppression、export cleanup 已自動驗證。 |
-| PERF-EMPTY / PERF-PREVIEW / preview RSS | PASS（warm synthetic） | 兩輪 96-record B/O ABBA 通過。 |
+| PERF-EMPTY / preview RSS | PASS（五情境 synthetic） | empty 10/10、preview RSS 30/30 PASS。 |
+| PERF-PREVIEW | FAIL（stress） | 20 個五情境 gate 中 16 PASS；stress 一／十 mask 兩輪共四個 FAIL。 |
 | PERF-COVERAGE | NOT RUN | 公開 B/O harness 只量 total preview，未產生可直接比較的 B/O coverage stage。O-only coverage correctness 已有測試。 |
-| cold / changed / appended / stress ABBA | NOT RUN | runner 與 schema 已支援，正式樣本未執行。 |
+| cold / warm / changed / appended / stress ABBA | EXECUTED | 正式 480 records validation PASS；stress 延遲 gate FAIL。 |
 | INTERACTIVE-150 | NOT RUN | 缺真實 RAW production preview 的 0/1/10 masks、cold/warm/changed matrix。 |
 | PERF-EXPORT / PERF-MEM-EXPORT | NOT RUN | 缺 B/O 原尺寸真實 RAW export 與程序 peak RSS。 |
 | PERF-MEM-50-CANCEL | NOT RUN | 有直接 renderer 50-cycle 診斷，但未完成規格要求的完整 scheduler 切圖流程 gate。 |
@@ -133,8 +150,8 @@ git diff a2cf222..HEAD --check
 | 獨立 reviewer | NOT RUN | Sol 為主要 writer，Codex root 做整合與證據 validator review；仍不構成規格要求的非 writer 獨立覆核。 |
 | notarization | SKIPPED | 本輪只產生本機未發布 alpha 封裝。 |
 
-## 6. 判定與下一步
+## 7. 判定與下一步
 
-跨垂直 tile 像素錯位、標準 Release testability、取消生命週期及 warm synthetic B/O 證據已修正並通過。由於真實 RAW、原尺寸 export/RSS、完整情境 ABBA、人工裝置與獨立審查仍缺，分支保持 `DONE_WITH_CONCERNS`，不標示整合 READY。
+跨垂直 tile 像素錯位、標準 Release testability、取消生命週期與五情境 synthetic B/O 已具可重算證據。cold/warm/changed/appended 通過；stress 效能明確 FAIL。真實 RAW、原尺寸 export/RSS、完整 scheduler 取消、人工裝置與獨立審查仍缺，因此分支保持 `DONE_WITH_CONCERNS`。
 
-下一個有界工作是[後續計畫 Task 2](../../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：完整五情境 synthetic ABBA（480 records）。接著補 scheduler 取消／切圖與 RAW/export；RAW 環境變數未設定只表示該次未注入素材，不能推論本機沒有既有 fixture。
+下一個有界工作是[後續計畫 Task 3](../../superpowers/plans/2026-10-06-brush-acceptance-completion.md)：補 stage coverage 與完整 scheduler 50-cycle 取消／切圖，以定位 stress 成本與確認 worker/RSS 生命週期；產品效能修正另依該證據規劃。

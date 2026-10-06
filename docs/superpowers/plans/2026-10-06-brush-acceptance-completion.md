@@ -11,7 +11,7 @@
 ## 範圍與基準
 
 - 本計畫是[追補 spec](../specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md) §7～9 的剩餘工作，不重做已通過的 F1～F3。
-- 日期：2026-10-06；本次授權是更新文件與擬定計畫，Task 2～6 尚未執行。
+- 日期：2026-10-06；Task 1、2 已完成，Task 3～6 尚未執行。
 - Writer：Codex；延續已授權候選 `codex/brush-performance-acceptance-repair`，單一 writer。
 - 起始 HEAD：`2fdc2562be099490068456074defbd4c2907e276`；起始工作樹乾淨。
 - B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
@@ -53,14 +53,14 @@ python3 Scripts/analyze-brush-performance-abba.py \
 
 `TASK_GATE_OUTPUT` 是執行者建立的本機暫存檔案；與已保存 gates 做 JSON 結構比較。這是重算歷史資料，不是新的 benchmark。
 
-## Task 2：完整 synthetic ABBA（唯一立即下一步）
+## Task 2：完整 synthetic ABBA（已完成）
 
 **Files:** 讀取 `Scripts/run-brush-performance-abba.sh`、`Scripts/analyze-brush-performance-abba.py`、`Tests/RawProcessingCoreTests/BrushPreviewABBAHarnessTests.swift`、`docs/testing/brush-performance-abba-schema.json`；新增本輪 evidence 目錄，更新 report。
 
 **Interfaces:** 現有 runner 接收 `LUMAHARBOR_BRUSH_ABBA_SCENARIOS`／`MASK_COUNTS`／`BLOCKS`／`RUN_ROOT`，輸出 `brush-preview-abba.jsonl` 與 `brush-preview-abba-gates.json`。
 
-- [ ] 核對乾淨 HEAD、單一 writer、供電及 thermal state；建立全新 RUN_ROOT，記錄 OS／Xcode／匿名硬體規格，不填未測 metadata。
-- [ ] 執行以下命令，五種 scenario 同輪保存，避免把不同日期 warm 數據混成同一輪。
+- [x] 核對乾淨 HEAD、單一 writer、供電及 thermal state；建立全新 RUN_ROOT，記錄 OS／Xcode／匿名硬體規格，不填未測 metadata。
+- [x] 執行以下命令，五種 scenario 同輪保存，避免把不同日期 warm 數據混成同一輪。
 
 ```sh
 TASK_ABBA_ROOT=$(mktemp -d)
@@ -71,10 +71,10 @@ LUMAHARBOR_BRUSH_ABBA_RUN_ROOT="$TASK_ABBA_ROOT" \
 Scripts/run-brush-performance-abba.sh
 ```
 
-- [ ] 核對 5 scenarios × 3 mask counts × 2 rounds × 2 variants × 8 samples = **480 records**；每輪 BOOB／OBBO 各四區塊，對應 sample ordinal workload 一致，輸出尺寸正確。
-- [ ] 在計時外比對同 workload 的 B/O 像素，確認 spec R8／materialized-channel 門檻；僅有 sample 尺寸或 `pixelError=null` 不等於像素 PASS。
-- [ ] 分情境記 empty、incremental、preview RSS；p50/p95 是各組分位數相減，不能稱逐筆差值分布。stage coverage、RAW、export、UI 保持未測。
-- [ ] 若超標，保留全部資料，定位該情境後提出最小修正；不重抽快樣本、不放寬門檻。保存去識別化 samples／gates／manifest，單獨提交證據。
+- [x] 核對 5 scenarios × 3 mask counts × 2 rounds × 2 variants × 8 samples = **480 records**；每輪 BOOB／OBBO 各四區塊，對應 sample ordinal workload 一致，輸出尺寸正確。
+- [x] 在計時外比對同 workload 的 B/O 像素，確認 18 份 preview 與 66 份 R8 最大 byte error 均為 0。
+- [x] 分情境記 empty、incremental、preview RSS；stage coverage、RAW、export、UI 保持 NOT RUN。
+- [x] 完整保留第一次矩陣與修正後正式矩陣；stress 四個 PERF-PREVIEW gate 保留 FAIL，未重抽或放寬門檻。
 
 **完成條件:** 480 筆完整、metadata 一致、像素比較可追溯、每一 gate 有結果；FAIL 也必須報告，不得以 runner exit 0 代替產品通過。
 
@@ -142,4 +142,4 @@ swift test --scratch-path "$TASK_DEBUG_SCRATCH" --filter RawFixtureTests
 
 ## 執行順序與狀態
 
-Task 1 已完成；**Task 2 是下一個有界工作**。接著 Task 3，再 Task 4；素材可用性可以提早查核，但量測不可彼此並行。Task 5 的程式碼審查可在候選穩定後進行，人工操作待設備可用；最後 Task 6 收尾。不承諾固定工時，以每項完成條件推進。
+Task 1、2 已完成；**Task 3 是下一個有界工作**。Task 2 找出 stress preview 效能 FAIL，Task 3 先補 stage coverage 與完整 scheduler 取消／切圖，為後續效能修正提供可定位資料。接著 Task 4；素材可用性可以提早查核，但量測不可彼此並行。Task 5 的程式碼審查可在候選穩定後進行，人工操作待設備可用；最後 Task 6 收尾。

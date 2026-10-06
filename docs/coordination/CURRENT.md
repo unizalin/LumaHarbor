@@ -2,14 +2,14 @@
 
 ## Brush raster correctness follow-up（2026-10-06, Codex；目前有效）
 
-- **狀態**：`DONE_WITH_CONCERNS`。F1 全圖 row mapping、F2 標準 Release testability、F3 真正父 Task 取消與 F4 warm synthetic B/O ABBA 均已完成；真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer 仍未完成，因此不是整合 READY。
+- **狀態**：`DONE_WITH_CONCERNS`。F1～F3 與完整五情境 synthetic B/O 已執行；cold/warm/changed/appended 通過，stress preview 效能四個 gate FAIL。真實 RAW、原尺寸 export/RSS、人工裝置與獨立 reviewer 仍未完成。
 - **工作樹與 SHA**：branch `codex/brush-performance-acceptance-repair`；B=`1de07dcfeb2ed217a75d1c04978da6a5936f379a`；原 U=`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`；最終已驗產品／證據 SHA=`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`。未 push、merge、rebase 或 deploy。
 - **實作**：`29718d2` 修正跨垂直 tile row mapping；`bc89693` 移除全域 `-DDEBUG` workaround；`1ded16a` 加入 per-invocation cancellation observer 與 preview/export lifecycle tests；`c425cb7` 加入 B/O ABBA／schema／取消與 RSS 診斷；`4e74bf3` 使 analyzer 對缺欄位與不一致 metadata fail closed。
-- **最終驗證**：完整 Debug 與標準 Release 各 2,708 executed／21 skipped／0 failures；strict-concurrency、Mac Release app、generic iOS Simulator/device、codesign、privacy、未發布 ZIP/checksum 全部 PASS。正式 warm synthetic ABBA 96 records，兩輪 0/1/10 masks preview 與 preview RSS gates PASS。
-- **限制**：最終 SHA 的 RawFixtureTests 因私有 fixture 環境未提供而 NOT RUN。真實 RAW INTERACTIVE-150、原尺寸 export/RSS、cold/changed/appended/stress 正式 ABBA、B/O coverage stage、完整 scheduler 50-cycle、GUI heartbeat、人工 Mac／實體 iPad／灰卡與獨立 reviewer仍為 NOT RUN 或 partial。
+- **最終驗證**：既有完整 Debug／Release 與 build/privacy 證據維持；`a4278c1` 的五情境 ABBA 480 records validation PASS，PERF-EMPTY 10/10、preview RSS 30/30、PERF-PREVIEW 16/20 PASS。stress 一／十 masks 兩輪共四個 PERF-PREVIEW FAIL。計時外 18 preview＋66 R8 B/O 最大 byte error 0。
+- **限制**：最終 SHA 的 RawFixtureTests、真實 RAW INTERACTIVE-150、原尺寸 export/RSS、B/O coverage stage、完整 scheduler 50-cycle、GUI heartbeat、人工 Mac／實體 iPad／灰卡與獨立 reviewer仍為 NOT RUN 或 partial。
 - **文件**：[追補規格](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)、[最終驗收報告](../testing/reports/2026-10-06-brush-raster-correctness-followup.md)、[目前交接](2026-10-06-brush-raster-correctness-followup-handoff.md)。下方舊區塊保留為歷史；相衝突的狀態與下一步由本節取代。
-- **文件與樣本補齊**：Codex 為本工作樹唯一 writer；本輪以 `2fdc2562be099490068456074defbd4c2907e276` 的乾淨工作樹開始，僅更新文件與保存既有去識別化證據。warm ABBA O／harness=`c425cb7fdc93442e915c13eee913bf175fc15758`；96 筆樣本重算 exit 0、validation PASS。spec 狀態與完整 SHA 已同步，產品測試未重跑。
-- **唯一下一步**：依[後續計畫 Task 2](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)執行五情境 synthetic ABBA（480 records），完成後再補 scheduler、RAW/export、獨立審查與人工操作；不必先等待 RAW 或實體裝置。
+- **完整矩陣**：正式 benchmark／parity HEAD=`a4278c15606ed6e79d414fcf646acb37c30b223f`；該 commit 只修正 changed benchmark neutral control，產品 renderer 仍等同 `4e74bf3`。第一次與修正後各 480 筆、pixel parity 與 checksums 已保存於 committed evidence。
+- **唯一下一步**：依[後續計畫 Task 3](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)補 stage coverage 與完整 PreviewScheduler 50-cycle 取消／切圖；先建立 stress 成本與 worker/RSS 證據，再規劃效能修正。
 
 Updated: 2026-10-06
 
