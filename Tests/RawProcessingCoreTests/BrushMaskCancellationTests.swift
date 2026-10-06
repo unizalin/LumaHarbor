@@ -180,6 +180,49 @@ final class BrushMaskCancellationTests: XCTestCase {
         harness.assertBalanced(expectedMinimumStarted: 1)
     }
 
+    func testPreviewSchedulerQuiescenceWaitsForCancelledProductionWorkerToJoin() async throws {
+        let harness = CancellationHarness(stage: .rasterization)
+        let renderer = CoreImagePreviewRenderer(
+            decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 800, height: 600)),
+            brushRenderObserverFactory: { harness.observer }
+        )
+        let scheduler = PreviewScheduler(renderer: renderer)
+        let completion = AsyncCompletionFlag()
+
+        _ = await scheduler.submit(PreviewRequest(
+            subject: PreviewSubject(UUID()),
+            url: URL(fileURLWithPath: "/tmp/preview-cancel-all.ARW"),
+            adjustments: PhotoAdjustments(brushMasks: [makeMask(index: 0)]),
+            targetPixelDimension: 800,
+            quality: .interactive
+        ))
+
+        await waitUntil("production worker to reach rasterization") { harness.reached }
+        await scheduler.cancelAll()
+        let joinTask = Task {
+            await scheduler.waitUntilQuiescent()
+            await completion.markDone()
+        }
+        await waitUntil("scheduler state to be invalidated") {
+            await scheduler.currentSubject == nil
+        }
+
+        let completedWhileWorkerBlocked = await completion.isDone
+        XCTAssertFalse(
+            completedWhileWorkerBlocked,
+            "waitUntilQuiescent returned while the cancelled production worker was still blocked"
+        )
+        XCTAssertEqual(harness.activeWorkerCount, 1)
+
+        harness.release()
+        await joinTask.value
+
+        let completedAfterJoin = await completion.isDone
+        XCTAssertTrue(completedAfterJoin)
+        XCTAssertEqual(harness.activeWorkerCount, 0)
+        harness.assertBalanced(expectedMinimumStarted: 1)
+    }
+
     func testExportCancellationDuringRasterizationCleansTemporaryAndFinalFiles() async throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("BrushExportCancellation-\(UUID().uuidString)", isDirectory: true)
@@ -276,6 +319,12 @@ final class BrushMaskCancellationTests: XCTestCase {
             return arrivals >= requiredArrivals
         }
 
+        var activeWorkerCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return started.subtracting(finished).count
+        }
+
         func release() {
             lock.lock()
             released = true
@@ -363,6 +412,14 @@ final class BrushMaskCancellationTests: XCTestCase {
             isReleased = true
             continuation?.resume()
             continuation = nil
+        }
+    }
+
+    private actor AsyncCompletionFlag {
+        private(set) var isDone = false
+
+        func markDone() {
+            isDone = true
         }
     }
 }
