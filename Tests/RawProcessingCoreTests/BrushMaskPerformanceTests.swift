@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import Darwin
 import Foundation
 import XCTest
 @testable import RawProcessingCore
@@ -85,6 +86,141 @@ final class BrushMaskPerformanceTests: XCTestCase {
         }
     }
 
+    func testOptInCancellationLatencyPrintsMachineReadableSamples() async throws {
+        guard ProcessInfo.processInfo.environment["LUMAHARBOR_RUN_BRUSH_PERF_ACCEPTANCE"] == "1" else {
+            throw XCTSkip("brush performance acceptance is opt-in")
+        }
+
+        let sampleCount = max(
+            Int(ProcessInfo.processInfo.environment["LUMAHARBOR_BRUSH_PERF_SAMPLES"] ?? "8") ?? 8,
+            1
+        )
+        let mask = makeMasks(count: 1)[0]
+        let clock = ContinuousClock()
+        var previewSamples: [Double] = []
+        var exportSamples: [Double] = []
+
+        for sampleOrdinal in 0..<sampleCount {
+            let probe = CancellationLatencyProbe(stage: .rasterization)
+            let renderer = CoreImagePreviewRenderer(
+                decoder: SyntheticRawDecoder(pixelSize: CGSize(width: width, height: height)),
+                brushRenderObserverFactory: { probe.observer }
+            )
+            let request = PreviewRequest(
+                subject: PreviewSubject(UUID()),
+                url: URL(fileURLWithPath: "/tmp/brush-perf-preview.raw"),
+                adjustments: PhotoAdjustments(brushMasks: [mask]),
+                targetPixelDimension: width,
+                quality: .interactive
+            )
+            let task = Task { try await renderer.render(request) }
+            await waitUntil("preview cancellation barrier \(sampleOrdinal)") { probe.reached }
+            let start = clock.now
+            task.cancel()
+            probe.release()
+            do {
+                _ = try await task.value
+                XCTFail("cancelled preview returned a frame")
+            } catch {
+                XCTAssertTrue(error is CancellationError)
+            }
+            previewSamples.append(seconds(start.duration(to: clock.now)))
+            probe.assertBalanced()
+        }
+
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("BrushCancellationPerf-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source.raw")
+        try Data([0]).write(to: sourceURL)
+
+        for sampleOrdinal in 0..<sampleCount {
+            let probe = CancellationLatencyProbe(stage: .rasterization)
+            let exporter = PhotoExporter(
+                decoder: SyntheticRawDecoder(pixelSize: CGSize(width: 6_000, height: 4_000)),
+                brushRenderObserverFactory: { probe.observer }
+            )
+            let request = ExportRequest(
+                sourceURL: sourceURL,
+                adjustments: PhotoAdjustments(brushMasks: [mask]),
+                destinationDirectory: directory,
+                baseFilename: "cancelled-\(sampleOrdinal)",
+                format: .jpeg
+            )
+            let task = Task { try await exporter.export(request) }
+            await waitUntil("export cancellation barrier \(sampleOrdinal)", timeout: 10) { probe.reached }
+            let start = clock.now
+            task.cancel()
+            probe.release()
+            do {
+                _ = try await task.value
+                XCTFail("cancelled export published a file")
+            } catch {
+                XCTAssertEqual(error as? ExportError, .cancelled)
+            }
+            exportSamples.append(seconds(start.duration(to: clock.now)))
+            probe.assertBalanced()
+        }
+
+        let previewP95 = nearestRankP95(previewSamples)
+        let exportP95 = nearestRankP95(exportSamples)
+        XCTAssertLessThanOrEqual(previewP95, 0.1)
+        XCTAssertLessThanOrEqual(exportP95, 0.1)
+        for (scenario, samples) in [("preview-cancel", previewSamples), ("export-cancel-24mp", exportSamples)] {
+            let record: [String: Any] = [
+                "schemaVersion": 2,
+                "scenario": scenario,
+                "variant": "O",
+                "sampleCount": samples.count,
+                "durationsSeconds": samples,
+                "p95Seconds": nearestRankP95(samples),
+                "workerCounts": ["startedMinimum": 1, "activeAfterJoin": 0],
+                "cancelOutcome": "cancelled-and-joined",
+                "result": nearestRankP95(samples) <= 0.1 ? "PASS" : "FAIL"
+            ]
+            let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            print(String(decoding: data, as: UTF8.self))
+        }
+    }
+
+    func testOptInFiftyCancellationCyclesSettleWorkersAndMemory() async throws {
+        guard ProcessInfo.processInfo.environment["LUMAHARBOR_RUN_BRUSH_PERF_ACCEPTANCE"] == "1" else {
+            throw XCTSkip("brush performance acceptance is opt-in")
+        }
+
+        let mask = makeMasks(count: 1)[0]
+        var totalStarted = 0
+        for cycle in 0..<5 {
+            totalStarted += try await runCancelledPreviewCycle(cycle, mask: mask)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let warmPlateau = try currentResidentSizeBytes()
+
+        for cycle in 5..<55 {
+            totalStarted += try await runCancelledPreviewCycle(cycle, mask: mask)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let settled = try currentResidentSizeBytes()
+        let limit = warmPlateau + 32 * 1_024 * 1_024
+        XCTAssertLessThanOrEqual(settled, limit)
+
+        let record: [String: Any] = [
+            "schemaVersion": 2,
+            "scenario": "50-cancel-switch-preview",
+            "variant": "O",
+            "warmupCycles": 5,
+            "measuredCycles": 50,
+            "warmPlateauRSSBytes": warmPlateau,
+            "settledRSSBytes": settled,
+            "rssLimitBytes": limit,
+            "workerCounts": ["started": totalStarted, "finished": totalStarted, "activeAfterJoin": 0],
+            "cancelOutcome": "all-cancelled-and-joined",
+            "result": settled <= limit ? "PASS" : "FAIL"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+        print(String(decoding: data, as: UTF8.self))
+    }
+
     private func render(
         _ masks: [BrushMask],
         source: CIImage,
@@ -92,6 +228,71 @@ final class BrushMaskPerformanceTests: XCTestCase {
     ) async throws -> CGImage {
         let rendered = try await BrushMaskRenderer.applyValidatedAsync(masks, to: source)
         return try service.makeCGImage(rendered)
+    }
+
+    private func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+    }
+
+    private func nearestRankP95(_ samples: [Double]) -> Double {
+        let sorted = samples.sorted()
+        let index = max(Int(ceil(0.95 * Double(sorted.count))) - 1, 0)
+        return sorted[index]
+    }
+
+    private func runCancelledPreviewCycle(_ cycle: Int, mask: BrushMask) async throws -> Int {
+        let probe = CancellationLatencyProbe(stage: .rasterization)
+        let renderer = CoreImagePreviewRenderer(
+            decoder: SyntheticRawDecoder(pixelSize: CGSize(width: width, height: height)),
+            brushRenderObserverFactory: { probe.observer }
+        )
+        let subjectSuffix = cycle.isMultiple(of: 2) ? 1 : 2
+        let request = PreviewRequest(
+            subject: PreviewSubject(UUID(uuidString: String(
+                format: "00000000-0000-4000-c000-%012d",
+                subjectSuffix
+            ))!),
+            url: URL(fileURLWithPath: "/tmp/brush-perf-switch-\(subjectSuffix).raw"),
+            adjustments: PhotoAdjustments(
+                exposure: cycle.isMultiple(of: 2) ? 0.05 : -0.05,
+                brushMasks: [mask]
+            ),
+            targetPixelDimension: width,
+            quality: .interactive
+        )
+        let task = Task { try await renderer.render(request) }
+        await waitUntil("50-cycle cancellation barrier \(cycle)") { probe.reached }
+        task.cancel()
+        probe.release()
+        do {
+            _ = try await task.value
+            XCTFail("cancelled switch cycle returned a frame")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        probe.assertBalanced()
+        return probe.workerCounts.started
+    }
+
+    private func currentResidentSizeBytes() throws -> UInt64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info>.size / MemoryLayout<integer_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    $0,
+                    &count
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            throw NSError(domain: "BrushMaskPerformanceTests", code: Int(result))
+        }
+        return info.resident_size
     }
 
     private func renderCoverageInParallel(_ masks: [BrushMask], extent: CGRect) async throws {
@@ -134,6 +335,75 @@ final class BrushMaskPerformanceTests: XCTestCase {
                 strokes: strokes,
                 adjustments: BrushMaskPatch(exposure: maskIndex.isMultiple(of: 2) ? 0.25 : -0.2)
             )
+        }
+    }
+
+    private final class CancellationLatencyProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private let semaphore = DispatchSemaphore(value: 0)
+        private let stage: BrushMaskRenderEvent.Stage
+        private var didReach = false
+        private var isReleased = false
+        private var started = 0
+        private var finished = 0
+
+        init(stage: BrushMaskRenderEvent.Stage) {
+            self.stage = stage
+        }
+
+        lazy var observer = BrushMaskRenderObserver { [weak self] event in
+            self?.record(event)
+        }
+
+        var reached: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return didReach
+        }
+
+        func release() {
+            lock.lock()
+            isReleased = true
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        func assertBalanced(file: StaticString = #filePath, line: UInt = #line) {
+            lock.lock()
+            let counts = (started, finished)
+            lock.unlock()
+            XCTAssertGreaterThanOrEqual(counts.0, 1, file: file, line: line)
+            XCTAssertEqual(counts.1, counts.0, file: file, line: line)
+        }
+
+        var workerCounts: (started: Int, finished: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            return (started, finished)
+        }
+
+        private func record(_ event: BrushMaskRenderEvent) {
+            var shouldWait = false
+            lock.lock()
+            switch event.kind {
+            case .workerStarted:
+                started += 1
+            case .workerFinished:
+                finished += 1
+            case .progress:
+                if !didReach, event.stage == stage, event.completedIterations >= 4_096 {
+                    didReach = true
+                    shouldWait = !isReleased
+                }
+            }
+            lock.unlock()
+
+            while shouldWait {
+                _ = semaphore.wait(timeout: .now() + 0.01)
+                lock.lock()
+                shouldWait = !isReleased
+                lock.unlock()
+            }
         }
     }
 }

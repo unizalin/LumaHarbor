@@ -116,10 +116,10 @@ final class BrushMaskCancellationTests: XCTestCase {
 
     func testPreCancelledRendererDoesNotStartCoverageWorker() async throws {
         let harness = CancellationHarness(stage: .rasterization)
-        let startGate = DispatchSemaphore(value: 0)
+        let startGate = AsyncStartGate()
         let source = makeSource()
         let task = Task.detached {
-            startGate.wait()
+            await startGate.wait()
             return try await BrushMaskRenderer._applyValidatedAsync(
                 [self.makeMask(index: 0)],
                 to: source,
@@ -128,7 +128,7 @@ final class BrushMaskCancellationTests: XCTestCase {
         }
 
         task.cancel()
-        startGate.signal()
+        await startGate.release()
         await assertCancelled(task)
         harness.assertBalanced(expectedMinimumStarted: 0)
     }
@@ -341,6 +341,28 @@ final class BrushMaskCancellationTests: XCTestCase {
             defer { lock.unlock() }
             defer { observer = nil }
             return observer
+        }
+    }
+
+    private actor AsyncStartGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var isReleased = false
+
+        func wait() async {
+            guard !isReleased else { return }
+            await withCheckedContinuation { continuation in
+                if isReleased {
+                    continuation.resume()
+                } else {
+                    self.continuation = continuation
+                }
+            }
+        }
+
+        func release() {
+            isReleased = true
+            continuation?.resume()
+            continuation = nil
         }
     }
 }

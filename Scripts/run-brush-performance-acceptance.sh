@@ -20,4 +20,4 @@ LUMAHARBOR_BRUSH_PERF_SAMPLES="${SAMPLES}" \
 LUMAHARBOR_BRUSH_PERF_PREFER_METAL="${LUMAHARBOR_BRUSH_PERF_PREFER_METAL:-1}" \
 swift test -c release \
     --scratch-path "${SCRATCH_PATH}" \
-    --filter 'BrushMaskPerformanceTests.testOptInWorkloadPrintsMachineReadableSamples'
+    --filter 'BrushMaskPerformanceTests.testOptIn'

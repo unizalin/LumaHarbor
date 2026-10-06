@@ -1,0 +1,12 @@
+diff --git a/Sources/EditorCore/EditorSession.swift b/Sources/EditorCore/EditorSession.swift
+index f7f5a88..2475284 100644
+--- a/Sources/EditorCore/EditorSession.swift
++++ b/Sources/EditorCore/EditorSession.swift
+@@ -465 +464,0 @@ public final class EditorSession: ObservableObject {
+-    #if DEBUG
+@@ -499 +497,0 @@ public final class EditorSession: ObservableObject {
+-    #endif
+@@ -1603 +1600,0 @@ public final class EditorSession: ObservableObject {
+-    #if DEBUG
+@@ -1608 +1604,0 @@ public final class EditorSession: ObservableObject {
+-    #endif
