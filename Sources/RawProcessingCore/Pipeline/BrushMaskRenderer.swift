@@ -201,6 +201,33 @@ public enum BrushMaskRenderer {
         )
     }
 
+    /// Returns the exact R8 storage produced by the tiled rasterizer before
+    /// Core Image interprets its row order. This keeps byte-for-byte oracle
+    /// tests independent from a second render pass that may normalize image
+    /// orientation.
+    internal static func _testRenderCoverageBytes(
+        _ mask: BrushMask,
+        imageExtent: CGRect,
+        mapping: BrushCoordinateMapping? = nil,
+        cancellationCheck: @escaping CancellationCheck = { try Task.checkCancellation() }
+    ) throws -> Data {
+        let resolvedMapping: BrushCoordinateMapping
+        if let mapping {
+            resolvedMapping = mapping
+        } else {
+            resolvedMapping = try BrushCoordinateMapping(sourceExtent: imageExtent, geometry: .neutral)
+        }
+        var bitmap = Data()
+        _ = try renderCoverage(
+            mask,
+            imageExtent: imageExtent,
+            mapping: resolvedMapping,
+            cancellationCheck: cancellationCheck,
+            bitmapObserver: { bitmap = $0 }
+        )
+        return bitmap
+    }
+
     private static func parameters(for patch: BrushMaskPatch) -> PhotoAdjustments {
         var adjustments = PhotoAdjustments.neutral
         if let value = patch.exposure { adjustments.exposure = value }
@@ -219,11 +246,12 @@ public enum BrushMaskRenderer {
         _ mask: BrushMask,
         imageExtent: CGRect,
         mapping: BrushCoordinateMapping,
-        cancellationCheck: @escaping CancellationCheck
+        cancellationCheck: @escaping CancellationCheck,
+        bitmapObserver: ((Data) -> Void)? = nil
     ) throws -> CIImage {
         guard imageExtent.width.isFinite, imageExtent.height.isFinite,
               imageExtent.width > 0, imageExtent.height > 0,
-              imageExtent.width <= CGFloat(Int.max), imageExtent.height <= CGFloat(Int.max)
+              imageExtent.width < CGFloat(Int.max), imageExtent.height < CGFloat(Int.max)
         else { throw Error.renderFailed }
         let width = Int(imageExtent.width.rounded(.up))
         let height = Int(imageExtent.height.rounded(.up))
@@ -382,21 +410,23 @@ public enum BrushMaskRenderer {
                 // CIImage bitmap rows are top-down for R8; the coverage array
                 // uses Core Image's y-up pixel rows, so flip exactly once here.
                 var conversionIterations = 0
-                for row in 0..<tileHeight {
-                    let sourceRow = tileHeight - 1 - row
-                    let outputRow = tileStartY + row
+                for localRow in 0..<tileHeight {
+                    let globalY = tileStartY + localRow
+                    let bitmapRow = height - 1 - globalY
                     for column in 0..<tileWidth {
                         conversionIterations += 1
                         if conversionIterations.isMultiple(of: 4096) { try cancellationCheck() }
-                        let value = min(max(alpha[sourceRow * tileWidth + column], 0), 1)
-                        bytes[outputRow * width + tileStartX + column] = UInt8((value * 255).rounded())
+                        let value = min(max(alpha[localRow * tileWidth + column], 0), 1)
+                        bytes[bitmapRow * width + tileStartX + column] = UInt8((value * 255).rounded())
                     }
                 }
             }
         }
         let gray = CGColorSpace(name: CGColorSpace.linearGray)
             ?? CGColorSpaceCreateDeviceGray()
-        return CIImage(bitmapData: Data(bytes), bytesPerRow: width,
+        let bitmap = Data(bytes)
+        bitmapObserver?(bitmap)
+        return CIImage(bitmapData: bitmap, bytesPerRow: width,
                         size: CGSize(width: width, height: height), format: .R8,
                         colorSpace: gray)
             .transformed(by: CGAffineTransform(translationX: imageExtent.minX, y: imageExtent.minY))

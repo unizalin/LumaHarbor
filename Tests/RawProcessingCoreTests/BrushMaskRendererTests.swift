@@ -24,6 +24,17 @@ final class BrushMaskRendererTests: XCTestCase {
         return (bytes[0], bytes[1], bytes[2], bytes[3])
     }
 
+    func testCoverageRejectsExtentAtUnrepresentableIntegerBoundary() throws {
+        let mask = BrushMask(
+            strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.5, y: 0.5)])],
+            adjustments: BrushMaskPatch(exposure: 1)
+        )
+        XCTAssertThrowsError(try BrushMaskRenderer._testRenderCoverage(
+            mask,
+            imageExtent: CGRect(x: 0, y: 0, width: CGFloat(Int.max), height: 1)
+        ))
+    }
+
     func testPaintAndEraseRespectNonCentralQuadrant() throws {
         let path = BrushMaskPath(points: [
             BrushMaskPoint(x: 0.72, y: 0.25),

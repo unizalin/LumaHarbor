@@ -8,6 +8,113 @@ import XCTest
 /// keeps the old `hypot` path separate from the production rasterizer so a
 /// future optimization cannot make its own output the expected answer.
 final class BrushMaskScalarOracleTests: XCTestCase {
+    func testTiledCoverageMatchesScalarOracleAcrossVerticalTileBoundaries() throws {
+        let extents = [127, 128, 129, 240, 256, 257].map {
+            CGRect(x: 0, y: 0, width: 180, height: $0)
+        } + [
+            CGRect(x: 7, y: 11, width: 257, height: 259),
+            CGRect(x: -13, y: -5, width: 257, height: 259),
+            CGRect(x: 7, y: 11, width: 1_600, height: 1_067)
+        ]
+        for extent in extents {
+            let mapping = try BrushCoordinateMapping(sourceExtent: extent, geometry: .neutral)
+            let mask = BrushMask(
+                strokes: [
+                    BrushMaskStroke(
+                        points: [BrushMaskPoint(x: 0.13, y: 0.19)],
+                        size: 0.08,
+                        feather: 0.31,
+                        flow: 0.73
+                    )
+                ],
+                adjustments: BrushMaskPatch(exposure: 1)
+            )
+
+            let expected = try scalarCoverage(mask, extent: extent, mapping: mapping)
+            let actualBytes = try BrushMaskRenderer._testRenderCoverageBytes(
+                mask,
+                imageExtent: extent,
+                mapping: mapping
+            )
+
+            XCTAssertEqual(
+                actualBytes,
+                expected.bytes,
+                "R8 coverage must preserve global row mapping for extent \(extent)"
+            )
+        }
+    }
+
+    func testSyncAndAsyncCompositionMatchIndependentThreeMaskOracle() async throws {
+        let extent = CGRect(x: 7, y: 11, width: 257, height: 259)
+        let source = CIImage(color: CIColor(red: 0.35, green: 0.48, blue: 0.62)).cropped(to: extent)
+        let mapping = try BrushCoordinateMapping(sourceExtent: extent, geometry: .neutral)
+        let masks = [
+            BrushMask(
+                strokes: [BrushMaskStroke(
+                    points: [BrushMaskPoint(x: 0.18, y: 0.22), BrushMaskPoint(x: 0.78, y: 0.72)],
+                    size: 0.24,
+                    feather: 0.3,
+                    flow: 0.72
+                )],
+                adjustments: BrushMaskPatch(exposure: 0.65)
+            ),
+            BrushMask(
+                strokes: [
+                    BrushMaskStroke(
+                        points: [BrushMaskPoint(x: 0.24, y: 0.68), BrushMaskPoint(x: 0.76, y: 0.28)],
+                        size: 0.22,
+                        feather: 1,
+                        flow: 0.81
+                    ),
+                    BrushMaskStroke(
+                        points: [BrushMaskPoint(x: 0.54, y: 0.48)],
+                        mode: .erase,
+                        size: 0.04,
+                        feather: 0,
+                        flow: 0.6
+                    )
+                ],
+                adjustments: BrushMaskPatch(contrast: 18)
+            ),
+            BrushMask(
+                strokes: [BrushMaskStroke(
+                    points: [BrushMaskPoint(x: 0.5, y: 0.2), BrushMaskPoint(x: 0.5, y: 0.82)],
+                    size: 0.18,
+                    feather: 0.15,
+                    flow: 0.55
+                )],
+                adjustments: BrushMaskPatch(blacks: 0.2)
+            )
+        ]
+
+        var expected = source
+        for mask in masks {
+            let coverage = try scalarCoverage(mask, extent: extent, mapping: mapping).image
+            let adjusted = AdjustmentPipeline().apply(
+                parameters(for: mask.adjustments),
+                to: expected,
+                recipe: nil,
+                scaleFactor: 1
+            )
+            let blend = CIFilter.blendWithMask()
+            blend.inputImage = adjusted.cropped(to: extent)
+            blend.backgroundImage = expected
+            blend.maskImage = coverage
+            expected = try XCTUnwrap(blend.outputImage).cropped(to: extent)
+        }
+
+        let sync = try BrushMaskRenderer.applyValidated(masks, to: source, mapping: mapping)
+        let asyncImage = try await BrushMaskRenderer.applyValidatedAsync(masks, to: source, mapping: mapping)
+        let service = ImageRenderService(preferMetal: false)
+        let expectedPixels = try XCTUnwrap(service.makeCGImage(expected).dataProvider?.data as Data?)
+        let syncPixels = try XCTUnwrap(service.makeCGImage(sync).dataProvider?.data as Data?)
+        let asyncPixels = try XCTUnwrap(service.makeCGImage(asyncImage).dataProvider?.data as Data?)
+
+        XCTAssertLessThanOrEqual(maximumByteDifference(expectedPixels, syncPixels), 1)
+        XCTAssertLessThanOrEqual(maximumByteDifference(expectedPixels, asyncPixels), 1)
+    }
+
     func testTiledCoverageMatchesIndependentScalarOracle() throws {
         let extent = CGRect(x: 7, y: 11, width: 180, height: 120)
         let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: extent)
@@ -35,7 +142,7 @@ final class BrushMaskScalarOracleTests: XCTestCase {
             adjustments: BrushMaskPatch(exposure: 1.25)
         )
 
-        let expectedCoverage = try scalarCoverage(mask, extent: extent, mapping: mapping)
+        let expectedCoverage = try scalarCoverage(mask, extent: extent, mapping: mapping).image
         let adjusted = AdjustmentPipeline().apply(PhotoAdjustments(exposure: 1.25), to: source)
         let expectedBlend = CIFilter.blendWithMask()
         expectedBlend.inputImage = adjusted.cropped(to: extent)
@@ -92,7 +199,7 @@ final class BrushMaskScalarOracleTests: XCTestCase {
         _ mask: BrushMask,
         extent: CGRect,
         mapping: BrushCoordinateMapping
-    ) throws -> CIImage {
+    ) throws -> (image: CIImage, bytes: Data) {
         let width = Int(extent.width.rounded(.up))
         let height = Int(extent.height.rounded(.up))
         var alpha = [CGFloat](repeating: 0, count: width * height)
@@ -141,8 +248,9 @@ final class BrushMaskScalarOracleTests: XCTestCase {
             }
         }
         let gray = CGColorSpace(name: CGColorSpace.linearGray) ?? CGColorSpaceCreateDeviceGray()
-        return CIImage(
-            bitmapData: Data(bytes),
+        let bitmap = Data(bytes)
+        let image = CIImage(
+            bitmapData: bitmap,
             bytesPerRow: width,
             size: CGSize(width: width, height: height),
             format: .R8,
@@ -150,6 +258,7 @@ final class BrushMaskScalarOracleTests: XCTestCase {
         )
         .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
         .cropped(to: extent)
+        return (image, bitmap)
     }
 
     private func scalarSamples(
@@ -183,5 +292,24 @@ final class BrushMaskScalarOracleTests: XCTestCase {
         }
         if output.last != previous { output.append(previous) }
         return output
+    }
+
+    private func parameters(for patch: BrushMaskPatch) -> PhotoAdjustments {
+        var adjustments = PhotoAdjustments.neutral
+        if let value = patch.exposure { adjustments.exposure = value }
+        if let value = patch.contrast { adjustments.contrast = value }
+        if let value = patch.highlights { adjustments.highlights = value }
+        if let value = patch.shadows { adjustments.shadows = value }
+        if let value = patch.whites { adjustments.whites = value }
+        if let value = patch.blacks { adjustments.blacks = value }
+        if let value = patch.saturation { adjustments.saturation = value }
+        if let value = patch.temperature { adjustments.temperature = value }
+        if let value = patch.tint { adjustments.tint = value }
+        return adjustments
+    }
+
+    private func maximumByteDifference(_ lhs: Data, _ rhs: Data) -> Int {
+        guard lhs.count == rhs.count else { return .max }
+        return zip(lhs, rhs).map { abs(Int($0) - Int($1)) }.max() ?? 0
     }
 }
