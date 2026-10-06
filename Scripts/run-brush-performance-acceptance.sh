@@ -13,14 +13,20 @@ if [[ ! "${SAMPLES}" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 
-mkdir -p "${SCRATCH_PATH}"
-mkdir -p "${RUN_ROOT}"
 cd "${REPO_ROOT}"
 
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "error: brush performance acceptance requires a clean worktree so productSHA and harnessSHA are exact" >&2
     exit 2
 fi
+
+if [[ -e "${RUN_ROOT}" ]]; then
+    echo "error: LUMAHARBOR_BRUSH_PERF_RUN_ROOT already exists; use a fresh run root" >&2
+    exit 2
+fi
+
+mkdir -p "${SCRATCH_PATH}"
+mkdir -p "${RUN_ROOT}"
 
 PRODUCT_SHA="$(git rev-parse HEAD)"
 RAW_LOG="${RUN_ROOT}/brush-performance-acceptance.log"
