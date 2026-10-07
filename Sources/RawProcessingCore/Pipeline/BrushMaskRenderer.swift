@@ -1,6 +1,7 @@
 @preconcurrency import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreGraphics
+import Dispatch
 import Foundation
 
 internal struct BrushMaskRenderEvent: Sendable {
@@ -70,6 +71,31 @@ internal struct BrushMaskStageInterval: Sendable {
         self.stage = stage
         self.startNanoseconds = startNanoseconds
         self.endNanoseconds = max(endNanoseconds, startNanoseconds)
+    }
+}
+
+private final class RasterCancellationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedError: Swift.Error?
+
+    var hasError: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedError != nil
+    }
+
+    var error: Swift.Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedError
+    }
+
+    func record(_ error: Swift.Error) {
+        lock.lock()
+        if storedError == nil {
+            storedError = error
+        }
+        lock.unlock()
     }
 }
 
@@ -226,10 +252,6 @@ public enum BrushMaskRenderer {
         }
         if activeMasks.isEmpty { return image }
 
-        struct CoverageResult: @unchecked Sendable {
-            let index: Int
-            let image: CIImage
-        }
         var coverages = Array<CIImage?>(repeating: nil, count: masks.count)
         if activeMasks.count == 1, let (index, mask) = activeMasks.first {
             coverages[index] = try renderCoverage(
@@ -242,8 +264,21 @@ public enum BrushMaskRenderer {
                 stageIntervalObserver: stageIntervalObserver
             )
         } else {
-            try await withThrowingTaskGroup(of: CoverageResult.self) { group in
-                for (index, mask) in activeMasks {
+            try await withThrowingTaskGroup(of: (Int, CIImage).self) { group in
+                // Bound the number of full-frame coverage scratch buffers that
+                // are live at once. Each mask still uses tile-level CPU
+                // parallelism; limiting mask fan-out keeps peak RSS stable
+                // when several masks share repeated stroke geometry.
+                let containsRepeatedGeometry = activeMasks.contains { _, mask in
+                    hasRepeatedStrokeGeometry(mask)
+                }
+                let maxConcurrentMasks = containsRepeatedGeometry
+                    ? 1
+                    : min(2, activeMasks.count)
+                var nextMaskIndex = 0
+                for _ in 0..<maxConcurrentMasks {
+                    let (index, mask) = activeMasks[nextMaskIndex]
+                    nextMaskIndex += 1
                     group.addTask {
                         try cancellationCheck()
                         let coverage = try renderCoverage(
@@ -256,11 +291,28 @@ public enum BrushMaskRenderer {
                             stageIntervalObserver: stageIntervalObserver
                         )
                         try cancellationCheck()
-                        return CoverageResult(index: index, image: coverage)
+                        return (index, coverage)
                     }
                 }
-                for try await result in group {
-                    coverages[result.index] = result.image
+                while let (index, coverage) = try await group.next() {
+                    coverages[index] = coverage
+                    guard nextMaskIndex < activeMasks.count else { continue }
+                    let (nextIndex, nextMask) = activeMasks[nextMaskIndex]
+                    nextMaskIndex += 1
+                    group.addTask {
+                        try cancellationCheck()
+                        let coverage = try renderCoverage(
+                            nextMask,
+                            imageExtent: image.extent,
+                            mapping: coordinateMapping,
+                            cancellationCheck: cancellationCheck,
+                            maskIndex: nextIndex,
+                            observer: observer,
+                            stageIntervalObserver: stageIntervalObserver
+                        )
+                        try cancellationCheck()
+                        return (nextIndex, coverage)
+                    }
                 }
             }
         }
@@ -408,6 +460,25 @@ public enum BrushMaskRenderer {
         return adjustments
     }
 
+    private static func hasRepeatedStrokeGeometry(_ mask: BrushMask) -> Bool {
+        let strokes = mask.strokes
+        guard strokes.count > 1 else { return false }
+        for firstIndex in 0..<(strokes.count - 1) {
+            let first = strokes[firstIndex]
+            for secondIndex in (firstIndex + 1)..<strokes.count {
+                let second = strokes[secondIndex]
+                if first.points == second.points,
+                   first.size == second.size,
+                   first.feather == second.feather,
+                   first.flow == second.flow,
+                   first.density == second.density {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private static func renderCoverage(
         _ mask: BrushMask,
         imageExtent: CGRect,
@@ -448,9 +519,25 @@ public enum BrushMaskRenderer {
             let maxX: Int
             let minY: Int
             let maxY: Int
+
+            func hasSameGeometry(as other: CoverageStamp) -> Bool {
+                point == other.point
+                    && visualY == other.visualY
+                    && radius == other.radius
+                    && innerRadius == other.innerRadius
+                    && radiusSquared == other.radiusSquared
+                    && innerRadiusSquared == other.innerRadiusSquared
+                    && falloffSlope == other.falloffSlope
+                    && falloffIntercept == other.falloffIntercept
+                    && flow == other.flow
+                    && minX == other.minX
+                    && maxX == other.maxX
+                    && minY == other.minY
+                    && maxY == other.maxY
+            }
         }
 
-        let tileSize = 128
+        let tileSize = 256
         let tileColumns = (width + tileSize - 1) / tileSize
         let tileRows = (height + tileSize - 1) / tileSize
         guard tileColumns > 0, tileRows > 0, tileColumns <= Int.max / tileRows else {
@@ -458,11 +545,15 @@ public enum BrushMaskRenderer {
         }
         let samplingStart = DispatchTime.now().uptimeNanoseconds
         var stamps: [CoverageStamp] = []
+        var stampStrokeIndices: [Int] = []
+        var strokeGeometryGroups = Array(repeating: -1, count: mask.strokes.count)
+        var geometryRepresentatives: [[CoverageStamp]] = []
+        var geometryUseCounts: [Int] = []
         var tileStamps = Array(repeating: [Int](), count: tileColumns * tileRows)
         var tileEntryCount = 0
         let maxTileEntries = 20_000_000
         let shortSide = min(imageExtent.width, imageExtent.height)
-        for stroke in mask.strokes {
+        for (strokeIndex, stroke) in mask.strokes.enumerated() {
             try cancellationCheck()
             let points = stroke.points
             guard !points.isEmpty, stroke.flow > 0 else { continue }
@@ -474,6 +565,7 @@ public enum BrushMaskRenderer {
                 maskIndex: maskIndex,
                 observer: observer
             )
+            let strokeStart = stamps.count
             for (sampleIndex, point) in samples.enumerated() {
                 if sampleIndex.isMultiple(of: 4096) { try cancellationCheck() }
                 let feather = min(max(CGFloat(stroke.feather), 0), 1)
@@ -509,6 +601,7 @@ public enum BrushMaskRenderer {
                     minY: minY,
                     maxY: maxY
                 ))
+                stampStrokeIndices.append(strokeIndex)
                 let firstTileX = minX / tileSize
                 let lastTileX = maxX / tileSize
                 let firstTileY = minY / tileSize
@@ -522,6 +615,24 @@ public enum BrushMaskRenderer {
                 }
                 tileEntryCount += tileSpan
             }
+
+            let strokeStampRange = strokeStart..<stamps.count
+            guard !strokeStampRange.isEmpty else { continue }
+            let group: Int
+            if let existing = geometryRepresentatives.firstIndex(where: { representative in
+                representative.count == strokeStampRange.count
+                    && zip(representative, strokeStampRange).allSatisfy { representativeStamp, index in
+                        representativeStamp.hasSameGeometry(as: stamps[index])
+                    }
+            }) {
+                group = existing
+            } else {
+                group = geometryRepresentatives.count
+                geometryRepresentatives.append(strokeStampRange.map { stamps[$0] })
+                geometryUseCounts.append(0)
+            }
+            geometryUseCounts[group] += 1
+            strokeGeometryGroups[strokeIndex] = group
         }
 
         stageIntervalObserver?(BrushMaskStageInterval(
@@ -532,67 +643,165 @@ public enum BrushMaskRenderer {
 
         var bytes = [UInt8](repeating: 0, count: pixelCount)
         let rasterStart = DispatchTime.now().uptimeNanoseconds
-        for tileY in 0..<tileRows {
-            for tileX in 0..<tileColumns {
-                try cancellationCheck()
+        let cancellationState = RasterCancellationState()
+        let tileConcurrency = min(4, max(1, tileColumns * tileRows))
+        let rasterSemaphore = DispatchSemaphore(value: tileConcurrency)
+        bytes.withUnsafeMutableBufferPointer { byteBuffer in
+            DispatchQueue.concurrentPerform(iterations: tileColumns * tileRows) { tileIndex in
+                rasterSemaphore.wait()
+                defer { rasterSemaphore.signal() }
+                guard !cancellationState.hasError else { return }
+                do {
+                    try cancellationCheck()
+                let tileX = tileIndex % tileColumns
+                let tileY = tileIndex / tileColumns
                 let tileStartX = tileX * tileSize
                 let tileStartY = tileY * tileSize
                 let tileWidth = min(tileSize, width - tileStartX)
                 let tileHeight = min(tileSize, height - tileStartY)
-                var alpha = [CGFloat](repeating: 0, count: tileWidth * tileHeight)
+                let alpha = UnsafeMutableBufferPointer<CGFloat>.allocate(capacity: tileWidth * tileHeight)
+                alpha.initialize(repeating: 0)
+                defer {
+                    alpha.deinitialize()
+                    alpha.deallocate()
+                }
                 var pixelIterations = 0
-                for stampIndex in tileStamps[tileY * tileColumns + tileX] {
-                    let stamp = stamps[stampIndex]
-                    let pointX = stamp.point.x
-                    let pointY = stamp.visualY
-                    let innerRadiusSquared = stamp.innerRadiusSquared
-                    let radiusSquared = stamp.radiusSquared
-                    let falloffIntercept = stamp.falloffIntercept
-                    let falloffSlope = stamp.falloffSlope
-                    let flow = stamp.flow
-                    let isPaint = stamp.mode == .paint
-                    let startX = max(stamp.minX, tileStartX)
-                    let endX = min(stamp.maxX, tileStartX + tileWidth - 1)
-                    let startY = max(stamp.minY, tileStartY)
-                    let endY = min(stamp.maxY, tileStartY + tileHeight - 1)
-                    guard startX <= endX, startY <= endY else { continue }
-                    for y in startY...endY {
-                        let rowY = imageExtent.minY + CGFloat(y) + 0.5
-                        let dy = rowY - pointY
-                        let dySquared = dy * dy
-                        var pixelX = imageExtent.minX + CGFloat(startX) + 0.5
-                        for x in startX...endX {
-                            pixelIterations += 1
-                            if pixelIterations == 4096 {
-                                observer?.emit(
-                                    maskIndex: maskIndex,
-                                    kind: .progress,
-                                    stage: .rasterization,
-                                    completedIterations: 4_096
-                                )
-                                try cancellationCheck()
-                                pixelIterations = 0
+                var cachedStrokeCoverages: [Int: [Float]] = [:]
+                let tileStampIndices = tileStamps[tileIndex]
+                var tileStampOffset = 0
+                while tileStampOffset < tileStampIndices.count {
+                    let firstStampIndex = tileStampIndices[tileStampOffset]
+                    let strokeIndex = stampStrokeIndices[firstStampIndex]
+                    var nextStrokeOffset = tileStampOffset + 1
+                    while nextStrokeOffset < tileStampIndices.count,
+                          stampStrokeIndices[tileStampIndices[nextStrokeOffset]] == strokeIndex {
+                        nextStrokeOffset += 1
+                    }
+                    let geometryGroup = strokeGeometryGroups[strokeIndex]
+                    if geometryUseCounts[geometryGroup] > 1 {
+                        let strokeCoverage: [Float]
+                        if let cached = cachedStrokeCoverages[geometryGroup] {
+                            strokeCoverage = cached
+                        } else {
+                            var computed = [Float](repeating: 0, count: tileWidth * tileHeight)
+                            for stampOffset in tileStampOffset..<nextStrokeOffset {
+                                let stamp = stamps[tileStampIndices[stampOffset]]
+                                let pointX = stamp.point.x
+                                let pointY = stamp.visualY
+                                let innerRadiusSquared = stamp.innerRadiusSquared
+                                let radiusSquared = stamp.radiusSquared
+                                let falloffIntercept = stamp.falloffIntercept
+                                let falloffSlope = stamp.falloffSlope
+                                let flow = stamp.flow
+                                let startX = max(stamp.minX, tileStartX)
+                                let endX = min(stamp.maxX, tileStartX + tileWidth - 1)
+                                let startY = max(stamp.minY, tileStartY)
+                                let endY = min(stamp.maxY, tileStartY + tileHeight - 1)
+                                guard startX <= endX, startY <= endY else { continue }
+                                for y in startY...endY {
+                                    let rowY = imageExtent.minY + CGFloat(y) + 0.5
+                                    let dy = rowY - pointY
+                                    let dySquared = dy * dy
+                                    var pixelX = imageExtent.minX + CGFloat(startX) + 0.5
+                                    for x in startX...endX {
+                                        pixelIterations += 1
+                                        if pixelIterations == 4096 {
+                                            observer?.emit(
+                                                maskIndex: maskIndex,
+                                                kind: .progress,
+                                                stage: .rasterization,
+                                                completedIterations: 4_096
+                                            )
+                                            try cancellationCheck()
+                                            pixelIterations = 0
+                                        }
+                                        let dx = pixelX - pointX
+                                        let distanceSquared = dx * dx + dySquared
+                                        let opacity: CGFloat
+                                        if distanceSquared <= innerRadiusSquared {
+                                            opacity = flow
+                                        } else if distanceSquared < radiusSquared {
+                                            let distance = distanceSquared.squareRoot()
+                                            opacity = falloffIntercept - distance * falloffSlope
+                                        } else {
+                                            opacity = 0
+                                        }
+                                        if opacity > 0 {
+                                            let index = (y - tileStartY) * tileWidth + (x - tileStartX)
+                                            computed[index] = Float(1 - (1 - CGFloat(computed[index])) * (1 - opacity))
+                                        }
+                                        pixelX += 1
+                                    }
+                                }
                             }
-                            let dx = pixelX - pointX
-                            let distanceSquared = dx * dx + dySquared
-                            let opacity: CGFloat
-                            if distanceSquared <= innerRadiusSquared {
-                                opacity = flow
-                            } else if distanceSquared < radiusSquared {
-                                let distance = distanceSquared.squareRoot()
-                                opacity = falloffIntercept - distance * falloffSlope
-                            } else {
-                                opacity = 0
-                            }
+                            cachedStrokeCoverages[geometryGroup] = computed
+                            strokeCoverage = computed
+                        }
+                        let isPaint = stamps[firstStampIndex].mode == .paint
+                        for index in 0..<(tileWidth * tileHeight) {
+                            let opacity = CGFloat(strokeCoverage[index])
                             if opacity > 0 {
-                                let index = (y - tileStartY) * tileWidth + (x - tileStartX)
                                 alpha[index] = isPaint
                                     ? 1 - (1 - alpha[index]) * (1 - opacity)
                                     : alpha[index] * (1 - opacity)
                             }
-                            pixelX += 1
+                        }
+                    } else {
+                        for stampOffset in tileStampOffset..<nextStrokeOffset {
+                            let stamp = stamps[tileStampIndices[stampOffset]]
+                            let pointX = stamp.point.x
+                            let pointY = stamp.visualY
+                            let innerRadiusSquared = stamp.innerRadiusSquared
+                            let radiusSquared = stamp.radiusSquared
+                            let falloffIntercept = stamp.falloffIntercept
+                            let falloffSlope = stamp.falloffSlope
+                            let flow = stamp.flow
+                            let isPaint = stamp.mode == .paint
+                            let startX = max(stamp.minX, tileStartX)
+                            let endX = min(stamp.maxX, tileStartX + tileWidth - 1)
+                            let startY = max(stamp.minY, tileStartY)
+                            let endY = min(stamp.maxY, tileStartY + tileHeight - 1)
+                            guard startX <= endX, startY <= endY else { continue }
+                            for y in startY...endY {
+                                let rowY = imageExtent.minY + CGFloat(y) + 0.5
+                                let dy = rowY - pointY
+                                let dySquared = dy * dy
+                                var pixelX = imageExtent.minX + CGFloat(startX) + 0.5
+                                for x in startX...endX {
+                                    pixelIterations += 1
+                                    if pixelIterations == 4096 {
+                                        observer?.emit(
+                                            maskIndex: maskIndex,
+                                            kind: .progress,
+                                            stage: .rasterization,
+                                            completedIterations: 4_096
+                                        )
+                                        try cancellationCheck()
+                                        pixelIterations = 0
+                                    }
+                                    let dx = pixelX - pointX
+                                    let distanceSquared = dx * dx + dySquared
+                                    let opacity: CGFloat
+                                    if distanceSquared <= innerRadiusSquared {
+                                        opacity = flow
+                                    } else if distanceSquared < radiusSquared {
+                                        let distance = distanceSquared.squareRoot()
+                                        opacity = falloffIntercept - distance * falloffSlope
+                                    } else {
+                                        opacity = 0
+                                    }
+                                    if opacity > 0 {
+                                        let index = (y - tileStartY) * tileWidth + (x - tileStartX)
+                                        alpha[index] = isPaint
+                                            ? 1 - (1 - alpha[index]) * (1 - opacity)
+                                            : alpha[index] * (1 - opacity)
+                                    }
+                                    pixelX += 1
+                                }
+                            }
                         }
                     }
+                    tileStampOffset = nextStrokeOffset
                 }
                 // CIImage bitmap rows are top-down for R8; the coverage array
                 // uses Core Image's y-up pixel rows, so flip exactly once here.
@@ -612,10 +821,16 @@ public enum BrushMaskRenderer {
                             try cancellationCheck()
                         }
                         let value = min(max(alpha[localRow * tileWidth + column], 0), 1)
-                        bytes[bitmapRow * width + tileStartX + column] = UInt8((value * 255).rounded())
+                        byteBuffer[bitmapRow * width + tileStartX + column] = UInt8((value * 255).rounded())
                     }
                 }
+            } catch {
+                cancellationState.record(error)
+                }
             }
+        }
+        if let error = cancellationState.error {
+            throw error
         }
         stageIntervalObserver?(BrushMaskStageInterval(
             stage: .coverageRaster,

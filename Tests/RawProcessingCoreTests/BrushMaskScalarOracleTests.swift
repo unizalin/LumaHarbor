@@ -8,6 +8,29 @@ import XCTest
 /// keeps the old `hypot` path separate from the production rasterizer so a
 /// future optimization cannot make its own output the expected answer.
 final class BrushMaskScalarOracleTests: XCTestCase {
+    func testRepeatedGeometryStrokeCacheMatchesScalarOracle() throws {
+        let extent = CGRect(x: 7, y: 11, width: 257, height: 259)
+        let mapping = try BrushCoordinateMapping(sourceExtent: extent, geometry: .neutral)
+        let points = [
+            BrushMaskPoint(x: 0.12, y: 0.18),
+            BrushMaskPoint(x: 0.82, y: 0.76)
+        ]
+        let masks = [
+            BrushMaskStroke(points: points, mode: .paint, size: 0.74, feather: 0.25, flow: 0.61),
+            BrushMaskStroke(points: points, mode: .erase, size: 0.74, feather: 0.25, flow: 0.61),
+            BrushMaskStroke(points: points, mode: .paint, size: 0.74, feather: 0.25, flow: 0.61)
+        ]
+        let mask = BrushMask(strokes: masks, adjustments: BrushMaskPatch(exposure: 1))
+        let expected = try scalarCoverage(mask, extent: extent, mapping: mapping)
+        let actual = try BrushMaskRenderer._testRenderCoverageBytes(
+            mask,
+            imageExtent: extent,
+            mapping: mapping
+        )
+
+        XCTAssertEqual(actual, expected.bytes)
+    }
+
     func testTiledCoverageMatchesScalarOracleAcrossVerticalTileBoundaries() throws {
         let extents = [127, 128, 129, 240, 256, 257].map {
             CGRect(x: 0, y: 0, width: 180, height: $0)

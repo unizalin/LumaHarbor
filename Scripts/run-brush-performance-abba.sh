@@ -34,6 +34,7 @@ CANDIDATE_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
 # Compile both variants before timing. The opt-in test skips, but SwiftPM still
 # builds the same Release test product later used with --skip-build.
 swift test -c release --package-path "${BASELINE_ROOT}" --scratch-path "${BASELINE_SCRATCH}" \
+    -Xswiftc -DLUMAHARBOR_BRUSH_LEGACY \
     --filter BrushPreviewABBAHarnessTests
 swift test -c release --package-path "${REPO_ROOT}" --scratch-path "${CANDIDATE_SCRATCH}" \
     --filter BrushPreviewABBAHarnessTests
@@ -64,20 +65,38 @@ run_sample() {
     fi
 
     local output record
-    output="$(
-        LUMAHARBOR_RUN_BRUSH_ABBA=1 \
-        LUMAHARBOR_BRUSH_VARIANT="${variant}" \
-        LUMAHARBOR_BRUSH_PRODUCT_SHA="${product_sha}" \
-        LUMAHARBOR_BRUSH_HARNESS_SHA="${HARNESS_SHA}" \
-        LUMAHARBOR_BRUSH_INSTRUMENTATION_DIGEST="${INSTRUMENTATION_DIGEST}" \
-        LUMAHARBOR_BRUSH_ROUND="${round}" \
-        LUMAHARBOR_BRUSH_ORDER="${ORDER_INDEX}" \
-        LUMAHARBOR_BRUSH_SAMPLE_ORDINAL="${sample_ordinal}" \
-        LUMAHARBOR_BRUSH_MASK_COUNT="${mask_count}" \
-        LUMAHARBOR_BRUSH_SCENARIO="${scenario}" \
-        swift test -c release --package-path "${package_root}" --scratch-path "${scratch}" \
-            --skip-build --filter BrushPreviewABBAHarnessTests/testOptInProductionPreviewSample
-    )"
+    if [[ "${variant}" == "B" ]]; then
+        output="$(
+            LUMAHARBOR_RUN_BRUSH_ABBA=1 \
+            LUMAHARBOR_BRUSH_VARIANT="${variant}" \
+            LUMAHARBOR_BRUSH_PRODUCT_SHA="${product_sha}" \
+            LUMAHARBOR_BRUSH_HARNESS_SHA="${HARNESS_SHA}" \
+            LUMAHARBOR_BRUSH_INSTRUMENTATION_DIGEST="${INSTRUMENTATION_DIGEST}" \
+            LUMAHARBOR_BRUSH_ROUND="${round}" \
+            LUMAHARBOR_BRUSH_ORDER="${ORDER_INDEX}" \
+            LUMAHARBOR_BRUSH_SAMPLE_ORDINAL="${sample_ordinal}" \
+            LUMAHARBOR_BRUSH_MASK_COUNT="${mask_count}" \
+            LUMAHARBOR_BRUSH_SCENARIO="${scenario}" \
+            swift test -c release --package-path "${package_root}" --scratch-path "${scratch}" \
+                -Xswiftc -DLUMAHARBOR_BRUSH_LEGACY \
+                --skip-build --filter BrushPreviewABBAHarnessTests/testOptInProductionPreviewSample
+        )"
+    else
+        output="$(
+            LUMAHARBOR_RUN_BRUSH_ABBA=1 \
+            LUMAHARBOR_BRUSH_VARIANT="${variant}" \
+            LUMAHARBOR_BRUSH_PRODUCT_SHA="${product_sha}" \
+            LUMAHARBOR_BRUSH_HARNESS_SHA="${HARNESS_SHA}" \
+            LUMAHARBOR_BRUSH_INSTRUMENTATION_DIGEST="${INSTRUMENTATION_DIGEST}" \
+            LUMAHARBOR_BRUSH_ROUND="${round}" \
+            LUMAHARBOR_BRUSH_ORDER="${ORDER_INDEX}" \
+            LUMAHARBOR_BRUSH_SAMPLE_ORDINAL="${sample_ordinal}" \
+            LUMAHARBOR_BRUSH_MASK_COUNT="${mask_count}" \
+            LUMAHARBOR_BRUSH_SCENARIO="${scenario}" \
+            swift test -c release --package-path "${package_root}" --scratch-path "${scratch}" \
+                --skip-build --filter BrushPreviewABBAHarnessTests/testOptInProductionPreviewSample
+        )"
+    fi
     printf '%s\n' "${output}"
     record="$(printf '%s\n' "${output}" | awk '/^\{.*\}$/ { print; exit }')"
     if [[ -z "${record}" ]]; then
