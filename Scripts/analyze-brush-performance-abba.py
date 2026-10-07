@@ -102,9 +102,15 @@ def main():
         if missing:
             continue
 
-        for field in ("configuration", "scenario", "variant", "result"):
-            if not isinstance(record[field], str):
-                errors.append(f"line {line_number}: {field} must be a string")
+        invalid_string_fields = [
+            field for field in ("configuration", "scenario", "variant", "result")
+            if not isinstance(record[field], str)
+        ]
+        if invalid_string_fields:
+            errors.append(
+                f"line {line_number}: {','.join(invalid_string_fields)} must be strings"
+            )
+            continue
         for field in ("nativeSize", "decodedSize", "outputSize"):
             size = record[field]
             if not isinstance(size, dict) or set(size) != {"width", "height"} \

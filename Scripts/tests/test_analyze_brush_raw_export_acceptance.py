@@ -313,7 +313,11 @@ class AnalyzeBrushRawExportAcceptanceTests(unittest.TestCase):
                         del records[0][field]
                     else:
                         records[0][field] = value
-                    self.assert_rejected(records)
+                    completed, payload = self.run_analyzer(records)
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIsNotNone(payload)
+                    expected_name = field if value is not None else field
+                    self.assertIn(expected_name, "\n".join(payload["validationErrors"]))
 
     def test_scalar_types_fail_closed(self):
         for field in ("schemaVersion", "round", "maskCount", "order", "sampleOrdinal",

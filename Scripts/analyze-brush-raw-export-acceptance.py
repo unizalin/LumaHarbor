@@ -186,9 +186,9 @@ def main():
         if not isinstance(record["contextLifecycle"], str) or not record["contextLifecycle"]:
             errors.append(f"line {line_number}: contextLifecycle must be nonempty")
         if not is_nonnegative_integer(record[count_prefix + "BeforeTimer"]):
-            errors.append(f"line {line_number}: invalid contextCreationCountBeforeTimer")
+            errors.append(f"line {line_number}: invalid {count_prefix}BeforeTimer")
         if not is_nonnegative_integer(record[count_prefix + "DuringTimer"]):
-            errors.append(f"line {line_number}: invalid contextCreationCountDuringTimer")
+            errors.append(f"line {line_number}: invalid {count_prefix}DuringTimer")
         if record["sourceFingerprintUnchanged"] is not True:
             errors.append(f"line {line_number}: source fingerprint changed or was not checked")
         if not isinstance(record["thermalState"], str) or not record["thermalState"]:
@@ -250,9 +250,9 @@ def main():
             expected_before = 0
             expected_during = 2 if record["variant"] == "B" else 1
         if record[count_prefix + "BeforeTimer"] != expected_before:
-            errors.append(f"line {line_number}: unexpected context creations before timer")
+            errors.append(f"line {line_number}: unexpected {count_prefix}BeforeTimer")
         if record[count_prefix + "DuringTimer"] != expected_during:
-            errors.append(f"line {line_number}: unexpected context creations during timer")
+            errors.append(f"line {line_number}: unexpected {count_prefix}DuringTimer")
 
         if len(errors) == line_error_count:
             records.append(record)
