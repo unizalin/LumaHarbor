@@ -63,6 +63,21 @@ def valid_records(expected_per_round=2):
     return records
 
 
+def complete_stage_records(expected_per_round=2):
+    records = valid_records(expected_per_round)
+    for record in records:
+        record["stageDurationsSeconds"] = {
+            "rawDecode": 0.001,
+            "globalAdjustmentGraph": 0.001,
+            "validationSampling": 0.001,
+            "coverageRaster": 0.010,
+            "perMaskAdjustmentBlend": 0.001,
+            "finalMakeCGImage": 0.001,
+            "totalMaterialized": 0.015,
+        }
+    return records
+
+
 class AnalyzeBrushPerformanceABBATests(unittest.TestCase):
     def run_analyzer(self, records, *, expected_per_round=2):
         with tempfile.TemporaryDirectory() as directory:
@@ -93,6 +108,17 @@ class AnalyzeBrushPerformanceABBATests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(payload["validation"], "PASS")
         self.assertEqual(payload["recordCount"], 120)
+
+    def test_complete_stage_matrix_runs_coverage_gate(self):
+        completed, payload = self.run_analyzer(complete_stage_records())
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        coverage_gates = [gate for gate in payload["gates"] if gate["gate"] == "PERF-COVERAGE"]
+        self.assertEqual(len(coverage_gates), 20)
+        self.assertTrue(all(gate["result"] == "PASS" for gate in coverage_gates))
+        self.assertIn("stageDurationsSeconds", payload["summaries"][
+            "stress-vectors-production-preview/masks-10/round-2/O"
+        ])
 
     def test_truncated_matrix_fails(self):
         completed, payload = self.run_analyzer(valid_records()[:16])

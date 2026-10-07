@@ -5,7 +5,6 @@ import Foundation
 import XCTest
 @testable import RawProcessingCore
 
-#if !LUMAHARBOR_BRUSH_LEGACY
 private final class PreviewTimingBox: @unchecked Sendable {
     private let lock = NSLock()
     private var latest: PreviewStageTimings?
@@ -22,7 +21,6 @@ private final class PreviewTimingBox: @unchecked Sendable {
         return latest
     }
 }
-#endif
 
 /// One production-preview sample per process. The shell orchestrator controls
 /// B/O order so compiler work and another variant never overlap a timed sample.
@@ -58,20 +56,12 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
         XCTAssertTrue(["cold", "warm", "changed", "appended", "stress"].contains(scenario))
 
         let decoder = SyntheticRawDecoder(pixelSize: CGSize(width: 1_600, height: 1_067))
-#if !LUMAHARBOR_BRUSH_LEGACY
         let timingBox = PreviewTimingBox()
         let renderer = CoreImagePreviewRenderer(
             decoder: decoder,
             renderService: ImageRenderService(preferMetal: true),
-            brushRenderObserverFactory: { nil },
             stageTimingObserver: { timingBox.record($0) }
         )
-#else
-        let renderer = CoreImagePreviewRenderer(
-            decoder: decoder,
-            renderService: ImageRenderService(preferMetal: true)
-        )
-#endif
         let inputs = makeInputs(scenario: scenario, maskCount: maskCount, sampleOrdinal: sampleOrdinal)
         let request = PreviewRequest(
             subject: PreviewSubject(UUID(uuidString: "00000000-0000-4000-8000-000000000001")!),
@@ -94,9 +84,7 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
         let start = clock.now
         let image = try await renderer.render(request)
         let total = seconds(start.duration(to: clock.now))
-#if !LUMAHARBOR_BRUSH_LEGACY
         let stageTimings = timingBox.take()
-#endif
         XCTAssertGreaterThan(image.pixelSize.width, 0)
         XCTAssertGreaterThan(image.pixelSize.height, 0)
 
@@ -114,7 +102,6 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
             "workerCounts": "observer disabled during timed sample",
             "cancelOutcome": "not a cancellation scenario"
         ]
-#if !LUMAHARBOR_BRUSH_LEGACY
         let stageDurations: [String: Double]
         if let stageTimings {
             stageDurations = [
@@ -130,10 +117,6 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
             stageDurations = ["total": total]
             unavailableReasons["stageDurationsSeconds"] = "stage observer did not emit a completed sample"
         }
-#else
-        let stageDurations: [String: Double] = ["total": total]
-        unavailableReasons["stageDurationsSeconds"] = "baseline renderer predates stage observer instrumentation"
-#endif
         if rssBytes == nil {
             unavailableReasons["rssBytes"] = "getrusage failed for the isolated test process"
         }

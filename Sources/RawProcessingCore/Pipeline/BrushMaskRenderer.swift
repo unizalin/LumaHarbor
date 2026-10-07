@@ -269,12 +269,7 @@ public enum BrushMaskRenderer {
                 // are live at once. Each mask still uses tile-level CPU
                 // parallelism; limiting mask fan-out keeps peak RSS stable
                 // when several masks share repeated stroke geometry.
-                let containsRepeatedGeometry = activeMasks.contains { _, mask in
-                    hasRepeatedStrokeGeometry(mask)
-                }
-                let maxConcurrentMasks = containsRepeatedGeometry
-                    ? 1
-                    : min(2, activeMasks.count)
+                let maxConcurrentMasks = min(2, activeMasks.count)
                 var nextMaskIndex = 0
                 for _ in 0..<maxConcurrentMasks {
                     let (index, mask) = activeMasks[nextMaskIndex]
@@ -458,25 +453,6 @@ public enum BrushMaskRenderer {
         if let value = patch.temperature { adjustments.temperature = value }
         if let value = patch.tint { adjustments.tint = value }
         return adjustments
-    }
-
-    private static func hasRepeatedStrokeGeometry(_ mask: BrushMask) -> Bool {
-        let strokes = mask.strokes
-        guard strokes.count > 1 else { return false }
-        for firstIndex in 0..<(strokes.count - 1) {
-            let first = strokes[firstIndex]
-            for secondIndex in (firstIndex + 1)..<strokes.count {
-                let second = strokes[secondIndex]
-                if first.points == second.points,
-                   first.size == second.size,
-                   first.feather == second.feather,
-                   first.flow == second.flow,
-                   first.density == second.density {
-                    return true
-                }
-            }
-        }
-        return false
     }
 
     private static func renderCoverage(

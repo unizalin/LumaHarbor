@@ -22,6 +22,15 @@ DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 VARIANTS = ("B", "O")
 ROUNDS = (1, 2)
 ROUND_PATTERNS = {1: ("B", "O", "O", "B"), 2: ("O", "B", "B", "O")}
+STAGE_FIELDS = (
+    "rawDecode",
+    "globalAdjustmentGraph",
+    "validationSampling",
+    "coverageRaster",
+    "perMaskAdjustmentBlend",
+    "finalMakeCGImage",
+    "totalMaterialized",
+)
 
 
 def percentile_95(values):
@@ -32,12 +41,25 @@ def percentile_95(values):
 def summary(records):
     durations = [record["totalDurationSeconds"] for record in records]
     rss_values = [record["rssBytes"] for record in records if record["rssBytes"] is not None]
-    return {
+    result = {
         "count": len(records),
         "p50Seconds": statistics.median(durations),
         "p95Seconds": percentile_95(durations),
         "peakRSSBytes": max(rss_values) if len(rss_values) == len(records) else None,
     }
+    if all(complete_stage_record(record) for record in records):
+        result["stageDurationsSeconds"] = {
+            stage: {
+                "p50Seconds": statistics.median(
+                    [record["stageDurationsSeconds"][stage] for record in records]
+                ),
+                "p95Seconds": percentile_95(
+                    [record["stageDurationsSeconds"][stage] for record in records]
+                ),
+            }
+            for stage in STAGE_FIELDS
+        }
+    return result
 
 
 def is_nonnegative_integer(value):
@@ -51,6 +73,14 @@ def is_finite_nonnegative(value):
         return math.isfinite(value) and value >= 0
     except OverflowError:
         return False
+
+
+def complete_stage_record(record):
+    durations = record.get("stageDurationsSeconds")
+    return (
+        isinstance(durations, dict)
+        and all(stage in durations and is_finite_nonnegative(durations[stage]) for stage in STAGE_FIELDS)
+    )
 
 
 def main():
@@ -142,6 +172,13 @@ def main():
         duration = record["totalDurationSeconds"]
         if not is_finite_nonnegative(duration):
             errors.append(f"line {line_number}: invalid totalDurationSeconds")
+        stage_durations = record["stageDurationsSeconds"]
+        if not isinstance(stage_durations, dict):
+            errors.append(f"line {line_number}: stageDurationsSeconds must be an object")
+        else:
+            for stage, value in stage_durations.items():
+                if stage in STAGE_FIELDS and not is_finite_nonnegative(value):
+                    errors.append(f"line {line_number}: invalid stageDurationsSeconds.{stage}")
         rss = record["rssBytes"]
         if rss is not None and (not is_nonnegative_integer(rss) or not is_finite_nonnegative(rss)):
             errors.append(f"line {line_number}: invalid rssBytes")
@@ -271,8 +308,43 @@ def main():
                         "baselinePeakRSSBytes": baseline_rss, "candidatePeakRSSBytes": candidate_rss,
                     })
 
+    stage_timing_complete = bool(records) and all(complete_stage_record(record) for record in records)
+    if not errors and stage_timing_complete:
+        for scenario in expected_scenarios:
+            for round_number in ROUNDS:
+                for mask_count, p50_budget in ((1, 0.020), (10, 0.080)):
+                    if mask_count not in expected_mask_counts:
+                        continue
+                    baseline = summaries[
+                        f"{scenario}/masks-{mask_count}/round-{round_number}/B"
+                    ]
+                    candidate = summaries[
+                        f"{scenario}/masks-{mask_count}/round-{round_number}/O"
+                    ]
+                    baseline_p50 = baseline["stageDurationsSeconds"]["coverageRaster"]["p50Seconds"]
+                    candidate_p50 = candidate["stageDurationsSeconds"]["coverageRaster"]["p50Seconds"]
+                    regression_limit = baseline_p50 + max(0.002, baseline_p50 * 0.05)
+                    passed = candidate_p50 <= p50_budget and (
+                        baseline_p50 > p50_budget or candidate_p50 <= regression_limit
+                    )
+                    gates.append({
+                        "gate": "PERF-COVERAGE", "scenario": scenario,
+                        "round": round_number, "maskCount": mask_count,
+                        "result": "PASS" if passed else "FAIL",
+                        "baselineP50Seconds": baseline_p50,
+                        "candidateP50Seconds": candidate_p50,
+                        "baselineP95Seconds": baseline["stageDurationsSeconds"]["coverageRaster"]["p95Seconds"],
+                        "candidateP95Seconds": candidate["stageDurationsSeconds"]["coverageRaster"]["p95Seconds"],
+                        "p50BudgetSeconds": p50_budget,
+                        "regressionLimitSeconds": regression_limit,
+                    })
+    else:
+        gates.append({
+            "gate": "PERF-COVERAGE", "result": "NOT RUN",
+            "reason": "B/O samples do not contain the same complete stage wall-time fields",
+        })
+
     for gate, reason in (
-        ("PERF-COVERAGE", "production B/O harness exposes total preview wall time only"),
         ("INTERACTIVE-150", "real RAW workload was not part of this artifact"),
         ("PERF-EXPORT", "export workload was not part of this artifact"),
         ("PERF-MEM-EXPORT", "export workload was not part of this artifact"),

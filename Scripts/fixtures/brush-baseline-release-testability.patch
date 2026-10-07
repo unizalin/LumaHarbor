@@ -10,3 +10,196 @@ index f7f5a88..2475284 100644
 -    #if DEBUG
 @@ -1608 +1604,0 @@ public final class EditorSession: ObservableObject {
 -    #endif
+
+
+# Brush performance stage instrumentation follows the release testability hunks.
+--- a/Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift
++++ b/Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift
+@@ -3,0 +4 @@
++import Dispatch
+@@ -28,0 +30,18 @@
++    ) throws -> CIImage {
++        try _applyValidated(
++            masks,
++            to: image,
++            mapping: mapping,
++            recipe: recipe,
++            scaleFactor: scaleFactor,
++            stageIntervalObserver: nil
++        )
++    }
++
++    internal static func _applyValidated(
++        _ masks: [BrushMask],
++        to image: CIImage,
++        mapping: BrushCoordinateMapping? = nil,
++        recipe: ResolvedRawRenderRecipe? = nil,
++        scaleFactor: Double = 1,
++        stageIntervalObserver: (@Sendable (BrushMaskStageInterval) -> Void)? = nil
+@@ -37,0 +57 @@
++        let validationStart = DispatchTime.now().uptimeNanoseconds
+@@ -43,0 +64,5 @@
++        stageIntervalObserver?(BrushMaskStageInterval(
++            stage: .validationSampling,
++            startNanoseconds: validationStart,
++            endNanoseconds: DispatchTime.now().uptimeNanoseconds
++        ))
+@@ -46,0 +72 @@
++            let coverageStart = DispatchTime.now().uptimeNanoseconds
+@@ -47,0 +74,6 @@
++            stageIntervalObserver?(BrushMaskStageInterval(
++                stage: .coverageRaster,
++                startNanoseconds: coverageStart,
++                endNanoseconds: DispatchTime.now().uptimeNanoseconds
++            ))
++            let blendStart = DispatchTime.now().uptimeNanoseconds
+@@ -58,0 +91,5 @@
++            stageIntervalObserver?(BrushMaskStageInterval(
++                stage: .perMaskAdjustmentBlend,
++                startNanoseconds: blendStart,
++                endNanoseconds: DispatchTime.now().uptimeNanoseconds
++            ))
+--- a/Sources/RawProcessingCore/Preview/CoreImagePreviewRenderer.swift
++++ b/Sources/RawProcessingCore/Preview/CoreImagePreviewRenderer.swift
+@@ -2,0 +3 @@
++import Dispatch
+@@ -13,0 +15 @@
++    private let stageTimingObserver: @Sendable (PreviewStageTimings) -> Void
+@@ -22,0 +25,13 @@
++        self.stageTimingObserver = { _ in }
++    }
++
++    internal init(
++        decoder: any RawDecoding,
++        pipeline: AdjustmentPipeline = AdjustmentPipeline(),
++        renderService: ImageRenderService = ImageRenderService(),
++        stageTimingObserver: @escaping @Sendable (PreviewStageTimings) -> Void
++    ) {
++        self.decoder = decoder
++        self.pipeline = pipeline
++        self.renderService = renderService
++        self.stageTimingObserver = stageTimingObserver
+@@ -52,0 +68 @@
++        let stageTimingObserver = self.stageTimingObserver
+@@ -56,0 +73,15 @@
++            let stageCollector = PreviewStageTimingCollector()
++            let totalStart = DispatchTime.now().uptimeNanoseconds
++            defer {
++                var timings = PreviewStageTimings()
++                timings.rawDecode = stageCollector.duration(for: .rawDecode)
++                timings.globalAdjustmentGraph = stageCollector.duration(for: .globalAdjustmentGraph)
++                timings.validationSampling = stageCollector.duration(for: .validationSampling)
++                timings.coverageRaster = stageCollector.duration(for: .coverageRaster)
++                timings.perMaskAdjustmentBlend = stageCollector.duration(for: .perMaskAdjustmentBlend)
++                timings.finalMakeCGImage = stageCollector.duration(for: .finalMakeCGImage)
++                timings.totalMaterialized = Double(
++                    DispatchTime.now().uptimeNanoseconds - totalStart
++                ) / 1_000_000_000
++                stageTimingObserver(timings)
++            }
+@@ -57,0 +89 @@
++            let decodeStart = DispatchTime.now().uptimeNanoseconds
+@@ -58,0 +91 @@
++            stageCollector.record(.rawDecode, start: decodeStart, end: DispatchTime.now().uptimeNanoseconds)
+@@ -60,0 +94 @@
++            let globalStart = DispatchTime.now().uptimeNanoseconds
+@@ -66,0 +101 @@
++            stageCollector.record(.globalAdjustmentGraph, start: globalStart, end: DispatchTime.now().uptimeNanoseconds)
+@@ -71 +106 @@
+-            let withBrushMasks = try BrushMaskRenderer.applyValidated(
++            let withBrushMasks = try BrushMaskRenderer._applyValidated(
+@@ -76 +111,2 @@
+-                scaleFactor: decoded.scaleFactor
++                scaleFactor: decoded.scaleFactor,
++                stageIntervalObserver: { interval in stageCollector.record(interval) }
+@@ -82,0 +119 @@
++            let materializeStart = DispatchTime.now().uptimeNanoseconds
+@@ -83,0 +121 @@
++            stageCollector.record(.finalMakeCGImage, start: materializeStart, end: DispatchTime.now().uptimeNanoseconds)
+--- a/Sources/RawProcessingCore/Preview/PreviewRenderInstrumentation.swift
++++ b/Sources/RawProcessingCore/Preview/PreviewRenderInstrumentation.swift
+@@ -0,0 +1,84 @@
++import Dispatch
++import Foundation
++
++internal enum PreviewRenderStage: String, Sendable {
++    case rawDecode
++    case globalAdjustmentGraph
++    case validationSampling
++    case coverageRaster
++    case perMaskAdjustmentBlend
++    case finalMakeCGImage
++}
++
++internal struct PreviewStageTimings: Sendable, Equatable {
++    internal var rawDecode: Double = 0
++    internal var globalAdjustmentGraph: Double = 0
++    internal var validationSampling: Double = 0
++    internal var coverageRaster: Double = 0
++    internal var perMaskAdjustmentBlend: Double = 0
++    internal var finalMakeCGImage: Double = 0
++    internal var totalMaterialized: Double = 0
++
++    internal init() {}
++}
++
++internal struct BrushMaskStageInterval: Sendable {
++    internal enum Stage: Sendable {
++        case validationSampling
++        case coverageRaster
++        case perMaskAdjustmentBlend
++    }
++
++    let stage: Stage
++    let startNanoseconds: UInt64
++    let endNanoseconds: UInt64
++
++    init(stage: Stage, startNanoseconds: UInt64, endNanoseconds: UInt64) {
++        self.stage = stage
++        self.startNanoseconds = startNanoseconds
++        self.endNanoseconds = max(endNanoseconds, startNanoseconds)
++    }
++}
++
++internal final class PreviewStageTimingCollector: @unchecked Sendable {
++    private let lock = NSLock()
++    private var intervals: [PreviewRenderStage: [(UInt64, UInt64)]] = [:]
++
++    func record(_ stage: PreviewRenderStage, start: UInt64, end: UInt64) {
++        lock.lock()
++        intervals[stage, default: []].append((start, max(start, end)))
++        lock.unlock()
++    }
++
++    func record(_ interval: BrushMaskStageInterval) {
++        let stage: PreviewRenderStage
++        switch interval.stage {
++        case .validationSampling: stage = .validationSampling
++        case .coverageRaster: stage = .coverageRaster
++        case .perMaskAdjustmentBlend: stage = .perMaskAdjustmentBlend
++        }
++        record(stage, start: interval.startNanoseconds, end: interval.endNanoseconds)
++    }
++
++    func duration(for stage: PreviewRenderStage) -> Double {
++        lock.lock()
++        let values = intervals[stage, default: []].sorted { $0.0 < $1.0 }
++        lock.unlock()
++        guard !values.isEmpty else { return 0 }
++
++        var unionStart = values[0].0
++        var unionEnd = values[0].1
++        var nanoseconds: UInt64 = 0
++        for (start, end) in values.dropFirst() {
++            if start > unionEnd {
++                nanoseconds += unionEnd - unionStart
++                unionStart = start
++                unionEnd = end
++            } else {
++                unionEnd = max(unionEnd, end)
++            }
++        }
++        nanoseconds += unionEnd - unionStart
++        return Double(nanoseconds) / 1_000_000_000
++    }
++}

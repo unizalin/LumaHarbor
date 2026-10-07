@@ -44,6 +44,21 @@ public struct CoreImagePreviewRenderer: PreviewRendering {
         self.decodedPreviewCache = decodedPreviewCache
     }
 
+    internal init(
+        decoder: any RawDecoding,
+        pipeline: AdjustmentPipeline = AdjustmentPipeline(),
+        renderService: ImageRenderService = ImageRenderService(),
+        stageTimingObserver: @escaping @Sendable (PreviewStageTimings) -> Void
+    ) {
+        self.init(
+            decoder: decoder,
+            pipeline: pipeline,
+            renderService: renderService,
+            brushRenderObserverFactory: { nil },
+            stageTimingObserver: stageTimingObserver
+        )
+    }
+
     /// Drops retained decoded previews after a source/library change or an
     /// explicit memory-pressure boundary. File identity is also part of every
     /// cache key, so ordinary edits naturally miss without requiring callers
