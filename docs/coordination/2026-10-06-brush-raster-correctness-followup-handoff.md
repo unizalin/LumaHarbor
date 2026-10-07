@@ -2,6 +2,13 @@
 
 日期：2026-10-06
 
+## 2026-10-07 交接補充（目前權威結果）
+
+- `e7d6425` 修正 synthetic ABBA runner 的正式 scenario mapping 與 strict round/order contract；以 480 筆重新驗證，`validation PASS`，56 PASS／4 FAIL／7 NOT RUN。
+- `4fdbc1f` 執行新版 RAW／Export runner；以 schema v2 完成 352 筆雙輪次矩陣，`validation PASS`，`PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4、`PERF-MEM-PREVIEW` 9/9 PASS，warm RAW `INTERACTIVE-150` 3/3 FAIL。
+- 新證據目錄：[full ABBA repair](../testing/evidence/2026-10-07-brush-full-abba-repair/README.md) 與 [RAW/export repair](../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。舊的 2026-10-06 176 筆 RAW artifact 保留作歷史，不再作目前相對效能的唯一依據。
+- 兩份新 gate artifact 已用 committed analyzer 重算逐位元相同；工作樹不得以此狀態宣稱 READY，仍需 Task 5 獨立 reviewer 與人工／實體裝置項目。
+
 ## 目前狀態
 
 - Branch：`codex/brush-performance-acceptance-repair`

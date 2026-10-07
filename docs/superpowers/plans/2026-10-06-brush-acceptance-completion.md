@@ -78,6 +78,8 @@ Scripts/run-brush-performance-abba.sh
 - [x] 分情境記 empty、incremental、preview RSS；stage coverage、RAW、export、UI 保持 NOT RUN。
 - [x] 完整保留第一次矩陣與修正後正式矩陣；stress 四個 PERF-PREVIEW gate 保留 FAIL，未重抽或放寬門檻。
 
+**2026-10-07 rerun note:** `e7d6425` 修正 analyzer 與 runner 的正式 scenario mapping 後，完整矩陣重新以 480 筆執行，`validation PASS`；新證據見 [`2026-10-07-brush-full-abba-repair`](../../testing/evidence/2026-10-07-brush-full-abba-repair/README.md)。
+
 **完成條件:** 480 筆完整、metadata 一致、像素比較可追溯、每一 gate 有結果；FAIL 也必須報告，不得以 runner exit 0 代替產品通過。
 
 ## Task 3：stage coverage 與完整 scheduler 取消／切圖（已完成，coverage 維持 NOT RUN）
@@ -116,12 +118,12 @@ swift test --scratch-path "$TASK_DEBUG_SCRATCH" --filter RawFixtureTests
 ```
 
 - [x] 先新增缺 fixture 不會誤標 PASS、原尺寸不被縮小、encode/close/publish 未結束不會停表的失敗測試；再補 preview/export benchmark、exact allowlist analyzer、schema 與 runner。Analyzer 8/8、Release 計時邊界 1/1 PASS。
-- [x] RAW preview 測 0/1/10 masks、cold/warm/changed；每輪 B/O 各 8 samples。144 筆完整，native/decoded/output 已記錄；warm 三個 INTERACTIVE-150 gate 均 FAIL，原樣保存。
+- [x] RAW preview 測 0/1/10 masks、cold/warm/changed；每輪 B/O 各 8 samples。新版雙輪次共 288 筆，native/decoded/output 與 context lifecycle 已記錄；warm 三個 INTERACTIVE-150 gate 均 FAIL，原樣保存。
 - [x] 24MP synthetic 加真實 RAW 原尺寸 export；每輪 B/O 一／十 masks 各 4 次，新目的檔；time 含 export return、publish 與 reopen 驗證，逐程序 peak RSS 含所有 worker。
 - [x] PERF-EXPORT 4/4 PASS、PERF-MEM-EXPORT 4/4 PASS、PERF-MEM-PREVIEW 9/9 PASS；B 四組 export 已在 absolute budget 內，因此依 ≤5% regression 規則判定。
-- [x] 保存去識別化 evidence 與來源檔未變的私有驗證結果；176 筆全為 nominal、來源前後完整 digest 一致，公開 artifact privacy scan PASS。
+- [x] 保存去識別化 evidence 與來源檔未變的私有驗證結果；352 筆全為 nominal、來源前後完整 digest 一致，公開 artifact privacy scan PASS。
 
-**完成結果:** `8bc6819` 提供正式入口與 fail-closed analyzer；176 筆矩陣 validation PASS、17 gates PASS、3 gates FAIL，整體維持 `DONE_WITH_CONCERNS`。證據見[真實 RAW／原尺寸 export evidence](../../testing/evidence/2026-10-06-brush-raw-export/README.md)。
+**完成結果:** `4fdbc1f` 執行新版入口與 `8bc6819` 契約修正；352 筆矩陣 validation PASS、17 gates PASS、3 gates FAIL，整體維持 `DONE_WITH_CONCERNS`。證據見[2026-10-07 RAW／原尺寸 export evidence](../../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。
 
 ## Task 5：非原作者審查與人工操作
 

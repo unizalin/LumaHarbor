@@ -6,6 +6,12 @@
 - 文件狀態：`IMPLEMENTED`（F1～F4 自動化切片）；F5 完整回歸與文件已有歷史證據，人工與獨立審查尚未全數完成。
 - 產品狀態：`DONE_WITH_CONCERNS`。跨 tile 列位置、標準 Release、取消生命週期、完整 synthetic ABBA、真實 RAW preview 與原尺寸 export/RSS 已驗；synthetic stress 四個 gate 與 warm RAW INTERACTIVE-150 三個 gate FAIL，公平 stage、人工操作與獨立審查仍待完成。
 
+## 2026-10-07 實作後補充
+
+- 完整 synthetic ABBA 已以 `e7d6425` 修正後重跑 480 筆；analyzer `validation PASS`，stress 四個 preview gate 保留 FAIL。
+- RAW／Export 已以 `4fdbc1f` 執行新版 schema v2 雙輪次矩陣 352 筆；context lifecycle、timer 前後建立次數、round/order、distinct B/O SHA 均由 analyzer fail closed 驗證。`PERF-EXPORT`、`PERF-MEM-EXPORT`、`PERF-MEM-PREVIEW` 全部通過，warm RAW `INTERACTIVE-150` 0/1/10 masks 保留 3 個 FAIL。
+- 權威證據為 [2026-10-07 full ABBA repair](../../testing/evidence/2026-10-07-brush-full-abba-repair/README.md) 與 [2026-10-07 RAW/export repair](../../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)；2026-10-06 artifact 仍保留為歷史樣本。
+
 ## 1. 目的、權威與範圍
 
 讓使用者畫下的筆刷，在多個垂直 tile、預覽與原尺寸匯出中保持相同來源位置；同時讓 Release 測試、取消與效能證據能驗證實際產品行為。先證明畫對位置，再比較速度。

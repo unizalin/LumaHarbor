@@ -1,5 +1,13 @@
 # Current Coordination State
 
+## Brush raster correctness follow-up（2026-10-07；目前有效）
+
+- **狀態**：`DONE_WITH_CONCERNS`。2026-10-07 已重跑完整 synthetic ABBA 480 筆與 RAW／Export 352 筆；stress preview 四個 gate、warm RAW `INTERACTIVE-150` 三個 gate 仍 FAIL，沒有放寬門檻。
+- **最新驗證**：ABBA `validation PASS`，`PERF-EMPTY` 10/10、`PERF-PREVIEW` 16/20、`PERF-MEM-PREVIEW` 30/30 PASS；RAW／Export `validation PASS`，`PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4、`PERF-MEM-PREVIEW` 9/9 PASS。新版 RAW／Export matrix 共 352 筆，取代舊 176 筆作為目前相對效能證據。
+- **最新 SHA**：ABBA／harness 修正=`e7d6425d72ceb542d9e130b1eadd8f550afdae2e`；RAW／Export runner 執行 HEAD=`4fdbc1fb3abcfea5abe3b11ed03c267851de9116`。Baseline B 仍為 `1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
+- **證據**：[full ABBA repair](../testing/evidence/2026-10-07-brush-full-abba-repair/README.md)、[RAW/export repair](../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。兩份 analyzer gate 都已獨立重算逐位元相同，公開 artifact 未含私人路徑。
+- **下一步**：依後續計畫 Task 5 進行非原作者唯讀審查與人工 Mac／實體 iPad／heartbeat／輸入／灰卡項目；公平 B/O stage coverage 仍需共同的互斥 production clock。
+
 ## Brush raster correctness follow-up（2026-10-06, Codex；目前有效）
 
 - **狀態**：`DONE_WITH_CONCERNS`。F1～F3、完整五情境 synthetic B/O、production PreviewScheduler 50-cycle、8+8 cancellation、真實 RAW preview 與原尺寸 export/RSS 已執行。synthetic stress 四個 gate與 warm RAW INTERACTIVE-150 三個 gate FAIL；公平 B/O stage、人工裝置與獨立 reviewer 仍未完成。
