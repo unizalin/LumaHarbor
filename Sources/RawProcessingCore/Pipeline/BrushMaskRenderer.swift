@@ -52,6 +52,27 @@ internal struct BrushMaskRenderObserver: Sendable {
     }
 }
 
+/// Monotonic wall-time interval emitted by a brush worker. Parallel workers
+/// are reported as intervals and unioned by the preview renderer; their CPU
+/// durations are never summed as if they were wall time.
+internal struct BrushMaskStageInterval: Sendable {
+    internal enum Stage: Sendable {
+        case validationSampling
+        case coverageRaster
+        case perMaskAdjustmentBlend
+    }
+
+    let stage: Stage
+    let startNanoseconds: UInt64
+    let endNanoseconds: UInt64
+
+    init(stage: Stage, startNanoseconds: UInt64, endNanoseconds: UInt64) {
+        self.stage = stage
+        self.startNanoseconds = startNanoseconds
+        self.endNanoseconds = max(endNanoseconds, startNanoseconds)
+    }
+}
+
 /// Renders the independent source-coordinate brush-mask pipeline. Masks are
 /// composited in array order and each mask's local adjustment is evaluated once
 /// against the image produced by the preceding mask.
@@ -173,6 +194,7 @@ public enum BrushMaskRenderer {
         recipe: ResolvedRawRenderRecipe? = nil,
         scaleFactor: Double = 1,
         observer: BrushMaskRenderObserver?,
+        stageIntervalObserver: (@Sendable (BrushMaskStageInterval) -> Void)? = nil,
         cancellationCheck: @escaping CancellationCheck = { try Task.checkCancellation() }
     ) async throws -> CIImage {
         guard !masks.isEmpty, image.extent.width > 0, image.extent.height > 0 else { return image }
@@ -184,12 +206,18 @@ public enum BrushMaskRenderer {
             coordinateMapping = try BrushCoordinateMapping(sourceExtent: image.extent, geometry: .neutral)
         }
 
+        let validationStart = DispatchTime.now().uptimeNanoseconds
         try validate(
             masks,
             mapping: coordinateMapping,
             observer: observer,
             cancellationCheck: cancellationCheck
         )
+        stageIntervalObserver?(BrushMaskStageInterval(
+            stage: .validationSampling,
+            startNanoseconds: validationStart,
+            endNanoseconds: DispatchTime.now().uptimeNanoseconds
+        ))
 
         let activeMasks = masks.enumerated().filter { _, mask in
             mask.isEnabled
@@ -210,7 +238,8 @@ public enum BrushMaskRenderer {
                 mapping: coordinateMapping,
                 cancellationCheck: cancellationCheck,
                 maskIndex: index,
-                observer: observer
+                observer: observer,
+                stageIntervalObserver: stageIntervalObserver
             )
         } else {
             try await withThrowingTaskGroup(of: CoverageResult.self) { group in
@@ -223,7 +252,8 @@ public enum BrushMaskRenderer {
                             mapping: coordinateMapping,
                             cancellationCheck: cancellationCheck,
                             maskIndex: index,
-                            observer: observer
+                            observer: observer,
+                            stageIntervalObserver: stageIntervalObserver
                         )
                         try cancellationCheck()
                         return CoverageResult(index: index, image: coverage)
@@ -236,6 +266,7 @@ public enum BrushMaskRenderer {
         }
 
         var working = image
+        let blendStart = DispatchTime.now().uptimeNanoseconds
         for (index, mask) in activeMasks {
             try cancellationCheck()
             guard let coverage = coverages[index] else { throw Error.renderFailed }
@@ -248,6 +279,11 @@ public enum BrushMaskRenderer {
             guard let out = blend.outputImage else { throw Error.renderFailed }
             working = out.cropped(to: working.extent)
         }
+        stageIntervalObserver?(BrushMaskStageInterval(
+            stage: .perMaskAdjustmentBlend,
+            startNanoseconds: blendStart,
+            endNanoseconds: DispatchTime.now().uptimeNanoseconds
+        ))
         return working
     }
 
@@ -379,7 +415,8 @@ public enum BrushMaskRenderer {
         cancellationCheck: @escaping CancellationCheck,
         bitmapObserver: ((Data) -> Void)? = nil,
         maskIndex: Int = 0,
-        observer: BrushMaskRenderObserver? = nil
+        observer: BrushMaskRenderObserver? = nil,
+        stageIntervalObserver: (@Sendable (BrushMaskStageInterval) -> Void)? = nil
     ) throws -> CIImage {
         observer?.emit(maskIndex: maskIndex, kind: .workerStarted)
         defer { observer?.emit(maskIndex: maskIndex, kind: .workerFinished) }
@@ -419,6 +456,7 @@ public enum BrushMaskRenderer {
         guard tileColumns > 0, tileRows > 0, tileColumns <= Int.max / tileRows else {
             throw Error.renderFailed
         }
+        let samplingStart = DispatchTime.now().uptimeNanoseconds
         var stamps: [CoverageStamp] = []
         var tileStamps = Array(repeating: [Int](), count: tileColumns * tileRows)
         var tileEntryCount = 0
@@ -486,7 +524,14 @@ public enum BrushMaskRenderer {
             }
         }
 
+        stageIntervalObserver?(BrushMaskStageInterval(
+            stage: .validationSampling,
+            startNanoseconds: samplingStart,
+            endNanoseconds: DispatchTime.now().uptimeNanoseconds
+        ))
+
         var bytes = [UInt8](repeating: 0, count: pixelCount)
+        let rasterStart = DispatchTime.now().uptimeNanoseconds
         for tileY in 0..<tileRows {
             for tileX in 0..<tileColumns {
                 try cancellationCheck()
@@ -572,6 +617,11 @@ public enum BrushMaskRenderer {
                 }
             }
         }
+        stageIntervalObserver?(BrushMaskStageInterval(
+            stage: .coverageRaster,
+            startNanoseconds: rasterStart,
+            endNanoseconds: DispatchTime.now().uptimeNanoseconds
+        ))
         let gray = CGColorSpace(name: CGColorSpace.linearGray)
             ?? CGColorSpaceCreateDeviceGray()
         let bitmap = Data(bytes)

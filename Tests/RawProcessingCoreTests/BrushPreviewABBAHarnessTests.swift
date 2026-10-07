@@ -5,6 +5,25 @@ import Foundation
 import XCTest
 @testable import RawProcessingCore
 
+#if !LUMAHARBOR_BRUSH_LEGACY
+private final class PreviewTimingBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest: PreviewStageTimings?
+
+    func record(_ timings: PreviewStageTimings) {
+        lock.lock()
+        latest = timings
+        lock.unlock()
+    }
+
+    func take() -> PreviewStageTimings? {
+        lock.lock()
+        defer { lock.unlock() }
+        return latest
+    }
+}
+#endif
+
 /// One production-preview sample per process. The shell orchestrator controls
 /// B/O order so compiler work and another variant never overlap a timed sample.
 final class BrushPreviewABBAHarnessTests: XCTestCase {
@@ -39,10 +58,20 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
         XCTAssertTrue(["cold", "warm", "changed", "appended", "stress"].contains(scenario))
 
         let decoder = SyntheticRawDecoder(pixelSize: CGSize(width: 1_600, height: 1_067))
+#if !LUMAHARBOR_BRUSH_LEGACY
+        let timingBox = PreviewTimingBox()
+        let renderer = CoreImagePreviewRenderer(
+            decoder: decoder,
+            renderService: ImageRenderService(preferMetal: true),
+            brushRenderObserverFactory: { nil },
+            stageTimingObserver: { timingBox.record($0) }
+        )
+#else
         let renderer = CoreImagePreviewRenderer(
             decoder: decoder,
             renderService: ImageRenderService(preferMetal: true)
         )
+#endif
         let inputs = makeInputs(scenario: scenario, maskCount: maskCount, sampleOrdinal: sampleOrdinal)
         let request = PreviewRequest(
             subject: PreviewSubject(UUID(uuidString: "00000000-0000-4000-8000-000000000001")!),
@@ -65,6 +94,9 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
         let start = clock.now
         let image = try await renderer.render(request)
         let total = seconds(start.duration(to: clock.now))
+#if !LUMAHARBOR_BRUSH_LEGACY
+        let stageTimings = timingBox.take()
+#endif
         XCTAssertGreaterThan(image.pixelSize.width, 0)
         XCTAssertGreaterThan(image.pixelSize.height, 0)
 
@@ -80,9 +112,28 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
             "recipeIDs": "synthetic decoder uses the native default recipe",
             "pixelError": "verified outside timed sample",
             "workerCounts": "observer disabled during timed sample",
-            "cancelOutcome": "not a cancellation scenario",
-            "stageDurationsSeconds": "public B/O production API exposes only total wall time"
+            "cancelOutcome": "not a cancellation scenario"
         ]
+#if !LUMAHARBOR_BRUSH_LEGACY
+        let stageDurations: [String: Double]
+        if let stageTimings {
+            stageDurations = [
+                "rawDecode": stageTimings.rawDecode,
+                "globalAdjustmentGraph": stageTimings.globalAdjustmentGraph,
+                "validationSampling": stageTimings.validationSampling,
+                "coverageRaster": stageTimings.coverageRaster,
+                "perMaskAdjustmentBlend": stageTimings.perMaskAdjustmentBlend,
+                "finalMakeCGImage": stageTimings.finalMakeCGImage,
+                "totalMaterialized": stageTimings.totalMaterialized
+            ]
+        } else {
+            stageDurations = ["total": total]
+            unavailableReasons["stageDurationsSeconds"] = "stage observer did not emit a completed sample"
+        }
+#else
+        let stageDurations: [String: Double] = ["total": total]
+        unavailableReasons["stageDurationsSeconds"] = "baseline renderer predates stage observer instrumentation"
+#endif
         if rssBytes == nil {
             unavailableReasons["rssBytes"] = "getrusage failed for the isolated test process"
         }
@@ -104,7 +155,7 @@ final class BrushPreviewABBAHarnessTests: XCTestCase {
             "decodedSize": size,
             "outputSize": outputSize,
             "recipeIDs": [],
-            "stageDurationsSeconds": ["total": total],
+            "stageDurationsSeconds": stageDurations,
             "totalDurationSeconds": total,
             "pixelError": null,
             "workerCounts": null,
