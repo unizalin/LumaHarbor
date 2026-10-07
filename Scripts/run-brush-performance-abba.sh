@@ -111,7 +111,18 @@ ANALYZER_ARGS=(
     --expected-per-round "$((BLOCKS * 2))"
 )
 for scenario in ${SCENARIOS}; do
-    ANALYZER_ARGS+=(--expected-scenario "${scenario}")
+    case "${scenario}" in
+        cold) expected_scenario="cold-first-open-production-preview" ;;
+        warm) expected_scenario="warm-unchanged-production-preview" ;;
+        changed) expected_scenario="parameter-changed-production-preview" ;;
+        appended) expected_scenario="stroke-appended-production-preview" ;;
+        stress) expected_scenario="stress-vectors-production-preview" ;;
+        *)
+            echo "error: unsupported brush scenario '${scenario}'" >&2
+            exit 2
+            ;;
+    esac
+    ANALYZER_ARGS+=(--expected-scenario "${expected_scenario}")
 done
 for mask_count in ${MASK_COUNTS}; do
     ANALYZER_ARGS+=(--expected-mask-count "${mask_count}")
