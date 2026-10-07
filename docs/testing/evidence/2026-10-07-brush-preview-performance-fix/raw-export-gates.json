@@ -1,0 +1,358 @@
+{
+  "baselineProductSHA": "1de07dcfeb2ed217a75d1c04978da6a5936f379a",
+  "contextCountEvidence": "declared-from-construction-path",
+  "contextCountLimitation": "Context allocations are not measured; v2 and v3 counts are construction-path declarations only.",
+  "gates": [
+    {
+      "baselinePeakRSSBytes": 145178624,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 178733056,
+      "optimizedPeakRSSBytes": 145784832,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "baselinePeakRSSBytes": 166625280,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 200179712,
+      "optimizedPeakRSSBytes": 154910720,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "baselinePeakRSSBytes": 200081408,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 233635840,
+      "optimizedPeakRSSBytes": 201080832,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 0,
+      "optimizedP50Seconds": 0.0354000625,
+      "optimizedP95Seconds": 0.040243708,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 145866752,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 179421184,
+      "optimizedPeakRSSBytes": 145539072,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 1,
+      "optimizedP50Seconds": 0.038048666499999995,
+      "optimizedP95Seconds": 0.044368458,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 168656896,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 202211328,
+      "optimizedPeakRSSBytes": 155435008,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 10,
+      "optimizedP50Seconds": 0.0568275835,
+      "optimizedP95Seconds": 0.058629958,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 202260480,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 235814912,
+      "optimizedPeakRSSBytes": 206716928,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 145899520,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 179453952,
+      "optimizedPeakRSSBytes": 145571840,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselinePeakRSSBytes": 168640512,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 202194944,
+      "optimizedPeakRSSBytes": 154877952,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselinePeakRSSBytes": 203833344,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 237387776,
+      "optimizedPeakRSSBytes": 207192064,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselineMedianSeconds": 0.356933854,
+      "gate": "PERF-EXPORT",
+      "maskCount": 1,
+      "optimizedLimitSeconds": 0.3747805467,
+      "optimizedMedianSeconds": 0.118678104,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "absoluteLimitBytes": 805306368,
+      "baselinePeakRSSBytes": 395952128,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 1,
+      "optimizedPeakRSSBytes": 184795136,
+      "result": "PASS",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "baselineMedianSeconds": 2.7822050835,
+      "gate": "PERF-EXPORT",
+      "maskCount": 10,
+      "optimizedLimitSeconds": 2.9213153376750003,
+      "optimizedMedianSeconds": 0.362617167,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "absoluteLimitBytes": 805306368,
+      "baselinePeakRSSBytes": 615596032,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 10,
+      "optimizedPeakRSSBytes": 435863552,
+      "result": "PASS",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "baselineMedianSeconds": 0.619161271,
+      "gate": "PERF-EXPORT",
+      "maskCount": 1,
+      "optimizedLimitSeconds": 0.6501193345499999,
+      "optimizedMedianSeconds": 0.441942854,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "real-raw"
+    },
+    {
+      "absoluteLimitBytes": null,
+      "baselinePeakRSSBytes": 507215872,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 1,
+      "optimizedPeakRSSBytes": 286818304,
+      "result": "PASS",
+      "sourceKind": "real-raw"
+    },
+    {
+      "baselineMedianSeconds": 2.3418128334999997,
+      "gate": "PERF-EXPORT",
+      "maskCount": 10,
+      "optimizedLimitSeconds": 2.4589034751749996,
+      "optimizedMedianSeconds": 0.5658777085,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "real-raw"
+    },
+    {
+      "absoluteLimitBytes": null,
+      "baselinePeakRSSBytes": 723648512,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 10,
+      "optimizedPeakRSSBytes": 509476864,
+      "result": "PASS",
+      "sourceKind": "real-raw"
+    }
+  ],
+  "harnessSHA": "26e7358fcf5019b246588d1bb3baa8a6005548cd",
+  "instrumentationDigest": "1bf08395a149875e9c3b0fe5a8ef4473761c7abf3d785ac464096fe94ca292fe",
+  "optimizedProductSHA": "26e7358fcf5019b246588d1bb3baa8a6005548cd",
+  "overallResult": "DONE_WITH_CONCERNS",
+  "recordCount": 352,
+  "sampleArtifact": "brush-raw-export-samples.jsonl",
+  "schemaVersion": 1,
+  "summaries": {
+    "export/real-raw/1/B": {
+      "count": 8,
+      "p50Seconds": 0.619161271,
+      "p95Seconds": 0.647051333,
+      "peakRSSBytes": 507215872
+    },
+    "export/real-raw/1/O": {
+      "count": 8,
+      "p50Seconds": 0.441942854,
+      "p95Seconds": 0.474219833,
+      "peakRSSBytes": 286818304
+    },
+    "export/real-raw/10/B": {
+      "count": 8,
+      "p50Seconds": 2.3418128334999997,
+      "p95Seconds": 2.393371167,
+      "peakRSSBytes": 723648512
+    },
+    "export/real-raw/10/O": {
+      "count": 8,
+      "p50Seconds": 0.5658777085,
+      "p95Seconds": 0.603287791,
+      "peakRSSBytes": 509476864
+    },
+    "export/synthetic-24mp/1/B": {
+      "count": 8,
+      "p50Seconds": 0.356933854,
+      "p95Seconds": 0.359377042,
+      "peakRSSBytes": 395952128
+    },
+    "export/synthetic-24mp/1/O": {
+      "count": 8,
+      "p50Seconds": 0.118678104,
+      "p95Seconds": 0.128366041,
+      "peakRSSBytes": 184795136
+    },
+    "export/synthetic-24mp/10/B": {
+      "count": 8,
+      "p50Seconds": 2.7822050835,
+      "p95Seconds": 2.826467708,
+      "peakRSSBytes": 615596032
+    },
+    "export/synthetic-24mp/10/O": {
+      "count": 8,
+      "p50Seconds": 0.362617167,
+      "p95Seconds": 0.373507166,
+      "peakRSSBytes": 435863552
+    },
+    "preview/changed/0/B": {
+      "count": 16,
+      "p50Seconds": 0.172966229,
+      "p95Seconds": 0.182850583,
+      "peakRSSBytes": 145899520
+    },
+    "preview/changed/0/O": {
+      "count": 16,
+      "p50Seconds": 0.0369919795,
+      "p95Seconds": 0.056844291,
+      "peakRSSBytes": 145571840
+    },
+    "preview/changed/1/B": {
+      "count": 16,
+      "p50Seconds": 0.189862271,
+      "p95Seconds": 0.205573292,
+      "peakRSSBytes": 168640512
+    },
+    "preview/changed/1/O": {
+      "count": 16,
+      "p50Seconds": 0.0388823545,
+      "p95Seconds": 0.055460042,
+      "peakRSSBytes": 154877952
+    },
+    "preview/changed/10/B": {
+      "count": 16,
+      "p50Seconds": 0.379089646,
+      "p95Seconds": 0.384113458,
+      "peakRSSBytes": 203833344
+    },
+    "preview/changed/10/O": {
+      "count": 16,
+      "p50Seconds": 0.057059417,
+      "p95Seconds": 0.069024125,
+      "peakRSSBytes": 207192064
+    },
+    "preview/cold/0/B": {
+      "count": 16,
+      "p50Seconds": 0.255032896,
+      "p95Seconds": 0.275139583,
+      "peakRSSBytes": 145178624
+    },
+    "preview/cold/0/O": {
+      "count": 16,
+      "p50Seconds": 0.249971229,
+      "p95Seconds": 0.292393625,
+      "peakRSSBytes": 145784832
+    },
+    "preview/cold/1/B": {
+      "count": 16,
+      "p50Seconds": 0.2823761455,
+      "p95Seconds": 0.29803525,
+      "peakRSSBytes": 166625280
+    },
+    "preview/cold/1/O": {
+      "count": 16,
+      "p50Seconds": 0.251639,
+      "p95Seconds": 0.265719041,
+      "peakRSSBytes": 154910720
+    },
+    "preview/cold/10/B": {
+      "count": 16,
+      "p50Seconds": 0.46201662450000003,
+      "p95Seconds": 0.49245125,
+      "peakRSSBytes": 200081408
+    },
+    "preview/cold/10/O": {
+      "count": 16,
+      "p50Seconds": 0.276458542,
+      "p95Seconds": 0.290444958,
+      "peakRSSBytes": 201080832
+    },
+    "preview/warm/0/B": {
+      "count": 16,
+      "p50Seconds": 0.1704563125,
+      "p95Seconds": 0.1832095,
+      "peakRSSBytes": 145866752
+    },
+    "preview/warm/0/O": {
+      "count": 16,
+      "p50Seconds": 0.0354000625,
+      "p95Seconds": 0.040243708,
+      "peakRSSBytes": 145539072
+    },
+    "preview/warm/1/B": {
+      "count": 16,
+      "p50Seconds": 0.18849516700000002,
+      "p95Seconds": 0.201919542,
+      "peakRSSBytes": 168656896
+    },
+    "preview/warm/1/O": {
+      "count": 16,
+      "p50Seconds": 0.038048666499999995,
+      "p95Seconds": 0.044368458,
+      "peakRSSBytes": 155435008
+    },
+    "preview/warm/10/B": {
+      "count": 16,
+      "p50Seconds": 0.37944422899999997,
+      "p95Seconds": 0.384029291,
+      "peakRSSBytes": 202260480
+    },
+    "preview/warm/10/O": {
+      "count": 16,
+      "p50Seconds": 0.0568275835,
+      "p95Seconds": 0.058629958,
+      "peakRSSBytes": 206716928
+    }
+  },
+  "validation": "PASS",
+  "validationErrors": []
+}

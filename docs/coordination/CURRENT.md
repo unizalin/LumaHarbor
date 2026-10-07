@@ -1,5 +1,15 @@
 # Current Coordination State
 
+## Brush preview performance fix（2026-10-07；最新有效狀態）
+
+- **狀態**：`DONE_WITH_CONCERNS`。筆刷預覽剩餘效能 FAIL 已修正；synthetic stress、真實 RAW warm preview、original-size export、preview/export memory、pixel parity、cancellation 與 50-cycle worker convergence 均已通過。`PERF-COVERAGE` 仍為 `NOT RUN`，因 B/O 尚沒有相同且互斥的 stage wall-time clock；UI／實體裝置／灰卡與獨立 reviewer 也未在本輪執行。
+- **工作樹／版本**：branch `luna/brush-preview-performance-fix`，task-scoped worktree；validated product HEAD=`26e7358fcf5019b246588d1bb3baa8a6005548cd`。base=`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`；本 task 依使用者授權延續候選父版本 `eae30121ec7ef089b4a048a50151993c205e2686`，不代表候選已整合。
+- **產品修正**：`b640823` 加入互斥 stage interval union、bounded decoded-preview cache 與 exact invalidation key；`26e7358` 加入 bounded tile raster、repeated-geometry coverage reuse、bounded mask fan-out、cancellation join 與 scalar oracle。沒有降低解析度、刪除筆刷點、跳過調整或放寬門檻。
+- **根因**：candidate O-only stage data 確認 coverage raster 是主要成本：1 mask p50/p95=`9.221/9.582 ms`、10 masks=`87.248/131.703 ms`；raw decode、global graph、per-mask adjustment/blend 都是次要成本。RAW warm total p50/p95 為 0/1/10 masks=`35.400/40.244`、`38.049/44.368`、`56.828/58.630 ms`。
+- **證據**：[效能修正驗收報告](../testing/reports/2026-10-07-brush-preview-performance-fix.md)、[原始 evidence 與 checksum](../testing/evidence/2026-10-07-brush-preview-performance-fix/README.md)、[本輪 handoff](2026-10-07-brush-preview-performance-fix-handoff.md)。公開 artifact 已掃描，沒有私人路徑。
+- **回歸**：完整 Release suite `2714 executed、22 skipped、0 failures`；focused renderer／cancellation／oracle 30/30 PASS；50-cycle `55/55` worker join 與 settled RSS gate PASS。
+- **下一步**：請另一個帳號做唯讀 spec／code review；若必須解除 `PERF-COVERAGE: NOT RUN`，只補 B/O 共用 test-only stage clock 後重跑 ABBA。完成 review 前不要 push、merge、rebase 或修改其他 worktree。
+
 ## Brush review fixes（2026-10-07；最新有效狀態）
 
 - **狀態**：`DONE_WITH_CONCERNS`。本輪四類驗收工具／文件修正已完成自動驗證與 Gemini 非原作者唯讀覆核；Gemini 對 `6fd3d41..d34fc99` 的 spec compliance／code quality 均為 `APPROVED`、無 blocking finding，兩個 minor 已修正。

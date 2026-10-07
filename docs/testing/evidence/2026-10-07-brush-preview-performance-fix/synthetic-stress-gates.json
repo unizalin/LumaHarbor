@@ -1,0 +1,131 @@
+{
+  "gates": [
+    {
+      "baselinePeakRSSBytes": 66945024,
+      "candidatePeakRSSBytes": 58966016,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86196224,
+      "candidatePeakRSSBytes": 84180992,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 66961408,
+      "candidatePeakRSSBytes": 59260928,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 89980928,
+      "candidatePeakRSSBytes": 78233600,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "gate": "PERF-COVERAGE",
+      "reason": "production B/O harness exposes total preview wall time only",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "INTERACTIVE-150",
+      "reason": "real RAW workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-50-CANCEL",
+      "reason": "50-cycle workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-CANCEL",
+      "reason": "reported by the separate cancellation acceptance record",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-UI",
+      "reason": "requires device interaction evidence",
+      "result": "NOT RUN"
+    }
+  ],
+  "overallResult": "DONE_WITH_CONCERNS",
+  "recordCount": 64,
+  "sampleArtifact": "brush-preview-abba.jsonl",
+  "schemaVersion": 1,
+  "summaries": {
+    "stress-vectors-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.180497979,
+      "p95Seconds": 0.187762542,
+      "peakRSSBytes": 66945024
+    },
+    "stress-vectors-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.012292958,
+      "p95Seconds": 0.012624459,
+      "peakRSSBytes": 58966016
+    },
+    "stress-vectors-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.1811417495,
+      "p95Seconds": 0.197553166,
+      "peakRSSBytes": 66961408
+    },
+    "stress-vectors-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.012265874999999999,
+      "p95Seconds": 0.012679584,
+      "peakRSSBytes": 59260928
+    },
+    "stress-vectors-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 1.761335625,
+      "p95Seconds": 1.766906125,
+      "peakRSSBytes": 86196224
+    },
+    "stress-vectors-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.09612124999999999,
+      "p95Seconds": 0.141143208,
+      "peakRSSBytes": 84180992
+    },
+    "stress-vectors-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 1.7626544795,
+      "p95Seconds": 1.7691735,
+      "peakRSSBytes": 89980928
+    },
+    "stress-vectors-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.096024729,
+      "p95Seconds": 0.0973905,
+      "peakRSSBytes": 78233600
+    }
+  },
+  "validation": "PASS",
+  "validationErrors": []
+}
