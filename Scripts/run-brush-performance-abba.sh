@@ -105,10 +105,18 @@ for scenario in ${SCENARIOS}; do
     done
 done
 
-python3 "${SCRIPT_DIR}/analyze-brush-performance-abba.py" \
-    --samples "${ARTIFACT}" \
-    --output "${GATE_ARTIFACT}" \
+ANALYZER_ARGS=(
+    --samples "${ARTIFACT}"
+    --output "${GATE_ARTIFACT}"
     --expected-per-round "$((BLOCKS * 2))"
+)
+for scenario in ${SCENARIOS}; do
+    ANALYZER_ARGS+=(--expected-scenario "${scenario}")
+done
+for mask_count in ${MASK_COUNTS}; do
+    ANALYZER_ARGS+=(--expected-mask-count "${mask_count}")
+done
+python3 "${SCRIPT_DIR}/analyze-brush-performance-abba.py" "${ANALYZER_ARGS[@]}"
 echo "artifact=${ARTIFACT}"
 echo "gates=${GATE_ARTIFACT}"
 echo "baselineRoot=${BASELINE_ROOT}"

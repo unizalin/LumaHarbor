@@ -55,6 +55,7 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
         let sourceKind = try XCTUnwrap(environment["LUMAHARBOR_BRUSH_SOURCE_KIND"])
         let operation = try XCTUnwrap(environment["LUMAHARBOR_BRUSH_OPERATION"])
         let scenario = try XCTUnwrap(environment["LUMAHARBOR_BRUSH_SCENARIO"])
+        let round = try XCTUnwrap(Int(environment["LUMAHARBOR_BRUSH_ROUND"] ?? ""))
         let order = try XCTUnwrap(Int(environment["LUMAHARBOR_BRUSH_ORDER"] ?? ""))
         let sampleOrdinal = try XCTUnwrap(
             Int(environment["LUMAHARBOR_BRUSH_SAMPLE_ORDINAL"] ?? "")
@@ -102,16 +103,15 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
         let durationSeconds: Double
         let timingBoundary: String
         let publishedFileValidated: Any
+        let contextLifecycle: String
+        let contextCreationCountBeforeTimer: Int
+        let contextCreationCountDuringTimer: Int
 
         switch operation {
         case "preview":
             guard sourceKind == "real-raw", ["cold", "warm", "changed"].contains(scenario) else {
                 throw AcceptanceHarnessError.invalidConfiguration
             }
-            let renderer = CoreImagePreviewRenderer(
-                decoder: decoder,
-                renderService: ImageRenderService(preferMetal: true)
-            )
             let base = PhotoAdjustments(brushMasks: masks)
             let timed: PhotoAdjustments
             let warmup: PhotoAdjustments?
@@ -133,18 +133,32 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             let subject = PreviewSubject(
                 UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
             )
-            if let warmup {
-                _ = try await renderer.render(PreviewRequest(
-                    subject: subject,
-                    url: sourceURL,
-                    adjustments: warmup,
-                    targetPixelDimension: 1_600,
-                    quality: .interactive
-                ))
+            let renderer: CoreImagePreviewRenderer?
+            if scenario == "cold" {
+                renderer = nil
+            } else {
+                let created = CoreImagePreviewRenderer(
+                    decoder: decoder,
+                    renderService: ImageRenderService(preferMetal: true)
+                )
+                renderer = created
+                if let warmup {
+                    _ = try await created.render(PreviewRequest(
+                        subject: subject,
+                        url: sourceURL,
+                        adjustments: warmup,
+                        targetPixelDimension: 1_600,
+                        quality: .interactive
+                    ))
+                }
             }
             let measured = try await BrushRawExportAcceptanceMeasurement.measure(
                 operation: {
-                    try await renderer.render(PreviewRequest(
+                    let activeRenderer = renderer ?? CoreImagePreviewRenderer(
+                        decoder: decoder,
+                        renderService: ImageRenderService(preferMetal: true)
+                    )
+                    return try await activeRenderer.render(PreviewRequest(
                         subject: subject,
                         url: sourceURL,
                         adjustments: timed,
@@ -166,6 +180,15 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             durationSeconds = measured.durationSeconds
             timingBoundary = "submit-through-materialized-cgimage"
             publishedFileValidated = NSNull()
+            if scenario == "cold" {
+                contextLifecycle = "fresh-renderer-context-inside-timer"
+                contextCreationCountBeforeTimer = 0
+                contextCreationCountDuringTimer = variant == "B" ? 2 : 1
+            } else {
+                contextLifecycle = "fresh-renderer-context-before-warmup-reused-for-timed-request"
+                contextCreationCountBeforeTimer = variant == "B" ? 2 : 1
+                contextCreationCountDuringTimer = variant == "B" ? 1 : 0
+            }
 
         case "export":
             guard scenario == "full-resolution", [1, 10].contains(maskCount) else {
@@ -173,13 +196,13 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             }
             let destination = temporaryRoot.appendingPathComponent("output", isDirectory: true)
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-            let exporter = PhotoExporter(
-                decoder: decoder,
-                renderService: ImageRenderService(preferMetal: true)
-            )
             let measured = try await BrushRawExportAcceptanceMeasurement.measure(
                 operation: {
-                    try await exporter.export(ExportRequest(
+                    let exporter = PhotoExporter(
+                        decoder: decoder,
+                        renderService: ImageRenderService(preferMetal: true)
+                    )
+                    return try await exporter.export(ExportRequest(
                         sourceURL: sourceURL,
                         adjustments: PhotoAdjustments(brushMasks: masks),
                         destinationDirectory: destination,
@@ -208,6 +231,9 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             durationSeconds = measured.durationSeconds
             timingBoundary = "submit-through-export-return-and-published-image-reopen"
             publishedFileValidated = true
+            contextLifecycle = "fresh-exporter-context-inside-timer"
+            contextCreationCountBeforeTimer = 0
+            contextCreationCountDuringTimer = variant == "B" ? 2 : 1
 
         default:
             throw AcceptanceHarnessError.invalidConfiguration
@@ -215,7 +241,7 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
 
         let sourceAfter = try sourceState(sourceURL)
         let record: [String: Any] = [
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "productSHA": productSHA,
             "harnessSHA": harnessSHA,
             "instrumentationDigest": instrumentationDigest,
@@ -224,6 +250,7 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             "operation": operation,
             "scenario": scenario,
             "variant": variant,
+            "round": round,
             "order": order,
             "sampleOrdinal": sampleOrdinal,
             "maskCount": maskCount,
@@ -232,6 +259,9 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             "outputSize": jsonSize(outputSize),
             "totalDurationSeconds": durationSeconds,
             "peakRSSBytes": try XCTUnwrap(peakRSSBytes),
+            "contextLifecycle": contextLifecycle,
+            "contextCreationCountBeforeTimer": contextCreationCountBeforeTimer,
+            "contextCreationCountDuringTimer": contextCreationCountDuringTimer,
             "timingBoundary": timingBoundary,
             "publishedFileValidated": publishedFileValidated,
             "sourceFingerprintUnchanged": sourceBefore == sourceAfter,

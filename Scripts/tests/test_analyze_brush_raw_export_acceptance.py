@@ -22,13 +22,15 @@ def valid_records(preview_samples=8, export_samples=4):
     order = 0
     for scenario in ("cold", "warm", "changed"):
         for mask_count in (0, 1, 10):
-            for variant, duration, rss in (
-                ("B", 0.120, 200_000_000),
-                ("O", 0.100, 180_000_000),
-            ):
-                for sample_ordinal in range(preview_samples):
+            ordinals = {"B": 0, "O": 0}
+            for round_number, pattern in ((1, ("B", "O", "O", "B")), (2, ("O", "B", "B", "O"))):
+                for variant in pattern * (preview_samples // 2):
+                    sample_ordinal = ordinals[variant]
+                    ordinals[variant] += 1
+                    duration = 0.120 if variant == "B" else 0.100
+                    rss = 200_000_000 if variant == "B" else 180_000_000
                     records.append({
-                        "schemaVersion": 1,
+                        "schemaVersion": 2,
                         "productSHA": BASE_SHA if variant == "B" else OPTIMIZED_SHA,
                         "harnessSHA": HARNESS_SHA,
                         "instrumentationDigest": INSTRUMENTATION_DIGEST,
@@ -37,6 +39,7 @@ def valid_records(preview_samples=8, export_samples=4):
                         "operation": "preview",
                         "scenario": scenario,
                         "variant": variant,
+                        "round": round_number,
                         "order": order,
                         "sampleOrdinal": sample_ordinal,
                         "maskCount": mask_count,
@@ -45,6 +48,12 @@ def valid_records(preview_samples=8, export_samples=4):
                         "outputSize": size(1_600, 1_067),
                         "totalDurationSeconds": duration,
                         "peakRSSBytes": rss,
+                        "contextLifecycle": (
+                            "fresh-renderer-context-inside-timer" if scenario == "cold"
+                            else "fresh-renderer-context-before-warmup-reused-for-timed-request"
+                        ),
+                        "contextCreationCountBeforeTimer": 0 if scenario == "cold" else (2 if variant == "B" else 1),
+                        "contextCreationCountDuringTimer": 2 if scenario == "cold" and variant == "B" else (1 if variant == "O" and scenario == "cold" else (1 if variant == "B" else 0)),
                         "timingBoundary": "submit-through-materialized-cgimage",
                         "publishedFileValidated": None,
                         "sourceFingerprintUnchanged": True,
@@ -55,13 +64,15 @@ def valid_records(preview_samples=8, export_samples=4):
 
     for source_kind in ("synthetic-24mp", "real-raw"):
         for mask_count in (1, 10):
-            for variant, duration, rss in (
-                ("B", 20.0, 600_000_000),
-                ("O", 8.0, 500_000_000),
-            ):
-                for sample_ordinal in range(export_samples):
+            ordinals = {"B": 0, "O": 0}
+            for round_number, pattern in ((1, ("B", "O", "O", "B")), (2, ("O", "B", "B", "O"))):
+                for variant in pattern * (export_samples // 2):
+                    sample_ordinal = ordinals[variant]
+                    ordinals[variant] += 1
+                    duration = 20.0 if variant == "B" else 8.0
+                    rss = 600_000_000 if variant == "B" else 500_000_000
                     records.append({
-                        "schemaVersion": 1,
+                        "schemaVersion": 2,
                         "productSHA": BASE_SHA if variant == "B" else OPTIMIZED_SHA,
                         "harnessSHA": HARNESS_SHA,
                         "instrumentationDigest": INSTRUMENTATION_DIGEST,
@@ -70,6 +81,7 @@ def valid_records(preview_samples=8, export_samples=4):
                         "operation": "export",
                         "scenario": "full-resolution",
                         "variant": variant,
+                        "round": round_number,
                         "order": order,
                         "sampleOrdinal": sample_ordinal,
                         "maskCount": mask_count,
@@ -78,6 +90,9 @@ def valid_records(preview_samples=8, export_samples=4):
                         "outputSize": size(6_000, 4_000),
                         "totalDurationSeconds": duration,
                         "peakRSSBytes": rss,
+                        "contextLifecycle": "fresh-exporter-context-inside-timer",
+                        "contextCreationCountBeforeTimer": 0,
+                        "contextCreationCountDuringTimer": 2 if variant == "B" else 1,
                         "timingBoundary": "submit-through-export-return-and-published-image-reopen",
                         "publishedFileValidated": True,
                         "sourceFingerprintUnchanged": True,
@@ -122,7 +137,7 @@ class AnalyzeBrushRawExportAcceptanceTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(payload["validation"], "PASS")
-        self.assertEqual(payload["recordCount"], 176)
+        self.assertEqual(payload["recordCount"], 352)
         self.assertEqual(
             {gate["gate"] for gate in payload["gates"]},
             {"INTERACTIVE-150", "PERF-MEM-PREVIEW", "PERF-EXPORT", "PERF-MEM-EXPORT"},
@@ -214,6 +229,43 @@ class AnalyzeBrushRawExportAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(real_raw_memory_gates), 2)
         self.assertTrue(all(gate["result"] == "PASS" for gate in real_raw_memory_gates))
         self.assertTrue(all(gate["absoluteLimitBytes"] is None for gate in real_raw_memory_gates))
+
+    def test_reverse_round_is_required(self):
+        records = [record for record in valid_records() if record["round"] == 1]
+
+        completed, payload = self.run_analyzer(records)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("expected 352 records", "\n".join(payload["validationErrors"]))
+
+    def test_exact_abba_order_is_required(self):
+        records = valid_records()
+        records[0]["variant"], records[1]["variant"] = records[1]["variant"], records[0]["variant"]
+        records[0]["productSHA"], records[1]["productSHA"] = records[1]["productSHA"], records[0]["productSHA"]
+
+        completed, payload = self.run_analyzer(records)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("variant order", "\n".join(payload["validationErrors"]))
+
+    def test_baseline_and_optimized_sha_must_differ(self):
+        records = valid_records()
+        for record in records:
+            record["productSHA"] = BASE_SHA
+
+        completed, payload = self.run_analyzer(records)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("distinct productSHA", "\n".join(payload["validationErrors"]))
+
+    def test_context_creation_counts_are_required(self):
+        records = valid_records()
+        del records[0]["contextCreationCountDuringTimer"]
+
+        completed, payload = self.run_analyzer(records)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("missing contextCreationCountDuringTimer", "\n".join(payload["validationErrors"]))
 
 
 if __name__ == "__main__":

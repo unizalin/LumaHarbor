@@ -85,10 +85,11 @@ O_ORDINAL=0
 
 run_sample() {
     local variant="$1"
-    local operation="$2"
-    local source_kind="$3"
-    local scenario="$4"
-    local mask_count="$5"
+    local round="$2"
+    local operation="$3"
+    local source_kind="$4"
+    local scenario="$5"
+    local mask_count="$6"
     local package_root scratch product_sha sample_ordinal output record
 
     if [[ "${variant}" == "B" ]]; then
@@ -111,6 +112,7 @@ run_sample() {
         LUMAHARBOR_BRUSH_PRODUCT_SHA="${product_sha}" \
         LUMAHARBOR_BRUSH_HARNESS_SHA="${HARNESS_SHA}" \
         LUMAHARBOR_BRUSH_INSTRUMENTATION_DIGEST="${INSTRUMENTATION_DIGEST}" \
+        LUMAHARBOR_BRUSH_ROUND="${round}" \
         LUMAHARBOR_BRUSH_SOURCE_KIND="${source_kind}" \
         LUMAHARBOR_BRUSH_OPERATION="${operation}" \
         LUMAHARBOR_BRUSH_SCENARIO="${scenario}" \
@@ -141,13 +143,20 @@ run_abba_group() {
     local mask_count="$4"
     local samples_per_variant="$5"
     local blocks=$((samples_per_variant / 2))
-    local block variant
+    local block variant round pattern
 
     B_ORDINAL=0
     O_ORDINAL=0
-    for ((block = 0; block < blocks; block += 1)); do
-        for variant in B O O B; do
-            run_sample "${variant}" "${operation}" "${source_kind}" "${scenario}" "${mask_count}"
+    for round in 1 2; do
+        if [[ "${round}" == 1 ]]; then
+            pattern=(B O O B)
+        else
+            pattern=(O B B O)
+        fi
+        for ((block = 0; block < blocks; block += 1)); do
+            for variant in "${pattern[@]}"; do
+                run_sample "${variant}" "${round}" "${operation}" "${source_kind}" "${scenario}" "${mask_count}"
+            done
         done
     done
 }

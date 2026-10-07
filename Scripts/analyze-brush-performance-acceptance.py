@@ -29,6 +29,7 @@ SCENARIO_FIELDS = {
     "export-cancel-24mp": CANCELLATION_FIELDS,
     "50-cancel-switch-preview": MEMORY_FIELDS,
 }
+CANCELLATION_TIMING_BOUNDARY = "coverage barrier release through parent and worker join"
 
 
 def fail(message: str) -> None:
@@ -208,8 +209,11 @@ def main() -> None:
                 or abs(p95 - float(recorded_p95)) > 1e-12:
             fail(f"{scenario} p95 does not recompute from samples")
         require_balanced_workers(record)
-        if not isinstance(record["timingBoundary"], str) or not record["timingBoundary"]:
-            fail(f"{scenario} timingBoundary must be nonempty")
+        if record["timingBoundary"] != CANCELLATION_TIMING_BOUNDARY:
+            fail(
+                f"{scenario} unexpected timingBoundary; expected "
+                f"{CANCELLATION_TIMING_BOUNDARY!r}"
+            )
         if record["nonPreemptibleSectionsExcluded"] != ["raw-decode", "cgimage-destination-encode"]:
             fail(f"{scenario} nonPreemptibleSectionsExcluded is inconsistent")
         computed_result = "PASS" if p95 <= 0.1 else "FAIL"

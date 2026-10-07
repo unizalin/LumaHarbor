@@ -12,7 +12,9 @@
 ```sh
 python3 Scripts/analyze-brush-performance-abba.py \
   --samples docs/testing/evidence/2026-10-06-brush-warm-abba/samples.jsonl \
-  --output "$TASK_GATE_OUTPUT" --expected-per-round 8
+  --output "$TASK_GATE_OUTPUT" --expected-per-round 8 \
+  --expected-scenario warm-unchanged-production-preview \
+  --expected-mask-count 0 --expected-mask-count 1 --expected-mask-count 10
 ```
 
 `TASK_GATE_OUTPUT` 由操作者指定為新的本機暫存輸出；與 `gates.json` 比較 JSON 結構。p50/p95 incremental 分別是有遮罩組分位數減空遮罩組分位數，不是逐筆 delta 的分位數，因此 incremental p95 可能小於 incremental p50。

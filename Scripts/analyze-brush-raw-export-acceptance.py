@@ -19,6 +19,7 @@ REQUIRED_FIELDS = {
     "operation",
     "scenario",
     "variant",
+    "round",
     "order",
     "sampleOrdinal",
     "maskCount",
@@ -27,6 +28,9 @@ REQUIRED_FIELDS = {
     "outputSize",
     "totalDurationSeconds",
     "peakRSSBytes",
+    "contextLifecycle",
+    "contextCreationCountBeforeTimer",
+    "contextCreationCountDuringTimer",
     "timingBoundary",
     "publishedFileValidated",
     "sourceFingerprintUnchanged",
@@ -39,6 +43,8 @@ PREVIEW_SCENARIOS = ("cold", "warm", "changed")
 MASK_COUNTS = (0, 1, 10)
 EXPORT_MASK_COUNTS = (1, 10)
 VARIANTS = ("B", "O")
+ROUNDS = (1, 2)
+ROUND_PATTERNS = {1: ("B", "O", "O", "B"), 2: ("O", "B", "B", "O")}
 
 
 def percentile_95(values):
@@ -114,8 +120,8 @@ def main():
         if missing:
             continue
 
-        if record["schemaVersion"] != 1:
-            errors.append(f"line {line_number}: schemaVersion must be 1")
+        if record["schemaVersion"] != 2:
+            errors.append(f"line {line_number}: schemaVersion must be 2")
         if not isinstance(record["productSHA"], str) \
                 or COMMIT_PATTERN.fullmatch(record["productSHA"]) is None:
             errors.append(f"line {line_number}: productSHA must be a full lowercase commit")
@@ -129,6 +135,8 @@ def main():
             errors.append(f"line {line_number}: configuration must be release")
         if record["variant"] not in VARIANTS:
             errors.append(f"line {line_number}: variant must be B or O")
+        if isinstance(record["round"], bool) or record["round"] not in ROUNDS:
+            errors.append(f"line {line_number}: round must be 1 or 2")
         if not is_nonnegative_integer(record["order"]):
             errors.append(f"line {line_number}: order must be a nonnegative integer")
         if not is_nonnegative_integer(record["sampleOrdinal"]):
@@ -147,6 +155,12 @@ def main():
             errors.append(f"line {line_number}: invalid totalDurationSeconds")
         if not is_nonnegative_integer(record["peakRSSBytes"], positive=True):
             errors.append(f"line {line_number}: invalid peakRSSBytes")
+        if not isinstance(record["contextLifecycle"], str) or not record["contextLifecycle"]:
+            errors.append(f"line {line_number}: contextLifecycle must be nonempty")
+        if not is_nonnegative_integer(record["contextCreationCountBeforeTimer"]):
+            errors.append(f"line {line_number}: invalid contextCreationCountBeforeTimer")
+        if not is_nonnegative_integer(record["contextCreationCountDuringTimer"]):
+            errors.append(f"line {line_number}: invalid contextCreationCountDuringTimer")
         if record["sourceFingerprintUnchanged"] is not True:
             errors.append(f"line {line_number}: source fingerprint changed or was not checked")
         if not isinstance(record["thermalState"], str) or not record["thermalState"]:
@@ -166,6 +180,12 @@ def main():
                 errors.append(f"line {line_number}: invalid preview timing boundary")
             if record["publishedFileValidated"] is not None:
                 errors.append(f"line {line_number}: preview publishedFileValidated must be null")
+            expected_lifecycle = (
+                "fresh-renderer-context-inside-timer" if record["scenario"] == "cold"
+                else "fresh-renderer-context-before-warmup-reused-for-timed-request"
+            )
+            if record["contextLifecycle"] != expected_lifecycle:
+                errors.append(f"line {line_number}: invalid preview context lifecycle")
             if decoded and output and decoded != output:
                 errors.append(f"line {line_number}: preview decoded/output size mismatch")
             if native and output and (
@@ -183,6 +203,8 @@ def main():
                 errors.append(f"line {line_number}: export timer does not include publish/reopen")
             if record["publishedFileValidated"] is not True:
                 errors.append(f"line {line_number}: published output was not validated")
+            if record["contextLifecycle"] != "fresh-exporter-context-inside-timer":
+                errors.append(f"line {line_number}: invalid export context lifecycle")
             if native and decoded and output and not (
                 sorted(native) == sorted(decoded) == sorted(output)
             ):
@@ -190,12 +212,24 @@ def main():
         else:
             errors.append(f"line {line_number}: operation must be preview or export")
 
+        if record["operation"] == "preview" and record["scenario"] != "cold":
+            expected_before = 2 if record["variant"] == "B" else 1
+            expected_during = 1 if record["variant"] == "B" else 0
+        else:
+            expected_before = 0
+            expected_during = 2 if record["variant"] == "B" else 1
+        if record["contextCreationCountBeforeTimer"] != expected_before:
+            errors.append(f"line {line_number}: unexpected context creations before timer")
+        if record["contextCreationCountDuringTimer"] != expected_during:
+            errors.append(f"line {line_number}: unexpected context creations during timer")
+
         records.append(record)
 
     expected_record_count = (
-        len(PREVIEW_SCENARIOS) * len(MASK_COUNTS) * len(VARIANTS)
+        len(PREVIEW_SCENARIOS) * len(MASK_COUNTS) * len(ROUNDS) * len(VARIANTS)
         * args.expected_preview_samples
-        + 2 * len(EXPORT_MASK_COUNTS) * len(VARIANTS) * args.expected_export_samples
+        + 2 * len(EXPORT_MASK_COUNTS) * len(ROUNDS) * len(VARIANTS)
+        * args.expected_export_samples
     )
     if len(records) != expected_record_count:
         errors.append(f"expected {expected_record_count} records, found {len(records)}")
@@ -223,8 +257,19 @@ def main():
         }
         if len(product_shas) != 1:
             errors.append(f"variant {variant} must use exactly one productSHA")
+    baseline_shas = {
+        record["productSHA"] for record in records
+        if record.get("variant") == "B" and isinstance(record.get("productSHA"), str)
+    }
+    optimized_shas = {
+        record["productSHA"] for record in records
+        if record.get("variant") == "O" and isinstance(record.get("productSHA"), str)
+    }
+    if len(baseline_shas) == 1 and baseline_shas == optimized_shas:
+        errors.append("baseline and optimized variants must use distinct productSHA values")
 
     grouped = defaultdict(list)
+    ordered_records = []
     for record in records:
         operation = record.get("operation")
         scenario = record.get("scenario")
@@ -235,28 +280,74 @@ def main():
                 and scenario in PREVIEW_SCENARIOS \
                 and mask_count in MASK_COUNTS \
                 and variant in VARIANTS:
-            grouped[("preview", scenario, mask_count, variant)].append(record)
+            grouped[("preview", scenario, mask_count, record.get("round"), variant)].append(record)
+            ordered_records.append(record)
         elif operation == "export" \
                 and source_kind in {"synthetic-24mp", "real-raw"} \
                 and mask_count in EXPORT_MASK_COUNTS \
                 and variant in VARIANTS:
-            grouped[("export", source_kind, mask_count, variant)].append(record)
+            grouped[("export", source_kind, mask_count, record.get("round"), variant)].append(record)
+            ordered_records.append(record)
+
+    expected_sequence = []
+
+    def append_expected_group(operation, source_kind, scenario, mask_count, samples_per_variant):
+        ordinals = {variant: 0 for variant in VARIANTS}
+        blocks = samples_per_variant // 2
+        for round_number in ROUNDS:
+            for variant in ROUND_PATTERNS[round_number] * blocks:
+                expected_sequence.append((
+                    operation,
+                    source_kind,
+                    scenario,
+                    mask_count,
+                    round_number,
+                    variant,
+                    ordinals[variant],
+                ))
+                ordinals[variant] += 1
+
+    for scenario in PREVIEW_SCENARIOS:
+        for mask_count in MASK_COUNTS:
+            append_expected_group("preview", "real-raw", scenario, mask_count, args.expected_preview_samples)
+    for source_kind in ("synthetic-24mp", "real-raw"):
+        for mask_count in EXPORT_MASK_COUNTS:
+            append_expected_group("export", source_kind, "full-resolution", mask_count, args.expected_export_samples)
+
+    if len(ordered_records) == len(records) and all(
+        is_nonnegative_integer(record.get("order")) for record in records
+    ):
+        actual_sequence = []
+        for record in sorted(ordered_records, key=lambda item: item["order"]):
+            actual_sequence.append((
+                record.get("operation"),
+                record.get("sourceKind"),
+                record.get("scenario"),
+                record.get("maskCount"),
+                record.get("round"),
+                record.get("variant"),
+                record.get("sampleOrdinal"),
+            ))
+        if actual_sequence != expected_sequence:
+            errors.append("records must follow the exact round variant order and sampleOrdinal contract")
 
     expected_groups = []
     for scenario in PREVIEW_SCENARIOS:
         for mask_count in MASK_COUNTS:
-            for variant in VARIANTS:
-                expected_groups.append((
-                    ("preview", scenario, mask_count, variant),
-                    args.expected_preview_samples,
-                ))
+            for round_number in ROUNDS:
+                for variant in VARIANTS:
+                    expected_groups.append((
+                        ("preview", scenario, mask_count, round_number, variant),
+                        args.expected_preview_samples,
+                    ))
     for source_kind in ("synthetic-24mp", "real-raw"):
         for mask_count in EXPORT_MASK_COUNTS:
-            for variant in VARIANTS:
-                expected_groups.append((
-                    ("export", source_kind, mask_count, variant),
-                    args.expected_export_samples,
-                ))
+            for round_number in ROUNDS:
+                for variant in VARIANTS:
+                    expected_groups.append((
+                        ("export", source_kind, mask_count, round_number, variant),
+                        args.expected_export_samples,
+                    ))
 
     for key, expected_count in expected_groups:
         values = grouped.get(key, [])
@@ -264,15 +355,27 @@ def main():
             errors.append(f"{'/'.join(map(str, key))}: expected {expected_count} samples, found {len(values)}")
             continue
         ordinals = [record["sampleOrdinal"] for record in values]
+        expected_ordinal_start = (key[3] - 1) * expected_count
+        expected_ordinals = list(range(expected_ordinal_start, expected_ordinal_start + expected_count))
         if not all(is_nonnegative_integer(ordinal) for ordinal in ordinals) \
-                or sorted(ordinals) != list(range(expected_count)):
-            errors.append(f"{'/'.join(map(str, key))}: sampleOrdinal must cover zero through {expected_count - 1}")
+                or sorted(ordinals) != expected_ordinals:
+            errors.append(
+                f"{'/'.join(map(str, key))}: sampleOrdinal must cover "
+                f"{expected_ordinal_start} through {expected_ordinals[-1]} within the round"
+            )
 
     summaries = {}
     gates = []
     if not errors:
-        for key, _ in expected_groups:
-            summaries["/".join(map(str, key))] = sample_summary(grouped[key])
+        summary_groups = defaultdict(list)
+        for key, values in grouped.items():
+            if key[0] == "preview":
+                summary_key = (key[0], key[1], key[2], key[4])
+            else:
+                summary_key = (key[0], key[1], key[2], key[4])
+            summary_groups[summary_key].extend(values)
+        for key, values in summary_groups.items():
+            summaries["/".join(map(str, key))] = sample_summary(values)
 
         for scenario in PREVIEW_SCENARIOS:
             for mask_count in MASK_COUNTS:

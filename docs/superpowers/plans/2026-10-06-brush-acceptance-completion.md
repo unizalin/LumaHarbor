@@ -48,7 +48,9 @@
 ```sh
 python3 Scripts/analyze-brush-performance-abba.py \
   --samples docs/testing/evidence/2026-10-06-brush-warm-abba/samples.jsonl \
-  --output "$TASK_GATE_OUTPUT" --expected-per-round 8
+  --output "$TASK_GATE_OUTPUT" --expected-per-round 8 \
+  --expected-scenario warm-unchanged-production-preview \
+  --expected-mask-count 0 --expected-mask-count 1 --expected-mask-count 10
 ```
 
 `TASK_GATE_OUTPUT` 是執行者建立的本機暫存檔案；與已保存 gates 做 JSON 結構比較。這是重算歷史資料，不是新的 benchmark。

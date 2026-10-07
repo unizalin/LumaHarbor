@@ -156,6 +156,15 @@ class AnalyzeBrushPerformanceAcceptanceTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0, output)
         self.assertIn("contains an invalid duration", completed.stderr)
 
+    def test_cancellation_timing_boundary_must_match_contract(self):
+        records = valid_records()
+        records[3]["timingBoundary"] = "x"
+
+        completed, output = self.run_analyzer(records)
+
+        self.assertNotEqual(completed.returncode, 0, output)
+        self.assertIn("unexpected timingBoundary", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
