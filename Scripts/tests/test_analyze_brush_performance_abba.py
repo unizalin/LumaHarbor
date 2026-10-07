@@ -130,6 +130,45 @@ class AnalyzeBrushPerformanceABBATests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("sampleOrdinal", "\n".join(payload["validationErrors"]))
 
+    def assert_rejected(self, records):
+        completed, payload = self.run_analyzer(records)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertNotIn("Traceback", completed.stderr)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["validation"], "FAIL")
+        self.assertFalse(any(g["result"] == "PASS" for g in payload["gates"]))
+
+    def test_scalar_types_fail_closed(self):
+        for field in ("schemaVersion", "round", "maskCount", "order", "sampleOrdinal"):
+            for value in (True, 1.0, [], {}):
+                with self.subTest(field=field, value=value):
+                    records = valid_records()
+                    records[0][field] = value
+                    self.assert_rejected(records)
+        for field in ("scenario", "variant", "configuration", "result"):
+            for value in ([], {}):
+                with self.subTest(field=field, value=value):
+                    records = valid_records()
+                    records[0][field] = value
+                    self.assert_rejected(records)
+
+    def test_fixed_workload_dimensions_are_required(self):
+        for field in ("nativeSize", "decodedSize", "outputSize"):
+            for value in ({"width": 1, "height": 1}, {"width": 1067, "height": 1600},
+                          {"width": 1600.0, "height": 1067}, {"width": True, "height": 1067}):
+                with self.subTest(field=field, value=value):
+                    records = valid_records()
+                    records[0][field] = value
+                    self.assert_rejected(records)
+
+    def test_invalid_numeric_measurements_fail_closed(self):
+        for field in ("totalDurationSeconds", "rssBytes"):
+            for value in (True, [], {}, float("nan"), float("inf"), 10 ** 400):
+                with self.subTest(field=field, value=str(value)):
+                    records = valid_records()
+                    records[0][field] = value
+                    self.assert_rejected(records)
+
 
 if __name__ == "__main__":
     unittest.main()

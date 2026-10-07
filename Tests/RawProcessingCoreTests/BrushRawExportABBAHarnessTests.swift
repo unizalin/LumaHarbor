@@ -104,8 +104,8 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
         let timingBoundary: String
         let publishedFileValidated: Any
         let contextLifecycle: String
-        let contextCreationCountBeforeTimer: Int
-        let contextCreationCountDuringTimer: Int
+        let expectedContextCreationCountBeforeTimer: Int
+        let expectedContextCreationCountDuringTimer: Int
 
         switch operation {
         case "preview":
@@ -182,12 +182,12 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             publishedFileValidated = NSNull()
             if scenario == "cold" {
                 contextLifecycle = "fresh-renderer-context-inside-timer"
-                contextCreationCountBeforeTimer = 0
-                contextCreationCountDuringTimer = variant == "B" ? 2 : 1
+                expectedContextCreationCountBeforeTimer = 0
+                expectedContextCreationCountDuringTimer = variant == "B" ? 2 : 1
             } else {
                 contextLifecycle = "fresh-renderer-context-before-warmup-reused-for-timed-request"
-                contextCreationCountBeforeTimer = variant == "B" ? 2 : 1
-                contextCreationCountDuringTimer = variant == "B" ? 1 : 0
+                expectedContextCreationCountBeforeTimer = variant == "B" ? 2 : 1
+                expectedContextCreationCountDuringTimer = variant == "B" ? 1 : 0
             }
 
         case "export":
@@ -232,8 +232,8 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             timingBoundary = "submit-through-export-return-and-published-image-reopen"
             publishedFileValidated = true
             contextLifecycle = "fresh-exporter-context-inside-timer"
-            contextCreationCountBeforeTimer = 0
-            contextCreationCountDuringTimer = variant == "B" ? 2 : 1
+            expectedContextCreationCountBeforeTimer = 0
+            expectedContextCreationCountDuringTimer = variant == "B" ? 2 : 1
 
         default:
             throw AcceptanceHarnessError.invalidConfiguration
@@ -241,7 +241,7 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
 
         let sourceAfter = try sourceState(sourceURL)
         let record: [String: Any] = [
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "productSHA": productSHA,
             "harnessSHA": harnessSHA,
             "instrumentationDigest": instrumentationDigest,
@@ -260,8 +260,9 @@ final class BrushRawExportABBAHarnessTests: XCTestCase {
             "totalDurationSeconds": durationSeconds,
             "peakRSSBytes": try XCTUnwrap(peakRSSBytes),
             "contextLifecycle": contextLifecycle,
-            "contextCreationCountBeforeTimer": contextCreationCountBeforeTimer,
-            "contextCreationCountDuringTimer": contextCreationCountDuringTimer,
+            "contextCountEvidence": "declared-from-construction-path",
+            "expectedContextCreationCountBeforeTimer": expectedContextCreationCountBeforeTimer,
+            "expectedContextCreationCountDuringTimer": expectedContextCreationCountDuringTimer,
             "timingBoundary": timingBoundary,
             "publishedFileValidated": publishedFileValidated,
             "sourceFingerprintUnchanged": sourceBefore == sourceAfter,

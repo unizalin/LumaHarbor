@@ -267,6 +267,111 @@ class AnalyzeBrushRawExportAcceptanceTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("missing contextCreationCountDuringTimer", "\n".join(payload["validationErrors"]))
 
+    def assert_rejected(self, records):
+        completed, payload = self.run_analyzer(records)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertNotIn("Traceback", completed.stderr)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["validation"], "FAIL")
+        self.assertFalse(any(g["result"] == "PASS" for g in payload["gates"]))
+
+    def v3_records(self):
+        records = valid_records()
+        for record in records:
+            record["schemaVersion"] = 3
+            record["contextCountEvidence"] = "declared-from-construction-path"
+            for suffix in ("BeforeTimer", "DuringTimer"):
+                record["expectedContextCreationCount" + suffix] = record.pop("contextCreationCount" + suffix)
+        return records
+
+    def test_context_evidence_is_explicit_for_both_versions(self):
+        for records in (valid_records(), self.v3_records()):
+            completed, payload = self.run_analyzer(records)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(payload["contextCountEvidence"], "declared-from-construction-path")
+            self.assertIn("not measured", payload["contextCountLimitation"])
+
+    def test_v3_requires_unambiguous_declaration_and_one_version(self):
+        for value in (None, False, "measured"):
+            records = self.v3_records()
+            if value is None:
+                del records[0]["contextCountEvidence"]
+            else:
+                records[0]["contextCountEvidence"] = value
+            self.assert_rejected(records)
+        records = self.v3_records()
+        records[0]["contextCreationCountDuringTimer"] = 2
+        self.assert_rejected(records)
+        records = self.v3_records()
+        records[0] = valid_records()[0]
+        self.assert_rejected(records)
+        for field in ("expectedContextCreationCountBeforeTimer", "expectedContextCreationCountDuringTimer"):
+            for value in (None, True, 2.0, [], 99):
+                with self.subTest(field=field, value=value):
+                    records = self.v3_records()
+                    if value is None:
+                        del records[0][field]
+                    else:
+                        records[0][field] = value
+                    self.assert_rejected(records)
+
+    def test_scalar_types_fail_closed(self):
+        for field in ("schemaVersion", "round", "maskCount", "order", "sampleOrdinal",
+                      "contextCreationCountBeforeTimer", "contextCreationCountDuringTimer"):
+            for value in (True, 1.0, [], {}):
+                with self.subTest(field=field, value=value):
+                    records = valid_records()
+                    records[0][field] = value
+                    self.assert_rejected(records)
+        for field in ("sourceKind", "operation", "scenario", "variant", "contextLifecycle"):
+            for value in ([], {}):
+                with self.subTest(field=field, value=value):
+                    records = valid_records()
+                    next(r for r in records if r["operation"] == "export")[field] = value
+                    self.assert_rejected(records)
+
+    def test_preview_dimensions_and_fixture_consistency(self):
+        for dimensions in ((1, 1), (800, 533), (1600, 800), (1600.0, 1067)):
+            with self.subTest(dimensions=dimensions):
+                records = valid_records()
+                for record in records:
+                    if record["operation"] == "preview":
+                        record["decodedSize"] = record["outputSize"] = size(*dimensions)
+                self.assert_rejected(records)
+        records = valid_records()
+        records[0]["nativeSize"] = size(12000, 8000)
+        self.assert_rejected(records)
+        records = valid_records()
+        records[0]["decodedSize"] = records[0]["outputSize"] = size(1067, 1600)
+        self.assert_rejected(records)
+
+    def test_portrait_preview_and_oriented_export_are_valid(self):
+        records = valid_records()
+        for record in records:
+            if record["operation"] == "preview":
+                record["decodedSize"] = record["outputSize"] = size(1067, 1600)
+            else:
+                record["decodedSize"] = size(4000, 6000)
+        completed, payload = self.run_analyzer(records)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(payload["validation"], "PASS")
+
+    def test_synthetic_export_must_be_24mp(self):
+        records = valid_records()
+        for record in records:
+            if record["sourceKind"] == "synthetic-24mp":
+                for field in ("nativeSize", "decodedSize", "outputSize"):
+                    record[field] = size(3000, 2000)
+        self.assert_rejected(records)
+
+    def test_invalid_numeric_measurements_fail_closed(self):
+        for field in ("totalDurationSeconds", "peakRSSBytes"):
+            for value in (True, [], {}, float("nan"), float("inf"), 10 ** 400):
+                with self.subTest(field=field, value=str(value)):
+                    records = valid_records()
+                    records[0][field] = value
+                    self.assert_rejected(records)
+
 
 if __name__ == "__main__":
     unittest.main()

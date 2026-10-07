@@ -44,6 +44,15 @@ def is_nonnegative_integer(value):
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def is_finite_nonnegative(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--samples", type=Path, required=True)
@@ -83,6 +92,7 @@ def main():
         if not isinstance(record, dict):
             errors.append(f"line {line_number}: record must be an object")
             continue
+        line_error_count = len(errors)
         missing = sorted(REQUIRED_FIELDS - record.keys())
         unexpected = sorted(record.keys() - REQUIRED_FIELDS)
         if missing:
@@ -92,7 +102,16 @@ def main():
         if missing:
             continue
 
-        if record["schemaVersion"] != 2:
+        for field in ("configuration", "scenario", "variant", "result"):
+            if not isinstance(record[field], str):
+                errors.append(f"line {line_number}: {field} must be a string")
+        for field in ("nativeSize", "decodedSize", "outputSize"):
+            size = record[field]
+            if not isinstance(size, dict) or set(size) != {"width", "height"} \
+                    or any(type(value) is not int for value in size.values()) \
+                    or size != {"width": 1600, "height": 1067}:
+                errors.append(f"line {line_number}: {field} must be 1600x1067 integer dimensions")
+        if type(record["schemaVersion"]) is not int or record["schemaVersion"] != 2:
             errors.append(f"line {line_number}: schemaVersion must be 2")
         if not isinstance(record["productSHA"], str) or COMMIT_PATTERN.fullmatch(record["productSHA"]) is None:
             errors.append(f"line {line_number}: productSHA must be a full lowercase commit")
@@ -106,23 +125,24 @@ def main():
             errors.append(f"line {line_number}: unexpected scenario")
         if record["variant"] not in VARIANTS:
             errors.append(f"line {line_number}: variant must be B or O")
-        if record["round"] not in ROUNDS:
+        if type(record["round"]) is not int or record["round"] not in ROUNDS:
             errors.append(f"line {line_number}: round must be 1 or 2")
-        if record["maskCount"] not in expected_mask_counts:
+        if type(record["maskCount"]) is not int or record["maskCount"] not in expected_mask_counts:
             errors.append(f"line {line_number}: unexpected maskCount")
         if not is_nonnegative_integer(record["order"]):
             errors.append(f"line {line_number}: order must be a nonnegative integer")
         if not is_nonnegative_integer(record["sampleOrdinal"]):
             errors.append(f"line {line_number}: sampleOrdinal must be a nonnegative integer")
         duration = record["totalDurationSeconds"]
-        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(float(duration)) or duration < 0:
+        if not is_finite_nonnegative(duration):
             errors.append(f"line {line_number}: invalid totalDurationSeconds")
         rss = record["rssBytes"]
-        if rss is not None and not is_nonnegative_integer(rss):
+        if rss is not None and (not is_nonnegative_integer(rss) or not is_finite_nonnegative(rss)):
             errors.append(f"line {line_number}: invalid rssBytes")
         if record["result"] != "MEASURED":
             errors.append(f"line {line_number}: non-measured result must be investigated")
-        records.append(record)
+        if len(errors) == line_error_count:
+            records.append(record)
 
     expected_record_count = (
         len(expected_scenarios) * len(expected_mask_counts) * len(ROUNDS)

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://lumaharbor.invalid/schemas/brush-raw-export-acceptance-v2.json",
+  "$id": "https://lumaharbor.invalid/schemas/brush-raw-export-acceptance-v3.json",
   "title": "LumaHarbor real RAW preview and full-resolution export acceptance sample",
   "type": "object",
   "additionalProperties": false,
@@ -24,8 +24,9 @@
     "totalDurationSeconds",
     "peakRSSBytes",
     "contextLifecycle",
-    "contextCreationCountBeforeTimer",
-    "contextCreationCountDuringTimer",
+    "contextCountEvidence",
+    "expectedContextCreationCountBeforeTimer",
+    "expectedContextCreationCountDuringTimer",
     "timingBoundary",
     "publishedFileValidated",
     "sourceFingerprintUnchanged",
@@ -33,7 +34,7 @@
     "result"
   ],
   "properties": {
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
     "productSHA": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "harnessSHA": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "instrumentationDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -51,6 +52,10 @@
     "outputSize": { "$ref": "#/$defs/size" },
     "totalDurationSeconds": { "type": "number", "minimum": 0 },
     "peakRSSBytes": { "type": "integer", "minimum": 1 },
+    "contextCountEvidence": {
+      "const": "declared-from-construction-path",
+      "description": "Expected construction-path counts; context allocations are not measured."
+    },
     "contextLifecycle": {
       "enum": [
         "fresh-renderer-context-inside-timer",
@@ -58,8 +63,8 @@
         "fresh-exporter-context-inside-timer"
       ]
     },
-    "contextCreationCountBeforeTimer": { "type": "integer", "minimum": 0 },
-    "contextCreationCountDuringTimer": { "type": "integer", "minimum": 0 },
+    "expectedContextCreationCountBeforeTimer": { "type": "integer", "minimum": 0 },
+    "expectedContextCreationCountDuringTimer": { "type": "integer", "minimum": 0 },
     "timingBoundary": {
       "enum": [
         "submit-through-materialized-cgimage",
@@ -108,7 +113,7 @@
       "then": {
         "properties": {
           "contextLifecycle": { "const": "fresh-renderer-context-inside-timer" },
-          "contextCreationCountBeforeTimer": { "const": 0 }
+          "expectedContextCreationCountBeforeTimer": { "const": 0 }
         }
       }
     },

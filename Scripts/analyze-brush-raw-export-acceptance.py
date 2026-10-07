@@ -37,6 +37,10 @@ REQUIRED_FIELDS = {
     "thermalState",
     "result",
 }
+LEGACY_COUNT_FIELDS = {"contextCreationCountBeforeTimer", "contextCreationCountDuringTimer"}
+EXPECTED_COUNT_FIELDS = {"expectedContextCreationCountBeforeTimer", "expectedContextCreationCountDuringTimer"}
+V3_REQUIRED_FIELDS = (REQUIRED_FIELDS - LEGACY_COUNT_FIELDS) | EXPECTED_COUNT_FIELDS | {"contextCountEvidence"}
+CONTEXT_EVIDENCE = "declared-from-construction-path"
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 PREVIEW_SCENARIOS = ("cold", "warm", "changed")
@@ -77,6 +81,15 @@ def sample_summary(records):
     }
 
 
+def is_finite_nonnegative(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--samples", type=Path, required=True)
@@ -92,6 +105,7 @@ def main():
         errors.append("expected-export-samples must be positive")
 
     records = []
+    sample_versions = set()
     try:
         lines = args.samples.read_text(encoding="utf-8", errors="strict").splitlines()
     except (OSError, UnicodeError) as error:
@@ -111,8 +125,15 @@ def main():
             errors.append(f"line {line_number}: record must be an object")
             continue
 
-        missing = sorted(REQUIRED_FIELDS - record.keys())
-        unexpected = sorted(record.keys() - REQUIRED_FIELDS)
+        line_error_count = len(errors)
+        version = record.get("schemaVersion")
+        if type(version) is not int or version not in (2, 3):
+            errors.append(f"line {line_number}: schemaVersion must be integer 2 or 3")
+            continue
+        sample_versions.add(version)
+        required_fields = V3_REQUIRED_FIELDS if version == 3 else REQUIRED_FIELDS
+        missing = sorted(required_fields - record.keys())
+        unexpected = sorted(record.keys() - required_fields)
         if missing:
             errors.append(f"line {line_number}: missing {','.join(missing)}")
         if unexpected:
@@ -120,8 +141,16 @@ def main():
         if missing:
             continue
 
-        if record["schemaVersion"] != 2:
-            errors.append(f"line {line_number}: schemaVersion must be 2")
+        count_prefix = "expectedContextCreationCount" if version == 3 else "contextCreationCount"
+        if version == 3 and record["contextCountEvidence"] != CONTEXT_EVIDENCE:
+            errors.append(f"line {line_number}: contextCountEvidence must declare construction-path expectations")
+        scalar_fields = ("configuration", "sourceKind", "operation", "scenario", "variant",
+                         "contextLifecycle", "timingBoundary", "thermalState", "result")
+        invalid_scalars = [field for field in scalar_fields if not isinstance(record[field], str)]
+        if invalid_scalars:
+            errors.append(f"line {line_number}: {','.join(invalid_scalars)} must be strings")
+            # Do not allow compound values to reach enum sets or grouping keys.
+            continue
         if not isinstance(record["productSHA"], str) \
                 or COMMIT_PATTERN.fullmatch(record["productSHA"]) is None:
             errors.append(f"line {line_number}: productSHA must be a full lowercase commit")
@@ -135,13 +164,13 @@ def main():
             errors.append(f"line {line_number}: configuration must be release")
         if record["variant"] not in VARIANTS:
             errors.append(f"line {line_number}: variant must be B or O")
-        if isinstance(record["round"], bool) or record["round"] not in ROUNDS:
+        if type(record["round"]) is not int or record["round"] not in ROUNDS:
             errors.append(f"line {line_number}: round must be 1 or 2")
         if not is_nonnegative_integer(record["order"]):
             errors.append(f"line {line_number}: order must be a nonnegative integer")
         if not is_nonnegative_integer(record["sampleOrdinal"]):
             errors.append(f"line {line_number}: sampleOrdinal must be a nonnegative integer")
-        if record["maskCount"] not in MASK_COUNTS or isinstance(record["maskCount"], bool):
+        if type(record["maskCount"]) is not int or record["maskCount"] not in MASK_COUNTS:
             errors.append(f"line {line_number}: invalid maskCount")
         if size_tuple(record["nativeSize"]) is None:
             errors.append(f"line {line_number}: invalid nativeSize")
@@ -150,16 +179,15 @@ def main():
         if size_tuple(record["outputSize"]) is None:
             errors.append(f"line {line_number}: invalid outputSize")
         duration = record["totalDurationSeconds"]
-        if isinstance(duration, bool) or not isinstance(duration, (int, float)) \
-                or not math.isfinite(float(duration)) or duration < 0:
+        if not is_finite_nonnegative(duration):
             errors.append(f"line {line_number}: invalid totalDurationSeconds")
-        if not is_nonnegative_integer(record["peakRSSBytes"], positive=True):
+        if not is_nonnegative_integer(record["peakRSSBytes"], positive=True) or not is_finite_nonnegative(record["peakRSSBytes"]):
             errors.append(f"line {line_number}: invalid peakRSSBytes")
         if not isinstance(record["contextLifecycle"], str) or not record["contextLifecycle"]:
             errors.append(f"line {line_number}: contextLifecycle must be nonempty")
-        if not is_nonnegative_integer(record["contextCreationCountBeforeTimer"]):
+        if not is_nonnegative_integer(record[count_prefix + "BeforeTimer"]):
             errors.append(f"line {line_number}: invalid contextCreationCountBeforeTimer")
-        if not is_nonnegative_integer(record["contextCreationCountDuringTimer"]):
+        if not is_nonnegative_integer(record[count_prefix + "DuringTimer"]):
             errors.append(f"line {line_number}: invalid contextCreationCountDuringTimer")
         if record["sourceFingerprintUnchanged"] is not True:
             errors.append(f"line {line_number}: source fingerprint changed or was not checked")
@@ -189,12 +217,15 @@ def main():
             if decoded and output and decoded != output:
                 errors.append(f"line {line_number}: preview decoded/output size mismatch")
             if native and output and (
-                max(output) > 1_600 or max(native) <= max(output)
+                max(output) != 1_600 or max(native) <= 1_600
+                or abs(min(output) * max(native) - 1600 * min(native)) > max(native)
             ):
                 errors.append(f"line {line_number}: preview was not a bounded 1600px decode")
         elif record["operation"] == "export":
             if record["sourceKind"] not in {"real-raw", "synthetic-24mp"}:
                 errors.append(f"line {line_number}: invalid export sourceKind")
+            if record["sourceKind"] == "synthetic-24mp" and native and sorted(native) != [4000, 6000]:
+                errors.append(f"line {line_number}: synthetic-24mp native size must be 6000x4000")
             if record["scenario"] != "full-resolution":
                 errors.append(f"line {line_number}: export scenario must be full-resolution")
             if record["maskCount"] not in EXPORT_MASK_COUNTS:
@@ -218,12 +249,23 @@ def main():
         else:
             expected_before = 0
             expected_during = 2 if record["variant"] == "B" else 1
-        if record["contextCreationCountBeforeTimer"] != expected_before:
+        if record[count_prefix + "BeforeTimer"] != expected_before:
             errors.append(f"line {line_number}: unexpected context creations before timer")
-        if record["contextCreationCountDuringTimer"] != expected_during:
+        if record[count_prefix + "DuringTimer"] != expected_during:
             errors.append(f"line {line_number}: unexpected context creations during timer")
 
-        records.append(record)
+        if len(errors) == line_error_count:
+            records.append(record)
+
+    if len(sample_versions) > 1:
+        errors.append("all records must use one sample schemaVersion")
+    for source_kind in ("real-raw", "synthetic-24mp"):
+        native_sizes = {size_tuple(r["nativeSize"]) for r in records if r["sourceKind"] == source_kind}
+        if len(native_sizes) > 1:
+            errors.append(f"{source_kind}: native size must be consistent across the fixture")
+    preview_sizes = {size_tuple(r["outputSize"]) for r in records if r["operation"] == "preview"}
+    if len(preview_sizes) > 1:
+        errors.append("preview output size and orientation must be consistent across B/O and groups")
 
     expected_record_count = (
         len(PREVIEW_SCENARIOS) * len(MASK_COUNTS) * len(ROUNDS) * len(VARIANTS)
@@ -456,6 +498,8 @@ def main():
     payload = {
         "schemaVersion": 1,
         "sampleArtifact": args.samples.name,
+        "contextCountEvidence": CONTEXT_EVIDENCE,
+        "contextCountLimitation": "Context allocations are not measured; v2 and v3 counts are construction-path declarations only.",
         "recordCount": len(records),
         "validation": "PASS" if not errors else "FAIL",
         "validationErrors": errors,
