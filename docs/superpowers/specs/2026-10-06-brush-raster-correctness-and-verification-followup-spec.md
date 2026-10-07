@@ -1,5 +1,13 @@
 # 筆刷跨 tile 正確性與驗收證據追補規格
 
+## 2026-10-07 驗收資料契約補充（目前有效）
+
+- Synthetic preview 的 native／decoded／output 必須是 1600×1067；RAW preview native 長邊大於 1600，decoded/output 相等、長邊恰為 1600，短邊與 native 比例誤差不超過 1 pixel，可接受直幅旋轉。單一 fixture native 及跨 B/O／組別 preview 尺寸方向必須一致。
+- 原尺寸 export 保持 native／decoded／output 可旋轉但尺寸相同；synthetic-24mp 必須為 6000×4000。
+- schema、round、order、ordinal、mask、counts 使用純整數，排除 bool／float；字串 enum 與測量數值在分組前驗證。異常輸入生成 FAIL artifact，不產生 PASS gate。
+- RAW harness schema v3 使用 `expectedContextCreationCountBeforeTimer`／`expectedContextCreationCountDuringTimer`、`contextCountEvidence=declared-from-construction-path`。歷史 v2 可讀取但只代表宣告值；拒絕混版及 v3 舊欄位。兩版 gate 輸出均明列 allocations 未量測，不能把預期數字當 runtime 觀測。
+- `c9196b6` 已實作並驗證上述契約。未改效能門檻、產品 Sources 或歷史樣本；修正後獨立覆核待額度可用。見[修正報告](../../testing/reports/2026-10-07-brush-review-fixes.md)。
+
 - 日期：2026-10-06
 - 識別：`LH-BRUSH-CORRECTNESS-FOLLOWUP-20261006`
 - 版本：1.1（實作後狀態與後續計畫更新）
@@ -9,7 +17,7 @@
 ## 2026-10-07 實作後補充
 
 - 完整 synthetic ABBA 已以 `e7d6425` 修正後重跑 480 筆；analyzer `validation PASS`，stress 四個 preview gate 保留 FAIL。
-- RAW／Export 已以 `4fdbc1f` 執行新版 schema v2 雙輪次矩陣 352 筆；context lifecycle、timer 前後建立次數、round/order、distinct B/O SHA 均由 analyzer fail closed 驗證。`PERF-EXPORT`、`PERF-MEM-EXPORT`、`PERF-MEM-PREVIEW` 全部通過，warm RAW `INTERACTIVE-150` 0/1/10 masks 保留 3 個 FAIL。
+- RAW／Export 已以 `4fdbc1f` 執行新版 schema v2 雙輪次矩陣 352 筆；context lifecycle、timer 前後預期建立次數（宣告值，未實測）、round/order、distinct B/O SHA 均由 analyzer fail closed 驗證。`PERF-EXPORT`、`PERF-MEM-EXPORT`、`PERF-MEM-PREVIEW` 全部通過，warm RAW `INTERACTIVE-150` 0/1/10 masks 保留 3 個 FAIL。
 - 權威證據為 [2026-10-07 full ABBA repair](../../testing/evidence/2026-10-07-brush-full-abba-repair/README.md) 與 [2026-10-07 RAW/export repair](../../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)；2026-10-06 artifact 仍保留為歷史樣本。
 
 ## 1. 目的、權威與範圍

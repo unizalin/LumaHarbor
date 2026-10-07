@@ -1,5 +1,15 @@
 # Brush acceptance completion implementation plan
 
+## 2026-10-07 收尾補充（目前有效）
+
+- [x] 覆核 Gemini 意見與本地反例，限定四類驗收工具／文件缺陷。
+- [x] TDD 修正 workload 尺寸與型別驗證；context v3 改 expected 宣告並相容 v2；驗證程式 SHA=`c9196b64826edb943da558b889af0d9c3c591ae1`。
+- [x] Python 34 PASS；Swift Release focused 2 tests／1 skip／0 failures；832 筆既有樣本重算，所有效能結果不變。
+- [x] 更正 checksum／版本歸因，保存新的重算 artifact，更新 CURRENT／report／handoff。
+- [ ] 本輪修正後非原作者覆核：因子代理工作區額度不足為 NOT RUN；額度可用後審 `6fd3d41..c9196b6` 與文件。這是下一個有界動作。
+
+Task 5 曾有 Gemini 唯讀審查及本地 finding 覆核，尚未達成完整產品簽核；Task 5 人工項目、Task 6 最終整合驗證仍待完成。四個 synthetic stress FAIL、三個 RAW latency FAIL 保留。見[修正報告](../../testing/reports/2026-10-07-brush-review-fixes.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task in the current session. Steps use checkbox syntax for tracking. 非原作者的獨立審查安排在 Task 5。
 
 **Goal:** 補齊筆刷效能與驗收證據，讓每個必要 gate 都有可重算、可追溯的結果；有 FAIL 或 NOT RUN 就維持 `DONE_WITH_CONCERNS`。
@@ -78,7 +88,7 @@ Scripts/run-brush-performance-abba.sh
 - [x] 分情境記 empty、incremental、preview RSS；stage coverage、RAW、export、UI 保持 NOT RUN。
 - [x] 完整保留第一次矩陣與修正後正式矩陣；stress 四個 PERF-PREVIEW gate 保留 FAIL，未重抽或放寬門檻。
 
-**2026-10-07 rerun note:** `e7d6425` 修正 analyzer 與 runner 的正式 scenario mapping 後，完整矩陣重新以 480 筆執行，`validation PASS`；新證據見 [`2026-10-07-brush-full-abba-repair`](../../testing/evidence/2026-10-07-brush-full-abba-repair/README.md)。
+**2026-10-07 rerun note:** `e7d6425` 修正驗收契約後，完整矩陣以該 O／harness 重新執行 480 筆；runner 的正式 scenario mapping 修正在後續 `4fdbc1f`，`validation PASS`；新證據見 [`2026-10-07-brush-full-abba-repair`](../../testing/evidence/2026-10-07-brush-full-abba-repair/README.md)。
 
 **完成條件:** 480 筆完整、metadata 一致、像素比較可追溯、每一 gate 有結果；FAIL 也必須報告，不得以 runner exit 0 代替產品通過。
 
@@ -123,7 +133,7 @@ swift test --scratch-path "$TASK_DEBUG_SCRATCH" --filter RawFixtureTests
 - [x] PERF-EXPORT 4/4 PASS、PERF-MEM-EXPORT 4/4 PASS、PERF-MEM-PREVIEW 9/9 PASS；B 四組 export 已在 absolute budget 內，因此依 ≤5% regression 規則判定。
 - [x] 保存去識別化 evidence 與來源檔未變的私有驗證結果；352 筆全為 nominal、來源前後完整 digest 一致，公開 artifact privacy scan PASS。
 
-**完成結果:** `4fdbc1f` 執行新版入口與 `8bc6819` 契約修正；352 筆矩陣 validation PASS、17 gates PASS、3 gates FAIL，整體維持 `DONE_WITH_CONCERNS`。證據見[2026-10-07 RAW／原尺寸 export evidence](../../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。
+**完成結果:** `8bc6819` 建立入口，`e7d6425` 修正契約；`4fdbc1f` 為本次 RAW／Export 執行 HEAD；352 筆矩陣 validation PASS、17 gates PASS、3 gates FAIL，整體維持 `DONE_WITH_CONCERNS`。證據見[2026-10-07 RAW／原尺寸 export evidence](../../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。
 
 ## Task 5：非原作者審查與人工操作
 

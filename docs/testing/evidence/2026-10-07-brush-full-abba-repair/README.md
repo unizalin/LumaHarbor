@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-這是 `e7d6425` 修正後重新執行的五情境完整矩陣。舊的 2026-10-06 證據保留為歷史資料；本目錄是目前 analyzer 與 scenario mapping 修正後的可重算證據。
+這是 `e7d6425` 修正後重新執行的五情境完整矩陣。舊的 2026-10-06 證據保留為歷史資料；本目錄保存的 O／harness 為 e7d6425；scenario mapping 的 runner 修正另位於 4fdbc1f。2026-10-07 審查發現 README 使用舊 checksum，現已依原檔更正，gates.json 未改動。加嚴 analyzer 的重算見[審查修正證據](../2026-10-07-brush-review-fixes/README.md)。
 
 ## 矩陣與版本
 
@@ -29,7 +29,7 @@
 | 檔案 | SHA-256 |
 | --- | --- |
 | `samples.jsonl` | `be249c74ab8d1748a13408b45944754dc6687bdb2b088dcb5fef9e0e27e609a5` |
-| `gates.json` | `1d2e5b16e80921fd6e3adf369dcbd3132e62841939dfd6eb86e665908546b8d2` |
+| `gates.json` | `2175d908220c4f71d145ca0d6daba941c53a52e5a3f784e928ceb3404e5aa062` |
 
 重算命令：
 

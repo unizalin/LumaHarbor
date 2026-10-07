@@ -1,10 +1,49 @@
 # Brush raster correctness follow-up 交接
 
+## 2026-10-07 審查修正交接（最新）
+
+### Status
+
+`DONE_WITH_CONCERNS`：限定修正已驗證，修正後獨立覆核待補。
+
+### Git state
+
+- Owner／writer：Codex root；worktree `.worktrees/codex-brush-performance-acceptance-repair`。
+- Branch：`codex/brush-performance-acceptance-repair`；最後驗證程式 HEAD=`c9196b64826edb943da558b889af0d9c3c591ae1`；本輪起始 `6fd3d416d64093fb1ab9609497633915fe6702f9`。
+- 延續既有 task candidate；本機 `origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`，程式提交時 ahead 48／behind 0、無 upstream；沒有查詢遠端。後續純文件提交依 D-003 不改此驗證 SHA。
+- 未 push、merge、rebase 或 deploy。
+
+### Changes
+
+- `c9196b6 test: validate brush workloads and declare context expectations`：兩個 analyzer、兩個 Python test、RAW Swift harness、RAW schema，共六檔；完整檔案清單可由該 commit 取得。
+- 後續文件提交：CURRENT、本交接、原 report／spec／plan、兩個歷史 evidence README、新修正 report 與三個新 evidence 檔案。歷史 samples／gates 未修改。
+- 尺寸與型別 fail-closed；context v3 明確聲明預期值，v2 保留但附限制。Production Sources 不變。
+
+### Verification
+
+[完整命令／exit／結果與限制](../testing/reports/2026-10-07-brush-review-fixes.md)：Python 34 PASS；Swift Release 2 tests／1 skip／0 failures；832 筆歷史樣本重算、checksum 與 diff check PASS。既有 7 個效能 FAIL 保留。
+
+### Dirty files
+
+完成本輪文件提交後預期為零；交接接手時重新確認。無其他代理或使用者待保護變更。
+
+### Concerns and blockers
+
+修正後獨立 reviewer 因額度不足為 NOT RUN；原產品人工／實機與公平 stage 未完成。Context allocations 未實測，不能用宣告 counts 證明 lifecycle 沒有回歸。Release 編譯保留既有 Swift 6 warnings。
+
+### Next action
+
+額度可用後以 `6fd3d41..c9196b6`、修正報告及重算 evidence 做非原作者唯讀覆核，修完 confirmed finding 才簽核。不得 push／merge／rebase／破壞性清理或更動歷史樣本。
+
+### Suggested skills
+
+`receiving-code-review`、`verification-before-completion`；有修正時使用 `test-driven-development`。下方為歷史交接。
+
 日期：2026-10-06
 
 ## 2026-10-07 交接補充（目前權威結果）
 
-- `e7d6425` 修正 synthetic ABBA runner 的正式 scenario mapping 與 strict round/order contract；以 480 筆重新驗證，`validation PASS`，56 PASS／4 FAIL／7 NOT RUN。
+- `e7d6425` 修正驗收與 strict round/order contract；synthetic runner 正式 scenario mapping 的修正另在 `4fdbc1f`；以 480 筆重新驗證，`validation PASS`，56 PASS／4 FAIL／7 NOT RUN。
 - `4fdbc1f` 執行新版 RAW／Export runner；以 schema v2 完成 352 筆雙輪次矩陣，`validation PASS`，`PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4、`PERF-MEM-PREVIEW` 9/9 PASS，warm RAW `INTERACTIVE-150` 3/3 FAIL。
 - 新證據目錄：[full ABBA repair](../testing/evidence/2026-10-07-brush-full-abba-repair/README.md) 與 [RAW/export repair](../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。舊的 2026-10-06 176 筆 RAW artifact 保留作歷史，不再作目前相對效能的唯一依據。
 - 兩份新 gate artifact 已用 committed analyzer 重算逐位元相同；工作樹不得以此狀態宣稱 READY，仍需 Task 5 獨立 reviewer 與人工／實體裝置項目。

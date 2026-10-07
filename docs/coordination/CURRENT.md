@@ -1,5 +1,16 @@
 # Current Coordination State
 
+## Brush review fixes（2026-10-07；最新有效狀態）
+
+- **狀態**：`DONE_WITH_CONCERNS`。本輪四類驗收工具／文件修正已完成自動驗證與本機提交；修正後獨立覆核因子代理工作區額度不足為 `NOT RUN`，尚未完整簽核。
+- **工作樹／版本**：`codex/brush-performance-acceptance-repair`，repo-relative worktree `.worktrees/codex-brush-performance-acceptance-repair`；writer=Codex root。最新驗證程式 SHA=`c9196b64826edb943da558b889af0d9c3c591ae1`，本輪起始 HEAD=`6fd3d416d64093fb1ab9609497633915fe6702f9`；其後僅文件／重算證據提交，不改 production Sources。
+- **修正**：固定 workload 解析度與跨組尺寸、嚴格純量型別及 FAIL artifact；RAW harness v3 使用 expected context counts，v2/v3 均標示 allocations 未量測；checksum 與 e7d6425／4fdbc1f 歸因已更正。
+- **驗證**：Python 34 tests PASS；Swift Release focused 2 tests／1 skipped／0 failures。832 筆歷史樣本重算 validation PASS，summaries/gates 不變：synthetic 56 PASS／4 FAIL／7 NOT RUN，RAW 17 PASS／3 FAIL。未新增 benchmark 數據。
+- **證據**：[修正報告](../testing/reports/2026-10-07-brush-review-fixes.md)、[重算與 checksums](../testing/evidence/2026-10-07-brush-review-fixes/README.md)、[交接](2026-10-06-brush-raster-correctness-followup-handoff.md)。完成文件提交後工作樹應乾淨，沒有保留使用者或其他代理 dirty files。
+- **唯一下一步**：額度可用後，請非原作者對 `6fd3d41..c9196b6` 與本輪文件做唯讀覆核；之後續 Task 5 人工／產品驗收。既有 7 個效能 FAIL、公平 stage 與實機項目維持，尚不能發布。未 push、merge、rebase 或 deploy。
+
+下方 2026-10-07 重跑與更早區塊為歷史；有衝突時以本節及最新修正報告為準。
+
 ## Brush raster correctness follow-up（2026-10-07；目前有效）
 
 - **狀態**：`DONE_WITH_CONCERNS`。2026-10-07 已重跑完整 synthetic ABBA 480 筆與 RAW／Export 352 筆；stress preview 四個 gate、warm RAW `INTERACTIVE-150` 三個 gate 仍 FAIL，沒有放寬門檻。

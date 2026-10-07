@@ -16,13 +16,13 @@
 - 合計 352 筆；`order` 為 0～351，round 1 為 `B O O B`，round 2 為 `O B B O`。
 - 所有 sample 的 thermal state 為 `nominal`；公開 artifact 未含私人 fixture 路徑、檔名或 digest，來源檔量測前後保持不變。
 
-## Context lifecycle 契約
+## Context lifecycle 宣告契約（建立次數未實測）
 
 - cold preview：context 在 timed request 內建立；B/O 分別為 `duringTimer=2/1`。
 - warm／changed preview：context 在 warmup 前建立並重用；B/O 分別為 `beforeTimer=2/1`、`duringTimer=1/0`。
 - export：exporter 在 timed request 內建立；B/O 分別為 `duringTimer=2/1`。
 
-這些欄位讓 baseline 的額外 production context construction 被明確記錄，避免把 B 的建立成本放在 timer 外而造成不公平比較。
+上述數字是依程式建構路徑寫入的預期常數，並非 runtime allocations 觀測。計時器包住 cold renderer／exporter 建立，但不能以這些宣告值證明沒有 context lifecycle regression。歷史 v2 原檔保留；新版 v3 使用 expected 欄位名稱。最新 analyzer 重算另外加入證據限制，見[審查修正證據](../2026-10-07-brush-review-fixes/README.md)，不再預期與本目錄的舊 gates 逐位元相同。
 
 ## 結果
 

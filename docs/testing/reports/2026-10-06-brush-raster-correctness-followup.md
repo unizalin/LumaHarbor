@@ -1,16 +1,22 @@
 # Brush raster correctness follow-up 驗收報告
 
+## 2026-10-07 審查修正（優先於下方歷史敘述）
+
+驗收工具已於 `c9196b64826edb943da558b889af0d9c3c591ae1` 補上尺寸、型別與 context 宣告語意，checksum／版本歸因更正。Python 34 PASS、Swift focused 2 tests／1 skip／0 failures；既有樣本重算仍為 4 stress FAIL 與 3 RAW FAIL。新版 analyzer 對 RAW 輸出增加 context 未實測限制，不能再宣稱與舊 gates 逐位元相同。
+
+本輪修正後獨立覆核因額度不足 `NOT RUN`，產品維持 `DONE_WITH_CONCERNS`。完整證據與下一步見[審查修正報告](2026-10-07-brush-review-fixes.md)。
+
 日期：2026-10-06
 
 狀態：`DONE_WITH_CONCERNS`
 
 ## 2026-10-07 修正後重跑（目前權威結果）
 
-本輪在同一分支完成兩項驗收契約修正後重新量測：`4fdbc1f` 對應 RAW／Export harness、`e7d6425` 對應 ABBA analyzer／harness 修正，並以 `4fdbc1f` 作為 runner 的 candidate／harness SHA。舊的 2026-10-06 數字與 artifact 仍保留為歷史資料，不覆寫。
+本輪在同一分支修正後重新量測：`e7d6425` 對應驗收契約與 RAW／Export harness 修正；`4fdbc1f` 只修 synthetic runner scenario mapping。Synthetic O／harness 為 `e7d6425`，RAW／Export 執行 candidate／harness HEAD 為 `4fdbc1f`。舊的 2026-10-06 數字與 artifact 仍保留為歷史資料，不覆寫。
 
 - 完整 synthetic ABBA：480 筆，`validation PASS`、`overallResult DONE_WITH_CONCERNS`；`PERF-EMPTY` 10/10、`PERF-MEM-PREVIEW` 30/30、`PERF-PREVIEW` 16/20 PASS，stress 四個 preview gate 仍 FAIL。證據：[2026-10-07 full ABBA repair](../evidence/2026-10-07-brush-full-abba-repair/README.md)。
 - RAW／Export：352 筆，`validation PASS`、`overallResult DONE_WITH_CONCERNS`；`PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4、`PERF-MEM-PREVIEW` 9/9 PASS；warm RAW `INTERACTIVE-150` 的 0/1/10 masks 仍 3/3 FAIL。證據：[2026-10-07 RAW/export repair](../evidence/2026-10-07-brush-raw-export-repair/README.md)。
-- RAW／Export 新版 schema v2 已把 context lifecycle、timer 前後建立次數、雙輪次順序與 distinct B/O SHA 納入 fail-closed 驗證；兩份 gate artifact 均可由 committed analyzer 逐位元重算，公開 artifact 隱私掃描無私人路徑。
+- RAW／Export 新版 schema v2 已把 context lifecycle、timer 前後預期建立次數（宣告值，未實測）、雙輪次順序與 distinct B/O SHA 納入 fail-closed 驗證；兩份 gate artifact 均可由 committed analyzer 逐位元重算，公開 artifact 隱私掃描無私人路徑。
 
 ## 1. 驗證對象
 
