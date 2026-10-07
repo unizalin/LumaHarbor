@@ -2,7 +2,7 @@
 
 日期：2026-10-07。狀態：`DONE_WITH_CONCERNS`。
 
-本輪只修正驗收工具與證據描述，沒有重新跑 benchmark、使用私人 RAW 或更動 production Sources。分析器／新版 harness 驗證 SHA：`c9196b64826edb943da558b889af0d9c3c591ae1`；分支 `codex/brush-performance-acceptance-repair`。
+本輪只修正驗收工具與證據描述，沒有重新跑 benchmark、使用私人 RAW 或更動 production Sources。核心分析器／新版 harness SHA：`c9196b64826edb943da558b889af0d9c3c591ae1`；review follow-up 與最新驗證程式 SHA：`b921082bcbb08906c1b8ad709b2abd6ec9ee812a`；分支 `codex/brush-performance-acceptance-repair`。
 
 ## 原始資料與版本
 
@@ -59,4 +59,4 @@ python3 Scripts/analyze-brush-raw-export-acceptance.py \
 
 ## 限制
 
-四個 synthetic stress 與三個 warm RAW INTERACTIVE-150 FAIL 保留。公平 B/O stage coverage、Mac／實體 iPad／heartbeat／輸入／灰卡與完整產品獨立審查仍待完成。本輪修正後的獨立 reviewer 因工作區額度不足而 NOT RUN。完整 Debug／Release suite、GUI、效能重新量測：本輪 NOT RUN。
+四個 synthetic stress 與三個 warm RAW INTERACTIVE-150 FAIL 保留。公平 B/O stage coverage、Mac／實體 iPad／heartbeat／輸入／灰卡與完整產品簽核仍待完成。本輪驗收工具修正已由 Gemini 3.8 Flash High 唯讀覆核，spec／quality 均 APPROVED；兩個 minor 於 `b921082` 修正並以相同 832 筆重新驗證，輸出逐位元相同。完整 Debug／Release suite、GUI、效能重新量測：本輪 NOT RUN。詳見[Gemini 最終覆核](../../reports/2026-10-07-brush-gemini-final-review.md)。

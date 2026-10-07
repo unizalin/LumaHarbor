@@ -6,9 +6,9 @@
 - [x] TDD 修正 workload 尺寸與型別驗證；context v3 改 expected 宣告並相容 v2；驗證程式 SHA=`c9196b64826edb943da558b889af0d9c3c591ae1`。
 - [x] Python 34 PASS；Swift Release focused 2 tests／1 skip／0 failures；832 筆既有樣本重算，所有效能結果不變。
 - [x] 更正 checksum／版本歸因，保存新的重算 artifact，更新 CURRENT／report／handoff。
-- [ ] 本輪修正後非原作者覆核：因子代理工作區額度不足為 NOT RUN；額度可用後審 `6fd3d41..c9196b6` 與文件。這是下一個有界動作。
+- [x] 本輪修正後非原作者覆核：Gemini 3.8 Flash High 唯讀審 `6fd3d41..d34fc99`，spec／quality 均 APPROVED、無 blocking finding；兩個 minor 由 `b921082` 修正，修正後 34 Python tests、Swift focused 與 832 筆重算均通過。
 
-Task 5 曾有 Gemini 唯讀審查及本地 finding 覆核，尚未達成完整產品簽核；Task 5 人工項目、Task 6 最終整合驗證仍待完成。四個 synthetic stress FAIL、三個 RAW latency FAIL 保留。見[修正報告](../../testing/reports/2026-10-07-brush-review-fixes.md)。
+本輪驗收工具修正已完成非原作者覆核；Task 5 人工／stage 項目與 Task 6 最終整合驗證仍待完成。四個 synthetic stress FAIL、三個 RAW latency FAIL 保留。見[修正報告](../../testing/reports/2026-10-07-brush-review-fixes.md)與[Gemini 最終覆核](../../testing/reports/2026-10-07-brush-gemini-final-review.md)。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task in the current session. Steps use checkbox syntax for tracking. 非原作者的獨立審查安排在 Task 5。
 

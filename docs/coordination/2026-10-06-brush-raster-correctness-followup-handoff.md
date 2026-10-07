@@ -4,18 +4,19 @@
 
 ### Status
 
-`DONE_WITH_CONCERNS`：限定修正已驗證，修正後獨立覆核待補。
+`DONE_WITH_CONCERNS`：限定修正、非原作者唯讀覆核與 minor follow-up 已完成；整體產品人工／stage／效能 gate 仍未結案。
 
 ### Git state
 
 - Owner／writer：Codex root；worktree `.worktrees/codex-brush-performance-acceptance-repair`。
-- Branch：`codex/brush-performance-acceptance-repair`；最後驗證程式 HEAD=`c9196b64826edb943da558b889af0d9c3c591ae1`；本輪起始 `6fd3d416d64093fb1ab9609497633915fe6702f9`。
+- Branch：`codex/brush-performance-acceptance-repair`；最後驗證程式 HEAD=`b921082bcbb08906c1b8ad709b2abd6ec9ee812a`；本輪起始 `6fd3d416d64093fb1ab9609497633915fe6702f9`。
 - 延續既有 task candidate；本機 `origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`，程式提交時 ahead 48／behind 0、無 upstream；沒有查詢遠端。後續純文件提交依 D-003 不改此驗證 SHA。
 - 未 push、merge、rebase 或 deploy。
 
 ### Changes
 
 - `c9196b6 test: validate brush workloads and declare context expectations`：兩個 analyzer、兩個 Python test、RAW Swift harness、RAW schema，共六檔；完整檔案清單可由該 commit 取得。
+- `b921082 test: address brush analyzer review notes`：修正 v3 expected count 錯誤訊息與 synthetic 非字串 record 的提早拒絕。
 - 後續文件提交：CURRENT、本交接、原 report／spec／plan、兩個歷史 evidence README、新修正 report 與三個新 evidence 檔案。歷史 samples／gates 未修改。
 - 尺寸與型別 fail-closed；context v3 明確聲明預期值，v2 保留但附限制。Production Sources 不變。
 
@@ -29,11 +30,11 @@
 
 ### Concerns and blockers
 
-修正後獨立 reviewer 因額度不足為 NOT RUN；原產品人工／實機與公平 stage 未完成。Context allocations 未實測，不能用宣告 counts 證明 lifecycle 沒有回歸。Release 編譯保留既有 Swift 6 warnings。
+Gemini 3.8 Flash High 對 `6fd3d41..d34fc99` 的 spec／quality 均 APPROVED、無 blocking finding；兩個 minor 已於 `b921082` 修正。原產品人工／實機與公平 stage 未完成。Context allocations 未實測，不能用宣告 counts 證明 lifecycle 沒有回歸。
 
 ### Next action
 
-額度可用後以 `6fd3d41..c9196b6`、修正報告及重算 evidence 做非原作者唯讀覆核，修完 confirmed finding 才簽核。不得 push／merge／rebase／破壞性清理或更動歷史樣本。
+進入 Task 5 剩餘項目：先建立公平 B/O stage wall-time 入口與證據，再執行可用的 Mac／實體 iPad／heartbeat／輸入／灰卡驗收。不得 push／merge／rebase／破壞性清理或更動歷史樣本。
 
 ### Suggested skills
 

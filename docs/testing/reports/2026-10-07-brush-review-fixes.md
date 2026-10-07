@@ -5,7 +5,7 @@
 ## 範圍與版本
 
 - 延續 `codex/brush-performance-acceptance-repair`；本輪起始 HEAD：`6fd3d416d64093fb1ab9609497633915fe6702f9`，起始工作樹乾淨。
-- 實作／驗證 SHA：`c9196b64826edb943da558b889af0d9c3c591ae1`。
+- 核心實作 SHA：`c9196b64826edb943da558b889af0d9c3c591ae1`；Gemini minor follow-up 與最新驗證程式 SHA：`b921082bcbb08906c1b8ad709b2abd6ec9ee812a`。
 - 單一 writer：Codex root。原派給 Luna 的代理因 `Your workspace is out of credits. Add credits to continue.` 中止，沒有留下變更；root 接手完成。
 - 修改兩個 analyzer、兩個 Python 測試檔、RAW／Export Swift harness 與 JSON schema；`Sources/`、效能門檻與原始樣本未更動。
 
@@ -18,7 +18,7 @@
 | P2：context 常數被當成觀測 | Harness 改 v3、expectedContextCreationCount* 與 declared-from-construction-path；analyzer 支援歷史 v2，但兩版都附未實測限制，拒絕混用版本與 v3 舊欄位 | 宣告語意已釐清；runtime allocations 未量測 |
 | P3：checksum／版本歸因錯誤 | README checksum 依既有檔案更正；e7d6425 契約修正、4fdbc1f scenario mapping／RAW 執行 HEAD 分開記錄 | 已更正 |
 
-Gemini 提出 context 問題；尺寸、型別與文件錯誤由 Codex 本地覆核發現。Gemini 對樣本數總量及全面 fail-closed 的說法未採用；RAW changed 的 exposure 差異未證明構成目前 gate 缺陷。本報告只記錄覆核後的處置，並非 Gemini 對修正後程式的簽核。
+Gemini 提出 context 問題；尺寸、型別與文件錯誤由 Codex 本地覆核發現。Gemini 對樣本數總量及全面 fail-closed 的說法未採用；RAW changed 的 exposure 差異未證明構成目前 gate 缺陷。其後 Gemini 3.8 Flash High 對修正差異完成非原作者唯讀覆核，詳見[最終覆核報告](2026-10-07-brush-gemini-final-review.md)。
 
 ## 驗證
 
@@ -36,7 +36,7 @@ Swift 編譯仍有既有 `BatchExportQueueTests.swift` 的 Swift 6 captured-var 
 
 ## 尚未結案的範圍
 
-- 本輪修正後獨立覆核：`NOT RUN`，子代理工作區額度不足；Codex root 自查不能代替非原作者 reviewer。
+- 本輪修正後非原作者覆核：`APPROVED`；無 blocking finding，兩個 minor 已修正並重驗。
 - 新 schema v3 真實 workload 量測：`NOT RUN`；已驗證編譯與 v3 analyzer fixtures，沒有宣稱得到新效能數據。
 - 完整產品 B→O 獨立審查、公平 stage coverage、Mac／實體 iPad／Pencil／鍵盤／VoiceOver／heartbeat／灰卡：仍待完成。
 - 四個 synthetic stress 與三個 warm RAW 效能 FAIL 保留；不放寬門檻、不宣稱 READY。
@@ -44,4 +44,4 @@ Swift 編譯仍有既有 `BatchExportQueueTests.swift` 的 Swift 6 captured-var 
 
 ## 下一步
 
-待 reviewer 額度可用，以 `6fd3d41..c9196b6` 為修正程式範圍、連同本報告及重算 artifact 做非原作者唯讀覆核；完成後回到原計畫 Task 5 的產品／人工驗收。範圍限定這四類 finding，效能優化另行規劃。
+本輪四類 finding 修正與 reviewer gate 已完成。下一步回到原計畫 Task 5 的公平 B/O stage 與產品／人工驗收；效能優化另行規劃。
