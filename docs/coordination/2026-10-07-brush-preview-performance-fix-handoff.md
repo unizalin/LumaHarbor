@@ -4,64 +4,60 @@
 
 `DONE_WITH_CONCERNS`
 
+原驗收矩陣的 7 個效能 FAIL 已完成程式修正與自動驗收。`PERF-COVERAGE` 已由 NOT RUN 解除為 B/O 共同 stage clock 的 4/4 PASS。UI、實體裝置與獨立 reviewer 尚未執行，因此保留 `DONE_WITH_CONCERNS`。
+
 ## Git state
 
 - Writer：Luna；worktree owner：本 task 的 Codex workspace。
 - Branch：`luna/brush-preview-performance-fix`。
-- Validated product HEAD：`26e7358fcf5019b246588d1bb3baa8a6005548cd`。
-- Base branch：`origin/main`；base SHA：`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
-- 使用者已授權延續的候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`；這是本 task 的相依例外，不代表它已整合到 `main`。
-- 相對 `origin/main`：ahead 53、behind 0；沒有 upstream。
-- Branch 是 task-scoped worktree；沒有 push、merge 或 rebase。
+- Validated product／harness HEAD：`f13de103cec69002666bba389cbf9b6e39cee02f`。
+- Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
+- Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
+- 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`；這是本 task 的相依例外，不表示已整合到 `main`。
+- 沒有 push、merge 或 rebase；不得覆蓋其他 worktree。
 
 ## Changes
 
 產品 commits：
 
-- `b640823` — `perf: instrument preview stages and cache decoded previews`
-- `26e7358` — `perf: reduce repeated brush coverage work`
+- `b640823` — stage instrumentation、bounded decoded-preview cache 與 exact invalidation key。
+- `26e7358` — bounded tile raster、repeated-geometry coverage reuse、bounded mask fan-out、cancellation join 與 scalar oracle。
+- `f97760a` — B/O 共享 stage coverage gate、baseline test-only stage observer 與完整 stage schema。
+- `f13de10` — 以目前 candidate SHA 保存 synthetic／RAW/export evidence 與文件。
 
-主要變更檔案：
+主要檔案：
 
 - `Sources/RawProcessingCore/Preview/PreviewRenderInstrumentation.swift`
 - `Sources/RawProcessingCore/Preview/DecodedPreviewCache.swift`
 - `Sources/RawProcessingCore/Preview/CoreImagePreviewRenderer.swift`
 - `Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift`
-- `Scripts/run-brush-performance-abba.sh`
+- `Scripts/fixtures/brush-baseline-release-testability.patch`
+- `Scripts/analyze-brush-performance-abba.py`
 - `Tests/RawProcessingCoreTests/BrushPreviewABBAHarnessTests.swift`
 - `Tests/RawProcessingCoreTests/CoreImagePreviewRendererTests.swift`
 - `Tests/RawProcessingCoreTests/BrushMaskScalarOracleTests.swift`
 
-驗收／交接文件與去識別化 artifact：
+設計保證：mask 順序、paint／erase 語意、geometry mapping、不同 mask adjustment、overlap、像素精度與 cancellation checkpoints 保持；沒有降低解析度、刪除筆刷點、跳過調整或放寬 benchmark 門檻。Cache 不跨照片、recipe 或 render context 誤用，且 full-resolution export 不共用 interactive decoded cache。
 
-- `docs/testing/reports/2026-10-07-brush-preview-performance-fix.md`
-- `docs/testing/evidence/2026-10-07-brush-preview-performance-fix/`
-- `docs/coordination/CURRENT.md`
-- `docs/coordination/2026-10-07-brush-preview-performance-fix-handoff.md`
+## Root cause and stage evidence
+
+Shared B/O stage wall time（synthetic stress aggregate p50/p95，ms）：
+
+- 1 mask：B coverage `173.879/176.316`，O `8.871/10.395`；O total materialized `11.922/13.319`。
+- 10 masks：B coverage `1736.591/1755.055`，O `62.821/65.111`；O total materialized `68.609/71.059`。
+- decode、global graph 與 per-mask adjustment/blend 均是次要 stage；RAW warm 的 cache 修正則把 0／1／10 masks 降到 O `34.636/39.790`、`37.048/42.379`、`55.097/67.036 ms`。
 
 ## Verification
 
-- Synthetic stress ABBA：64 records，validation PASS；1 mask O p50/p95 `12.293/12.624 ms`，10 masks `96.121/141.143 ms`，四個 performance gate PASS，四個 preview memory gate PASS。
-- RAW／export ABBA：352 records，validation PASS；warm 0/1/10 masks `35.400/40.244`、`38.049/44.368`、`56.828/58.630 ms`，均 PASS；export 4/4 與 export memory 4/4 PASS。
-- Focused Release：30 tests、0 failures；cancellation 9/9、renderer 9/9、scalar oracle 5/5、preview renderer 7/7。
+- Synthetic stress：64 records，validation PASS；1 mask O round 1／2=`11.998/13.402`、`12.070/12.338 ms`，10 masks=`68.867/71.171`、`68.282/69.940 ms`；`PERF-COVERAGE` 4/4 PASS；preview memory 4/4 PASS。
+- RAW／export：352 records，validation PASS；warm `INTERACTIVE-150` 3/3 PASS；preview memory 9/9 PASS；original-size export 4/4 PASS；export memory 4/4 PASS。
+- Pixel parity／scalar oracle：PASS，max R8 byte error 0。
+- Focused Release：30 tests、0 failures。
+- Analyzer unit tests：9/9 PASS。
+- 50-cycle scheduler：55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `58,605,568` bytes，limit `90,849,280` bytes。
 - Full Release suite：2714 tests、22 skipped、0 failures。
-- 50-cycle scheduler：PASS；55 started／55 finished、active after join 0、55 B delivered、55 A discarded、failed 0；settled RSS 58,605,568 bytes，limit 90,816,512 bytes。
-- Normal opt-in workload：PASS；5 samples、0／1／10 masks。
-- Stage instrumentation：candidate O-only diagnostic PASS；`PERF-COVERAGE` `NOT RUN`，因 B/O 沒有共同 stage clock。
-- `git diff --check` 與公開 artifact 私密路徑掃描：PASS（文件 commit 前完成）。
+- Artifact checksums：見 `docs/testing/evidence/2026-10-07-brush-preview-performance-fix/README.md`。
 
-詳細數據、命令與 checksum：[2026-10-07 brush preview performance fix report](../testing/reports/2026-10-07-brush-preview-performance-fix.md)。
+## Remaining bounded action
 
-## Dirty files
-
-目前文件仍在本次 coordination commit 前的工作狀態；所有 dirty files 都由本 task writer 產生，沒有其他代理或使用者的 dirty path。完成文件 commit 後應為 clean。
-
-## Concerns and blockers
-
-- `PERF-COVERAGE` 維持 `NOT RUN`：baseline B 使用 legacy renderer，沒有與 O 相同且互斥的 stage wall-time observer。要清除這個限制，必須在不改產品 math／benchmark 門檻下補共同 test-only clock 並重新跑 B/O。
-- 真實 RAW harness 的 warm timing 是完整 render wall time，未把每個 RAW stage 分開；不能從總時間反推 decode、adjustment 或 materialization 的單獨成本。
-- Mac 前景、實體 iPad、Pencil、VoiceOver、灰卡與獨立 reviewer 本輪未執行，仍是 `NOT RUN`。
-
-## Next action
-
-請下一個帳號以本 branch 的產品 SHA、報告與 evidence 做唯讀 review；若 review 要解除 `PERF-COVERAGE`，只新增 B/O 共用 stage clock、重跑 ABBA 並更新報告，維持現有門檻與像素／取消契約。不要 push、merge、rebase、刪除 branch/worktree，亦不要修改其他 worktree。
+只需另一個帳號做唯讀 code／spec review；有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate。不要再修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。

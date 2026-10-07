@@ -1,33 +1,37 @@
 # LumaHarbor 筆刷預覽效能修正驗收報告
 
-日期：2026-10-07（Asia/Taipei）
+日期：2026-10-08（Asia/Taipei）
 
 狀態：`DONE_WITH_CONCERNS`
 
-本輪修正了剩餘的筆刷預覽效能 FAIL。必要的 synthetic stress、真實 RAW warm preview、original-size export、記憶體、取消與像素回歸均已通過；公平的 B/O stage coverage 因 baseline 沒有同一套 stage clock，依規則保持 `NOT RUN`。
+本輪已處理原驗收矩陣中的 7 個效能 FAIL。剩餘問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。程式與自動驗收已完成；`DONE_WITH_CONCERNS` 僅保留 UI／實體裝置／獨立 reviewer 尚未執行的限制。
 
 ## 根因與分段數據
 
-先在候選版加入互斥 monotonic wall-time stage collector。平行 coverage worker 的區間以 union 計算，沒有把各 worker CPU duration 相加。Synthetic stress 的 O-only stage 數據顯示 coverage raster 是主要成本：
+B/O 現在使用相同、互斥的 monotonic wall-time stage 邊界：RAW decode、global adjustment graph、validation/sampling、coverage raster、per-mask adjustment/blend、final `makeCGImage` materialization。平行 coverage worker 以 interval union 計算 wall time，不累加 CPU duration。Baseline 的 observer 是 test-only Release patch，不改 baseline production math。
 
-| masks | raw decode p50/p95 | global graph p50/p95 | validation/sampling p50/p95 | coverage raster p50/p95 | per-mask adjustment/blend p50/p95 | final materialization p50/p95 | total p50/p95 |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 0.005 / 0.006 ms | 0.001 / 0.001 ms | 0.192 / 0.208 ms | 9.221 / 9.582 ms | 0.042 / 0.044 ms | 2.562 / 2.898 ms | 12.180 / 12.574 ms |
-| 10 | 0.006 / 0.006 ms | 0.001 / 0.001 ms | 1.855 / 2.130 ms | 87.248 / 131.703 ms | 0.110 / 0.126 ms | 5.308 / 6.878 ms | 95.987 / 141.012 ms |
+Synthetic stress aggregate（兩輪合併，p50／p95，ms）：
 
-RAW warm 的 B/O harness 目前只保存 submit-through-materialized wall time，沒有同樣的 stage fields；因此不把 RAW O-only stage 推成正式 `PERF-COVERAGE` regression。RAW 結果仍直接驗證互動總時間與輸出尺寸／發布檔案契約。
+| masks | variant | raw decode | global graph | validation/sampling | coverage raster | per-mask adjustment/blend | final materialization | stage total |
+| ---: | :---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | B | 0.008 / 0.011 | 0.001 / 0.001 | 0.011 / 0.012 | 173.879 / 176.316 | 0.050 / 0.058 | 3.937 / 4.097 | 177.847 / 180.367 |
+| 1 | O | 0.005 / 0.007 | 0.001 / 0.001 | 0.192 / 0.205 | 8.871 / 10.395 | 0.031 / 0.053 | 2.664 / 2.809 | 11.922 / 13.319 |
+| 10 | B | 0.010 / 0.011 | 0.001 / 0.002 | 0.074 / 0.079 | 1736.591 / 1755.055 | 0.296 / 0.351 | 7.337 / 7.613 | 1744.289 / 1762.886 |
+| 10 | O | 0.006 / 0.006 | 0.001 / 0.002 | 2.429 / 2.694 | 62.821 / 65.111 | 0.106 / 0.112 | 5.277 / 5.658 | 68.609 / 71.059 |
 
-## 修改內容與設計理由
+coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask adjustment/blend 不是主要瓶頸。RAW warm 測量則證實 decoded-preview cache 能移除重複 decode 的成本。
 
-- `Sources/RawProcessingCore/Preview/PreviewRenderInstrumentation.swift`：新增六段 stage model 與 interval-union collector，讓平行工作以 wall time 表示。
-- `Sources/RawProcessingCore/Preview/CoreImagePreviewRenderer.swift`：記錄 decode、global graph、brush stages 與 `makeCGImage`；新增 decoded preview cache 接線及取消後的晚到結果隔離。
-- `Sources/RawProcessingCore/Preview/DecodedPreviewCache.swift`：新增 bounded LRU actor cache。key 綁定標準化 URL、檔案 size／mtime／generation、decode quality、decoder identifier、white balance、lens correction、camera profile、compatibility 與 resolved recipe；只快取有界 interactive decode，full-resolution export 不共用此 cache。
-- `Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift`：coverage 改用 bounded tile scratch 與 bounded tile concurrency；相同幾何的 paint／erase stroke 在不改變 mask／stroke 順序下重用 coverage；active masks 使用 bounded dynamic task group，並在 cancellation 後 join 所有已啟動 worker。mask order、paint／erase、geometry、overlap、pixel precision 與 cancellation checkpoints 保留。
-- `Scripts/run-brush-performance-abba.sh`：baseline 以 legacy instrumentation compile，避免共用 harness 的 candidate-only symbols 污染 B。
-- `Tests/RawProcessingCoreTests/BrushMaskScalarOracleTests.swift`：加入 repeated-geometry paint／erase／paint 與獨立 scalar oracle 的 byte parity。
-- `Tests/RawProcessingCoreTests/BrushPreviewABBAHarnessTests.swift`、`CoreImagePreviewRendererTests.swift`：加入 stage JSON 與 exact cache-key coverage。
+## 修改檔案與設計理由
 
-這些修改對應兩個已確認的瓶頸：coverage raster 的全圖 per-mask 計算，以及 warm interactive RAW 重複 decode。沒有降低解析度、刪除筆刷點、跳過調整或放寬門檻。
+- `Sources/RawProcessingCore/Preview/PreviewRenderInstrumentation.swift`：新增共享 stage model 與 interval-union collector。
+- `Sources/RawProcessingCore/Preview/CoreImagePreviewRenderer.swift`：加入 decode、graph、validation、brush、materialization 分段計時；接入 bounded decoded-preview cache；取消後晚到結果不回填錯誤 context。
+- `Sources/RawProcessingCore/Preview/DecodedPreviewCache.swift`：bounded LRU actor cache。key 綁定標準化 URL、檔案 size／mtime／generation、decode quality、decoder identifier、resolved RAW recipe、白平衡、lens correction、camera profile 與其他 decode inputs；interactive decode 與 full-resolution export 分離。
+- `Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift`：bounded tile scratch／concurrency、相同幾何 coverage reuse、最多兩個 active mask worker，並在 cancellation 後 join 所有已啟動 worker。保留 mask 順序、paint／erase、geometry mapping、不同 mask adjustment、overlap、像素精度與 cancellation checkpoints。
+- `Scripts/fixtures/brush-baseline-release-testability.patch`：以同一 stage 邊界讓 baseline B 可觀測，僅供驗收 harness 使用。
+- `Scripts/analyze-brush-performance-abba.py`：只有 B/O 七段欄位完整且有限時才產生 `PERF-COVERAGE`；不完整舊 artifact 仍 fail closed 為 `NOT RUN`。
+- `Tests/RawProcessingCoreTests/BrushPreviewABBAHarnessTests.swift` 與 analyzer tests：記錄 B/O stage JSON 並驗證完整 coverage matrix。
+
+沒有降低解析度、刪除筆刷點、跳過調整、改 benchmark workload 或放寬門檻。
 
 ## 修改前後效能
 
@@ -35,22 +39,22 @@ RAW warm 的 B/O harness 目前只保存 submit-through-materialized wall time�
 
 | workload | B p50 / p95 | O p50 / p95 | 門檻 | 結果 |
 | --- | ---: | ---: | ---: | --- |
-| 1 mask round 1 | 180.498 / 187.763 ms | 12.293 / 12.624 ms | 30 / 60 ms | PASS |
-| 1 mask round 2 | 181.142 / 197.553 ms | 12.266 / 12.680 ms | 30 / 60 ms | PASS |
-| 10 masks round 1 | 1761.336 / 1766.906 ms | 96.121 / 141.143 ms | 100 / 150 ms | PASS |
-| 10 masks round 2 | 1762.654 / 1769.174 ms | 96.025 / 97.391 ms | 100 / 150 ms | PASS |
+| 1 mask round 1 | 178.746 / 181.240 ms | 11.998 / 13.402 ms | 30 / 60 ms | PASS |
+| 1 mask round 2 | 178.873 / 180.672 ms | 12.070 / 12.338 ms | 30 / 60 ms | PASS |
+| 10 masks round 1 | 1746.476 / 1763.953 ms | 68.867 / 71.171 ms | 100 / 150 ms | PASS |
+| 10 masks round 2 | 1745.098 / 1748.845 ms | 68.282 / 69.940 ms | 100 / 150 ms | PASS |
 
 ### RAW warm preview
 
 | masks | B p50 / p95 | O p50 / p95 | 門檻 | 結果 |
 | ---: | ---: | ---: | ---: | --- |
-| 0 | 170.456 / 183.210 ms | 35.400 / 40.244 ms | 150 / 150 ms | PASS |
-| 1 | 188.495 / 201.920 ms | 38.049 / 44.368 ms | 150 / 150 ms | PASS |
-| 10 | 379.444 / 384.029 ms | 56.828 / 58.630 ms | 150 / 150 ms | PASS |
+| 0 | 164.579 / 176.565 ms | 34.636 / 39.790 ms | 150 / 150 ms | PASS |
+| 1 | 184.257 / 192.003 ms | 37.048 / 42.379 ms | 150 / 150 ms | PASS |
+| 10 | 366.840 / 390.928 ms | 55.097 / 67.036 ms | 150 / 150 ms | PASS |
 
-### Export
+### Original-size export
 
-Original-size synthetic 24MP 與真實 RAW 的 1／10 mask export `PERF-EXPORT` 4/4 PASS；`PERF-MEM-EXPORT` 4/4 PASS。候選 p50 分別為 synthetic 0.119／0.363 秒、real RAW 0.442／0.566 秒，均低於 baseline 的五％ regression limit 與絕對門檻。
+`PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4 PASS。O p50：synthetic 24MP 1／10 masks=`110.769/354.699 ms`；真實 RAW 1／10 masks=`421.932/549.644 ms`。
 
 ## Gate 狀態
 
@@ -58,6 +62,7 @@ Original-size synthetic 24MP 與真實 RAW 的 1／10 mask export `PERF-EXPORT` 
 | --- | --- |
 | Synthetic stress performance | PASS，4/4 |
 | Synthetic preview memory | PASS，4/4 |
+| B/O `PERF-COVERAGE` | PASS，4/4；共同互斥 stage clock 已具備 |
 | RAW warm `INTERACTIVE-150` | PASS，3/3 |
 | RAW preview memory | PASS，9/9 |
 | Original-size export | PASS，4/4 |
@@ -65,33 +70,17 @@ Original-size synthetic 24MP 與真實 RAW 的 1／10 mask export `PERF-EXPORT` 
 | Pixel parity／scalar oracle | PASS，max R8 byte error 0 |
 | Cancellation focused matrix | PASS，9/9 |
 | 50-cycle worker convergence／RSS | PASS，55/55 joined，active 0 |
+| Analyzer unit tests | PASS，9/9 |
+| Focused Release tests | PASS，30/30 |
 | Full Release regression | PASS，2714 tests、22 skipped、0 failures |
-| `PERF-COVERAGE` | NOT RUN；B/O 尚無相同且互斥 stage wall-time |
-| UI／Mac 前景／實體 iPad／Pencil／VoiceOver／灰卡 | NOT RUN；本輪未取得這些人工驗收證據 |
+| UI／Mac 前景／實體 iPad／Pencil／VoiceOver／灰卡 | NOT RUN |
+
+`PERF-COVERAGE` 不再是 NOT RUN；RAW/export harness 沒有把 stage coverage 反推成 gate，仍以其自身的 total wall-time、RSS 與 published-file checks 驗收。
 
 ## 可重現驗證
 
-候選 worktree 的完整原始 artifact 與 checksum 見[證據目錄](../evidence/2026-10-07-brush-preview-performance-fix/README.md)。本輪主要命令如下，全部 exit 0：
-
-```sh
-LUMAHARBOR_BRUSH_ABBA_BLOCKS=4 \
-LUMAHARBOR_BRUSH_ABBA_SCENARIOS='stress' \
-LUMAHARBOR_BRUSH_ABBA_MASK_COUNTS='1 10' \
-Scripts/run-brush-performance-abba.sh
-
-LUMAHARBOR_RAW_FIXTURE_DIR='<private RAW fixture directory>' \
-LUMAHARBOR_BRUSH_RAW_PREVIEW_SAMPLES=8 \
-LUMAHARBOR_BRUSH_EXPORT_SAMPLES=4 \
-Scripts/run-brush-raw-export-acceptance.sh
-
-LUMAHARBOR_RUN_BRUSH_PERF_ACCEPTANCE=1 \
-swift test -c release \
-  --filter BrushMaskPerformanceTests/testOptInFiftyCancellationCyclesSettleWorkersAndMemory
-
-swift test -c release \
-  --filter 'BrushMaskScalarOracleTests|BrushMaskCancellationTests|BrushMaskRendererTests|CoreImagePreviewRendererTests'
-```
+完整原始 artifact、環境、SHA、命令、exit code 與 checksum 見[證據目錄](../evidence/2026-10-07-brush-preview-performance-fix/README.md)。
 
 ## 尚未完成與 bounded next action
 
-產品效能修正已完成，但 branch 尚未整合。下一位帳號的唯一 bounded action 是：以本報告的 candidate SHA 與 evidence 進行唯讀 code／spec review，確認是否要補上共用 B/O stage clock；若要解除 `PERF-COVERAGE: NOT RUN`，只修改驗收 instrumentation／harness，讓 B/O 共用相同互斥 stage 邊界後重跑 ABBA，不改門檻、不改 benchmark workload。完成 review 前不要 push、merge、rebase 或修改其他 worktree。
+產品效能修正與自動驗收已完成。下一個帳號只需做一次唯讀 code／spec review，並在有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate；不需再修改效能門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase 或修改其他 worktree。

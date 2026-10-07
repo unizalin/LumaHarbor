@@ -1,10 +1,10 @@
 # Brush preview performance fix evidence
 
-日期：2026-10-07（Asia/Taipei）
+日期：2026-10-08（Asia/Taipei）
 
 狀態：`DONE_WITH_CONCERNS`
 
-這份目錄保存本次修正後的原始 synthetic stress 與 RAW／export JSONL，以及由同一次執行產生的 gate JSON。公開 artifact 已掃描，不含私人 fixture 路徑、使用者目錄或憑證。
+本目錄保存同一候選版本上的 synthetic stress 與真實 RAW／original-size export 原始 JSONL、gate JSON 與 checksum。`DONE_WITH_CONCERNS` 只表示 UI／實體裝置／獨立 reviewer 尚未執行；本輪必要的程式、效能、記憶體、取消、pixel parity 與 worker 收斂驗證已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
 
 ## 版本與環境
 
@@ -12,13 +12,16 @@
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`
-- Candidate O／harness：`26e7358fcf5019b246588d1bb3baa8a6005548cd`
-- Synthetic instrumentation digest：`1bf08395a149875e9c3b0fe5a8ef4473761c7abf3d785ac464096fe94ca292fe`
+- Candidate O：`f13de103cec69002666bba389cbf9b6e39cee02f`
+- Harness：`f13de103cec69002666bba389cbf9b6e39cee02f`
+- Synthetic instrumentation digest：`a29a2e92c11fffa3b9cb05dfbdbc7714a91777b5ee792b41ba4ae6dd125f5f70`
 - 平台：macOS arm64e，Release，`thermalState=nominal`
 
-## 執行命令
+Baseline 的 shared stage observer 是驗收用 test-only patch，保留 baseline production math；B/O 使用相同 stage 邊界與 interval-union wall clock，平行 worker 不累加 CPU duration。
 
-以下命令均在候選 worktree 執行並 exit 0；`<private RAW fixture directory>` 是本機私有目錄的去識別化佔位符。
+## 執行命令與 exit code
+
+以下命令均在候選 worktree 執行並 exit 0；RAW 目錄以去識別化佔位符表示：
 
 ```sh
 LUMAHARBOR_BRUSH_ABBA_BLOCKS=4 \
@@ -37,50 +40,53 @@ swift test -c release \
 
 swift test -c release \
   --filter 'BrushMaskScalarOracleTests|BrushMaskCancellationTests|BrushMaskRendererTests|CoreImagePreviewRendererTests'
+
+swift test -c release
 ```
 
-## Stage 計時診斷
+## Stage 計時與根因
 
-候選版使用互斥 monotonic wall-time span，平行 worker 以 interval union 計算，不累加 CPU duration。Synthetic O 的中位數／p95 如下：
+每筆 B/O 都記錄以下互斥 stage：RAW decode、global adjustment graph、validation/sampling、coverage raster、per-mask adjustment/blend、final `makeCGImage` materialization，以及 stage total。下表為 synthetic stress 的 p50／p95（ms）：
 
-| masks | raw decode | global graph | validation/sampling | coverage raster | per-mask adjustment/blend | final makeCGImage | total materialized |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 p50 / p95 ms | 0.005 / 0.006 | 0.001 / 0.001 | 0.192 / 0.208 | 9.221 / 9.582 | 0.042 / 0.044 | 2.562 / 2.898 | 12.180 / 12.574 |
-| 10 p50 / p95 ms | 0.006 / 0.006 | 0.001 / 0.001 | 1.855 / 2.130 | 87.248 / 131.703 | 0.110 / 0.126 | 5.308 / 6.878 | 95.987 / 141.012 |
+| masks | variant | raw decode | global graph | validation/sampling | coverage raster | per-mask adjustment/blend | final materialization | stage total |
+| ---: | :---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | B | 0.008 / 0.011 | 0.001 / 0.001 | 0.011 / 0.012 | 173.879 / 176.316 | 0.050 / 0.058 | 3.937 / 4.097 | 177.847 / 180.367 |
+| 1 | O | 0.005 / 0.007 | 0.001 / 0.001 | 0.192 / 0.205 | 8.871 / 10.395 | 0.031 / 0.053 | 2.664 / 2.809 | 11.922 / 13.319 |
+| 10 | B | 0.010 / 0.011 | 0.001 / 0.002 | 0.074 / 0.079 | 1736.591 / 1755.055 | 0.296 / 0.351 | 7.337 / 7.613 | 1744.289 / 1762.886 |
+| 10 | O | 0.006 / 0.006 | 0.001 / 0.002 | 2.429 / 2.694 | 62.821 / 65.111 | 0.106 / 0.112 | 5.277 / 5.658 | 68.609 / 71.059 |
 
-主要成本確定在 coverage raster；RAW decode 與 adjustment／blend 不是 synthetic stress 的主因。B 仍是舊版 renderer，沒有相同 stage observer，因此 `PERF-COVERAGE` 保持 `NOT RUN`，不把 O-only stage 拿來宣稱 B/O coverage regression。
+主要根因是 coverage raster 的全圖 per-mask 計算；RAW decode 與 adjustment／blend 不是 synthetic stress 的主成本。RAW warm 的主要修正則是 bounded decoded-preview cache，cache key 綁定檔案狀態、decode quality、resolved recipe、白平衡、lens correction、camera profile 與其他 decode inputs，且不共用 full-resolution export。
 
 ## Gate 結果
 
-### Synthetic stress
+### Synthetic stress（64 records）
 
-- 1 mask：O p50 `12.293 ms`、p95 `12.624 ms`（round 1）；p50 `12.266 ms`、p95 `12.680 ms`（round 2）。門檻 `p50 ≤30 ms`、`p95 ≤60 ms`，PASS。
-- 10 masks：O p50 `96.121 ms`、p95 `141.143 ms`（round 1）；p50 `96.025 ms`、p95 `97.391 ms`（round 2）。門檻 `p50 ≤100 ms`、`p95 ≤150 ms`，PASS。
-- 4 個 synthetic `PERF-MEM-PREVIEW` gate：PASS；candidate peak RSS 為 58.97／84.18／59.26／78.23 MB。
+- 1 mask：O round 1 p50/p95 `11.998/13.402 ms`；round 2 `12.070/12.338 ms`。門檻 `30/60 ms`，PASS。
+- 10 masks：O round 1 `68.867/71.171 ms`；round 2 `68.282/69.940 ms`。門檻 `100/150 ms`，PASS。
+- `PERF-COVERAGE`：4/4 PASS；B/O 都有相同且互斥 stage clock。
+- `PERF-MEM-PREVIEW`：4/4 PASS。
 - artifact validation：PASS，64 records。
-- `PERF-COVERAGE`：`NOT RUN`，B/O 沒有相同 stage clock。
 
-### 真實 RAW warm preview
+### 真實 RAW warm preview（352 records）
 
-- 0 masks：p50 `35.400 ms`、p95 `40.244 ms`，PASS。
-- 1 mask：p50 `38.049 ms`、p95 `44.368 ms`，PASS。
-- 10 masks：p50 `56.828 ms`、p95 `58.630 ms`，PASS。
-- `INTERACTIVE-150`：3/3 PASS；preview memory：9/9 PASS；artifact validation：PASS，352 records。
+- 0 masks：p50/p95 `34.636/39.790 ms`，PASS。
+- 1 mask：`37.048/42.379 ms`，PASS。
+- 10 masks：`55.097/67.036 ms`，PASS。
+- `INTERACTIVE-150`：3/3 PASS；`PERF-MEM-PREVIEW`：9/9 PASS；artifact validation：PASS。
 
 ### Export、取消與像素
 
-- Synthetic／real RAW original-size export：`PERF-EXPORT` 4/4 PASS。
-- Export memory：`PERF-MEM-EXPORT` 4/4 PASS。
-- 50-cycle scheduler：PASS；55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `58,605,568` bytes，limit `90,816,512` bytes。
-- Focused regression：30 tests、0 failures；cancellation 9/9、renderer 9/9、scalar oracle 5/5、preview renderer 7/7。
+- Original-size synthetic 24MP export：1 mask `110.769 ms`、10 masks `354.699 ms`（O p50）；真實 RAW：1 mask `421.932 ms`、10 masks `549.644 ms`（O p50）；`PERF-EXPORT` 4/4 PASS。
+- `PERF-MEM-EXPORT`：4/4 PASS；real RAW 10-mask candidate peak RSS `532,824,064` bytes。
+- 50-cycle scheduler：PASS；55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `58,605,568` bytes，limit `90,849,280` bytes。
+- Focused regression：30 tests、0 failures；repeated-geometry paint／erase scalar oracle max R8 byte error `0`。
 - Full Release suite：2714 tests、22 skipped、0 failures。
-- Repeated-geometry paint／erase scalar oracle：max R8 byte error `0`。
 
 ## Artifact checksum
 
 | 檔案 | SHA-256 |
 | --- | --- |
-| `synthetic-stress-samples.jsonl` | `7c0422a5f2723a689ba88f012a627ee04b1e8822f2ba155dd15e31d4add210db` |
-| `synthetic-stress-gates.json` | `b9c894283899de3912fe6a4eb0e4adfa001ad0488415480726a93eeea00585f5` |
-| `raw-export-samples.jsonl` | `c1cfc8a5e23940257f77331dcbbc6b844acf8012b0496fab768a45ce168578fd` |
-| `raw-export-gates.json` | `92a70e477a8fd52e9b579e049bbe9f0573cb41dd4108b94bb147884df29e8603` |
+| `synthetic-stress-samples.jsonl` | `3ce092bebd8f2482bcb55a29c6400b7d91250e8035ba98e168824b5b99d27900` |
+| `synthetic-stress-gates.json` | `528074a4625b664a7a0e5ee5c0b2e6f098bf55505c8c21b0605b40fd54f18379` |
+| `raw-export-samples.jsonl` | `ffd22667520bb9043ae61bb15efeecd8f280d4b1237871452a2490a3c939e3ac` |
+| `raw-export-gates.json` | `b5f4f8339ae9561c3fbd981b45ddf128689a34bc9c46533fd00e9e8ba1154327` |

@@ -1,26 +1,26 @@
 {
   "gates": [
     {
-      "baselinePeakRSSBytes": 66977792,
-      "candidatePeakRSSBytes": 58163200,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 1,
-      "result": "PASS",
-      "round": 1,
-      "scenario": "stress-vectors-production-preview"
-    },
-    {
-      "baselinePeakRSSBytes": 87998464,
-      "candidatePeakRSSBytes": 99696640,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 10,
-      "result": "PASS",
-      "round": 1,
-      "scenario": "stress-vectors-production-preview"
-    },
-    {
       "baselinePeakRSSBytes": 67010560,
-      "candidatePeakRSSBytes": 57704448,
+      "candidatePeakRSSBytes": 60866560,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86360064,
+      "candidatePeakRSSBytes": 99516416,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 67026944,
+      "candidatePeakRSSBytes": 57622528,
       "gate": "PERF-MEM-PREVIEW",
       "maskCount": 1,
       "result": "PASS",
@@ -28,8 +28,8 @@
       "scenario": "stress-vectors-production-preview"
     },
     {
-      "baselinePeakRSSBytes": 86310912,
-      "candidatePeakRSSBytes": 97042432,
+      "baselinePeakRSSBytes": 86327296,
+      "candidatePeakRSSBytes": 101466112,
       "gate": "PERF-MEM-PREVIEW",
       "maskCount": 10,
       "result": "PASS",
@@ -37,53 +37,53 @@
       "scenario": "stress-vectors-production-preview"
     },
     {
-      "baselineP50Seconds": 0.173374604,
-      "baselineP95Seconds": 0.17431925,
-      "candidateP50Seconds": 0.0088275835,
-      "candidateP95Seconds": 0.009027125,
+      "baselineP50Seconds": 0.173770292,
+      "baselineP95Seconds": 0.176316291,
+      "candidateP50Seconds": 0.008869938,
+      "candidateP95Seconds": 0.010395334,
       "gate": "PERF-COVERAGE",
       "maskCount": 1,
       "p50BudgetSeconds": 0.02,
-      "regressionLimitSeconds": 0.1820433342,
+      "regressionLimitSeconds": 0.1824588066,
       "result": "PASS",
       "round": 1,
       "scenario": "stress-vectors-production-preview"
     },
     {
-      "baselineP50Seconds": 1.739214938,
-      "baselineP95Seconds": 1.74339971,
-      "candidateP50Seconds": 0.0624516665,
-      "candidateP95Seconds": 0.064559125,
+      "baselineP50Seconds": 1.737368563,
+      "baselineP95Seconds": 1.755054707,
+      "candidateP50Seconds": 0.06295716600000001,
+      "candidateP95Seconds": 0.065111459,
       "gate": "PERF-COVERAGE",
       "maskCount": 10,
       "p50BudgetSeconds": 0.08,
-      "regressionLimitSeconds": 1.8261756849,
+      "regressionLimitSeconds": 1.82423699115,
       "result": "PASS",
       "round": 1,
       "scenario": "stress-vectors-production-preview"
     },
     {
-      "baselineP50Seconds": 0.1735056875,
-      "baselineP95Seconds": 0.175620459,
-      "candidateP50Seconds": 0.0088312085,
-      "candidateP95Seconds": 0.0089885,
+      "baselineP50Seconds": 0.1739753125,
+      "baselineP95Seconds": 0.175716625,
+      "candidateP50Seconds": 0.0088708545,
+      "candidateP95Seconds": 0.009013708,
       "gate": "PERF-COVERAGE",
       "maskCount": 1,
       "p50BudgetSeconds": 0.02,
-      "regressionLimitSeconds": 0.18218097187500001,
+      "regressionLimitSeconds": 0.182674078125,
       "result": "PASS",
       "round": 2,
       "scenario": "stress-vectors-production-preview"
     },
     {
-      "baselineP50Seconds": 1.7387835405,
-      "baselineP95Seconds": 1.742543583,
-      "candidateP50Seconds": 0.0629780835,
-      "candidateP95Seconds": 0.064770917,
+      "baselineP50Seconds": 1.735940771,
+      "baselineP95Seconds": 1.739797207,
+      "candidateP50Seconds": 0.0623832705,
+      "candidateP95Seconds": 0.063713375,
       "gate": "PERF-COVERAGE",
       "maskCount": 10,
       "p50BudgetSeconds": 0.08,
-      "regressionLimitSeconds": 1.8257227175250001,
+      "regressionLimitSeconds": 1.8227378095500002,
       "result": "PASS",
       "round": 2,
       "scenario": "stress-vectors-production-preview"
@@ -121,294 +121,294 @@
   ],
   "overallResult": "DONE_WITH_CONCERNS",
   "recordCount": 64,
-  "sampleArtifact": "lh-stress-samples.jsonl",
+  "sampleArtifact": "brush-preview-abba.jsonl",
   "schemaVersion": 1,
   "summaries": {
     "stress-vectors-production-preview/masks-1/round-1/B": {
       "count": 8,
-      "p50Seconds": 0.178227375,
-      "p95Seconds": 0.179095458,
-      "peakRSSBytes": 66977792,
+      "p50Seconds": 0.178745625,
+      "p95Seconds": 0.181240459,
+      "peakRSSBytes": 67010560,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 0.173374604,
-          "p95Seconds": 0.17431925
+          "p50Seconds": 0.173770292,
+          "p95Seconds": 0.176316291
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.0038135204999999997,
-          "p95Seconds": 0.0040585
+          "p50Seconds": 0.003917166,
+          "p95Seconds": 0.00407125
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 1.1045e-06,
-          "p95Seconds": 1.25e-06
+          "p50Seconds": 1.0620000000000002e-06,
+          "p95Seconds": 1.208e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 4.85835e-05,
-          "p95Seconds": 5.0959e-05
+          "p50Seconds": 4.95415e-05,
+          "p95Seconds": 5.7709e-05
         },
         "rawDecode": {
-          "p50Seconds": 8.541e-06,
-          "p95Seconds": 9.042e-06
+          "p50Seconds": 7.6875e-06,
+          "p95Seconds": 8.625e-06
         },
         "totalMaterialized": {
-          "p50Seconds": 0.177342542,
-          "p95Seconds": 0.178186208
+          "p50Seconds": 0.177793625,
+          "p95Seconds": 0.180367375
         },
         "validationSampling": {
-          "p50Seconds": 1.1728999999999999e-05,
-          "p95Seconds": 1.2375e-05
+          "p50Seconds": 9.8955e-06,
+          "p95Seconds": 1.1875e-05
         }
       }
     },
     "stress-vectors-production-preview/masks-1/round-1/O": {
       "count": 8,
-      "p50Seconds": 0.011853146,
-      "p95Seconds": 0.012233292,
-      "peakRSSBytes": 58163200,
+      "p50Seconds": 0.0119982705,
+      "p95Seconds": 0.013402333,
+      "peakRSSBytes": 60866560,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 0.0088275835,
-          "p95Seconds": 0.009027125
+          "p50Seconds": 0.008869938,
+          "p95Seconds": 0.010395334
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.002539,
-          "p95Seconds": 0.002704625
+          "p50Seconds": 0.0026178959999999998,
+          "p95Seconds": 0.002685291
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 8.954999999999999e-07,
+          "p50Seconds": 9.795000000000001e-07,
           "p95Seconds": 1.25e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 3.0646e-05,
-          "p95Seconds": 3.4916e-05
+          "p50Seconds": 3.1457999999999996e-05,
+          "p95Seconds": 5.3333e-05
         },
         "rawDecode": {
-          "p50Seconds": 5.0625e-06,
-          "p95Seconds": 6.583e-06
+          "p50Seconds": 5.0835e-06,
+          "p95Seconds": 5.292e-06
         },
         "totalMaterialized": {
-          "p50Seconds": 0.011764396,
-          "p95Seconds": 0.012143917
+          "p50Seconds": 0.0119091875,
+          "p95Seconds": 0.013318917
         },
         "validationSampling": {
-          "p50Seconds": 0.00018800000000000002,
-          "p95Seconds": 0.000204208
+          "p50Seconds": 0.00019581200000000002,
+          "p95Seconds": 0.000204541
         }
       }
     },
     "stress-vectors-production-preview/masks-1/round-2/B": {
       "count": 8,
-      "p50Seconds": 0.178594584,
-      "p95Seconds": 0.18069525,
-      "peakRSSBytes": 67010560,
+      "p50Seconds": 0.178872979,
+      "p95Seconds": 0.180671959,
+      "peakRSSBytes": 67026944,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 0.1735056875,
-          "p95Seconds": 0.175620459
+          "p50Seconds": 0.1739753125,
+          "p95Seconds": 0.175716625
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.003999979,
-          "p95Seconds": 0.00407475
+          "p50Seconds": 0.003957146,
+          "p95Seconds": 0.004097417
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 1.104e-06,
-          "p95Seconds": 1.334e-06
+          "p50Seconds": 1.0005e-06,
+          "p95Seconds": 1.291e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 5.0729e-05,
-          "p95Seconds": 5.4333e-05
+          "p50Seconds": 5.0979499999999995e-05,
+          "p95Seconds": 5.7666e-05
         },
         "rawDecode": {
-          "p50Seconds": 8.687e-06,
-          "p95Seconds": 1.1417e-05
+          "p50Seconds": 8.041500000000001e-06,
+          "p95Seconds": 1.0625e-05
         },
         "totalMaterialized": {
-          "p50Seconds": 0.177502958,
-          "p95Seconds": 0.179766208
+          "p50Seconds": 0.17791337499999998,
+          "p95Seconds": 0.179778542
         },
         "validationSampling": {
-          "p50Seconds": 1.1813e-05,
-          "p95Seconds": 1.2083e-05
+          "p50Seconds": 1.16455e-05,
+          "p95Seconds": 1.2208e-05
         }
       }
     },
     "stress-vectors-production-preview/masks-1/round-2/O": {
       "count": 8,
-      "p50Seconds": 0.0119179165,
-      "p95Seconds": 0.012296584,
-      "peakRSSBytes": 57704448,
+      "p50Seconds": 0.0120700205,
+      "p95Seconds": 0.012337959,
+      "peakRSSBytes": 57622528,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 0.0088312085,
-          "p95Seconds": 0.0089885
+          "p50Seconds": 0.0088708545,
+          "p95Seconds": 0.009013708
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.002563146,
-          "p95Seconds": 0.002793042
+          "p50Seconds": 0.0026664375,
+          "p95Seconds": 0.002808958
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 8.334999999999999e-07,
-          "p95Seconds": 1.167e-06
+          "p50Seconds": 1.0000000000000002e-06,
+          "p95Seconds": 1.125e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 3.3478999999999996e-05,
-          "p95Seconds": 3.525e-05
+          "p50Seconds": 3.13125e-05,
+          "p95Seconds": 3.5708e-05
         },
         "rawDecode": {
-          "p50Seconds": 4.8955e-06,
-          "p95Seconds": 5.333e-06
+          "p50Seconds": 4.896e-06,
+          "p95Seconds": 6.75e-06
         },
         "totalMaterialized": {
-          "p50Seconds": 0.0118252085,
-          "p95Seconds": 0.012202833
+          "p50Seconds": 0.011979396,
+          "p95Seconds": 0.012237833
         },
         "validationSampling": {
-          "p50Seconds": 0.0001902705,
-          "p95Seconds": 0.000194667
+          "p50Seconds": 0.00018974999999999998,
+          "p95Seconds": 0.000205458
         }
       }
     },
     "stress-vectors-production-preview/masks-10/round-1/B": {
       "count": 8,
-      "p50Seconds": 1.748909146,
-      "p95Seconds": 1.75350975,
-      "peakRSSBytes": 87998464,
+      "p50Seconds": 1.746475958,
+      "p95Seconds": 1.763953292,
+      "peakRSSBytes": 86360064,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 1.739214938,
-          "p95Seconds": 1.74339971
+          "p50Seconds": 1.737368563,
+          "p95Seconds": 1.755054707
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.0074124585,
-          "p95Seconds": 0.00795875
+          "p50Seconds": 0.007348729,
+          "p95Seconds": 0.007612959
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 1.2080000000000001e-06,
-          "p95Seconds": 1.333e-06
+          "p50Seconds": 1.1665e-06,
+          "p95Seconds": 1.292e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 0.0003303745,
-          "p95Seconds": 0.000361251
+          "p50Seconds": 0.000301688,
+          "p95Seconds": 0.000325543
         },
         "rawDecode": {
-          "p50Seconds": 1.0395499999999999e-05,
-          "p95Seconds": 1.1709e-05
+          "p50Seconds": 9.8955e-06,
+          "p95Seconds": 1.0958e-05
         },
         "totalMaterialized": {
-          "p50Seconds": 1.7474144375,
-          "p95Seconds": 1.751218
+          "p50Seconds": 1.7451979789999998,
+          "p95Seconds": 1.7628855
         },
         "validationSampling": {
-          "p50Seconds": 7.5521e-05,
-          "p95Seconds": 8.6375e-05
+          "p50Seconds": 7.406200000000001e-05,
+          "p95Seconds": 7.8458e-05
         }
       }
     },
     "stress-vectors-production-preview/masks-10/round-1/O": {
       "count": 8,
-      "p50Seconds": 0.0683522085,
-      "p95Seconds": 0.070531125,
-      "peakRSSBytes": 99696640,
+      "p50Seconds": 0.0688665625,
+      "p95Seconds": 0.071170917,
+      "peakRSSBytes": 99516416,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 0.0624516665,
-          "p95Seconds": 0.064559125
+          "p50Seconds": 0.06295716600000001,
+          "p95Seconds": 0.065111459
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.005265062500000001,
-          "p95Seconds": 0.00560425
+          "p50Seconds": 0.0052628755,
+          "p95Seconds": 0.005354333
         },
         "globalAdjustmentGraph": {
           "p50Seconds": 1.1045e-06,
-          "p95Seconds": 1.459e-06
+          "p95Seconds": 1.375e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 0.0001035005,
-          "p95Seconds": 0.000108959
+          "p50Seconds": 0.000107208,
+          "p95Seconds": 0.000112084
         },
         "rawDecode": {
-          "p50Seconds": 5.5625e-06,
-          "p95Seconds": 6.125e-06
+          "p50Seconds": 5.7915e-06,
+          "p95Seconds": 6.083e-06
         },
         "totalMaterialized": {
-          "p50Seconds": 0.068233792,
-          "p95Seconds": 0.070413625
+          "p50Seconds": 0.0687549375,
+          "p95Seconds": 0.071059208
         },
         "validationSampling": {
-          "p50Seconds": 0.002248231,
-          "p95Seconds": 0.002953293
+          "p50Seconds": 0.002428624,
+          "p95Seconds": 0.002693958
         }
       }
     },
     "stress-vectors-production-preview/masks-10/round-2/B": {
       "count": 8,
-      "p50Seconds": 1.747812562,
-      "p95Seconds": 1.7524457089999999,
-      "peakRSSBytes": 86310912,
+      "p50Seconds": 1.7450978955,
+      "p95Seconds": 1.748844625,
+      "peakRSSBytes": 86327296,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 1.7387835405,
-          "p95Seconds": 1.742543583
+          "p50Seconds": 1.735940771,
+          "p95Seconds": 1.739797207
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.0073339995000000005,
-          "p95Seconds": 0.007581291
+          "p50Seconds": 0.007316458,
+          "p95Seconds": 0.007466875
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 1.1875e-06,
-          "p95Seconds": 1.625e-06
+          "p50Seconds": 1.083e-06,
+          "p95Seconds": 1.583e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 0.0003123335,
-          "p95Seconds": 0.000372291
+          "p50Seconds": 0.000290979,
+          "p95Seconds": 0.000350832
         },
         "rawDecode": {
-          "p50Seconds": 9.563e-06,
-          "p95Seconds": 1.1041e-05
+          "p50Seconds": 9.604e-06,
+          "p95Seconds": 1.0917e-05
         },
         "totalMaterialized": {
-          "p50Seconds": 1.7465245,
-          "p95Seconds": 1.750575333
+          "p50Seconds": 1.7437862499999999,
+          "p95Seconds": 1.747613958
         },
         "validationSampling": {
-          "p50Seconds": 7.666650000000001e-05,
-          "p95Seconds": 8.7167e-05
+          "p50Seconds": 7.42705e-05,
+          "p95Seconds": 7.9083e-05
         }
       }
     },
     "stress-vectors-production-preview/masks-10/round-2/O": {
       "count": 8,
-      "p50Seconds": 0.068823521,
-      "p95Seconds": 0.070978584,
-      "peakRSSBytes": 97042432,
+      "p50Seconds": 0.0682815625,
+      "p95Seconds": 0.069940208,
+      "peakRSSBytes": 101466112,
       "stageDurationsSeconds": {
         "coverageRaster": {
-          "p50Seconds": 0.0629780835,
-          "p95Seconds": 0.064770917
+          "p50Seconds": 0.0623832705,
+          "p95Seconds": 0.063713375
         },
         "finalMakeCGImage": {
-          "p50Seconds": 0.005227229,
-          "p95Seconds": 0.005430875
+          "p50Seconds": 0.005284375,
+          "p95Seconds": 0.005658334
         },
         "globalAdjustmentGraph": {
-          "p50Seconds": 1.125e-06,
-          "p95Seconds": 1.583e-06
+          "p50Seconds": 1.084e-06,
+          "p95Seconds": 1.542e-06
         },
         "perMaskAdjustmentBlend": {
-          "p50Seconds": 0.0001050625,
-          "p95Seconds": 0.0001095
+          "p50Seconds": 0.00010406249999999999,
+          "p95Seconds": 0.000108125
         },
         "rawDecode": {
-          "p50Seconds": 5.583000000000001e-06,
-          "p95Seconds": 6.166e-06
+          "p50Seconds": 5.6665e-06,
+          "p95Seconds": 5.958e-06
         },
         "totalMaterialized": {
-          "p50Seconds": 0.068706667,
-          "p95Seconds": 0.070861792
+          "p50Seconds": 0.06817247900000001,
+          "p95Seconds": 0.069827084
         },
         "validationSampling": {
-          "p50Seconds": 0.0023097295,
-          "p95Seconds": 0.002528293
+          "p50Seconds": 0.0024237705,
+          "p95Seconds": 0.002657834
         }
       }
     }

@@ -4,193 +4,193 @@
   "contextCountLimitation": "Context allocations are not measured; v2 and v3 counts are construction-path declarations only.",
   "gates": [
     {
-      "baselinePeakRSSBytes": 145178624,
+      "baselinePeakRSSBytes": 145752064,
       "gate": "PERF-MEM-PREVIEW",
       "maskCount": 0,
-      "optimizedLimitBytes": 178733056,
-      "optimizedPeakRSSBytes": 145784832,
-      "result": "PASS",
-      "scenario": "cold"
-    },
-    {
-      "baselinePeakRSSBytes": 166625280,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 1,
-      "optimizedLimitBytes": 200179712,
-      "optimizedPeakRSSBytes": 154910720,
-      "result": "PASS",
-      "scenario": "cold"
-    },
-    {
-      "baselinePeakRSSBytes": 200081408,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 10,
-      "optimizedLimitBytes": 233635840,
-      "optimizedPeakRSSBytes": 201080832,
-      "result": "PASS",
-      "scenario": "cold"
-    },
-    {
-      "budgetSeconds": 0.15,
-      "gate": "INTERACTIVE-150",
-      "maskCount": 0,
-      "optimizedP50Seconds": 0.0354000625,
-      "optimizedP95Seconds": 0.040243708,
-      "result": "PASS",
-      "scenario": "warm"
-    },
-    {
-      "baselinePeakRSSBytes": 145866752,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 0,
-      "optimizedLimitBytes": 179421184,
-      "optimizedPeakRSSBytes": 145539072,
-      "result": "PASS",
-      "scenario": "warm"
-    },
-    {
-      "budgetSeconds": 0.15,
-      "gate": "INTERACTIVE-150",
-      "maskCount": 1,
-      "optimizedP50Seconds": 0.038048666499999995,
-      "optimizedP95Seconds": 0.044368458,
-      "result": "PASS",
-      "scenario": "warm"
-    },
-    {
-      "baselinePeakRSSBytes": 168656896,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 1,
-      "optimizedLimitBytes": 202211328,
-      "optimizedPeakRSSBytes": 155435008,
-      "result": "PASS",
-      "scenario": "warm"
-    },
-    {
-      "budgetSeconds": 0.15,
-      "gate": "INTERACTIVE-150",
-      "maskCount": 10,
-      "optimizedP50Seconds": 0.0568275835,
-      "optimizedP95Seconds": 0.058629958,
-      "result": "PASS",
-      "scenario": "warm"
-    },
-    {
-      "baselinePeakRSSBytes": 202260480,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 10,
-      "optimizedLimitBytes": 235814912,
-      "optimizedPeakRSSBytes": 206716928,
-      "result": "PASS",
-      "scenario": "warm"
-    },
-    {
-      "baselinePeakRSSBytes": 145899520,
-      "gate": "PERF-MEM-PREVIEW",
-      "maskCount": 0,
-      "optimizedLimitBytes": 179453952,
+      "optimizedLimitBytes": 179306496,
       "optimizedPeakRSSBytes": 145571840,
       "result": "PASS",
-      "scenario": "changed"
+      "scenario": "cold"
     },
     {
-      "baselinePeakRSSBytes": 168640512,
+      "baselinePeakRSSBytes": 166526976,
       "gate": "PERF-MEM-PREVIEW",
       "maskCount": 1,
-      "optimizedLimitBytes": 202194944,
-      "optimizedPeakRSSBytes": 154877952,
+      "optimizedLimitBytes": 200081408,
+      "optimizedPeakRSSBytes": 153894912,
       "result": "PASS",
-      "scenario": "changed"
+      "scenario": "cold"
     },
     {
-      "baselinePeakRSSBytes": 203833344,
+      "baselinePeakRSSBytes": 199655424,
       "gate": "PERF-MEM-PREVIEW",
       "maskCount": 10,
-      "optimizedLimitBytes": 237387776,
-      "optimizedPeakRSSBytes": 207192064,
+      "optimizedLimitBytes": 233209856,
+      "optimizedPeakRSSBytes": 198819840,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 0,
+      "optimizedP50Seconds": 0.0346364795,
+      "optimizedP95Seconds": 0.039790125,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 145948672,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 179503104,
+      "optimizedPeakRSSBytes": 145555456,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 1,
+      "optimizedP50Seconds": 0.0370483335,
+      "optimizedP95Seconds": 0.042378958,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 168771584,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 202326016,
+      "optimizedPeakRSSBytes": 155942912,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 10,
+      "optimizedP50Seconds": 0.055096624999999996,
+      "optimizedP95Seconds": 0.067036333,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 205488128,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 239042560,
+      "optimizedPeakRSSBytes": 208371712,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 146079744,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 179634176,
+      "optimizedPeakRSSBytes": 145539072,
       "result": "PASS",
       "scenario": "changed"
     },
     {
-      "baselineMedianSeconds": 0.356933854,
+      "baselinePeakRSSBytes": 168673280,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 202227712,
+      "optimizedPeakRSSBytes": 155107328,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselinePeakRSSBytes": 202244096,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 235798528,
+      "optimizedPeakRSSBytes": 206520320,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselineMedianSeconds": 0.35019079200000003,
       "gate": "PERF-EXPORT",
       "maskCount": 1,
-      "optimizedLimitSeconds": 0.3747805467,
-      "optimizedMedianSeconds": 0.118678104,
+      "optimizedLimitSeconds": 0.36770033160000004,
+      "optimizedMedianSeconds": 0.110769354,
       "result": "PASS",
       "rule": "absolute-budget-and-max-five-percent-regression",
       "sourceKind": "synthetic-24mp"
     },
     {
       "absoluteLimitBytes": 805306368,
-      "baselinePeakRSSBytes": 395952128,
+      "baselinePeakRSSBytes": 395968512,
       "gate": "PERF-MEM-EXPORT",
       "maskCount": 1,
-      "optimizedPeakRSSBytes": 184795136,
+      "optimizedPeakRSSBytes": 184369152,
       "result": "PASS",
       "sourceKind": "synthetic-24mp"
     },
     {
-      "baselineMedianSeconds": 2.7822050835,
+      "baselineMedianSeconds": 2.7781561875,
       "gate": "PERF-EXPORT",
       "maskCount": 10,
-      "optimizedLimitSeconds": 2.9213153376750003,
-      "optimizedMedianSeconds": 0.362617167,
+      "optimizedLimitSeconds": 2.917063996875,
+      "optimizedMedianSeconds": 0.3546989585,
       "result": "PASS",
       "rule": "absolute-budget-and-max-five-percent-regression",
       "sourceKind": "synthetic-24mp"
     },
     {
       "absoluteLimitBytes": 805306368,
-      "baselinePeakRSSBytes": 615596032,
+      "baselinePeakRSSBytes": 617168896,
       "gate": "PERF-MEM-EXPORT",
       "maskCount": 10,
-      "optimizedPeakRSSBytes": 435863552,
+      "optimizedPeakRSSBytes": 414023680,
       "result": "PASS",
       "sourceKind": "synthetic-24mp"
     },
     {
-      "baselineMedianSeconds": 0.619161271,
+      "baselineMedianSeconds": 0.60539475,
       "gate": "PERF-EXPORT",
       "maskCount": 1,
-      "optimizedLimitSeconds": 0.6501193345499999,
-      "optimizedMedianSeconds": 0.441942854,
+      "optimizedLimitSeconds": 0.6356644875,
+      "optimizedMedianSeconds": 0.4219324585,
       "result": "PASS",
       "rule": "absolute-budget-and-max-five-percent-regression",
       "sourceKind": "real-raw"
     },
     {
       "absoluteLimitBytes": null,
-      "baselinePeakRSSBytes": 507215872,
+      "baselinePeakRSSBytes": 506576896,
       "gate": "PERF-MEM-EXPORT",
       "maskCount": 1,
-      "optimizedPeakRSSBytes": 286818304,
+      "optimizedPeakRSSBytes": 286932992,
       "result": "PASS",
       "sourceKind": "real-raw"
     },
     {
-      "baselineMedianSeconds": 2.3418128334999997,
+      "baselineMedianSeconds": 2.3120185209999997,
       "gate": "PERF-EXPORT",
       "maskCount": 10,
-      "optimizedLimitSeconds": 2.4589034751749996,
-      "optimizedMedianSeconds": 0.5658777085,
+      "optimizedLimitSeconds": 2.4276194470499997,
+      "optimizedMedianSeconds": 0.549643813,
       "result": "PASS",
       "rule": "absolute-budget-and-max-five-percent-regression",
       "sourceKind": "real-raw"
     },
     {
       "absoluteLimitBytes": null,
-      "baselinePeakRSSBytes": 723648512,
+      "baselinePeakRSSBytes": 726548480,
       "gate": "PERF-MEM-EXPORT",
       "maskCount": 10,
-      "optimizedPeakRSSBytes": 509476864,
+      "optimizedPeakRSSBytes": 532824064,
       "result": "PASS",
       "sourceKind": "real-raw"
     }
   ],
-  "harnessSHA": "26e7358fcf5019b246588d1bb3baa8a6005548cd",
-  "instrumentationDigest": "1bf08395a149875e9c3b0fe5a8ef4473761c7abf3d785ac464096fe94ca292fe",
-  "optimizedProductSHA": "26e7358fcf5019b246588d1bb3baa8a6005548cd",
+  "harnessSHA": "f13de103cec69002666bba389cbf9b6e39cee02f",
+  "instrumentationDigest": "ba0750154b0dd8fb99f027f96f8a360e14d10eee7c381662ac9f762d794b29c7",
+  "optimizedProductSHA": "f13de103cec69002666bba389cbf9b6e39cee02f",
   "overallResult": "DONE_WITH_CONCERNS",
   "recordCount": 352,
   "sampleArtifact": "brush-raw-export-samples.jsonl",
@@ -198,159 +198,159 @@
   "summaries": {
     "export/real-raw/1/B": {
       "count": 8,
-      "p50Seconds": 0.619161271,
-      "p95Seconds": 0.647051333,
-      "peakRSSBytes": 507215872
+      "p50Seconds": 0.60539475,
+      "p95Seconds": 0.611344875,
+      "peakRSSBytes": 506576896
     },
     "export/real-raw/1/O": {
       "count": 8,
-      "p50Seconds": 0.441942854,
-      "p95Seconds": 0.474219833,
-      "peakRSSBytes": 286818304
+      "p50Seconds": 0.4219324585,
+      "p95Seconds": 0.426265292,
+      "peakRSSBytes": 286932992
     },
     "export/real-raw/10/B": {
       "count": 8,
-      "p50Seconds": 2.3418128334999997,
-      "p95Seconds": 2.393371167,
-      "peakRSSBytes": 723648512
+      "p50Seconds": 2.3120185209999997,
+      "p95Seconds": 2.321950916,
+      "peakRSSBytes": 726548480
     },
     "export/real-raw/10/O": {
       "count": 8,
-      "p50Seconds": 0.5658777085,
-      "p95Seconds": 0.603287791,
-      "peakRSSBytes": 509476864
+      "p50Seconds": 0.549643813,
+      "p95Seconds": 0.58365175,
+      "peakRSSBytes": 532824064
     },
     "export/synthetic-24mp/1/B": {
       "count": 8,
-      "p50Seconds": 0.356933854,
-      "p95Seconds": 0.359377042,
-      "peakRSSBytes": 395952128
+      "p50Seconds": 0.35019079200000003,
+      "p95Seconds": 0.374254125,
+      "peakRSSBytes": 395968512
     },
     "export/synthetic-24mp/1/O": {
       "count": 8,
-      "p50Seconds": 0.118678104,
-      "p95Seconds": 0.128366041,
-      "peakRSSBytes": 184795136
+      "p50Seconds": 0.110769354,
+      "p95Seconds": 0.112729833,
+      "peakRSSBytes": 184369152
     },
     "export/synthetic-24mp/10/B": {
       "count": 8,
-      "p50Seconds": 2.7822050835,
-      "p95Seconds": 2.826467708,
-      "peakRSSBytes": 615596032
+      "p50Seconds": 2.7781561875,
+      "p95Seconds": 2.790166708,
+      "peakRSSBytes": 617168896
     },
     "export/synthetic-24mp/10/O": {
       "count": 8,
-      "p50Seconds": 0.362617167,
-      "p95Seconds": 0.373507166,
-      "peakRSSBytes": 435863552
+      "p50Seconds": 0.3546989585,
+      "p95Seconds": 0.3642275,
+      "peakRSSBytes": 414023680
     },
     "preview/changed/0/B": {
       "count": 16,
-      "p50Seconds": 0.172966229,
-      "p95Seconds": 0.182850583,
-      "peakRSSBytes": 145899520
+      "p50Seconds": 0.1663918125,
+      "p95Seconds": 0.175702,
+      "peakRSSBytes": 146079744
     },
     "preview/changed/0/O": {
       "count": 16,
-      "p50Seconds": 0.0369919795,
-      "p95Seconds": 0.056844291,
-      "peakRSSBytes": 145571840
+      "p50Seconds": 0.0349233545,
+      "p95Seconds": 0.045087125,
+      "peakRSSBytes": 145539072
     },
     "preview/changed/1/B": {
       "count": 16,
-      "p50Seconds": 0.189862271,
-      "p95Seconds": 0.205573292,
-      "peakRSSBytes": 168640512
+      "p50Seconds": 0.184977625,
+      "p95Seconds": 0.191888875,
+      "peakRSSBytes": 168673280
     },
     "preview/changed/1/O": {
       "count": 16,
-      "p50Seconds": 0.0388823545,
-      "p95Seconds": 0.055460042,
-      "peakRSSBytes": 154877952
+      "p50Seconds": 0.0375699585,
+      "p95Seconds": 0.043644292,
+      "peakRSSBytes": 155107328
     },
     "preview/changed/10/B": {
       "count": 16,
-      "p50Seconds": 0.379089646,
-      "p95Seconds": 0.384113458,
-      "peakRSSBytes": 203833344
+      "p50Seconds": 0.36656806249999996,
+      "p95Seconds": 0.370896625,
+      "peakRSSBytes": 202244096
     },
     "preview/changed/10/O": {
       "count": 16,
-      "p50Seconds": 0.057059417,
-      "p95Seconds": 0.069024125,
-      "peakRSSBytes": 207192064
+      "p50Seconds": 0.055175208,
+      "p95Seconds": 0.062072417,
+      "peakRSSBytes": 206520320
     },
     "preview/cold/0/B": {
       "count": 16,
-      "p50Seconds": 0.255032896,
-      "p95Seconds": 0.275139583,
-      "peakRSSBytes": 145178624
+      "p50Seconds": 0.2441769795,
+      "p95Seconds": 0.338433917,
+      "peakRSSBytes": 145752064
     },
     "preview/cold/0/O": {
       "count": 16,
-      "p50Seconds": 0.249971229,
-      "p95Seconds": 0.292393625,
-      "peakRSSBytes": 145784832
+      "p50Seconds": 0.23942325,
+      "p95Seconds": 0.252322833,
+      "peakRSSBytes": 145571840
     },
     "preview/cold/1/B": {
       "count": 16,
-      "p50Seconds": 0.2823761455,
-      "p95Seconds": 0.29803525,
-      "peakRSSBytes": 166625280
+      "p50Seconds": 0.26388225,
+      "p95Seconds": 0.27258525,
+      "peakRSSBytes": 166526976
     },
     "preview/cold/1/O": {
       "count": 16,
-      "p50Seconds": 0.251639,
-      "p95Seconds": 0.265719041,
-      "peakRSSBytes": 154910720
+      "p50Seconds": 0.241113625,
+      "p95Seconds": 0.249395292,
+      "peakRSSBytes": 153894912
     },
     "preview/cold/10/B": {
       "count": 16,
-      "p50Seconds": 0.46201662450000003,
-      "p95Seconds": 0.49245125,
-      "peakRSSBytes": 200081408
+      "p50Seconds": 0.44963093750000005,
+      "p95Seconds": 0.452555667,
+      "peakRSSBytes": 199655424
     },
     "preview/cold/10/O": {
       "count": 16,
-      "p50Seconds": 0.276458542,
-      "p95Seconds": 0.290444958,
-      "peakRSSBytes": 201080832
+      "p50Seconds": 0.25981489550000003,
+      "p95Seconds": 0.263762375,
+      "peakRSSBytes": 198819840
     },
     "preview/warm/0/B": {
       "count": 16,
-      "p50Seconds": 0.1704563125,
-      "p95Seconds": 0.1832095,
-      "peakRSSBytes": 145866752
+      "p50Seconds": 0.164578563,
+      "p95Seconds": 0.176565167,
+      "peakRSSBytes": 145948672
     },
     "preview/warm/0/O": {
       "count": 16,
-      "p50Seconds": 0.0354000625,
-      "p95Seconds": 0.040243708,
-      "peakRSSBytes": 145539072
+      "p50Seconds": 0.0346364795,
+      "p95Seconds": 0.039790125,
+      "peakRSSBytes": 145555456
     },
     "preview/warm/1/B": {
       "count": 16,
-      "p50Seconds": 0.18849516700000002,
-      "p95Seconds": 0.201919542,
-      "peakRSSBytes": 168656896
+      "p50Seconds": 0.1842573335,
+      "p95Seconds": 0.192003042,
+      "peakRSSBytes": 168771584
     },
     "preview/warm/1/O": {
       "count": 16,
-      "p50Seconds": 0.038048666499999995,
-      "p95Seconds": 0.044368458,
-      "peakRSSBytes": 155435008
+      "p50Seconds": 0.0370483335,
+      "p95Seconds": 0.042378958,
+      "peakRSSBytes": 155942912
     },
     "preview/warm/10/B": {
       "count": 16,
-      "p50Seconds": 0.37944422899999997,
-      "p95Seconds": 0.384029291,
-      "peakRSSBytes": 202260480
+      "p50Seconds": 0.36683966700000004,
+      "p95Seconds": 0.390927708,
+      "peakRSSBytes": 205488128
     },
     "preview/warm/10/O": {
       "count": 16,
-      "p50Seconds": 0.0568275835,
-      "p95Seconds": 0.058629958,
-      "peakRSSBytes": 206716928
+      "p50Seconds": 0.055096624999999996,
+      "p95Seconds": 0.067036333,
+      "peakRSSBytes": 208371712
     }
   },
   "validation": "PASS",

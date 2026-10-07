@@ -30,7 +30,7 @@ Scripts/run-brush-performance-acceptance.sh
 
 The scheduler workload performs five warmups and fifty production-route A→B switches. A enters the raster barrier, B submission cancels A, the barrier is released, and the harness waits for every live scheduler task to join. It validates B's token, subject, context, brush mapping and rendered histogram, and records actual worker started/finished counts plus settled RSS.
 
-The O-only `coverageIncludingSampling` field is diagnostic. `validationSampling`, `coverageRaster`, and `blendMaterialization` intentionally remain `null`, and `PERF-COVERAGE` remains `NOT RUN`, because B and O do not expose identical non-overlapping wall-time boundaries. Parallel worker CPU durations must never be summed and reported as wall time. A complete acceptance report must still combine these artifacts with real RAW preview, original-size export, export peak RSS, and device UI evidence.
+The stage fields are now recorded for both B and O with the same mutually exclusive wall-time boundaries: `rawDecode`, `globalAdjustmentGraph`, `validationSampling`, `coverageRaster`, `perMaskAdjustmentBlend`, `finalMakeCGImage`, and `totalMaterialized`. Parallel worker intervals are unioned; worker CPU durations are never summed as wall time. When every record contains all seven finite fields, the analyzer emits `PERF-COVERAGE`; incomplete or legacy artifacts remain explicitly `NOT RUN`. A complete acceptance report must still combine this synthetic evidence with real RAW preview, original-size export, export peak RSS, and device UI evidence.
 
 ## Untimed pixel validation
 
