@@ -19,6 +19,8 @@ Synthetic stress aggregate（兩輪合併，p50／p95，ms）：
 | 10 | B | 0.011 / 0.012 | 0.001 / 0.001 | 0.077 / 0.092 | 1754.617 / 1814.902 | 0.415 / 0.492 | 7.333 / 7.586 | 1762.474 / 1822.993 |
 | 10 | O | 0.006 / 0.007 | 0.001 / 0.001 | 3.097 / 3.813 | 64.776 / 74.801 | 0.108 / 0.113 | 5.169 / 5.363 | 70.664 / 81.013 |
 
+`stage total` 取自 16 筆兩輪樣本的 `stageDurationsSeconds.totalMaterialized`；同一批樣本的端到端 `totalDurationSeconds` 合併 p50／p95 則為 1 mask `12.084/13.337 ms`、10 masks `70.779/81.143 ms`。端到端數據另含 harness 邊界開銷，因此不得以它取代共用互斥 stage clock，也不得把兩者視為同一欄位。
+
 coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask adjustment/blend 不是主要瓶頸。RAW warm 測量則證實 decoded-preview cache 能移除重複 decode 的成本。
 
 ## 修改檔案與設計理由
@@ -75,7 +77,8 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 | 128×128 tile acceptance contract | PASS，RED／GREEN 已保存 |
 | Focused Release tests | PASS，31/31 |
 | Full Release regression | PASS，2715 tests、22 skipped、0 failures |
-| Gemini 唯讀審查 | `APPROVED_WITH_CONCERNS`；唯一 minor 已由 `7af2125` 解決 |
+| Gemini 程式／spec 唯讀審查 | `APPROVED_WITH_CONCERNS`；唯一 minor 已由 `7af2125` 解決 |
+| Gemini Mac 文件唯讀審查 | 初審 `CHANGES_REQUESTED`；端到端與 stage total 的來源說明補正後，follow-up=`APPROVED`、無 finding |
 | `UI-MAC-01` 原生數值欄位 | PASS；Enter／blur／Escape／±／reset／非法值／焦點中 Undo/Redo 同步／同值外部 revision 使舊草稿失效均通過 |
 | `UI-MAC-02` 白平衡滴管 | PARTIAL；啟用、單次取樣提交、明確取消通過；四色方向、切圖與晚到結果未跑 |
 | `UI-BRUSH-01` | PARTIAL；paint／erase、兩支筆刷切換、size／feather／flow／density、enable、select、單筆畫 Undo/Redo 與 autosave 通過；Delete 未點擊 |
@@ -100,4 +103,4 @@ Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`D
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、獨立唯讀 code／spec review 與目前可執行的 Mac 前景 slice 已完成。下一個 bounded action 是在裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，並在具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣；Mac 剩餘的四色滴管方向、中途手勢競態與破壞性 Delete 操作也要分列補證。程式面若要整合，先由另一個帳號唯讀確認 `7af2125` 之後的文件差異，再依共用 Git 流程處理。未經使用者另行授權，不 push、merge、rebase 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review 與目前可執行的 Mac 前景 slice 已完成。下一個 bounded action 是在裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，並在具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣；Mac 剩餘的四色滴管方向、中途手勢競態與破壞性 Delete 操作也要分列補證。若要整合，再依共用 Git 流程處理。未經使用者另行授權，不 push、merge、rebase 或修改其他 worktree。

@@ -55,6 +55,8 @@ swift test -c release
 | 10 | B | 0.011 / 0.012 | 0.001 / 0.001 | 0.077 / 0.092 | 1754.617 / 1814.902 | 0.415 / 0.492 | 7.333 / 7.586 | 1762.474 / 1822.993 |
 | 10 | O | 0.006 / 0.007 | 0.001 / 0.001 | 3.097 / 3.813 | 64.776 / 74.801 | 0.108 / 0.113 | 5.169 / 5.363 | 70.664 / 81.013 |
 
+表中的 `stage total` 是 16 筆兩輪樣本之 `stageDurationsSeconds.totalMaterialized` 合併 p50／p95；同一批樣本的端到端 `totalDurationSeconds` 合併 p50／p95 為 1 mask `12.084/13.337 ms`、10 masks `70.779/81.143 ms`。兩組數字不可互換：前者只涵蓋 B/O 共用互斥 stage clock，後者另含 harness 邊界上的少量開銷。
+
 主要根因是 coverage raster 的全圖 per-mask 計算；RAW decode 與 adjustment／blend 不是 synthetic stress 的主成本。RAW warm 的主要修正則是 bounded decoded-preview cache，cache key 綁定檔案狀態、decode quality、resolved recipe、白平衡、lens correction、camera profile 與其他 decode inputs，且不共用 full-resolution export。Gemini 指出的 tile 規格差異已在 `7af2125` 對齊為固定 128×128，並由合約測試鎖定。
 
 ## Gate 結果
@@ -63,6 +65,7 @@ swift test -c release
 
 - 1 mask：O round 1 p50/p95 `12.105/13.244 ms`；round 2 `12.067/13.337 ms`。門檻 `30/60 ms`，PASS。
 - 10 masks：O round 1 `70.907/81.143 ms`；round 2 `70.099/71.513 ms`。門檻 `100/150 ms`，PASS。
+- 兩輪端到端合併：1 mask `12.084/13.337 ms`；10 masks `70.779/81.143 ms`。這是 `totalDurationSeconds`，不等同上方 stage total。
 - `PERF-COVERAGE`：4/4 PASS；B/O 都有相同且互斥 stage clock。
 - `PERF-MEM-PREVIEW`：4/4 PASS。
 - artifact validation：PASS，64 records。
@@ -105,3 +108,5 @@ swift test -c release
 | `mac-ui-manual-summary.txt` | `368e231192e184880e5b85d20200e0504bdf475682f1e1a05f810aa9da2b575d` |
 
 `verification-summary.txt` 另保存 128×128 合約的 RED／GREEN、focused regression、50-cycle 與完整 Release suite 的命令、exit code 與摘要。
+
+2026-10-08 的 Mac 文件差異另經 agy → Gemini 3.1 Pro High 唯讀審查。初審指出 `CURRENT.md` 未說明端到端合併值與 stage total 的差異；本文件補上兩組數據的來源與邊界後，follow-up verdict=`APPROVED`、無 finding。完整紀錄見[Mac 文件 Gemini review](../../reports/2026-10-08-brush-preview-performance-fix-mac-ui-gemini-review.md)。

@@ -48,6 +48,7 @@ Shared B/O stage wall time（synthetic stress aggregate p50/p95，ms）：
 
 - 1 mask：B coverage `175.096/192.717`，O `8.801/10.111`；O total materialized `11.988/13.210`。
 - 10 masks：B coverage `1754.617/1814.902`，O `64.776/74.801`；O total materialized `70.664/81.013`。
+- 同一批 16 筆兩輪樣本的端到端 `totalDurationSeconds` 合併 p50/p95 為 1 mask `12.084/13.337 ms`、10 masks `70.779/81.143 ms`；這包含 shared stage clock 外的 harness 邊界開銷，不等同 total materialized。
 - decode、global graph 與 per-mask adjustment/blend 均是次要 stage；RAW warm 的 cache 修正則把 0／1／10 masks 降到 O `36.285/39.805`、`39.560/49.993`、`56.002/61.015 ms`。
 
 ## Verification
@@ -64,8 +65,10 @@ Shared B/O stage wall time（synthetic stress aggregate p50/p95，ms）：
 
 ## Independent review
 
-agy → Gemini 3.1 Pro High 已完成 sanitized read-only review，Verdict=`APPROVED_WITH_CONCERNS`，無 blocking finding。唯一 minor 是 spec 指定第一版固定 128×128 tile，但審查當時實作為 256×256；`7af2125` 已修正並重跑 parity、synthetic stress、RSS、cancellation、RAW/export 與 full Release gates，全數 PASS。完整審查與解決紀錄見 [Gemini review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)。
+程式／spec 的 agy → Gemini 3.1 Pro High sanitized read-only review 為 `APPROVED_WITH_CONCERNS`，無 blocking finding。唯一 minor 是 spec 指定第一版固定 128×128 tile，但審查當時實作為 256×256；`7af2125` 已修正並重跑 parity、synthetic stress、RSS、cancellation、RAW/export 與 full Release gates，全數 PASS。完整紀錄見 [程式／spec Gemini review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)。
+
+Mac 文件差異的 Gemini 初審為 `CHANGES_REQUESTED`：`CURRENT.md` 引用兩輪合併的端到端 p50/p95，卻沒有在證據與報告中說明它不同於 stage total。本輪已從 `synthetic-stress-samples.jsonl` 重算並補上兩組數據的來源與邊界；同一模型 follow-up verdict=`APPROVED`、無 finding，並確認沒有 overclaim 或隱私洩漏。完整紀錄見 [Mac 文件 Gemini review](../testing/reports/2026-10-08-brush-preview-performance-fix-mac-ui-gemini-review.md)。
 
 ## Remaining bounded action
 
-產品、自動驗收、獨立唯讀審查與目前可執行的 Mac 前景 slice 已收尾。下一個 bounded action 是裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View；具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣，再補 Mac 的四色滴管方向、中途手勢競態與破壞性 Delete 操作。若準備整合，先由非原作者唯讀檢查 `7af2125` 之後的文件差異，再依共用 Git 流程處理。不要修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品、自動驗收、兩輪獨立唯讀 review 與目前可執行的 Mac 前景 slice 已收尾。下一個 bounded action 是裝置恢復可用時執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣，再補 Mac 的四色滴管方向、中途手勢競態與破壞性 Delete 操作。不要修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。
