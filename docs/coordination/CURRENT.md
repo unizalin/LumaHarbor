@@ -12,7 +12,8 @@
 - **Mac 前景**：`UI-MAC-01` PASS；`UI-MAC-02`、`UI-BRUSH-01`、`UI-BRUSH-02`、`STORE-01` PARTIAL。paint／erase、兩支筆刷切換、設定、enable/select、單筆畫 Undo/Redo、autosave、close-to-library／reopen 與原尺寸 TIFF export 已通過；破壞性 Delete、四色滴管方向與中途手勢競態未跑。
 - **iPad Simulator**：`UI-SIM-01` PARTIAL。iPad Pro 11-inch (M4)、iOS 18.6 的 fresh Debug build／install／launch、直向／橫向、建立筆刷、paint、完成筆畫 Undo／Redo、曝光 0.0→0.1 與 relaunch persistence 已通過；accessibility semantics 可讀。窄視窗、zoom、Files-open、鍵盤與 hands-on VoiceOver 未跑，且不能取代實體 Pencil／裝置驗收。
 - **整合候選**：branch 已推送至 `origin/luna/brush-preview-performance-fix`，Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 為 OPEN／CLEAN；GitHub 未回報 checks。遠端 `main` 仍為 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319`，尚未 merge 或 rebase。
-- **下一步**：依[文件與 Alpha 整合收尾計畫](../superpowers/plans/2026-10-08-brush-alpha-integration-followup.md) Task 1 先同步根目錄 README 的 Sidecar v5、白平衡／筆刷與驗收限制，再補 Simulator／Mac 可執行子項。本輪僅完成計畫，產品 gate 不變；Alpha 例外整合尚未核准，PR 維持 Draft。
+- **文件同步**：Task 1 已將根目錄 README 對齊 Sidecar v5、白平衡數值輸入／滴管、有順序的 adjustment brush masks、paint／erase、筆畫 Undo／Redo，以及新舊筆刷共存但不自動轉換的契約；Alpha 摘要連至目前驗收報告並保留實機、輸入裝置與灰卡 `NOT RUN` 邊界。產品程式、測試與 gate 未變，候選仍未進入 `main`。
+- **下一步**：依[文件與 Alpha 整合收尾計畫](../superpowers/plans/2026-10-08-brush-alpha-integration-followup.md) Task 2 補 Simulator 的窄視窗／zoom／Files-open 子項，再進行 Task 3 的 Mac 局部操作與資料保存驗收。Alpha 例外整合尚未核准，PR 維持 Draft。
 
 ## Brush review fixes（2026-10-07；最新有效狀態）
 
