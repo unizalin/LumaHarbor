@@ -285,6 +285,8 @@ class AppViewModelTestCase: XCTestCase {
     func makeServices(
         loadAdjustments: (@Sendable (PhotoAsset) async throws -> PhotoAdjustments)? = nil,
         saveAdjustments: (@Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void)? = nil,
+        loadSnapshots: (@Sendable (PhotoAsset) async throws -> [EditSnapshot])? = nil,
+        saveSnapshots: (@Sendable ([EditSnapshot], PhotoAsset) async throws -> Void)? = nil,
         previewRenderer: (any PreviewRendering)? = nil,
         decoder: (any RawDecoding)? = nil
     ) throws -> AppServices {
@@ -319,6 +321,12 @@ class AppViewModelTestCase: XCTestCase {
             },
             saveAdjustments: saveAdjustments ?? { adjustments, photo in
                 try await libraryService.saveAdjustments(adjustments, for: photo)
+            },
+            loadSnapshots: loadSnapshots ?? { photo in
+                try await libraryService.snapshots(for: photo)
+            },
+            saveSnapshots: saveSnapshots ?? { snapshots, photo in
+                try await libraryService.saveSnapshots(snapshots, for: photo)
             }
         )
     }
@@ -328,7 +336,9 @@ class AppViewModelTestCase: XCTestCase {
             previewScheduler: services.previewScheduler,
             previewRenderer: services.previewRenderer,
             loadAdjustments: services.loadAdjustments,
-            saveAdjustments: services.saveAdjustments
+            saveAdjustments: services.saveAdjustments,
+            loadSnapshots: services.loadSnapshots,
+            saveSnapshots: services.saveSnapshots
         )
     }
 

@@ -1202,9 +1202,11 @@ public final class LibraryViewModel: ObservableObject {
             guard let self, let services else { return }
             let url = photo.url(inLibraryRootedAt: library.rootURL)
 
-            let loaded: Result<PhotoAdjustments, Error>
+            let loaded: Result<(adjustments: PhotoAdjustments, snapshots: [EditSnapshot]), Error>
             do {
-                loaded = .success(try await services.loadAdjustments(photo))
+                let adjustments = try await services.loadAdjustments(photo)
+                let snapshots = try await services.loadSnapshots(photo)
+                loaded = .success((adjustments, snapshots))
             } catch {
                 loaded = .failure(error)
             }
@@ -1219,12 +1221,13 @@ public final class LibraryViewModel: ObservableObject {
                   self.selectedLibraryID == library.id else { return }
 
             switch loaded {
-            case .success(let adjustments):
+            case .success(let loadedPhoto):
                 self.editor.open(
                     photo: photo,
                     sourceURL: url,
-                    adjustments: adjustments,
-                    isReadOnly: !library.isWritable
+                    adjustments: loadedPhoto.adjustments,
+                    isReadOnly: !library.isWritable,
+                    snapshots: loadedPhoto.snapshots
                 )
             case .failure(let error):
                 // Spec §10: a damaged sidecar is reported, never silently
