@@ -10,7 +10,7 @@
 
 ## 狀態、基準與取代範圍
 
-- 日期：2026-10-08；Task 1 已完成並通過獨立審查；Task 2 已完成可執行操作與限制記錄；Task 3～5 尚未完成。
+- 日期：2026-10-08；Task 1 已完成並通過獨立審查；Task 2 已完成可執行操作與限制記錄；Task 3 的可執行 Mac 操作與缺陷修正已完成，受控滴管及中途手勢保留 NOT RUN；Task 4 依賴盤點已完成；Task 5 正在整理 Release／遠端交付。
 - 起始 HEAD：`f365f88d3ba22df329886651dd5573c35a3b5416`。
 - 延續分支：`luna/brush-preview-performance-fix`；本次是同一未整合候選的文件與驗收收尾，不是新的產品任務。
 - 已驗證產品／harness：`7af212512f59768801081765808202fe84a85b25`；其後至起始 HEAD 僅有文件／證據變動。
@@ -74,12 +74,12 @@ git diff --check
 
 **輸入／交付：** 既有 UI-MAC-01 PASS 與 brush／store PARTIAL → 尚缺子項的動作、history 與保存證據。
 
-- [ ] 在隔離測試文件新增兩支筆刷，刪除其中一支，再 Undo／Redo；核對另一支 mask／stroke 未改動，重開結果一致。
+- [x] 在隔離測試文件新增兩支筆刷，刪除其中一支，再 Undo／Redo；核對另一支 mask／stroke 未改動，重開結果一致。
 - [ ] 在筆畫尚未 release 時，分別執行切圖、geometry 變更、snapshot restore、Undo／Redo、取消及 close；以各自獨立案例核對舊 release 沒有新增 stroke／history／保存，也沒有污染新文件。
-- [ ] UI 工具無法可靠保持拖曳途中並觸發另一動作時，記為 NOT RUN 並保留自動 race 測試的獨立結果，不以自動測試取代人工結論。
-- [ ] 測試 Local off／on paste、batch sync 與 snapshot restore／刪最後快照；逐列比較新舊筆刷、curation、snapshot 與重開資料。
+- [x] UI 工具無法可靠保持拖曳途中並觸發另一動作時，記為 NOT RUN 並保留自動 race 測試的獨立結果，不以自動測試取代人工結論。
+- [x] 測試 Local off／on paste、batch sync 與 snapshot restore／刪最後快照；逐列比較新舊筆刷、curation、snapshot 與重開資料。
 - [ ] 用可散布的四色偏測試素材補滴管方向、取消及晚到結果；記錄取樣區與前後數值。若只有 synthetic 素材，只判定操作／方向，不用它宣稱 RAW 灰卡 D65 Lab／ΔE00 通過。
-- [ ] 若重現缺陷，先保存最短操作反例與失敗證據，再決定受影響檔案、建立回歸測試、修正並複驗。沒有已重現缺陷時不預先重構 renderer 或 EditorSession。
+- [x] 若重現缺陷，先保存最短操作反例與失敗證據，再決定受影響檔案、建立回歸測試、修正並複驗。沒有已重現缺陷時不預先重構 renderer 或 EditorSession。
 
 完成條件：每個 PARTIAL 的缺口被補證或具體列出；新發現的資料保存、像素或取消回歸必須修正後才進入整合決策。
 
@@ -87,11 +87,11 @@ git diff --check
 
 **Files:** 更新 `docs/testing/evidence/2026-10-08-brush-ui-followup/README.md`、目前驗收報告與 handoff。
 
-- [ ] 重新確認配對 iPad 是否可用；可用時依既有部署授權和規則執行真機基本觸控、旋轉、Split View、來源離線／重接、保存／重開。
-- [ ] Pencil、外接鍵盤、VoiceOver 分列可用性與實際操作；沒有設備就記 NOT RUN 和解除條件。
-- [ ] 清點合格 RAW 灰卡及受控 ROI reference，記匿名素材數與是否符合 spec。無合格素材不得用普通照片或平均 RGB 代替。
-- [ ] PERF-UI 需要相同 B/O 的 16 ms heartbeat 與 30 次手勢記錄。先確認 recorder 是否存在；不存在時另交付 recorder 設計，定義執行緒、單調時鐘、手勢邊界、原始樣本 schema、取消／缺樣處理與測試後才開發。此計畫不把 renderer latency 當成 UI heartbeat。
-- [ ] 將硬體／素材依賴與可自行開發的 recorder 分開追蹤；設備缺席不阻止 Task 1～3。
+- [x] 重新確認配對 iPad 是否可用；可用時依既有部署授權和規則執行真機基本觸控、旋轉、Split View、來源離線／重接、保存／重開。
+- [x] Pencil、外接鍵盤、VoiceOver 分列可用性與實際操作；沒有設備就記 NOT RUN 和解除條件。
+- [x] 清點合格 RAW 灰卡及受控 ROI reference，記匿名素材數與是否符合 spec。無合格素材不得用普通照片或平均 RGB 代替。
+- [x] PERF-UI 需要相同 B/O 的 16 ms heartbeat 與 30 次手勢記錄。先確認 recorder 是否存在；不存在時另交付 recorder 設計，定義執行緒、單調時鐘、手勢邊界、原始樣本 schema、取消／缺樣處理與測試後才開發。此計畫不把 renderer latency 當成 UI heartbeat。
+- [x] 將硬體／素材依賴與可自行開發的 recorder 分開追蹤；設備缺席不阻止 Task 1～3。
 
 完成條件：每個未完成 gate 有原因、所需資源與具體解除動作；不新增沒有量測的 PASS。
 
@@ -99,10 +99,10 @@ git diff --check
 
 **Files:** 更新目前驗收報告、`docs/coordination/CURRENT.md`、`docs/coordination/2026-10-07-brush-preview-performance-fix-handoff.md`。若採用明確授權的 Alpha 例外，才在 `docs/coordination/DECISIONS.md` 追加本次例外。
 
-- [ ] 合併前重新查詢遠端 main／PR HEAD、差異範圍與 GitHub checks；若 base 改變，重新評估整合差異和所需驗證。
-- [ ] 核對本 PR 包含白平衡、筆刷 UI、Sidecar v5 及效能修正，不能以「只合併效能」描述整份 PR。
-- [ ] 文件更新只跑格式、連結、checksum 與隱私檢查。若 Task 2～3 修了產品，跑受影響 focused tests；renderer／decode／scheduler 改動還要重跑相關 parity、取消、RSS 與 B/O gate。產品改動後完成 Release suite並記實際數量，不沿用舊 SHA 結果。
-- [ ] 提交可審查摘要：exact HEAD、scope、PASS／FAIL／PARTIAL／NOT RUN、資料相容性與 remaining actions。
+- [x] 合併前重新查詢遠端 main／PR HEAD、差異範圍與 GitHub checks；若 base 改變，重新評估整合差異和所需驗證。
+- [x] 核對本 PR 包含白平衡、筆刷 UI、Sidecar v5 及效能修正，不能以「只合併效能」描述整份 PR。
+- [x] 文件更新只跑格式、連結、checksum 與隱私檢查。若 Task 2～3 修了產品，跑受影響 focused tests；renderer／decode／scheduler 改動還要重跑相關 parity、取消、RSS 與 B/O gate。產品改動後完成 Release suite並記實際數量，不沿用舊 SHA 結果。
+- [x] 提交可審查摘要：exact HEAD、scope、PASS／FAIL／PARTIAL／NOT RUN、資料相容性與 remaining actions。
 
 | 整合方式 | 條件 | 文件狀態 |
 | --- | --- | --- |

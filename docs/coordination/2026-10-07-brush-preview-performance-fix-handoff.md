@@ -10,7 +10,8 @@
 
 - Writer：Luna；128×128 follow-up：Sol；worktree owner：本 task 的 Codex workspace。
 - Branch：`luna/brush-preview-performance-fix`。
-- Validated product／harness HEAD：`7af212512f59768801081765808202fe84a85b25`。
+- Performance product／harness HEAD：`7af212512f59768801081765808202fe84a85b25`。
+- Mac snapshot follow-up product HEAD：`5d32550029fd317e377a732fa68b57ec2ff2cf85`。
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`；這是本 task 的相依例外，不表示已整合到 `main`。
@@ -26,6 +27,7 @@
 - `f13de10` — 以當時 candidate SHA 保存 synthetic／RAW/export evidence 與文件。
 - `462b30a` — 保存 agy → Gemini 3.1 Pro High 唯讀審查報告。
 - `7af2125` — 將 coverage tile 對齊固定 128×128，並加入 acceptance contract。
+- `5d32550` — 將 Mac snapshot load/save 接入 AppServices 與照片選取流程，加入重開持久化回歸測試。
 
 主要檔案：
 
@@ -59,9 +61,9 @@ Shared B/O stage wall time（synthetic stress aggregate p50/p95，ms）：
 - 128×128 acceptance contract：預期 RED 後 GREEN；focused Release 31 tests、0 failures。
 - Analyzer unit tests：9/9 PASS。
 - 50-cycle scheduler：55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `49,168,384` bytes，limit `89,735,168` bytes。
-- Full Release suite：2715 tests、22 skipped、0 failures。
-- Mac Debug 前景：`UI-MAC-01` PASS；`UI-MAC-02`、`UI-BRUSH-01`、`UI-BRUSH-02`、`STORE-01` PARTIAL。paint／erase、兩支筆刷切換、size／feather／flow／density、enable/select、單筆畫 Undo/Redo、autosave、close-to-library／reopen 與 4000×6000 16-bit TIFF export 通過。完整紀錄見 [Mac UI summary](../testing/evidence/2026-10-07-brush-preview-performance-fix/mac-ui-manual-summary.txt)。
-- iPad Simulator：`UI-SIM-01` PARTIAL。iPad Pro 11-inch (M4)、iOS 18.6 fresh Debug build／install／launch、直向／橫向、建立 brush、paint、完成筆畫 Undo／Redo、exposure 0.0→0.1 與 terminate／relaunch persistence 通過；accessibility tree 可讀主要 brush controls。窄視窗、0.75x／1x／2x zoom、Files-open、keyboard 與 hands-on VoiceOver 未跑。完整紀錄見 [Simulator UI summary](../testing/evidence/2026-10-07-brush-preview-performance-fix/ipad-simulator-manual-summary.txt)。
+- Full Release suite：snapshot follow-up `5d32550` 後重跑 2716 tests、22 skipped、0 failures；`LibraryViewModelTransitionTests` 13/13、`SnapshotWorkflowTests` 9/9 PASS。
+- Mac Debug 前景：`UI-MAC-01`、`UI-BRUSH-01`、`STORE-01` PASS；`UI-MAC-02`、`UI-BRUSH-02` PARTIAL。除既有 paint／erase、設定、export 外，筆刷 Delete／Undo／Redo／重開、Local off/on paste、batch sync、snapshot restore／持久化／刪除最後快照均通過。修正前 snapshot 重開消失；`5d32550` 接入 sidecar load/save 後，app-level test、Debug build 與 GUI 重開複驗通過。歷史紀錄見 [Mac UI summary](../testing/evidence/2026-10-07-brush-preview-performance-fix/mac-ui-manual-summary.txt)，follow-up 見 [Mac matrix](../testing/evidence/2026-10-08-brush-ui-followup/mac-matrix.md)。
+- iPad Simulator：`UI-SIM-01` PARTIAL。iPad Pro 11-inch (M4)、iOS 18.6 fresh Debug build／install／launch、直向／橫向、Files 選取／Quick Look 後返回、真實 Split View 窄窗、建立 brush、paint、完成筆畫 Undo／Redo、exposure 0.0→0.1 與 terminate／relaunch persistence 通過；accessibility tree 可讀主要 brush controls。Files 直接交件與 app-copy／in-place、精確 0.75x／1x／2x source mapping、keyboard 與 hands-on VoiceOver 未完成。完整紀錄見 [Simulator matrix](../testing/evidence/2026-10-08-brush-ui-followup/simulator-matrix.md)。
 - Artifact checksums：見 `docs/testing/evidence/2026-10-07-brush-preview-performance-fix/README.md`。
 
 ## Independent review
@@ -72,7 +74,7 @@ Mac 文件差異的 Gemini 初審為 `CHANGES_REQUESTED`：`CURRENT.md` 引用�
 
 ## Remaining bounded action
 
-產品、自動驗收、兩輪獨立唯讀 review、目前可執行的 Mac 前景 slice 與 iPad Simulator slice 已收尾，並已建立 Draft PR #2 保存整合候選。下一個 bounded action 是先補 Simulator 的窄視窗／zoom／Files-open 子項；裝置恢復可用時執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣，再補 Mac 的四色滴管方向、中途手勢競態與破壞性 Delete 操作。必要 gate 未完成前維持 Draft；不要修改門檻或 benchmark。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品、自動效能驗收、兩輪獨立唯讀 review、可執行的 Mac follow-up 與 iPad Simulator slice 已收尾，並由 Draft PR #2 保存整合候選。實體 iPad／iPhone 仍 offline；沒有合格灰卡／ROI reference，也沒有 16 ms heartbeat recorder。下一個可自行開發的 bounded action 是按 evidence README 的 schema 實作 recorder 並先測 clock、gesture boundary、缺樣與取消；裝置／受控素材到位後再補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View、四色滴管與灰卡矩陣。中途手勢人工案例需能同時維持 pointer-down 與觸發第二動作的輸入通道。必要 gate 未完成前維持 Draft；不要修改門檻或 benchmark。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
 
 ## 2026-10-08 實作方向補充
 

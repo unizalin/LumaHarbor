@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收與 iPad Simulator slice，並補跑 Files 選取／Quick Look 後返回、真實 Split View 窄窗、paint、autosave 與重啟保存；`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、破壞性刪除操作、中途手勢競態、Files 直接交件、精確 Simulator zoom/source mapping、PERF-UI heartbeat、實體裝置／輸入與灰卡項目。
+本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收與 iPad Simulator slice。Mac follow-up 補齊筆刷 Delete／Undo／Redo、Local off/on paste、batch sync、snapshot restore／刪除，並修正實測發現的快照未持久化缺陷；Simulator 補跑 Files 選取／Quick Look 後返回、真實 Split View 窄窗、paint、autosave 與重啟保存。`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、中途手勢競態、Files 直接交件、精確 Simulator zoom/source mapping、PERF-UI heartbeat、實體裝置／輸入與灰卡項目。
 
 ## 根因與分段數據
 
@@ -33,6 +33,8 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 - `Scripts/analyze-brush-performance-abba.py`：只有 B/O 七段欄位完整且有限時才產生 `PERF-COVERAGE`；不完整舊 artifact 仍 fail closed 為 `NOT RUN`。
 - `Tests/RawProcessingCoreTests/BrushPreviewABBAHarnessTests.swift` 與 analyzer tests：記錄 B/O stage JSON 並驗證完整 coverage matrix。
 - `Tests/RawProcessingCoreTests/BrushMaskRendererTests.swift`：加入 128×128 tile acceptance contract，已先以 256 取得預期 RED，再改為 128 取得 GREEN。
+- `Sources/LumaHarborApp/AppServices.swift`、`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`：將既有快照 sidecar 讀寫接入 Mac App 組裝層，並在照片選取的 generation／cancellation 邊界內載入快照。
+- `Tests/LumaHarborAppTests/LibraryViewModelTransitionTests.swift`：加入建立快照、等待 sidecar、關閉並重開後重新載入的 app-level 回歸測試；先保存預期 RED，再由 `5d32550` 修正為 GREEN。
 
 沒有降低解析度、刪除筆刷點、跳過調整、改 benchmark workload 或放寬門檻。
 
@@ -76,14 +78,14 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 | Analyzer unit tests | PASS，9/9 |
 | 128×128 tile acceptance contract | PASS，RED／GREEN 已保存 |
 | Focused Release tests | PASS，31/31 |
-| Full Release regression | PASS，2715 tests、22 skipped、0 failures |
+| Full Release regression | PASS，`5d32550` 後重跑 2716 tests、22 skipped、0 failures |
 | Gemini 程式／spec 唯讀審查 | `APPROVED_WITH_CONCERNS`；唯一 minor 已由 `7af2125` 解決 |
 | Gemini Mac 文件唯讀審查 | 初審 `CHANGES_REQUESTED`；端到端與 stage total 的來源說明補正後，follow-up=`APPROVED`、無 finding |
 | `UI-MAC-01` 原生數值欄位 | PASS；Enter／blur／Escape／±／reset／非法值／焦點中 Undo/Redo 同步／同值外部 revision 使舊草稿失效均通過 |
 | `UI-MAC-02` 白平衡滴管 | PARTIAL；啟用、單次取樣提交、明確取消通過；四色方向、切圖與晚到結果未跑 |
-| `UI-BRUSH-01` | PARTIAL；paint／erase、兩支筆刷切換、size／feather／flow／density、enable、select、單筆畫 Undo/Redo 與 autosave 通過；Delete 未點擊 |
+| `UI-BRUSH-01` | PASS；paint／erase、兩支筆刷切換、size／feather／flow／density、enable、select、Delete、Undo／Redo、autosave 與重開均通過；刪除一支不改另一支 mask／stroke |
 | `UI-BRUSH-02` | PARTIAL；完成筆畫 Undo/Redo 與 close-to-library／reopen 通過；中途換圖／geometry／snapshot／cancel／close 未手動執行 |
-| `STORE-01` | PARTIAL；paint→原尺寸 TIFF export→close→reopen 通過；Local paste、batch／snapshot、刪最後快照未跑 |
+| `STORE-01` | PASS；paint→原尺寸 TIFF export→close→reopen、Local off/on paste、batch sync、snapshot restore、快照寫入／重開、刪除最後快照／重開均通過；快照接線缺陷已修正並加入回歸測試 |
 | `PERF-UI` | NOT RUN；沒有 16 ms heartbeat 與 30 次 B/O UI gesture recorder |
 | `UI-SIM-01` | PARTIAL；fresh build／install／launch、直向／橫向、Files 選取／Quick Look 後返回、真實 Split View 窄窗、筆刷 paint、完成筆畫 Undo／Redo、曝光變更、autosave 與 relaunch persistence 通過；Files 直接交件、app-copy／in-place、精確 0.75x／1x／2x source mapping、鍵盤與 hands-on VoiceOver 未完成 |
 | `UI-DEVICE-01`／`UI-INPUT-01` | NOT RUN；CoreDevice 中 iPad／iPhone 均為 unavailable |
@@ -93,9 +95,9 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 
 ## Mac 前景驗收
 
-Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`Debug`，平台為 macOS 26.7.1 arm64／Xcode 26.6；候選產品 SHA=`7af2125`。同機另有已安裝版程序，因此已排除其早期 smoke 觀察，所有正式結果都在精確 app bundle 路徑與暫存 RAW 副本上重跑。
+Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`Debug`，平台為 macOS 26.7.1 arm64／Xcode 26.6；原效能候選 SHA=`7af2125`，snapshot follow-up SHA=`5d32550`。同機另有已安裝版程序，因此已排除其早期 smoke 觀察，所有正式結果都在精確 app bundle 路徑與暫存 RAW 副本上重跑。
 
-數值欄位各種提交／取消路徑與 Undo 粒度通過。調整筆刷 sidecar 實際保存兩支 mask；第一支依序保存 paint、erase 兩筆，Undo 只移除 erase、Redo 恢復 erase，切換第二支再切回時 exposure 狀態沒有串線。回到相片庫再重開仍保留 masks／strokes；前景匯出產生 4000×6000、16-bit TIFF，沒有降解析度。完整逐項紀錄見 [`mac-ui-manual-summary.txt`](../evidence/2026-10-07-brush-preview-performance-fix/mac-ui-manual-summary.txt)。
+數值欄位各種提交／取消路徑與 Undo 粒度通過。調整筆刷 sidecar 實際保存兩支 mask；第一支依序保存 paint、erase 兩筆，Undo 只移除 erase、Redo 恢復 erase，切換第二支再切回時 exposure 狀態沒有串線。Task 3 follow-up 另確認刪除第二支、Undo／Redo 與重開都不改第一支；Local off 不覆蓋目標筆刷，Local on 與 batch sync 依序複製兩支筆刷。Snapshot restore 在同一工作階段通過，但首次重開發現快照消失；最短反例確認 Mac 組裝層沒有接入已存在的快照讀寫。`5d32550` 修正後，建立快照會寫入 sidecar、重開可載回，刪除唯一快照後重開仍為空。前景匯出產生 4000×6000、16-bit TIFF，沒有降解析度。歷史 slice 見 [`mac-ui-manual-summary.txt`](../evidence/2026-10-07-brush-preview-performance-fix/mac-ui-manual-summary.txt)，follow-up 逐列紀錄見 [`mac-matrix.md`](../evidence/2026-10-08-brush-ui-followup/mac-matrix.md)。
 
 ## iPad Simulator slice
 
@@ -111,4 +113,4 @@ Task 2 follow-up 另從 Files 選取測試 RAW；檔案先進入 Quick Look，�
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 前景 slice，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成；branch 已推送既有候選並建立 Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2)，本輪新增文件尚未推送，遠端 `main` 尚未變動。下一個 bounded action 是依 follow-up 計畫 Task 3 補 Mac 的兩筆刷 Delete／Undo／Redo、Local paste／batch／snapshot、四色滴管方向與可操作的中途手勢案例。Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker；裝置恢復可用後再執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View。具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣。必要 gate 未完成前維持 Draft。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成。Mac 筆刷功能與資料保存 gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference，也沒有 16 ms heartbeat recorder。下一個 bounded action 是先依證據 README 的 schema 實作與驗證 PERF-UI recorder，或在裝置／四色與灰卡素材到位後補對應矩陣。Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker。必要 gate 未完成前維持 Draft；遠端 `main` 尚未變動。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
