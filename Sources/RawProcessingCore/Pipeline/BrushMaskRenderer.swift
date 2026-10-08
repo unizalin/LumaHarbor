@@ -105,6 +105,7 @@ private final class RasterCancellationState: @unchecked Sendable {
 public enum BrushMaskRenderer {
     public enum Error: Swift.Error, Equatable, Sendable { case renderFailed }
     public typealias CancellationCheck = @Sendable () throws -> Void
+    internal static let coverageTileSize = 128
 
     public static func apply(
         _ masks: [BrushMask],
@@ -513,7 +514,7 @@ public enum BrushMaskRenderer {
             }
         }
 
-        let tileSize = 256
+        let tileSize = coverageTileSize
         let tileColumns = (width + tileSize - 1) / tileSize
         let tileRows = (height + tileSize - 1) / tileSize
         guard tileColumns > 0, tileRows > 0, tileColumns <= Int.max / tileRows else {

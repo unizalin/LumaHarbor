@@ -24,6 +24,10 @@ final class BrushMaskRendererTests: XCTestCase {
         return (bytes[0], bytes[1], bytes[2], bytes[3])
     }
 
+    func testCoverageTileSizeMatchesAcceptanceSpec() {
+        XCTAssertEqual(BrushMaskRenderer.coverageTileSize, 128)
+    }
+
     func testCoverageRejectsExtentAtUnrepresentableIntegerBoundary() throws {
         let mask = BrushMask(
             strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.5, y: 0.5)])],
