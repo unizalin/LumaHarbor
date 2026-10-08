@@ -73,3 +73,7 @@ Mac 文件差異的 Gemini 初審為 `CHANGES_REQUESTED`：`CURRENT.md` 引用�
 ## Remaining bounded action
 
 產品、自動驗收、兩輪獨立唯讀 review、目前可執行的 Mac 前景 slice 與 iPad Simulator slice 已收尾，並已建立 Draft PR #2 保存整合候選。下一個 bounded action 是先補 Simulator 的窄視窗／zoom／Files-open 子項；裝置恢復可用時執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣，再補 Mac 的四色滴管方向、中途手勢競態與破壞性 Delete 操作。必要 gate 未完成前維持 Draft；不要修改門檻或 benchmark。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+
+## 2026-10-08 實作方向補充
+
+使用者要求先寫實作方向。已新增[文件同步、操作驗收與 Alpha 整合計畫](../superpowers/plans/2026-10-08-brush-alpha-integration-followup.md)，取代上節剩餘工作的執行順序；不取代既有驗收門檻或測試結果。起始 HEAD=`f365f88d3ba22df329886651dd5573c35a3b5416`，本次僅 plan／coordination 變更。下一步為 Task 1 更新根目錄 README（目前仍寫 v4，候選程式為 v5），再補 Simulator／Mac 子項。是否採用 Alpha 例外合併在具體結果齊備後決定，目前沒有授權 merge main。
