@@ -10,7 +10,7 @@
 
 ## 狀態、基準與取代範圍
 
-- 日期：2026-10-08；本文件狀態：SPEC ONLY，以下執行項目尚未完成。
+- 日期：2026-10-08；Task 1 已完成並通過獨立審查；Task 2～5 尚未完成。
 - 起始 HEAD：`f365f88d3ba22df329886651dd5573c35a3b5416`。
 - 延續分支：`luna/brush-preview-performance-fix`；本次是同一未整合候選的文件與驗收收尾，不是新的產品任務。
 - 已驗證產品／harness：`7af212512f59768801081765808202fe84a85b25`；其後至起始 HEAD 僅有文件／證據變動。
@@ -37,11 +37,11 @@
 
 **輸入／交付：** 現有程式與報告 → 正確描述目前分支能力、限制及驗收入口的 README。
 
-- [ ] 將 Sidecar v4 功能條目改為 v5；說明保留中繼資料、curation、snapshots，並新增有順序的 adjustment brush masks。舊版讀取能力以現有測試為準，不宣稱舊 App 可完整保存 v5。
-- [ ] 補上白平衡數值輸入／滴管、paint／erase、筆刷 Undo／Redo；說明舊筆刷與新調整筆刷共存，不宣稱自動轉換。
-- [ ] 保留「發布前 Alpha」；新增驗收摘要連結，明列自動效能通過、Mac／Simulator 部分完成、實機／輸入／灰卡尚待驗收。benchmark 數據連到報告，避免複製多套數字。
-- [ ] README 建議文案：「目前為發布前 Alpha。筆刷效能與自動回歸已通過；Mac 與 iPad 模擬器已完成部分操作驗收，實體 iPad、輸入裝置與灰卡色彩仍待驗證。完整結果見驗收報告。」
-- [ ] 檢查相對連結存在、版本與程式一致、沒有把候選寫成已進 main。
+- [x] 將 Sidecar v4 功能條目改為 v5；說明保留中繼資料、curation、snapshots，並新增有順序的 adjustment brush masks。舊版讀取能力以現有測試為準，不宣稱舊 App 可完整保存 v5。
+- [x] 補上白平衡數值輸入／滴管、paint／erase、筆刷 Undo／Redo；說明舊筆刷與新調整筆刷共存，不宣稱自動轉換。
+- [x] 保留「發布前 Alpha」；新增驗收摘要連結，明列自動效能通過、Mac／Simulator 部分完成、實機／輸入／灰卡尚待驗收。benchmark 數據連到報告，避免複製多套數字。
+- [x] README 建議文案：「目前為發布前 Alpha。筆刷效能與自動回歸已通過；Mac 與 iPad 模擬器已完成部分操作驗收，實體 iPad、輸入裝置與灰卡色彩仍待驗證。完整結果見驗收報告。」
+- [x] 檢查相對連結存在、版本與程式一致、沒有把候選寫成已進 main。
 
 驗證命令：
 
@@ -120,4 +120,3 @@ git diff --check
 順序：Task 1 → Task 2 → Task 3 → Task 4 → Task 5。先完成可直接執行的工作，再提出有具體結果的整合決策；不用等實機才能更新 README 或跑 Simulator。
 
 本次交付僅為計畫與 coordination 索引。下一個有界動作是 **Task 1：更新根目錄 README 的 Sidecar v5、白平衡／筆刷能力與 Alpha 驗收限制**。沒有新增測試結果、沒有改變 READY 判定，也沒有授權 main 合併。
-
