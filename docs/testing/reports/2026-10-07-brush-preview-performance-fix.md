@@ -113,4 +113,4 @@ Task 2 follow-up 另從 Files 選取測試 RAW；檔案先進入 Quick Look，�
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成。Mac 筆刷功能與資料保存 gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference，也沒有 16 ms heartbeat recorder。下一個 bounded action 是先依證據 README 的 schema 實作與驗證 PERF-UI recorder，或在裝置／四色與灰卡素材到位後補對應矩陣。Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker。必要 gate 未完成前維持 Draft；遠端 `main` 尚未變動。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成並推送既有候選分支。Mac 筆刷功能與資料保存 gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference，也沒有 16 ms heartbeat recorder。下一個 bounded action 是先依證據 README 的 schema 實作與驗證 PERF-UI recorder，或在裝置／四色與灰卡素材到位後補對應矩陣。Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker。必要 gate 未完成前維持 Draft；遠端 `main` 尚未變動。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
