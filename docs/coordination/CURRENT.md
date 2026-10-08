@@ -2,14 +2,15 @@
 
 ## Brush preview performance fix（2026-10-08；最新有效狀態）
 
-- **狀態**：`DONE_WITH_CONCERNS`。7 個效能 FAIL 已由兩個根因修正：warm RAW decoded-preview cache，以及 bounded brush coverage／mask fan-out。Gemini 唯一提出的 256×256／128×128 規格落差已由 Sol 對齊；synthetic stress、B/O `PERF-COVERAGE`、真實 RAW warm preview、original-size export、preview/export memory、pixel parity、cancellation 與 50-cycle worker convergence 均已通過。剩餘限制只有 UI／實體裝置人工 gate。
+- **狀態**：`DONE_WITH_CONCERNS`。7 個效能 FAIL 已由兩個根因修正：warm RAW decoded-preview cache，以及 bounded brush coverage／mask fan-out。Gemini 唯一提出的 256×256／128×128 規格落差已由 Sol 對齊；synthetic stress、B/O `PERF-COVERAGE`、真實 RAW warm preview、original-size export、preview/export memory、pixel parity、cancellation 與 50-cycle worker convergence 均已通過。Mac 前景可執行 slice 已補跑；實體裝置、輸入、heartbeat、灰卡與部分人工競態仍保留。
 - **工作樹／版本**：branch `luna/brush-preview-performance-fix`，獨立 task-scoped worktree。validated product／harness HEAD=`7af212512f59768801081765808202fe84a85b25`；base=`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`；延續候選父版本=`eae30121ec7ef089b4a048a50151993c205e2686`，不代表已整合。
 - **產品修正**：`b640823` 加入互斥 stage interval union 與 bounded decoded-preview cache；`26e7358` 加入 bounded tile raster、repeated-geometry coverage reuse、bounded mask fan-out、cancellation join 與 scalar oracle；`f97760a` 補上 B/O 共享 stage coverage gate 與 baseline test-only observer；`7af2125` 將 tile 對齊固定 128×128 並加入 acceptance contract。沒有降低解析度、刪除筆刷點、跳過調整或放寬門檻。
 - **根因／數據**：128×128 follow-up 的 synthetic stress coverage raster 為 O `8.801/10.111` ms（1 mask）與 `64.776/74.801` ms（10 masks），total wall time 為 `12.084/13.337` 與 `70.779/81.143 ms`（合併兩輪 p50/p95）；RAW warm O 的 0／1／10 masks 為 `36.285/39.805`、`39.560/49.993`、`56.002/61.015 ms`。
-- **證據**：[效能修正驗收報告](../testing/reports/2026-10-07-brush-preview-performance-fix.md)、[原始 evidence 與 checksum](../testing/evidence/2026-10-07-brush-preview-performance-fix/README.md)、[本輪 handoff](2026-10-07-brush-preview-performance-fix-handoff.md)。公開 artifact 已掃描，沒有私人路徑。
+- **證據**：[效能修正驗收報告](../testing/reports/2026-10-07-brush-preview-performance-fix.md)、[原始 evidence、Mac 前景摘要與 checksum](../testing/evidence/2026-10-07-brush-preview-performance-fix/README.md)、[本輪 handoff](2026-10-07-brush-preview-performance-fix-handoff.md)。公開 artifact 已掃描，沒有私人路徑。
 - **回歸**：完整 Release suite `2715 executed、22 skipped、0 failures`；focused renderer／cancellation／oracle 31/31 PASS；analyzer 9/9 PASS；50-cycle `55/55` worker join、active 0、settled RSS `49,168,384` bytes（limit `89,735,168`）PASS。
 - **獨立 review**：agy → Gemini 3.1 Pro High 已完成唯讀審查，Verdict=`APPROVED_WITH_CONCERNS`，無 blocking finding；唯一 minor 已由 `7af2125` 的 128×128 對齊與全套回歸解決。詳見 [Gemini review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)。
-- **下一步**：有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate；若要整合，先做最後唯讀 diff review，再依共用 Git 流程處理。未 push、merge、rebase 或修改其他 worktree。
+- **Mac 前景**：`UI-MAC-01` PASS；`UI-MAC-02`、`UI-BRUSH-01`、`UI-BRUSH-02`、`STORE-01` PARTIAL。paint／erase、兩支筆刷切換、設定、enable/select、單筆畫 Undo/Redo、autosave、close-to-library／reopen 與原尺寸 TIFF export 已通過；破壞性 Delete、四色滴管方向與中途手勢競態未跑。
+- **下一步**：裝置可用後補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View；具備 heartbeat recorder 與合格灰卡後補 `PERF-UI` 30 次 B/O 手勢與灰卡矩陣，再補 Mac 尚缺的人工子項。若要整合，先做最後唯讀 diff review，再依共用 Git 流程處理。未 push、merge、rebase 或修改其他 worktree。
 
 ## Brush review fixes（2026-10-07；最新有效狀態）
 

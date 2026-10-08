@@ -4,7 +4,7 @@
 
 `DONE_WITH_CONCERNS`
 
-原驗收矩陣的 7 個效能 FAIL 已完成程式修正與自動驗收。`PERF-COVERAGE` 已由 NOT RUN 解除為 B/O 共同 stage clock 的 4/4 PASS。Gemini 唯讀審查的唯一 minor 已由 Sol 完成 128×128 tile 對齊與全套回歸；UI 與實體裝置人工 gate 尚未執行，因此保留 `DONE_WITH_CONCERNS`。
+原驗收矩陣的 7 個效能 FAIL 已完成程式修正與自動驗收。`PERF-COVERAGE` 已由 NOT RUN 解除為 B/O 共同 stage clock 的 4/4 PASS。Gemini 唯讀審查的唯一 minor 已由 Sol 完成 128×128 tile 對齊與全套回歸；Mac 前景可執行 slice 已補跑，但實體裝置、輸入、heartbeat、灰卡與部分人工競態仍未完成，因此保留 `DONE_WITH_CONCERNS`。
 
 ## Git state
 
@@ -59,6 +59,7 @@ Shared B/O stage wall time（synthetic stress aggregate p50/p95，ms）：
 - Analyzer unit tests：9/9 PASS。
 - 50-cycle scheduler：55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `49,168,384` bytes，limit `89,735,168` bytes。
 - Full Release suite：2715 tests、22 skipped、0 failures。
+- Mac Debug 前景：`UI-MAC-01` PASS；`UI-MAC-02`、`UI-BRUSH-01`、`UI-BRUSH-02`、`STORE-01` PARTIAL。paint／erase、兩支筆刷切換、size／feather／flow／density、enable/select、單筆畫 Undo/Redo、autosave、close-to-library／reopen 與 4000×6000 16-bit TIFF export 通過。完整紀錄見 [Mac UI summary](../testing/evidence/2026-10-07-brush-preview-performance-fix/mac-ui-manual-summary.txt)。
 - Artifact checksums：見 `docs/testing/evidence/2026-10-07-brush-preview-performance-fix/README.md`。
 
 ## Independent review
@@ -67,4 +68,4 @@ agy → Gemini 3.1 Pro High 已完成 sanitized read-only review，Verdict=`APPR
 
 ## Remaining bounded action
 
-產品、自動驗收與獨立唯讀審查已收尾。下一個 bounded action 是有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate；若準備整合，先由非原作者唯讀檢查 `7af2125` 之後的文件差異，再依共用 Git 流程處理。不要修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品、自動驗收、獨立唯讀審查與目前可執行的 Mac 前景 slice 已收尾。下一個 bounded action 是裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View；具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣，再補 Mac 的四色滴管方向、中途手勢競態與破壞性 Delete 操作。若準備整合，先由非原作者唯讀檢查 `7af2125` 之後的文件差異，再依共用 Git 流程處理。不要修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。

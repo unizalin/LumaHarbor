@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成，`DONE_WITH_CONCERNS` 僅保留 UI／實體裝置人工驗收尚未執行的限制。
+本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收；`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、破壞性刪除操作、中途手勢競態、PERF-UI heartbeat、Simulator／實體裝置／輸入與灰卡項目。
 
 ## 根因與分段數據
 
@@ -76,9 +76,23 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 | Focused Release tests | PASS，31/31 |
 | Full Release regression | PASS，2715 tests、22 skipped、0 failures |
 | Gemini 唯讀審查 | `APPROVED_WITH_CONCERNS`；唯一 minor 已由 `7af2125` 解決 |
-| UI／Mac 前景／實體 iPad／Pencil／VoiceOver／灰卡 | NOT RUN |
+| `UI-MAC-01` 原生數值欄位 | PASS；Enter／blur／Escape／±／reset／非法值／焦點中 Undo/Redo 同步／同值外部 revision 使舊草稿失效均通過 |
+| `UI-MAC-02` 白平衡滴管 | PARTIAL；啟用、單次取樣提交、明確取消通過；四色方向、切圖與晚到結果未跑 |
+| `UI-BRUSH-01` | PARTIAL；paint／erase、兩支筆刷切換、size／feather／flow／density、enable、select、單筆畫 Undo/Redo 與 autosave 通過；Delete 未點擊 |
+| `UI-BRUSH-02` | PARTIAL；完成筆畫 Undo/Redo 與 close-to-library／reopen 通過；中途換圖／geometry／snapshot／cancel／close 未手動執行 |
+| `STORE-01` | PARTIAL；paint→原尺寸 TIFF export→close→reopen 通過；Local paste、batch／snapshot、刪最後快照未跑 |
+| `PERF-UI` | NOT RUN；沒有 16 ms heartbeat 與 30 次 B/O UI gesture recorder |
+| `UI-SIM-01` | NOT RUN |
+| `UI-DEVICE-01`／`UI-INPUT-01` | NOT RUN；CoreDevice 中 iPad／iPhone 均為 unavailable |
+| 灰卡色彩 gate | NOT RUN；未找到合格 RAW 灰卡與受控 ROI reference |
 
 `PERF-COVERAGE` 不再是 NOT RUN；RAW/export harness 沒有把 stage coverage 反推成 gate，仍以其自身的 total wall-time、RSS 與 published-file checks 驗收。
+
+## Mac 前景驗收
+
+Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`Debug`，平台為 macOS 26.7.1 arm64／Xcode 26.6；候選產品 SHA=`7af2125`。同機另有已安裝版程序，因此已排除其早期 smoke 觀察，所有正式結果都在精確 app bundle 路徑與暫存 RAW 副本上重跑。
+
+數值欄位各種提交／取消路徑與 Undo 粒度通過。調整筆刷 sidecar 實際保存兩支 mask；第一支依序保存 paint、erase 兩筆，Undo 只移除 erase、Redo 恢復 erase，切換第二支再切回時 exposure 狀態沒有串線。回到相片庫再重開仍保留 masks／strokes；前景匯出產生 4000×6000、16-bit TIFF，沒有降解析度。完整逐項紀錄見 [`mac-ui-manual-summary.txt`](../evidence/2026-10-07-brush-preview-performance-fix/mac-ui-manual-summary.txt)。
 
 ## 可重現驗證
 
@@ -86,4 +100,4 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收與獨立唯讀 code／spec review 已完成。下一個 bounded action 是在有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate；程式面若要整合，先由另一個帳號唯讀確認 `7af2125` 之後的文件差異，再依共用 Git 流程處理。未經使用者另行授權，不 push、merge、rebase 或修改其他 worktree。
+產品效能修正、自動驗收、獨立唯讀 code／spec review 與目前可執行的 Mac 前景 slice 已完成。下一個 bounded action 是在裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，並在具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣；Mac 剩餘的四色滴管方向、中途手勢競態與破壞性 Delete 操作也要分列補證。程式面若要整合，先由另一個帳號唯讀確認 `7af2125` 之後的文件差異，再依共用 Git 流程處理。未經使用者另行授權，不 push、merge、rebase 或修改其他 worktree。

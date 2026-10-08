@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress 與真實 RAW／original-size export 原始 JSONL、gate JSON 與 checksum。`DONE_WITH_CONCERNS` 只表示 UI／實體裝置人工驗收尚未執行；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
+本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress、真實 RAW／original-size export 原始 JSONL、gate JSON、Mac 前景人工摘要與 checksum。`DONE_WITH_CONCERNS` 表示 Mac 已完成可執行 slice，但實體裝置、輸入、heartbeat、灰卡與部分手動競態仍未完成；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
 
 ## 版本與環境
 
@@ -82,6 +82,17 @@ swift test -c release
 - Focused regression：31 tests、0 failures；repeated-geometry paint／erase scalar oracle max R8 byte error `0`；128×128 acceptance contract PASS。
 - Full Release suite：2715 tests、22 skipped、0 failures。
 
+### Mac 前景人工 slice
+
+- Debug app 綁定本 worktree 的精確 bundle 路徑；macOS 26.7.1 arm64、Xcode 26.6。另有已安裝版同名程序，已排除其早期 smoke 觀察後重跑正式步驟。
+- `UI-MAC-01` PASS：Enter、blur、Escape、±、reset、非法值、焦點中的 Undo／Redo 同步，以及同值外部 revision 使舊草稿失效均通過。
+- `UI-MAC-02` PARTIAL：滴管啟用、單次取樣提交與明確取消通過；受控四色方向、切圖與晚到結果未跑。
+- `UI-BRUSH-01` PARTIAL：paint／erase、兩支筆刷切換、size／feather／flow／density、enable/select、單步 Undo／Redo 與 autosave 通過；Delete 未執行。
+- `UI-BRUSH-02` PARTIAL：完成筆畫 Undo／Redo 與 close-to-library／reopen 通過；中途競態未手動執行。
+- `STORE-01` PARTIAL：前景原尺寸 16-bit TIFF 匯出為 4000×6000、144,013,192 bytes，重開保存通過；其餘 clipboard／batch／snapshot 子項未跑。
+- `PERF-UI`、Simulator、實體裝置／輸入與灰卡維持 NOT RUN。CoreDevice 的相關 iPad／iPhone 均 unavailable；fixture inventory 沒有可識別的合格灰卡。
+- 詳細步驟與邊界見 `mac-ui-manual-summary.txt`。
+
 ## Artifact checksum
 
 | 檔案 | SHA-256 |
@@ -91,5 +102,6 @@ swift test -c release
 | `raw-export-samples.jsonl` | `e25b61a8f844e2df94dda1bb1e9c0045c01a983a1600bbcb302fb59cf1488e27` |
 | `raw-export-gates.json` | `1648821519d3d45e21bcf830b530da2f031ce8ea2d1c914992d3d13e0c3da103` |
 | `verification-summary.txt` | `3c4d813d9466b5eb3e2859383bad46c5bc0d9882a30bf5c08374275aa2a4b87d` |
+| `mac-ui-manual-summary.txt` | `368e231192e184880e5b85d20200e0504bdf475682f1e1a05f810aa9da2b575d` |
 
 `verification-summary.txt` 另保存 128×128 合約的 RED／GREEN、focused regression、50-cycle 與完整 Release suite 的命令、exit code 與摘要。
