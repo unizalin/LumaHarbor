@@ -103,4 +103,4 @@ Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`D
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、兩輪獨立唯讀 review 與目前可執行的 Mac 前景 slice 已完成。下一個 bounded action 是在裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，並在具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣；Mac 剩餘的四色滴管方向、中途手勢競態與破壞性 Delete 操作也要分列補證。若要整合，再依共用 Git 流程處理。未經使用者另行授權，不 push、merge、rebase 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review 與目前可執行的 Mac 前景 slice 已完成；branch 已推送並建立 Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2)，遠端 `main` 尚未變動。下一個 bounded action 是在裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View，並在具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣；Mac 剩餘的四色滴管方向、中途手勢競態與破壞性 Delete 操作也要分列補證。必要 gate 未完成前維持 Draft。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。

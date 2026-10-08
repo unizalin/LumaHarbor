@@ -10,7 +10,8 @@
 - **回歸**：完整 Release suite `2715 executed、22 skipped、0 failures`；focused renderer／cancellation／oracle 31/31 PASS；analyzer 9/9 PASS；50-cycle `55/55` worker join、active 0、settled RSS `49,168,384` bytes（limit `89,735,168`）PASS。
 - **獨立 review**：程式／spec 的 agy → Gemini 3.1 Pro High 唯讀審查為 `APPROVED_WITH_CONCERNS`，唯一 minor 已由 `7af2125` 的 128×128 對齊與全套回歸解決。Mac 文件差異初審為 `CHANGES_REQUESTED`，指出端到端與 stage total 的來源未分開說明；數據邊界補正後，follow-up=`APPROVED`、無 finding。詳見 [程式／spec review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)與 [Mac 文件 review](../testing/reports/2026-10-08-brush-preview-performance-fix-mac-ui-gemini-review.md)。
 - **Mac 前景**：`UI-MAC-01` PASS；`UI-MAC-02`、`UI-BRUSH-01`、`UI-BRUSH-02`、`STORE-01` PARTIAL。paint／erase、兩支筆刷切換、設定、enable/select、單筆畫 Undo/Redo、autosave、close-to-library／reopen 與原尺寸 TIFF export 已通過；破壞性 Delete、四色滴管方向與中途手勢競態未跑。
-- **下一步**：待裝置可用時補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View；具備 heartbeat recorder 與合格灰卡後補 `PERF-UI` 30 次 B/O 手勢與灰卡矩陣，再補 Mac 尚缺的人工子項。若要整合，依共用 Git 流程處理。未 push、merge、rebase 或修改其他 worktree。
+- **整合候選**：branch 已推送至 `origin/luna/brush-preview-performance-fix`，Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 為 OPEN／CLEAN；GitHub 未回報 checks。遠端 `main` 仍為 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319`，尚未 merge 或 rebase。
+- **下一步**：待裝置可用時補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View；具備 heartbeat recorder 與合格灰卡後補 `PERF-UI` 30 次 B/O 手勢與灰卡矩陣，再補 Mac 尚缺的人工子項。完成必要 gate 後再把 Draft PR 轉為 ready；未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
 
 ## Brush review fixes（2026-10-07；最新有效狀態）
 
