@@ -8,7 +8,8 @@
 - **根因／數據**：synthetic stress 的 coverage raster 由 B/O `173.879/176.316` ms（1 mask）與 `1736.591/1755.055` ms（10 masks）降至 O `8.871/10.395` 與 `62.821/65.111` ms（p50/p95）；RAW warm O 的 0／1／10 masks 為 `34.636/39.790`、`37.048/42.379`、`55.097/67.036 ms`。
 - **證據**：[效能修正驗收報告](../testing/reports/2026-10-07-brush-preview-performance-fix.md)、[原始 evidence 與 checksum](../testing/evidence/2026-10-07-brush-preview-performance-fix/README.md)、[本輪 handoff](2026-10-07-brush-preview-performance-fix-handoff.md)。公開 artifact 已掃描，沒有私人路徑。
 - **回歸**：完整 Release suite `2714 executed、22 skipped、0 failures`；focused renderer／cancellation／oracle 30/30 PASS；analyzer 9/9 PASS；50-cycle `55/55` worker join、active 0 與 settled RSS gate PASS。
-- **下一步**：另一個帳號做一次唯讀 spec／code review；有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate。未 push、merge、rebase 或修改其他 worktree。
+- **獨立 review**：agy → Gemini 3.1 Pro High 已完成唯讀審查，Verdict=`APPROVED_WITH_CONCERNS`，無 blocking finding；唯一 minor 是 spec 指定 128×128 tile，而實作為 256×256。詳見 [Gemini review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)。
+- **下一步**：先決定是否把 tile size 對齊回 128；若要修正，交給 Sol 做 bounded follow-up 並重跑 parity／效能／RSS／cancellation gates。有設備時再補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate。未 push、merge、rebase 或修改其他 worktree。
 
 ## Brush review fixes（2026-10-07；最新有效狀態）
 

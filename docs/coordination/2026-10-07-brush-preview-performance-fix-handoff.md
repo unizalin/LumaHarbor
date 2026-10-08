@@ -58,6 +58,10 @@ Shared B/O stage wall time（synthetic stress aggregate p50/p95，ms）：
 - Full Release suite：2714 tests、22 skipped、0 failures。
 - Artifact checksums：見 `docs/testing/evidence/2026-10-07-brush-preview-performance-fix/README.md`。
 
+## Independent review
+
+agy → Gemini 3.1 Pro High 已完成 sanitized read-only review，Verdict=`APPROVED_WITH_CONCERNS`，無 blocking finding。唯一 minor 是 spec 指定第一版固定 128×128 tile，但實作為 256×256；完整審查結果見 [Gemini review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)。
+
 ## Remaining bounded action
 
-只需另一個帳號做唯讀 code／spec review；有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate。不要再修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+先決定是否接受 256×256 作為實作調整；若不接受，交給 Sol 只做 tile-size 對齊並重跑 pixel parity、synthetic stress、RSS、cancellation 與 full Release gates。有設備時補 Mac 前景、實體 iPad／Pencil、VoiceOver、灰卡等人工 gate。不要修改門檻或 benchmark。未經使用者另行授權，不 push、merge、rebase、刪除 branch/worktree 或修改其他 worktree。
