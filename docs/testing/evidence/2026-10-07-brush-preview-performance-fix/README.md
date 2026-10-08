@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress、真實 RAW／original-size export 原始 JSONL、gate JSON、Mac 前景人工摘要與 checksum。`DONE_WITH_CONCERNS` 表示 Mac 已完成可執行 slice，但實體裝置、輸入、heartbeat、灰卡與部分手動競態仍未完成；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
+本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress、真實 RAW／original-size export 原始 JSONL、gate JSON、Mac 前景人工摘要、iPad Simulator 人工摘要與 checksum。`DONE_WITH_CONCERNS` 表示 Mac 與 Simulator 已完成可執行 slice，但實體裝置、輸入、heartbeat、灰卡與部分手動競態仍未完成；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
 
 ## 版本與環境
 
@@ -93,8 +93,9 @@ swift test -c release
 - `UI-BRUSH-01` PARTIAL：paint／erase、兩支筆刷切換、size／feather／flow／density、enable/select、單步 Undo／Redo 與 autosave 通過；Delete 未執行。
 - `UI-BRUSH-02` PARTIAL：完成筆畫 Undo／Redo 與 close-to-library／reopen 通過；中途競態未手動執行。
 - `STORE-01` PARTIAL：前景原尺寸 16-bit TIFF 匯出為 4000×6000、144,013,192 bytes，重開保存通過；其餘 clipboard／batch／snapshot 子項未跑。
-- `PERF-UI`、Simulator、實體裝置／輸入與灰卡維持 NOT RUN。CoreDevice 的相關 iPad／iPhone 均 unavailable；fixture inventory 沒有可識別的合格灰卡。
-- 詳細步驟與邊界見 `mac-ui-manual-summary.txt`。
+- `UI-SIM-01` PARTIAL：iPad Pro 11-inch (M4)、iOS 18.6 Simulator 的 fresh Debug build／install／launch、直向與橫向、建立一支 adjustment brush、paint、完成筆畫 Undo／Redo、局部曝光 0.0→0.1，以及 terminate／relaunch 後保存均通過；accessibility tree 具備主要筆刷控制的 label／role／value。窄視窗、0.75x／1x／2x zoom、Files-open flow、鍵盤與 hands-on VoiceOver 未跑。
+- `PERF-UI`、實體裝置／Pencil／鍵盤／VoiceOver 與灰卡維持 NOT RUN。CoreDevice 的相關 iPad／iPhone 均 unavailable；fixture inventory 沒有可識別的合格灰卡。
+- 詳細步驟與邊界見 `mac-ui-manual-summary.txt` 與 `ipad-simulator-manual-summary.txt`。
 
 ## Artifact checksum
 
@@ -106,6 +107,7 @@ swift test -c release
 | `raw-export-gates.json` | `1648821519d3d45e21bcf830b530da2f031ce8ea2d1c914992d3d13e0c3da103` |
 | `verification-summary.txt` | `3c4d813d9466b5eb3e2859383bad46c5bc0d9882a30bf5c08374275aa2a4b87d` |
 | `mac-ui-manual-summary.txt` | `368e231192e184880e5b85d20200e0504bdf475682f1e1a05f810aa9da2b575d` |
+| `ipad-simulator-manual-summary.txt` | `9eb21384cb643c2b1fa97131ceacf8174d74ec8caeeef5941755f97cfa86c268` |
 
 `verification-summary.txt` 另保存 128×128 合約的 RED／GREEN、focused regression、50-cycle 與完整 Release suite 的命令、exit code 與摘要。
 
