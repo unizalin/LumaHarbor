@@ -10,6 +10,14 @@
 
 `APPROVED_WITH_CONCERNS`
 
+## Follow-up resolution
+
+`RESOLVED`（2026-10-08）
+
+Sol 以 TDD 處理唯一 minor：先加入 `BrushMaskRenderer.coverageTileSize == 128` acceptance contract，確認原本 256 會產生預期 RED，再將實作對齊固定 128×128 並取得 GREEN。產品提交為 `7af212512f59768801081765808202fe84a85b25`。
+
+修正後重新驗證：focused 31/31、synthetic stress／`PERF-COVERAGE`／preview memory、RAW warm 0／1／10 masks、original-size export／memory、50-cycle cancellation convergence 與完整 Release 2715 tests 全數 PASS；pixel parity 維持 max R8 byte error 0。因此原審查的唯一 concern 已解決，沒有新增 blocking 或 non-blocking finding。
+
 ### Blocking findings
 
 None。
@@ -17,9 +25,9 @@ None。
 ### Non-blocking finding
 
 - **Severity：Minor**
-- **位置**：[BrushMaskRenderer.swift:516](/Users/unizalin/Documents/ChatGPT/LumaHarbor/.worktrees/codex-shared-git-workflow/.worktrees/luna-brush-preview-performance-fix/Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift:516)
+- **原審查位置**：`Sources/RawProcessingCore/Pipeline/BrushMaskRenderer.swift:516`
 - **現況**：實作使用 `let tileSize = 256`。
-- **Spec**：[brush performance and acceptance repair spec:86](/Users/unizalin/Documents/ChatGPT/LumaHarbor/.worktrees/codex-shared-git-workflow/.worktrees/luna-brush-preview-performance-fix/docs/superpowers/specs/2026-10-06-brush-performance-and-acceptance-repair-spec.md:86) 指定第一版固定 `128×128` pixel tile。
+- **Spec**：[brush performance and acceptance repair spec](../../superpowers/specs/2026-10-06-brush-performance-and-acceptance-repair-spec.md) 指定第一版固定 `128×128` pixel tile。
 - **影響**：Gemini 判定目前 bounded memory 與效能 gate 仍成立，但 strict spec compliance 有一項數值落差。
 - **建議**：若要求嚴格遵循 spec，交給 Sol 將 tile size 改回 `128`，再重跑 pixel parity、synthetic stress、RSS、cancellation 與 full Release gates。這是 bounded follow-up，不是目前的 correctness blocker。
 
@@ -35,4 +43,4 @@ None。
 
 ## Bounded next action
 
-先由產品決策確認 `256` 是否接受為實作調整；若不接受，請 Sol 只做 tile-size 對齊與必要回歸驗證。Gemini 本次未修改任何檔案。
+此 bounded action 已由 `7af2125` 完成。剩餘項目只有 Mac／iPad／Pencil／VoiceOver／灰卡人工 gate；Gemini 本次仍未修改任何檔案。

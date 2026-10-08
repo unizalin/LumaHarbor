@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-本目錄保存同一候選版本上的 synthetic stress 與真實 RAW／original-size export 原始 JSONL、gate JSON 與 checksum。`DONE_WITH_CONCERNS` 只表示 UI／實體裝置／獨立 reviewer 尚未執行；本輪必要的程式、效能、記憶體、取消、pixel parity 與 worker 收斂驗證已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
+本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress 與真實 RAW／original-size export 原始 JSONL、gate JSON 與 checksum。`DONE_WITH_CONCERNS` 只表示 UI／實體裝置人工驗收尚未執行；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
 
 ## 版本與環境
 
@@ -12,8 +12,8 @@
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`
-- Candidate O：`f13de103cec69002666bba389cbf9b6e39cee02f`
-- Harness：`f13de103cec69002666bba389cbf9b6e39cee02f`
+- Candidate O：`7af212512f59768801081765808202fe84a85b25`
+- Harness：`7af212512f59768801081765808202fe84a85b25`
 - Synthetic instrumentation digest：`a29a2e92c11fffa3b9cb05dfbdbc7714a91777b5ee792b41ba4ae6dd125f5f70`
 - 平台：macOS arm64e，Release，`thermalState=nominal`
 
@@ -50,43 +50,46 @@ swift test -c release
 
 | masks | variant | raw decode | global graph | validation/sampling | coverage raster | per-mask adjustment/blend | final materialization | stage total |
 | ---: | :---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | B | 0.008 / 0.011 | 0.001 / 0.001 | 0.011 / 0.012 | 173.879 / 176.316 | 0.050 / 0.058 | 3.937 / 4.097 | 177.847 / 180.367 |
-| 1 | O | 0.005 / 0.007 | 0.001 / 0.001 | 0.192 / 0.205 | 8.871 / 10.395 | 0.031 / 0.053 | 2.664 / 2.809 | 11.922 / 13.319 |
-| 10 | B | 0.010 / 0.011 | 0.001 / 0.002 | 0.074 / 0.079 | 1736.591 / 1755.055 | 0.296 / 0.351 | 7.337 / 7.613 | 1744.289 / 1762.886 |
-| 10 | O | 0.006 / 0.006 | 0.001 / 0.002 | 2.429 / 2.694 | 62.821 / 65.111 | 0.106 / 0.112 | 5.277 / 5.658 | 68.609 / 71.059 |
+| 1 | B | 0.009 / 0.023 | 0.001 / 0.003 | 0.012 / 0.046 | 175.096 / 192.717 | 0.051 / 0.061 | 3.866 / 4.263 | 179.290 / 196.862 |
+| 1 | O | 0.005 / 0.006 | 0.001 / 0.001 | 0.240 / 0.297 | 8.801 / 10.111 | 0.037 / 0.056 | 2.550 / 2.811 | 11.988 / 13.210 |
+| 10 | B | 0.011 / 0.012 | 0.001 / 0.001 | 0.077 / 0.092 | 1754.617 / 1814.902 | 0.415 / 0.492 | 7.333 / 7.586 | 1762.474 / 1822.993 |
+| 10 | O | 0.006 / 0.007 | 0.001 / 0.001 | 3.097 / 3.813 | 64.776 / 74.801 | 0.108 / 0.113 | 5.169 / 5.363 | 70.664 / 81.013 |
 
-主要根因是 coverage raster 的全圖 per-mask 計算；RAW decode 與 adjustment／blend 不是 synthetic stress 的主成本。RAW warm 的主要修正則是 bounded decoded-preview cache，cache key 綁定檔案狀態、decode quality、resolved recipe、白平衡、lens correction、camera profile 與其他 decode inputs，且不共用 full-resolution export。
+主要根因是 coverage raster 的全圖 per-mask 計算；RAW decode 與 adjustment／blend 不是 synthetic stress 的主成本。RAW warm 的主要修正則是 bounded decoded-preview cache，cache key 綁定檔案狀態、decode quality、resolved recipe、白平衡、lens correction、camera profile 與其他 decode inputs，且不共用 full-resolution export。Gemini 指出的 tile 規格差異已在 `7af2125` 對齊為固定 128×128，並由合約測試鎖定。
 
 ## Gate 結果
 
 ### Synthetic stress（64 records）
 
-- 1 mask：O round 1 p50/p95 `11.998/13.402 ms`；round 2 `12.070/12.338 ms`。門檻 `30/60 ms`，PASS。
-- 10 masks：O round 1 `68.867/71.171 ms`；round 2 `68.282/69.940 ms`。門檻 `100/150 ms`，PASS。
+- 1 mask：O round 1 p50/p95 `12.105/13.244 ms`；round 2 `12.067/13.337 ms`。門檻 `30/60 ms`，PASS。
+- 10 masks：O round 1 `70.907/81.143 ms`；round 2 `70.099/71.513 ms`。門檻 `100/150 ms`，PASS。
 - `PERF-COVERAGE`：4/4 PASS；B/O 都有相同且互斥 stage clock。
 - `PERF-MEM-PREVIEW`：4/4 PASS。
 - artifact validation：PASS，64 records。
 
 ### 真實 RAW warm preview（352 records）
 
-- 0 masks：p50/p95 `34.636/39.790 ms`，PASS。
-- 1 mask：`37.048/42.379 ms`，PASS。
-- 10 masks：`55.097/67.036 ms`，PASS。
+- 0 masks：p50/p95 `36.285/39.805 ms`，PASS。
+- 1 mask：`39.560/49.993 ms`，PASS。
+- 10 masks：`56.002/61.015 ms`，PASS。
 - `INTERACTIVE-150`：3/3 PASS；`PERF-MEM-PREVIEW`：9/9 PASS；artifact validation：PASS。
 
 ### Export、取消與像素
 
-- Original-size synthetic 24MP export：1 mask `110.769 ms`、10 masks `354.699 ms`（O p50）；真實 RAW：1 mask `421.932 ms`、10 masks `549.644 ms`（O p50）；`PERF-EXPORT` 4/4 PASS。
-- `PERF-MEM-EXPORT`：4/4 PASS；real RAW 10-mask candidate peak RSS `532,824,064` bytes。
-- 50-cycle scheduler：PASS；55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `58,605,568` bytes，limit `90,849,280` bytes。
-- Focused regression：30 tests、0 failures；repeated-geometry paint／erase scalar oracle max R8 byte error `0`。
-- Full Release suite：2714 tests、22 skipped、0 failures。
+- Original-size synthetic 24MP export：1 mask `123.601 ms`、10 masks `382.940 ms`（O p50）；真實 RAW：1 mask `436.667 ms`、10 masks `562.844 ms`（O p50）；`PERF-EXPORT` 4/4 PASS。
+- `PERF-MEM-EXPORT`：4/4 PASS；real RAW 10-mask candidate peak RSS `503,316,480` bytes。
+- 50-cycle scheduler：PASS；55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `49,168,384` bytes，limit `89,735,168` bytes。
+- Focused regression：31 tests、0 failures；repeated-geometry paint／erase scalar oracle max R8 byte error `0`；128×128 acceptance contract PASS。
+- Full Release suite：2715 tests、22 skipped、0 failures。
 
 ## Artifact checksum
 
 | 檔案 | SHA-256 |
 | --- | --- |
-| `synthetic-stress-samples.jsonl` | `3ce092bebd8f2482bcb55a29c6400b7d91250e8035ba98e168824b5b99d27900` |
-| `synthetic-stress-gates.json` | `528074a4625b664a7a0e5ee5c0b2e6f098bf55505c8c21b0605b40fd54f18379` |
-| `raw-export-samples.jsonl` | `ffd22667520bb9043ae61bb15efeecd8f280d4b1237871452a2490a3c939e3ac` |
-| `raw-export-gates.json` | `b5f4f8339ae9561c3fbd981b45ddf128689a34bc9c46533fd00e9e8ba1154327` |
+| `synthetic-stress-samples.jsonl` | `f3b44e38c01b2beeb3a2e8e630889385407f226219248d4334225418d711e2f5` |
+| `synthetic-stress-gates.json` | `ce790aa609dd569f7ef1ce0e86701320b8ad0e9daa6eb2e18c60df6e15cb07fb` |
+| `raw-export-samples.jsonl` | `e25b61a8f844e2df94dda1bb1e9c0045c01a983a1600bbcb302fb59cf1488e27` |
+| `raw-export-gates.json` | `1648821519d3d45e21bcf830b530da2f031ce8ea2d1c914992d3d13e0c3da103` |
+| `verification-summary.txt` | `3c4d813d9466b5eb3e2859383bad46c5bc0d9882a30bf5c08374275aa2a4b87d` |
+
+`verification-summary.txt` 另保存 128×128 合約的 RED／GREEN、focused regression、50-cycle 與完整 Release suite 的命令、exit code 與摘要。

@@ -1,0 +1,40 @@
+LumaHarbor brush preview performance fix — 128x128 tile follow-up
+Date: 2026-10-08 Asia/Taipei
+Candidate: 7af212512f59768801081765808202fe84a85b25
+Branch: luna/brush-preview-performance-fix
+Configuration: Release, macOS arm64e, thermalState=nominal
+
+RED contract
+Command: swift test -c release --filter BrushMaskRendererTests/testCoverageTileSizeMatchesAcceptanceSpec
+Exit: 1
+Expected failure: XCTAssertEqual failed: ("256") is not equal to ("128")
+
+GREEN contract
+Command: swift test -c release --filter BrushMaskRendererTests/testCoverageTileSizeMatchesAcceptanceSpec
+Exit: 0
+Result: 1 test, 0 failures
+
+Focused regression
+Command: swift test -c release --filter 'BrushMaskScalarOracleTests|BrushMaskCancellationTests|BrushMaskRendererTests|CoreImagePreviewRendererTests'
+Exit: 0
+Result: 31 tests, 0 failures
+
+Synthetic stress
+Command: LUMAHARBOR_BRUSH_ABBA_BLOCKS=4 LUMAHARBOR_BRUSH_ABBA_SCENARIOS='stress' LUMAHARBOR_BRUSH_ABBA_MASK_COUNTS='1 10' Scripts/run-brush-performance-abba.sh
+Exit: 0
+Result: validation PASS, 64 records; PERF-COVERAGE 4/4 PASS; PERF-MEM-PREVIEW 4/4 PASS
+
+RAW preview and original-size export
+Command: LUMAHARBOR_RAW_FIXTURE_DIR='<private RAW fixture directory>' LUMAHARBOR_BRUSH_RAW_PREVIEW_SAMPLES=8 LUMAHARBOR_BRUSH_EXPORT_SAMPLES=4 Scripts/run-brush-raw-export-acceptance.sh
+Exit: 0
+Result: validation PASS, 352 records; INTERACTIVE-150 3/3 PASS; preview memory 9/9 PASS; export 4/4 PASS; export memory 4/4 PASS
+
+50-cycle cancellation convergence
+Command: LUMAHARBOR_RUN_BRUSH_PERF_ACCEPTANCE=1 swift test -c release --filter BrushMaskPerformanceTests/testOptInFiftyCancellationCyclesSettleWorkersAndMemory
+Exit: 0
+Result: PASS; 55/55 workers finished; activeAfterJoin=0; settledRSSBytes=49168384; rssLimitBytes=89735168
+
+Full Release regression
+Command: swift test -c release
+Exit: 0
+Result: 2715 tests, 22 skipped, 0 failures
