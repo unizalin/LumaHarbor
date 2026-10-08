@@ -4,7 +4,7 @@
 
 狀態：`DONE_WITH_CONCERNS`
 
-本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收與 iPad Simulator slice；`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、破壞性刪除操作、中途手勢競態、完整 Simulator matrix、PERF-UI heartbeat、實體裝置／輸入與灰卡項目。
+本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收與 iPad Simulator slice，並補跑 Files 選取／Quick Look 後返回、真實 Split View 窄窗、paint、autosave 與重啟保存；`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、破壞性刪除操作、中途手勢競態、Files 直接交件、精確 Simulator zoom/source mapping、PERF-UI heartbeat、實體裝置／輸入與灰卡項目。
 
 ## 根因與分段數據
 
@@ -85,7 +85,7 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 | `UI-BRUSH-02` | PARTIAL；完成筆畫 Undo/Redo 與 close-to-library／reopen 通過；中途換圖／geometry／snapshot／cancel／close 未手動執行 |
 | `STORE-01` | PARTIAL；paint→原尺寸 TIFF export→close→reopen 通過；Local paste、batch／snapshot、刪最後快照未跑 |
 | `PERF-UI` | NOT RUN；沒有 16 ms heartbeat 與 30 次 B/O UI gesture recorder |
-| `UI-SIM-01` | PARTIAL；fresh Simulator build／install／launch、直向／橫向、建立筆刷、paint、完成筆畫 Undo／Redo、曝光變更與 relaunch persistence 通過；窄視窗、0.75x／1x／2x zoom、Files-open flow、鍵盤與 hands-on VoiceOver 未跑 |
+| `UI-SIM-01` | PARTIAL；fresh build／install／launch、直向／橫向、Files 選取／Quick Look 後返回、真實 Split View 窄窗、筆刷 paint、完成筆畫 Undo／Redo、曝光變更、autosave 與 relaunch persistence 通過；Files 直接交件、app-copy／in-place、精確 0.75x／1x／2x source mapping、鍵盤與 hands-on VoiceOver 未完成 |
 | `UI-DEVICE-01`／`UI-INPUT-01` | NOT RUN；CoreDevice 中 iPad／iPhone 均為 unavailable |
 | 灰卡色彩 gate | NOT RUN；未找到合格 RAW 灰卡與受控 ROI reference |
 
@@ -99,9 +99,11 @@ Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`D
 
 ## iPad Simulator slice
 
-以 source HEAD `1dda4ad3f5c26a488fc8cce4cfc3172c87dd2a08` fresh build iPad Pro 11-inch (M4)、iOS 18.6 Simulator，unsigned Debug build exit 0。直向啟動與橫向旋轉均正常；局部調整可建立一支 adjustment brush 並繪製 paint stroke。匿名 sidecar aggregate 在 paint／Undo／Redo 後依序為 1／0／1 stroke；局部曝光由 0.0 調成 0.1 後，terminate／relaunch 仍保存 1 paint stroke 與 exposure=0.1。自動化 accessibility tree 可讀取 canvas、enable、delete、brush mode，以及 size／feather／flow／density／exposure 的 label／role／value。
+以 source HEAD `1dda4ad3f5c26a488fc8cce4cfc3172c87dd2a08` fresh build iPad Pro 11-inch (M4)、iOS 18.6 Simulator，unsigned Debug build exit 0。後續文件 HEAD `72945cf` 與該 source 間的 Sources／Apps／package inputs diff check exit 0，因此沿用相同 bundle。直向啟動與橫向旋轉均正常；局部調整可建立一支 adjustment brush 並繪製 paint stroke。匿名 sidecar aggregate 在 paint／Undo／Redo 後依序為 1／0／1 stroke；局部曝光由 0.0 調成 0.1 後，terminate／relaunch 仍保存 1 paint stroke 與 exposure=0.1。自動化 accessibility tree 可讀取 canvas、enable、delete、brush mode，以及 size／feather／flow／density／exposure 的 label／role／value。
 
-此結果只把 `UI-SIM-01` 推進到 PARTIAL。窄視窗、0.75x／1x／2x zoom、Files-open flow、hardware keyboard 與 hands-on VoiceOver 未執行；accessibility tree 可讀不等於 VoiceOver 人工驗收。實體 Pencil、實體裝置旋轉／Split View、真實效能 heartbeat 與灰卡色彩量測也不能由 Simulator 取代。完整紀錄見 [`ipad-simulator-manual-summary.txt`](../evidence/2026-10-07-brush-preview-performance-fix/ipad-simulator-manual-summary.txt)。含私人照片的本機截圖沒有提交。
+Task 2 follow-up 另從 Files 選取測試 RAW；檔案先進入 Quick Look，切回 LumaHarbor 後可讀到既有筆刷與 exposure=0.1。這證明返回 app 後狀態仍在，不證明 Files 已直接把文件交給 app。再由 iPad 多工選單進入真實 Split View 窄窗，inspector／canvas 仍可操作。窄窗新增一筆後由 `未儲存` 轉為 `已儲存`，匿名聚合從 1 mask／1 paint stroke 變為 1 mask／2 paint strokes；terminate／relaunch 後仍為 1／2 且 exposure=0.1。
+
+此結果仍只把 `UI-SIM-01` 維持在 PARTIAL。Files 直接交件及 app-copy／in-place 語意無法由 UI 獨立判別；工具也沒有曝露窄窗精確 logical point 尺寸。iPad 畫布將倍率限制在 1×～5×且沒有精確倍率讀值，因此 0.75×不可達，2×也無法從 UI 證明為精確倍率；原規格的 0.75×／1×／2× paint／erase source-marker mapping 保留 NOT RUN。hardware keyboard 與 hands-on VoiceOver 亦未執行；accessibility tree 可讀不等於 VoiceOver 人工驗收。實體 Pencil、實體裝置旋轉／Split View、真實效能 heartbeat 與灰卡色彩量測也不能由 Simulator 取代。歷史紀錄見 [`ipad-simulator-manual-summary.txt`](../evidence/2026-10-07-brush-preview-performance-fix/ipad-simulator-manual-summary.txt)，本次逐列結果見 [`simulator-matrix.md`](../evidence/2026-10-08-brush-ui-followup/simulator-matrix.md)。含私人照片的本機截圖沒有提交。
 
 ## 可重現驗證
 
@@ -109,4 +111,4 @@ Mac 測試固定綁定本 worktree 的 `build/LumaHarbor.app`，configuration=`D
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 前景 slice 與可模擬的 iPad slice 已完成；branch 已推送並建立 Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2)，遠端 `main` 尚未變動。下一個 bounded action 是補完 Simulator 的窄視窗／zoom／Files-open 子項，並在裝置恢復可用後執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View；具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣。Mac 剩餘的四色滴管方向、中途手勢競態與破壞性 Delete 操作也要分列補證。必要 gate 未完成前維持 Draft。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 前景 slice，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成；branch 已推送既有候選並建立 Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2)，本輪新增文件尚未推送，遠端 `main` 尚未變動。下一個 bounded action 是依 follow-up 計畫 Task 3 補 Mac 的兩筆刷 Delete／Undo／Redo、Local paste／batch／snapshot、四色滴管方向與可操作的中途手勢案例。Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker；裝置恢復可用後再執行實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View。具備 heartbeat recorder 與合格色卡後補 `PERF-UI` 30 次 B/O 手勢及灰卡矩陣。必要 gate 未完成前維持 Draft。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。

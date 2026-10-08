@@ -10,10 +10,10 @@
 - **回歸**：完整 Release suite `2715 executed、22 skipped、0 failures`；focused renderer／cancellation／oracle 31/31 PASS；analyzer 9/9 PASS；50-cycle `55/55` worker join、active 0、settled RSS `49,168,384` bytes（limit `89,735,168`）PASS。
 - **獨立 review**：程式／spec 的 agy → Gemini 3.1 Pro High 唯讀審查為 `APPROVED_WITH_CONCERNS`，唯一 minor 已由 `7af2125` 的 128×128 對齊與全套回歸解決。Mac 文件差異初審為 `CHANGES_REQUESTED`，指出端到端與 stage total 的來源未分開說明；數據邊界補正後，follow-up=`APPROVED`、無 finding。詳見 [程式／spec review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)與 [Mac 文件 review](../testing/reports/2026-10-08-brush-preview-performance-fix-mac-ui-gemini-review.md)。
 - **Mac 前景**：`UI-MAC-01` PASS；`UI-MAC-02`、`UI-BRUSH-01`、`UI-BRUSH-02`、`STORE-01` PARTIAL。paint／erase、兩支筆刷切換、設定、enable/select、單筆畫 Undo/Redo、autosave、close-to-library／reopen 與原尺寸 TIFF export 已通過；破壞性 Delete、四色滴管方向與中途手勢競態未跑。
-- **iPad Simulator**：`UI-SIM-01` PARTIAL。iPad Pro 11-inch (M4)、iOS 18.6 的 fresh Debug build／install／launch、直向／橫向、建立筆刷、paint、完成筆畫 Undo／Redo、曝光 0.0→0.1 與 relaunch persistence 已通過；accessibility semantics 可讀。窄視窗、zoom、Files-open、鍵盤與 hands-on VoiceOver 未跑，且不能取代實體 Pencil／裝置驗收。
+- **iPad Simulator**：`UI-SIM-01` PARTIAL。iPad Pro 11-inch (M4)、iOS 18.6 的 fresh Debug build／install／launch、直向／橫向、Files 選取／Quick Look 後返回、真實 Split View 窄窗、建立筆刷、paint、完成筆畫 Undo／Redo、曝光 0.0→0.1、autosave 與 relaunch persistence 已通過；窄窗新增後重啟仍為 1 mask／2 paint strokes／exposure 0.1。Files 直接交件與 app-copy／in-place 無法由 UI 判別；畫布 clamp 為 1×～5×且 UI 無精確倍率讀值，因此原 0.75×／1×／2× source-marker mapping、鍵盤與 hands-on VoiceOver 未完成，且不能取代實體 Pencil／裝置驗收。
 - **整合候選**：branch 已推送至 `origin/luna/brush-preview-performance-fix`，Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 為 OPEN／CLEAN；GitHub 未回報 checks。遠端 `main` 仍為 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319`，尚未 merge 或 rebase。
 - **文件同步**：Task 1 已將根目錄 README 對齊 Sidecar v5、白平衡數值輸入／滴管、有順序的 adjustment brush masks、paint／erase、筆畫 Undo／Redo，以及新舊筆刷共存但不自動轉換的契約；Alpha 摘要連至目前驗收報告並保留實機、輸入裝置與灰卡 `NOT RUN` 邊界。產品程式、測試與 gate 未變，候選仍未進入 `main`。
-- **下一步**：依[文件與 Alpha 整合收尾計畫](../superpowers/plans/2026-10-08-brush-alpha-integration-followup.md) Task 2 補 Simulator 的窄視窗／zoom／Files-open 子項，再進行 Task 3 的 Mac 局部操作與資料保存驗收。Alpha 例外整合尚未核准，PR 維持 Draft。
+- **下一步**：依[文件與 Alpha 整合收尾計畫](../superpowers/plans/2026-10-08-brush-alpha-integration-followup.md) Task 3 執行 Mac 局部操作與資料保存驗收；Simulator 無法證明的 storage mode、精確內容尺寸與 zoom/source mapping 已分列 NOT RUN。Alpha 例外整合尚未核准，PR 維持 Draft。
 
 ## Brush review fixes（2026-10-07；最新有效狀態）
 

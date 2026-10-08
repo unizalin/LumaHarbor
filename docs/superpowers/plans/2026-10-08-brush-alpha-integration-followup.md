@@ -10,7 +10,7 @@
 
 ## 狀態、基準與取代範圍
 
-- 日期：2026-10-08；Task 1 已完成並通過獨立審查；Task 2～5 尚未完成。
+- 日期：2026-10-08；Task 1 已完成並通過獨立審查；Task 2 已完成可執行操作與限制記錄；Task 3～5 尚未完成。
 - 起始 HEAD：`f365f88d3ba22df329886651dd5573c35a3b5416`。
 - 延續分支：`luna/brush-preview-performance-fix`；本次是同一未整合候選的文件與驗收收尾，不是新的產品任務。
 - 已驗證產品／harness：`7af212512f59768801081765808202fe84a85b25`；其後至起始 HEAD 僅有文件／證據變動。
@@ -59,12 +59,12 @@ git diff --check
 
 **輸入／交付：** 已保存的直橫向、paint／Undo／Redo／重啟證據 → 補足尚缺的逐案例操作與保存矩陣。
 
-- [ ] 核對 source SHA、app bundle 與 Simulator runtime。沿用已驗證 bundle 前先確認 Sources／Apps／依賴沒有變動；有變動則 fresh build，記 exit code。
-- [ ] 透過 Files 選取測試文件開啟；新增筆畫，等待 saved，關閉再由 Files 重開，核對 mask／stroke 數量與曝光值。另列 app-copy 與 in-place 的實際使用路徑，未測模式維持 NOT RUN。
-- [ ] 使用 iPad 內實際 Split View／多工視窗調整成窄視窗；記錄可用內容尺寸，確認 inspector 控制、canvas、保存／重開。縮小 macOS Simulator 外框不算完成。
-- [ ] 依產品畫布 zoom 0.75×／1×／2×，在可辨識測試標記上分別 paint／erase，核對 source 落點與 sidecar 保存；Simulator 顯示倍率不算產品畫布 zoom。
-- [ ] 若工具無法操作或無法證明精確倍率／內容尺寸，記錄具體限制並保留該列 NOT RUN；不注入 sidecar 冒充 UI 操作、不新增僅供通過驗收的產品控制。
-- [ ] 每列保存 SHA、匿名環境、起始狀態、操作、預期／實際、保存結果及狀態；只有原 spec 的全部子項通過才將 UI-SIM-01 升為 PASS。
+- [x] 核對 source SHA、app bundle 與 Simulator runtime。沿用已驗證 bundle前確認 Sources／Apps／依賴沒有變動；diff check exit 0，因此不重建未變更產品。
+- [x] 執行 Files 選取流程；檔案進入 Quick Look，未證明 Files 直接交件給 app，因此該步與 app-copy／in-place 分列 NOT RUN。另在 app 中完成新增筆畫、saved、terminate／relaunch 與 mask／stroke／曝光核對。
+- [x] 使用 iPad 內實際 Split View／多工視窗調整成窄視窗；確認 inspector 控制、canvas、保存／重開。工具未曝露精確 logical point 內容尺寸，該欄維持 NOT RUN。
+- [x] 核對產品畫布 zoom 0.75×／1×／2× 可執行性；iPad scale clamp 為 1×～5×且 UI 無精確倍率讀值，原矩陣無法完成並維持 NOT RUN。
+- [x] 對無法證明的精確倍率／內容尺寸記錄具體限制；沒有注入 sidecar，也沒有新增僅供通過驗收的產品控制。
+- [x] 每列保存 SHA、匿名環境、起始狀態、操作、預期／實際、保存結果及狀態；原 spec 子項未全數通過，UI-SIM-01 維持 PARTIAL。
 
 完成條件：每項都有可核對的結果或明確限制；不能只以 app 啟動或畫面存在判定 source mapping 正確。
 
