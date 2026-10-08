@@ -45,4 +45,3 @@ python3 Scripts/analyze-brush-performance-abba.py \
   --expected-scenario stress-vectors-production-preview \
   --expected-mask-count 0 --expected-mask-count 1 --expected-mask-count 10
 ```
-

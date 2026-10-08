@@ -47,4 +47,3 @@ python3 Scripts/analyze-brush-raw-export-acceptance.py \
   --output "$TMPDIR/brush-raw-export-gates-recomputed.json" \
   --expected-preview-samples 8 --expected-export-samples 4
 ```
-
