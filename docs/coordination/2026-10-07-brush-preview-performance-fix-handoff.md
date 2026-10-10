@@ -6,6 +6,8 @@
 
 原驗收矩陣的 7 個效能 FAIL 已完成程式修正與自動驗收。`PERF-COVERAGE` 已由 NOT RUN 解除為 B/O 共同 stage clock 的 4/4 PASS。Gemini 唯讀審查的唯一 minor 已由 Sol 完成 128×128 tile 對齊與全套回歸；Mac 前景、30 次 `PERF-UI` 與 iPad Simulator 可執行 slice 已補跑，但實體裝置、輸入、灰卡與部分人工競態仍未完成，因此保留 `DONE_WITH_CONCERNS`。
 
+2026-10-10 使用者已明確接受上述 `DONE_WITH_CONCERNS`，授權 PR #2 以 D-014 的 Alpha 例外標為 Ready 並整合至 `main`；未完成 gate 仍保持原狀，不轉成 PASS。
+
 ## Git state
 
 - Writer：Luna；128×128 follow-up：Sol；worktree owner：本 task 的 Codex workspace。
@@ -18,7 +20,7 @@
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`；這是本 task 的相依例外，不表示已整合到 `main`。
-- Branch 已推送至 `origin/luna/brush-preview-performance-fix`；Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 維持 OPEN／DRAFT，head 已包含本輪產品、驗證契約與驗收文件。遠端 `main` 尚未變動；沒有 merge 或 rebase，不得覆蓋其他 worktree。
+- Branch 已推送至 `origin/luna/brush-preview-performance-fix`；PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 在授權前確認 OPEN／DRAFT、`MERGEABLE／CLEAN`，head 已包含本輪產品、驗證契約與驗收文件。D-014 提交後將標為 Ready 並 squash merge；不得覆蓋或刪除其他 worktree。
 
 ## Changes
 
@@ -87,7 +89,7 @@ Mac 文件差異的 Gemini 初審為 `CHANGES_REQUESTED`：`CURRENT.md` 引用�
 
 ## Remaining bounded action
 
-產品、自動效能驗收、兩輪獨立唯讀 review、可執行的 Mac follow-up、PERF-UI 與 iPad Simulator slice 已收尾。實體 iPad／iPhone 仍 offline；沒有合格灰卡／ROI reference。下一個 bounded action 是在裝置／受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View、四色滴管與灰卡矩陣。中途手勢人工案例需能同時維持 pointer-down 與觸發第二動作的輸入通道。必要 gate 未完成前維持 Draft；分支已推送。不要修改門檻或 benchmark。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品、自動效能驗收、兩輪獨立唯讀 review、可執行的 Mac follow-up、PERF-UI 與 iPad Simulator slice 已收尾。實體 iPad／iPhone 仍 offline；沒有合格灰卡／ROI reference。使用者已授權 Alpha 例外整合；下一步是提交 D-014、標記 Ready、squash merge、核對遠端 `main`，再從 merged SHA 重建／同步 Mac Release。裝置／受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View、四色滴管與灰卡矩陣。中途手勢人工案例需能同時維持 pointer-down 與觸發第二動作的輸入通道。不要修改門檻或 benchmark；不刪除 branch/worktree。
 
 ## 2026-10-08 實作方向補充
 

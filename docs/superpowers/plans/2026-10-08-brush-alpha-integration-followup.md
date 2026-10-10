@@ -110,7 +110,7 @@ git diff --check
 | Alpha 例外整合 | 使用者明確接受列出的未驗收項目並授權此 PR 進 main；無未處理的已知資料／像素／取消回歸；遵守遠端保護規則 | 保留 DONE_WITH_CONCERNS，追加例外範圍及後續工作，不改成 PASS |
 | 暫不整合 | 上述條件未成立 | 保留 Draft，成果留在遠端分支 |
 
-- [ ] 若採 Alpha 例外，只針對本次 exact candidate 記錄，不能永久解除其他版本的驗收要求；未知風險必須明列。
+- [x] 若採 Alpha 例外，只針對本次 exact candidate 記錄，不能永久解除其他版本的驗收要求；未知風險必須明列。2026-10-10 使用者明確接受 PR #2 的 `DONE_WITH_CONCERNS`；D-014 綁定 validated product `5530e91` 與 reviewed pre-decision head `f695488`，未完成 gate 保留。
 - [ ] 真正授權後透過 PR 整合，核對 merged SHA 與遠端 main；不得 force-push 或覆寫其他 worktree。
 - [ ] 依 AGENTS 的產品版本推送規則，以實際 main SHA 建置／同步 Mac Release 並核對版本、簽章及啟動；可用且獲授權的 iPad 同步驗證，不可用則記 NOT RUN。若對外散布新版，依 D-011 更新產品版本，避免重複發行相同版本。
 - [ ] 應用程式安裝成功不取代未完成的功能驗收；不刪除保留的 branch／worktree 或歷史證據。

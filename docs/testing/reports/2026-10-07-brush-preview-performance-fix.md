@@ -126,4 +126,4 @@ Task 2 follow-up 另從 Files 選取測試 RAW；檔案先進入 Quick Look，�
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up、PERF-UI，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成。Mac 筆刷功能、資料保存與前景 heartbeat gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference。下一個 bounded action 是在裝置與受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver、四色滴管與灰卡矩陣；Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker。必要 gate 未完成前維持 Draft；branch 已推送至既有 Draft PR，遠端 `main` 未變動。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up、PERF-UI，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成。Mac 筆刷功能、資料保存與前景 heartbeat gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference。2026-10-10 使用者已接受 `DONE_WITH_CONCERNS` 並授權 PR #2 依 D-014 作 Alpha 例外整合；這不會把未完成 gate 改為 PASS，也不會豁免未來版本。裝置與受控素材到位後仍須補實體 iPad／Pencil／鍵盤／VoiceOver、四色滴管與灰卡矩陣；Simulator Files 直接交件與精確 zoom/source mapping 仍需要可觀測 storage mode／倍率及可散布 marker。
