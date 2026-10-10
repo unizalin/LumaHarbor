@@ -18,7 +18,7 @@
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`；這是本 task 的相依例外，不表示已整合到 `main`。
-- Branch 先前版本已推送至 `origin/luna/brush-preview-performance-fix`；本輪 `ae8c59a`、`5530e91`、`2c1d1e3` 與驗收文件提交尚未 push。Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 維持 OPEN；遠端 `main` 尚未變動；沒有 merge 或 rebase，不得覆蓋其他 worktree。
+- Branch 已推送至 `origin/luna/brush-preview-performance-fix`；Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 維持 OPEN／DRAFT，head 已包含本輪產品、驗證契約與驗收文件。遠端 `main` 尚未變動；沒有 merge 或 rebase，不得覆蓋其他 worktree。
 
 ## Changes
 
@@ -87,7 +87,7 @@ Mac 文件差異的 Gemini 初審為 `CHANGES_REQUESTED`：`CURRENT.md` 引用�
 
 ## Remaining bounded action
 
-產品、自動效能驗收、兩輪獨立唯讀 review、可執行的 Mac follow-up、PERF-UI 與 iPad Simulator slice 已收尾。實體 iPad／iPhone 仍 offline；沒有合格灰卡／ROI reference。下一個 bounded action 是在裝置／受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View、四色滴管與灰卡矩陣。中途手勢人工案例需能同時維持 pointer-down 與觸發第二動作的輸入通道。必要 gate 未完成前維持 Draft；本輪 commit 尚未 push。不要修改門檻或 benchmark。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品、自動效能驗收、兩輪獨立唯讀 review、可執行的 Mac follow-up、PERF-UI 與 iPad Simulator slice 已收尾。實體 iPad／iPhone 仍 offline；沒有合格灰卡／ROI reference。下一個 bounded action 是在裝置／受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver／旋轉／Split View、四色滴管與灰卡矩陣。中途手勢人工案例需能同時維持 pointer-down 與觸發第二動作的輸入通道。必要 gate 未完成前維持 Draft；分支已推送。不要修改門檻或 benchmark。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
 
 ## 2026-10-08 實作方向補充
 
