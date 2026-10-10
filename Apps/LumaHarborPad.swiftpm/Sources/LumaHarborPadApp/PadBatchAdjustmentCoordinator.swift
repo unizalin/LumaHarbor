@@ -83,7 +83,8 @@ final class PadBatchAdjustmentCoordinator: ObservableObject {
         let transaction = await service.syncPatch(
             clipboard.patch,
             sourcePhotoID: sourcePhotoID,
-            targetPhotoIDs: targets
+            targetPhotoIDs: targets,
+            brushMasks: clipboard.brushMasks
         )
         lastTransaction = transaction
         markSuccessfulTargets(in: transaction)

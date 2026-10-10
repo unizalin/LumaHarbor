@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lumaharbor.invalid/schemas/brush-raw-export-acceptance-v3.json",
+  "title": "LumaHarbor real RAW preview and full-resolution export acceptance sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "productSHA",
+    "harnessSHA",
+    "instrumentationDigest",
+    "configuration",
+    "sourceKind",
+    "operation",
+    "scenario",
+    "variant",
+    "round",
+    "order",
+    "sampleOrdinal",
+    "maskCount",
+    "nativeSize",
+    "decodedSize",
+    "outputSize",
+    "totalDurationSeconds",
+    "peakRSSBytes",
+    "contextLifecycle",
+    "contextCountEvidence",
+    "expectedContextCreationCountBeforeTimer",
+    "expectedContextCreationCountDuringTimer",
+    "timingBoundary",
+    "publishedFileValidated",
+    "sourceFingerprintUnchanged",
+    "thermalState",
+    "result"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 3 },
+    "productSHA": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "harnessSHA": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "instrumentationDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "configuration": { "const": "release" },
+    "sourceKind": { "enum": ["real-raw", "synthetic-24mp"] },
+    "operation": { "enum": ["preview", "export"] },
+    "scenario": { "enum": ["cold", "warm", "changed", "full-resolution"] },
+    "variant": { "enum": ["B", "O"] },
+    "round": { "enum": [1, 2] },
+    "order": { "type": "integer", "minimum": 0 },
+    "sampleOrdinal": { "type": "integer", "minimum": 0 },
+    "maskCount": { "enum": [0, 1, 10] },
+    "nativeSize": { "$ref": "#/$defs/size" },
+    "decodedSize": { "$ref": "#/$defs/size" },
+    "outputSize": { "$ref": "#/$defs/size" },
+    "totalDurationSeconds": { "type": "number", "minimum": 0 },
+    "peakRSSBytes": { "type": "integer", "minimum": 1 },
+    "contextCountEvidence": {
+      "const": "declared-from-construction-path",
+      "description": "Expected construction-path counts; context allocations are not measured."
+    },
+    "contextLifecycle": {
+      "enum": [
+        "fresh-renderer-context-inside-timer",
+        "fresh-renderer-context-before-warmup-reused-for-timed-request",
+        "fresh-exporter-context-inside-timer"
+      ]
+    },
+    "expectedContextCreationCountBeforeTimer": { "type": "integer", "minimum": 0 },
+    "expectedContextCreationCountDuringTimer": { "type": "integer", "minimum": 0 },
+    "timingBoundary": {
+      "enum": [
+        "submit-through-materialized-cgimage",
+        "submit-through-export-return-and-published-image-reopen"
+      ]
+    },
+    "publishedFileValidated": { "type": ["boolean", "null"] },
+    "sourceFingerprintUnchanged": { "const": true },
+    "thermalState": { "type": "string", "minLength": 1 },
+    "result": { "const": "MEASURED" }
+  },
+  "$defs": {
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "operation": { "const": "preview" } },
+        "required": ["operation"]
+      },
+      "then": {
+        "properties": {
+          "sourceKind": { "const": "real-raw" },
+          "scenario": { "enum": ["cold", "warm", "changed"] },
+          "timingBoundary": { "const": "submit-through-materialized-cgimage" },
+          "publishedFileValidated": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": { "const": "preview" },
+          "scenario": { "const": "cold" }
+        },
+        "required": ["operation", "scenario"]
+      },
+      "then": {
+        "properties": {
+          "contextLifecycle": { "const": "fresh-renderer-context-inside-timer" },
+          "expectedContextCreationCountBeforeTimer": { "const": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": { "const": "preview" },
+          "scenario": { "enum": ["warm", "changed"] }
+        },
+        "required": ["operation", "scenario"]
+      },
+      "then": {
+        "properties": {
+          "contextLifecycle": {
+            "const": "fresh-renderer-context-before-warmup-reused-for-timed-request"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "operation": { "const": "export" } },
+        "required": ["operation"]
+      },
+      "then": {
+        "properties": {
+          "scenario": { "const": "full-resolution" },
+          "maskCount": { "enum": [1, 10] },
+          "contextLifecycle": { "const": "fresh-exporter-context-inside-timer" },
+          "timingBoundary": {
+            "const": "submit-through-export-return-and-published-image-reopen"
+          },
+          "publishedFileValidated": { "const": true }
+        }
+      }
+    }
+  ]
+}

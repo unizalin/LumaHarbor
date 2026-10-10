@@ -165,6 +165,7 @@ public actor PhotoExporter {
     private let pipeline: AdjustmentPipeline
     private let renderService: ImageRenderService
     private let fileManager: FileManager
+    private let brushRenderObserverFactory: @Sendable () -> BrushMaskRenderObserver?
     /// Injectable so a platform build without an encoder for some format
     /// (no HEIC codec, say) can be simulated in tests instead of only ever
     /// matching whatever the machine running the suite happens to support.
@@ -184,6 +185,25 @@ public actor PhotoExporter {
         self.renderService = renderService
         self.fileManager = fileManager
         self.encodableTypeIdentifiers = encodableTypeIdentifiers
+        self.brushRenderObserverFactory = { nil }
+    }
+
+    internal init(
+        decoder: any RawDecoding,
+        pipeline: AdjustmentPipeline = AdjustmentPipeline(),
+        renderService: ImageRenderService = ImageRenderService(),
+        fileManager: FileManager = .default,
+        encodableTypeIdentifiers: @escaping @Sendable () -> Set<String> = {
+            ExportFormat.systemEncodableTypeIdentifiers()
+        },
+        brushRenderObserverFactory: @escaping @Sendable () -> BrushMaskRenderObserver?
+    ) {
+        self.decoder = decoder
+        self.pipeline = pipeline
+        self.renderService = renderService
+        self.fileManager = fileManager
+        self.encodableTypeIdentifiers = encodableTypeIdentifiers
+        self.brushRenderObserverFactory = brushRenderObserverFactory
     }
 
     public func export(_ request: ExportRequest) async throws -> ExportOutcome {
@@ -311,6 +331,7 @@ public actor PhotoExporter {
         let maximumWidth = request.maximumWidth
         let maximumHeight = request.maximumHeight
         let watermark = request.watermark
+        let brushRenderObserver = brushRenderObserverFactory()
 
         // Spec §11: no decoding or encoding on the main thread. Spec §6.3: the
         // export stays cancellable while it runs.
@@ -328,7 +349,19 @@ public actor PhotoExporter {
                 recipe: decoded.rawRenderRecipe ?? resolvedRecipe,
                 scaleFactor: decoded.scaleFactor
             )
-            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: adjusted)
+            let brushMapping = try GeometryRenderer.brushCoordinateMapping(
+                sourceExtent: decoded.image.extent,
+                geometry: request.adjustments.geometry
+            )
+            let withBrushMasks = try await BrushMaskRenderer._applyValidatedAsync(
+                request.adjustments.brushMasks,
+                to: adjusted,
+                mapping: brushMapping,
+                recipe: decoded.rawRenderRecipe ?? resolvedRecipe,
+                scaleFactor: decoded.scaleFactor,
+                observer: brushRenderObserver
+            )
+            let withGeometry = GeometryRenderer.apply(request.adjustments.geometry, to: withBrushMasks)
             // Local adjustments (Phase 4 Task 4.2) run after geometry, same
             // as the preview path (`CoreImagePreviewRenderer`) and for the
             // same reason: a gradient's anchor point is placed on the

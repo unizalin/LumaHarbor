@@ -30,9 +30,9 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
     /// Bumped only for breaking changes. A sidecar carrying a *higher* value is
     /// rejected rather than partially read (spec §12.1).
     ///
-    /// v4 (DECISIONS.md D-006 / P6) adds `snapshots`. Missing on a v1/v2/v3
-    /// sidecar; decodes to empty array `[]` rather than failing.
-    public static let currentSchemaVersion = 4
+    /// v5 adds the independent `adjustments.brushMasks` contract while
+    /// retaining v3 curation and v4 snapshots.
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var photoID: PhotoID
@@ -44,6 +44,15 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
     /// Portable rating/flag/keyword record (spec §6.1). Missing on a v1/v2
     /// sidecar; decodes to `.neutral` rather than failing.
     public var curation: PhotoCuration
+    /// Whether the source JSON actually carried the curation key. This keeps
+    /// experimental v3 brush files (which omit curation) distinguishable from
+    /// an explicit neutral curation value during migration.
+    public private(set) var hasCurationField: Bool
+    /// Whether the source adjustments object carried the brushMasks key. An
+    /// experimental v3 file may intentionally carry an empty array; that key
+    /// is still evidence of the brush dialect and must not be inferred from
+    /// the decoded array's count.
+    public private(set) var hasBrushMasksField: Bool
     /// Portable snapshot history milestones (spec §6.6). Missing on pre-v4
     /// sidecars; decodes to empty array `[]` rather than failing.
     public var snapshots: [EditSnapshot]
@@ -59,6 +68,23 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
     /// custom decoder: missing on an older sidecar decodes to `nil`
     /// automatically, same as every other addition here.
     public var variantOf: PhotoID?
+
+    // Decoder bookkeeping (`hasCurationField`) describes source shape rather
+    // than the portable value itself, so it must not make an otherwise equal
+    // sidecar compare or hash differently.
+    public static func == (lhs: PhotoSidecar, rhs: PhotoSidecar) -> Bool {
+        lhs.schemaVersion == rhs.schemaVersion
+            && lhs.photoID == rhs.photoID
+            && lhs.sourceRelativePath == rhs.sourceRelativePath
+            && lhs.sourceFingerprint == rhs.sourceFingerprint
+            && lhs.decoder == rhs.decoder
+            && lhs.adjustments == rhs.adjustments
+            && lhs.curation == rhs.curation
+            && lhs.snapshots == rhs.snapshots
+            && lhs.createdAt == rhs.createdAt
+            && lhs.modifiedAt == rhs.modifiedAt
+            && lhs.variantOf == rhs.variantOf
+    }
 
     public init(
         schemaVersion: Int = PhotoSidecar.currentSchemaVersion,
@@ -80,6 +106,8 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         self.decoder = decoder
         self.adjustments = adjustments
         self.curation = curation
+        self.hasCurationField = true
+        self.hasBrushMasksField = true
         self.snapshots = snapshots
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
@@ -99,6 +127,8 @@ public struct PhotoSidecar: Codable, Equatable, Sendable {
         sourceFingerprint = try container.decode(FileFingerprint.self, forKey: .sourceFingerprint)
         self.decoder = try container.decodeIfPresent(DecoderDescriptor.self, forKey: .decoder) ?? .coreImageDefault
         adjustments = try container.decodeIfPresent(PhotoAdjustments.self, forKey: .adjustments) ?? .neutral
+        hasCurationField = container.contains(.curation)
+        hasBrushMasksField = container.contains(.adjustments) && adjustments.hasBrushMasksField
         curation = try container.decodeIfPresent(PhotoCuration.self, forKey: .curation) ?? .neutral
         snapshots = try container.decodeIfPresent([EditSnapshot].self, forKey: .snapshots) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)

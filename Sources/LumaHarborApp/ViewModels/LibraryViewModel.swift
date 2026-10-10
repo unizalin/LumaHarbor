@@ -267,6 +267,7 @@ public final class LibraryViewModel: ObservableObject {
 
     public init() {
         editorForwarding = editor.objectWillChange.sink { [weak self] in
+            guard self?.editor.isCommittingBrushMaskGesture != true else { return }
             self?.objectWillChange.send()
         }
         presetLibraryForwarding = presetLibrary.objectWillChange.sink { [weak self] in
@@ -644,7 +645,8 @@ public final class LibraryViewModel: ObservableObject {
         adjustmentClipboard = AdjustmentClipboard(
             patch: AdjustmentPatch.extracting(modifiedFields, from: current),
             geometry: copyIncludesGeometry ? current.geometry : nil,
-            localAdjustments: copyIncludesLocalAdjustments ? current.localAdjustments : nil
+            localAdjustments: copyIncludesLocalAdjustments ? current.localAdjustments : nil,
+            brushMasks: copyIncludesLocalAdjustments ? current.brushMasks : nil
         )
     }
 
@@ -656,7 +658,8 @@ public final class LibraryViewModel: ObservableObject {
         editor.pasteAdjustments(
             patch: clipboard.patch,
             geometry: clipboard.geometry,
-            localAdjustments: clipboard.localAdjustments
+            localAdjustments: clipboard.localAdjustments,
+            brushMasks: clipboard.brushMasks
         )
     }
 
@@ -665,11 +668,9 @@ public final class LibraryViewModel: ObservableObject {
     /// `BatchAdjustmentSyncService`'s existing per-target snapshot/merge/
     /// fault-tolerance machinery via `syncPatch(_:sourcePhotoID:targetPhotoIDs:)`
     /// -- the explicit-action sibling of the slider-drag gesture's
-    /// `commitGesture`. Geometry/Local Adjustments in the clipboard are
-    /// never part of this: `BatchAdjustmentSyncService` only understands
-    /// `AdjustmentPatch`'s stable field IDs, and giving it a second,
-    /// parallel safety model for those fields is out of scope for this
-    /// round (see `docs/coordination/CURRENT.md`).
+    /// `commitGesture`. Geometry remains opt-in local UI state; both legacy
+    /// local adjustments and independent brush masks are carried when the
+    /// clipboard explicitly includes local adjustments.
     ///
     /// The target set is frozen synchronously -- `selectedPhotoIDs` is read
     /// into a local `let` before the `await` below, the same guarantee
@@ -686,7 +687,12 @@ public final class LibraryViewModel: ObservableObject {
         guard !targets.isEmpty else { return nil }
         let skipped = frozenSelection.count - targets.count
 
-        let transaction = await batchSyncService.syncPatch(clipboard.patch, sourcePhotoID: source, targetPhotoIDs: targets)
+        let transaction = await batchSyncService.syncPatch(
+            clipboard.patch,
+            sourcePhotoID: source,
+            targetPhotoIDs: targets,
+            brushMasks: clipboard.brushMasks
+        )
         lastBatchTransaction = transaction
         for targetID in transaction.targetPhotoIDs where transaction.results[targetID] == .success {
             updateEditBadge(photoID: targetID, hasEdits: true)
@@ -1197,9 +1203,11 @@ public final class LibraryViewModel: ObservableObject {
             guard let self, let services else { return }
             let url = photo.url(inLibraryRootedAt: library.rootURL)
 
-            let loaded: Result<PhotoAdjustments, Error>
+            let loaded: Result<(adjustments: PhotoAdjustments, snapshots: [EditSnapshot]), Error>
             do {
-                loaded = .success(try await services.loadAdjustments(photo))
+                let adjustments = try await services.loadAdjustments(photo)
+                let snapshots = try await services.loadSnapshots(photo)
+                loaded = .success((adjustments, snapshots))
             } catch {
                 loaded = .failure(error)
             }
@@ -1214,12 +1222,13 @@ public final class LibraryViewModel: ObservableObject {
                   self.selectedLibraryID == library.id else { return }
 
             switch loaded {
-            case .success(let adjustments):
+            case .success(let loadedPhoto):
                 self.editor.open(
                     photo: photo,
                     sourceURL: url,
-                    adjustments: adjustments,
-                    isReadOnly: !library.isWritable
+                    adjustments: loadedPhoto.adjustments,
+                    isReadOnly: !library.isWritable,
+                    snapshots: loadedPhoto.snapshots
                 )
             case .failure(let error):
                 // Spec §10: a damaged sidecar is reported, never silently

@@ -88,6 +88,10 @@ struct ManualPreviewRenderer: PreviewRendering {
     /// scheduler drops stale results at delivery time rather than relying on
     /// cooperative cancellation.
     var respectsCancellation: Bool = true
+    /// Requests in this set finish with a decode error after the gate opens.
+    /// This lets scheduler tests exercise delayed stale failures as well as
+    /// delayed stale images.
+    var failingKeys: Set<String> = []
 
     /// Requests are identified by their exposure value, which reads clearly in
     /// the tests.
@@ -99,6 +103,9 @@ struct ManualPreviewRenderer: PreviewRendering {
         await gate.wait(for: Self.key(for: request))
         if respectsCancellation {
             try Task.checkCancellation()
+        }
+        if failingKeys.contains(Self.key(for: request)) {
+            throw RawDecodingError.unsupportedFormat(path: request.url.path)
         }
         let image = try TestImage.make()
         return PreviewImage(cgImage: image, pixelSize: CGSize(width: 4, height: 4))

@@ -1,5 +1,84 @@
 # Current Coordination State
 
+## Brush preview performance fix（2026-10-10；最新有效狀態）
+
+- **狀態**：`DONE_WITH_CONCERNS`；2026-10-10 已取得使用者對 PR #2 的 Alpha 例外整合授權，依 D-014 保留所有 `PARTIAL`／`NOT RUN` 邊界。7 個效能 FAIL 已由兩個根因修正：warm RAW decoded-preview cache，以及 bounded brush coverage／mask fan-out。Gemini 唯一提出的 256×256／128×128 規格落差已由 Sol 對齊；synthetic stress、B/O `PERF-COVERAGE`、真實 RAW warm preview、original-size export、preview/export memory、pixel parity、cancellation、50-cycle worker convergence 與 30 次前景 `PERF-UI` 均已通過。實體裝置、輸入、灰卡與部分人工競態仍保留。
+- **工作樹／版本**：branch `luna/brush-preview-performance-fix`，獨立 task-scoped worktree。效能 product／harness HEAD=`7af212512f59768801081765808202fe84a85b25`；Mac snapshot follow-up product HEAD=`5d32550029fd317e377a732fa68b57ec2ff2cf85`；UI observation isolation HEAD=`ae8c59a457aa6f6298da43278edd53588562661e`；PERF-UI gesture fix／正式量測 HEAD=`5530e91f8f7cae86b6d6633cfd38f13d72bc896b`；base=`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`；延續候選父版本=`eae30121ec7ef089b4a048a50151993c205e2686`，不代表已整合。
+- **產品修正**：`b640823` 加入互斥 stage interval union 與 bounded decoded-preview cache；`26e7358` 加入 bounded tile raster、repeated-geometry coverage reuse、bounded mask fan-out、cancellation join 與 scalar oracle；`f97760a` 補上 B/O 共享 stage coverage gate 與 baseline test-only observer；`7af2125` 將 tile 對齊固定 128×128 並加入 acceptance contract；`5d32550` 接入 snapshot sidecar；`ae8c59a` 分離 render／history／brush display observation boundary 並加入 heartbeat recorder；`5530e91` 以 named overlay coordinate space 修正 gesture location 重複位移。沒有降低解析度、刪除筆刷點、跳過調整或放寬門檻。
+- **根因／數據**：128×128 follow-up 的 synthetic stress coverage raster 為 O `8.801/10.111` ms（1 mask）與 `64.776/74.801` ms（10 masks）；共用互斥 stage clock 的 total materialized 為 `11.988/13.210` 與 `70.664/81.013 ms`，同批 16 筆樣本的端到端 `totalDurationSeconds` 則為 `12.084/13.337` 與 `70.779/81.143 ms`（均為兩輪合併 p50/p95）。RAW warm O 的 0／1／10 masks 為 `36.285/39.805`、`39.560/49.993`、`56.002/61.015 ms`。PERF-UI O 的 heartbeat 額外延遲 p50/p95/max=`0.227/26.152/27.835 ms`，warm preview p50/p95=`80.540/90.083 ms`，30/30 完整、0 取消。
+- **證據**：[效能修正驗收報告](../testing/reports/2026-10-07-brush-preview-performance-fix.md)、[原始 evidence、Mac／Simulator 摘要與 checksum](../testing/evidence/2026-10-07-brush-preview-performance-fix/README.md)、[本輪 handoff](2026-10-07-brush-preview-performance-fix-handoff.md)。公開 artifact 已掃描，沒有私人路徑。
+- **回歸**：`2c1d1e3` 驗證狀態的完整 Release suite `2733 executed、22 skipped、0 failures`；`LibraryViewModelTransitionTests` 13/13、`SnapshotWorkflowTests` 9/9 PASS；focused renderer／cancellation／oracle 31/31 PASS；UI gesture／contract／recorder 29/29 PASS；analyzer 全套 41/41、UI 子集合 6/6 PASS；50-cycle `55/55` worker join、active 0、settled RSS `49,168,384` bytes（limit `89,735,168`）PASS。
+- **獨立 review**：程式／spec 的 agy → Gemini 3.1 Pro High 唯讀審查為 `APPROVED_WITH_CONCERNS`，唯一 minor 已由 `7af2125` 的 128×128 對齊與全套回歸解決。Mac 文件差異初審為 `CHANGES_REQUESTED`，指出端到端與 stage total 的來源未分開說明；數據邊界補正後，follow-up=`APPROVED`、無 finding。詳見 [程式／spec review](../testing/reports/2026-10-08-brush-preview-performance-fix-gemini-review.md)與 [Mac 文件 review](../testing/reports/2026-10-08-brush-preview-performance-fix-mac-ui-gemini-review.md)。
+- **Mac 前景**：`UI-MAC-01`、`UI-BRUSH-01`、`STORE-01`、`PERF-UI` PASS；`UI-MAC-02`、`UI-BRUSH-02` PARTIAL。兩支筆刷 Delete／Undo／Redo／重開、Local off/on paste、batch sync、snapshot restore、建立／重開與刪除最後快照已通過。首次 snapshot 重開暴露 Mac 組裝未接 sidecar 讀寫，`5d32550` 修正；正式 heartbeat 前發現 gesture location 重複加 image origin，`5530e91` 修正並以 RED→GREEN contract、真實 Release gesture 與 30 次量測複驗。受控四色滴管與未 release 時的跨動作競態仍未人工執行。
+- **iPad Simulator**：`UI-SIM-01` PARTIAL。iPad Pro 11-inch (M4)、iOS 18.6 的 fresh Debug build／install／launch、直向／橫向、Files 選取／Quick Look 後返回、真實 Split View 窄窗、建立筆刷、paint、完成筆畫 Undo／Redo、曝光 0.0→0.1、autosave 與 relaunch persistence 已通過；窄窗新增後重啟仍為 1 mask／2 paint strokes／exposure 0.1。Files 直接交件與 app-copy／in-place 無法由 UI 判別；畫布 clamp 為 1×～5×且 UI 無精確倍率讀值，因此原 0.75×／1×／2× source-marker mapping、鍵盤與 hands-on VoiceOver 未完成，且不能取代實體 Pencil／裝置驗收。
+- **整合候選**：branch 已推送至 `origin/luna/brush-preview-performance-fix`，包含本輪 UI observation、gesture 修正、驗證契約與驗收文件。PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 在授權前確認 `MERGEABLE／CLEAN`、無遠端 checks；使用者已明確授權標為 Ready 並以 Alpha 例外整合。此決策提交完成後執行 squash merge；遠端 `main` 在 merge 前仍為 `82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
+- **文件同步**：Task 1 已將根目錄 README 對齊 Sidecar v5、白平衡數值輸入／滴管、有順序的 adjustment brush masks、paint／erase、筆畫 Undo／Redo，以及新舊筆刷共存但不自動轉換的契約；Alpha 摘要連至目前驗收報告並保留實機、輸入裝置與灰卡 `NOT RUN` 邊界。產品程式、測試與 gate 未變，候選仍未進入 `main`。
+- **下一步**：提交並推送 D-014，將 PR #2 標為 Ready、squash merge，核對 merged SHA 與遠端 `main`；再從該 SHA 重建／同步 Mac Release 並記錄安裝與啟動狀態。裝置與受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver／四色滴管／灰卡；Simulator 無法證明的 storage mode 與精確 zoom/source mapping 保留 NOT RUN。
+
+## Brush review fixes（2026-10-07；最新有效狀態）
+
+- **狀態**：`DONE_WITH_CONCERNS`。本輪四類驗收工具／文件修正已完成自動驗證與 Gemini 非原作者唯讀覆核；Gemini 對 `6fd3d41..d34fc99` 的 spec compliance／code quality 均為 `APPROVED`、無 blocking finding，兩個 minor 已修正。
+- **工作樹／版本**：`codex/brush-performance-acceptance-repair`，repo-relative worktree `.worktrees/codex-brush-performance-acceptance-repair`；writer=Codex root。最新驗證程式 SHA=`b921082bcbb08906c1b8ad709b2abd6ec9ee812a`，本輪起始 HEAD=`6fd3d416d64093fb1ab9609497633915fe6702f9`；production Sources 未更動。
+- **修正**：固定 workload 解析度與跨組尺寸、嚴格純量型別及 FAIL artifact；RAW harness v3 使用 expected context counts，v2/v3 均標示 allocations 未量測；checksum 與 e7d6425／4fdbc1f 歸因已更正。
+- **驗證**：Python 34 tests PASS；Swift Release focused 2 tests／1 skipped／0 failures。832 筆歷史樣本重算 validation PASS，summaries/gates 不變：synthetic 56 PASS／4 FAIL／7 NOT RUN，RAW 17 PASS／3 FAIL。未新增 benchmark 數據。
+- **證據**：[修正報告](../testing/reports/2026-10-07-brush-review-fixes.md)、[Gemini 最終覆核](../testing/reports/2026-10-07-brush-gemini-final-review.md)、[重算與 checksums](../testing/evidence/2026-10-07-brush-review-fixes/README.md)、[交接](2026-10-06-brush-raster-correctness-followup-handoff.md)。完成文件提交後工作樹應乾淨，沒有保留使用者或其他代理 dirty files。
+- **唯一下一步**：進入 Task 5 尚未完成的人工／產品驗收，先建立公平 B/O stage wall-time 入口與量測，再依設備可用性執行 Mac／實體 iPad／Pencil／鍵盤／VoiceOver／heartbeat／灰卡。既有 7 個效能 FAIL 維持，尚不能發布。未 push、merge、rebase 或 deploy。
+
+下方 2026-10-07 重跑與更早區塊為歷史；有衝突時以本節及最新修正報告為準。
+
+## Brush raster correctness follow-up（2026-10-07；目前有效）
+
+- **狀態**：`DONE_WITH_CONCERNS`。2026-10-07 已重跑完整 synthetic ABBA 480 筆與 RAW／Export 352 筆；stress preview 四個 gate、warm RAW `INTERACTIVE-150` 三個 gate 仍 FAIL，沒有放寬門檻。
+- **最新驗證**：ABBA `validation PASS`，`PERF-EMPTY` 10/10、`PERF-PREVIEW` 16/20、`PERF-MEM-PREVIEW` 30/30 PASS；RAW／Export `validation PASS`，`PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4、`PERF-MEM-PREVIEW` 9/9 PASS。新版 RAW／Export matrix 共 352 筆，取代舊 176 筆作為目前相對效能證據。
+- **最新 SHA**：ABBA／harness 修正=`e7d6425d72ceb542d9e130b1eadd8f550afdae2e`；RAW／Export runner 執行 HEAD=`4fdbc1fb3abcfea5abe3b11ed03c267851de9116`。Baseline B 仍為 `1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
+- **證據**：[full ABBA repair](../testing/evidence/2026-10-07-brush-full-abba-repair/README.md)、[RAW/export repair](../testing/evidence/2026-10-07-brush-raw-export-repair/README.md)。兩份 analyzer gate 都已獨立重算逐位元相同，公開 artifact 未含私人路徑。
+- **下一步**：依後續計畫 Task 5 進行非原作者唯讀審查與人工 Mac／實體 iPad／heartbeat／輸入／灰卡項目；公平 B/O stage coverage 仍需共同的互斥 production clock。
+
+## Brush raster correctness follow-up（2026-10-06, Codex；目前有效）
+
+- **狀態**：`DONE_WITH_CONCERNS`。F1～F3、完整五情境 synthetic B/O、production PreviewScheduler 50-cycle、8+8 cancellation、真實 RAW preview 與原尺寸 export/RSS 已執行。synthetic stress 四個 gate與 warm RAW INTERACTIVE-150 三個 gate FAIL；公平 B/O stage、人工裝置與獨立 reviewer 仍未完成。
+- **工作樹與 SHA**：branch `codex/brush-performance-acceptance-repair`；B=`1de07dcfeb2ed217a75d1c04978da6a5936f379a`；原 U=`26c3390ba59e0e2ae416618d6e832a5c0eeba98d`；ABBA renderer／analyzer=`4e74bf3813ac4e6f6dbdc27b10d8a779c4ef3786`；scheduler 產品修正=`2b3acc4dbab87d91684ef127608a873173fbf7e5`；Task 3 最終證據=`5170fb18d06b49415dc6b1c56bf9dca250c05abd`；Task 4 harness／runner／analyzer=`8bc6819cae1ead2225f265116bb6822d9ecf087c`。未 push、merge、rebase 或 deploy。
+- **實作**：`29718d2` 修正跨垂直 tile row mapping；`bc89693` 移除全域 `-DDEBUG` workaround；`1ded16a` 加入 per-invocation cancellation observer 與 preview/export lifecycle tests；`c425cb7` 加入 B/O ABBA／schema／取消與 RSS 診斷；`4e74bf3` 使 ABBA analyzer fail closed；`2b3acc4` 讓 scheduler teardown 可等待所有 live task；`cf50e56` 建立 production-route Task 3 harness；`5170fb1` 收緊 acceptance 契約；`8bc6819` 新增真實 RAW／原尺寸 export 的 actual-decoded-size recorder、ABBA runner、schema 與 fail-closed analyzer。
+- **最終驗證**：既有完整 Debug／Release 與 build/privacy 證據維持；`a4278c1` 的五情境 ABBA 480 records validation PASS，stress 一／十 masks 兩輪共四個 PERF-PREVIEW FAIL。Task 3 的 PERF-CANCEL 與 PERF-MEM-50-CANCEL PASS。Task 4 的 RawFixtureTests 10 executed／1 optional skipped／0 failures；analyzer 8/8、Release 計時邊界 1/1 PASS；176 records validation PASS，PERF-EXPORT 4/4、export RSS 4/4、preview RSS 9/9 PASS，warm RAW INTERACTIVE-150 0/1/10 masks 3/3 FAIL。
+- **限制**：warm RAW INTERACTIVE-150 與 synthetic stress 已實測 FAIL；B/O coverage stage、GUI heartbeat、人工 Mac／實體 iPad／灰卡與獨立 reviewer 仍為 NOT RUN 或 partial。B/O 缺共同互斥 stage wall-time 入口，O-only 混合 coverage 數字不作正式 gate。
+- **文件**：[追補規格](../superpowers/specs/2026-10-06-brush-raster-correctness-and-verification-followup-spec.md)、[最終驗收報告](../testing/reports/2026-10-06-brush-raster-correctness-followup.md)、[目前交接](2026-10-06-brush-raster-correctness-followup-handoff.md)。下方舊區塊保留為歷史；相衝突的狀態與下一步由本節取代。
+- **完整矩陣**：正式 benchmark／parity HEAD=`a4278c15606ed6e79d414fcf646acb37c30b223f`；該 commit 只修正 changed benchmark neutral control，產品 renderer 仍等同 `4e74bf3`。第一次與修正後各 480 筆、pixel parity 與 checksums 已保存於 committed evidence。
+- **Task 3 commits／證據**：`2b3acc4` 新增 scheduler live-task join；`cf50e56` 新增 production-route 50-cycle；`5170fb1` 補上 exact allowlist、完整 schema、6 個 analyzer 測試與 fresh run-root 防覆寫。正式 p95 為 preview 0.052000 ms、6000×4000 export 0.370416 ms；artifact checksum `b79e0d238be7d885c12dde38a760aa7bcf89fad5b20f043439b2396214da8b1d`。證據見 [`docs/testing/evidence/2026-10-06-brush-scheduler-cancellation`](../testing/evidence/2026-10-06-brush-scheduler-cancellation/README.md)。
+- **Task 4 commits／證據**：`8bc6819` 新增真實 RAW preview／full export 入口；正式 176 筆全為 nominal，公開 artifact 無私人路徑，獨立重算逐位元相同。samples/gates checksum 為 `475509638b350051a01f719b13200503ea9732a390030053fcdd3871e60d5256`／`31bf6393cf4b5f04588de7ceb256cc29485ebda9e530e1e91a80114ecb053e6f`。證據見 [`docs/testing/evidence/2026-10-06-brush-raw-export`](../testing/evidence/2026-10-06-brush-raw-export/README.md)。
+- **唯一下一步**：依[後續計畫 Task 5](../superpowers/plans/2026-10-06-brush-acceptance-completion.md)安排非原作者唯讀審查，並將 Mac／實體 iPad、heartbeat、輸入與灰卡人工項目依設備可用性分列；已知效能 FAIL 維持，不放寬門檻。
+
+Updated: 2026-10-06
+
+Updated by: Codex（brush raster correctness follow-up implementation）
+
+## Brush performance and acceptance repair（2026-10-06, Codex）
+
+- **狀態**：`DONE_WITH_CONCERNS`。branch `codex/brush-performance-acceptance-repair` 以 candidate `1de07dcfeb2ed217a75d1c04978da6a5936f379a` 為基準；實作 commit `26c3390` 已完成 bounded tiled coverage、取消檢查、async preview／export、context reuse 與 deterministic acceptance harness。尚未 push、merge 或 rebase。
+- **自動驗證**：完整 `swift test` 2,696 executed、18 skipped、0 failures；strict-concurrency build exit 0；scalar oracle 最大 R8 byte 差 0；cancellation、sync／async composition、context identity/isolation focused tests 全部通過；`git diff --check` PASS。
+- **Release synthetic O**：1600×1067、16 samples、0／1／10 masks 的 coverage p50 為 0.002／11.058／19.964 ms，p95 為 0.004／11.202／21.321 ms；端到端 p50 為 2.274／13.635／25.561 ms，p95 為 2.431／13.815／26.417 ms。absolute coverage 與 preview incremental 目標通過；150 ms 目標仍另列。
+- **未完成**：candidate B/O ABBA delta、原尺寸 export／peak RSS、50 次取消／切圖、Mac／實體 iPad／輸入矩陣、灰卡 ΔE00、獨立 reviewer 均為 `NOT RUN`；因此不能宣稱整合 READY。rendererVersion 1 的 density／pressure 可見語意 concern 維持原狀。
+- **證據**：實作與限制見 `docs/testing/reports/2026-10-06-brush-performance-and-acceptance-repair.md`；正式 spec 見 `docs/superpowers/specs/2026-10-06-brush-performance-and-acceptance-repair-spec.md`；交接見 `docs/coordination/2026-10-06-brush-performance-acceptance-repair-handoff.md`。
+- **下一步**：在同一參考機器完成 candidate B 與 branch O 的 ABBA Release workload，再補原尺寸 export／RSS；此動作前維持 `DONE_WITH_CONCERNS`，不得以 synthetic O 結果取代產品驗收。
+
+Updated: 2026-10-06
+
+Updated by: Codex（brush performance and acceptance repair）
+
+## Mainline white-balance and brush integration（2026-10-06, Codex）
+
+- **狀態**：`DONE_WITH_CONCERNS`。白平衡輸入／滴管、Sidecar v5、獨立 adjustment brush 模型、座標映射、預覽／匯出、Editor session、批次／剪貼簿／快照保存及 Mac／iPad 共用 UI 已整合至 `codex/mainline-wb-brush-integration`。
+- **Git 基線**：本工作樹由 `origin/main` `82542e73aae8f16b0ba7e4d9d36a8a42451a7319` 建立；產品與測試實作 HEAD 為 `0cd6eba4a8c75746f7c7cefa24a4c7a85f6b114d`。分支尚未 push、merge 或 rebase，`Apps/LumaHarborPad.xcodeproj/project.pbxproj` 未修改。
+- **來源保全**：唯讀來源 `codex/open-source-release-prep` 仍停在 `5a80e969fbae94d8ee6db4842f3a2def781329f3`，維持原有 24 個 tracked modified 與 10 個 untracked 路徑；未覆蓋、回復或刪除其內容。
+- **自動驗證**：完整 `swift test` 2,687 executed、17 skipped、0 failures；strict-concurrency build、Mac Release app、generic iPad Simulator／device build、10 項私人 RAW fixture 測試（1 skip）、release privacy、未發布 ZIP 解壓與 checksum 全部通過。iPad Simulator 安裝、啟動、首屏截圖與清理通過。
+- **效能 concern**：同一 renderer 的空筆刷 1600px 預覽兩輪 p50 為 151.6／153.8 ms，未比 baseline 159.3／154.1 ms 超出預算；固定一個 mask 的 p50 為 933.9／943.8 ms，十個 mask 為 7,993.1／8,008.0 ms。6000×4000 原尺寸匯出一個／十個 mask 分別約 9.1／87.2 秒，十 mask 峰值約 691 MiB。有效筆刷負載不符合互動目標，需另案優化 rasterizer。
+- **人工限制**：Mac 主機鎖定，Mac 視覺操作未執行；iPad 僅完成 Simulator 首屏 smoke。實體 iPad、Apple Pencil、旋轉／Split View、VoiceOver、鍵盤、灰卡 D65 Lab／ΔE00 與正式 Lightroom Gate 2 均為 `NOT RUN`。
+- **證據**：完整矩陣、命令、像素／效能結果與限制見 `docs/testing/reports/2026-10-05-mainline-white-balance-brush-integration.md`。
+- **下一步**：以獨立任務優化 `BrushMaskRenderer` 的 coverage rasterization，先保留相同像素與取消契約，再重跑一／十 mask 的 1600px 與原尺寸效能矩陣；未獲授權前不得 push、merge、rebase 或修改唯讀來源工作樹。
+
+Updated: 2026-10-06
+
+Updated by: Codex（mainline white-balance and brush integration Task 8）
+
 ## Semantic release versioning landed（2026-09-29, Codex）
 
 - **整合狀態**：`codex/semver-release-versioning` 已以 fast-forward 合併並推送至 `origin/main`，正式產品基準為 `2905314872686aa836848ebe27a8e82cddfee658`；工作樹在推送前後均乾淨。

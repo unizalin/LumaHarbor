@@ -51,7 +51,7 @@ final class SnapshotModelTests: XCTestCase {
         XCTAssertEqual(decoded.createdAt, now)
     }
 
-    func testPhotoSidecarV4RoundTripWithSnapshots() throws {
+    func testPhotoSidecarV5RoundTripWithSnapshots() throws {
         let photoID = PhotoID()
         let snapshot1 = EditSnapshot(name: "Version 1", adjustments: .neutral)
         var adj2 = PhotoAdjustments.neutral
@@ -65,13 +65,13 @@ final class SnapshotModelTests: XCTestCase {
             snapshots: [snapshot1, snapshot2]
         )
 
-        XCTAssertEqual(sidecar.schemaVersion, 4)
+        XCTAssertEqual(sidecar.schemaVersion, 5)
         XCTAssertEqual(sidecar.snapshots.count, 2)
 
         let encoded = try SidecarCoding.encode(sidecar)
         let decoded = try SidecarCoding.decode(PhotoSidecar.self, from: encoded)
 
-        XCTAssertEqual(decoded.schemaVersion, 4)
+        XCTAssertEqual(decoded.schemaVersion, 5)
         XCTAssertEqual(decoded.photoID, photoID)
         XCTAssertEqual(decoded.snapshots.count, 2)
         XCTAssertEqual(decoded.snapshots[0].name, "Version 1")

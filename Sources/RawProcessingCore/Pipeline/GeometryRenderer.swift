@@ -50,6 +50,96 @@ import Foundation
 /// place in their own pipelines, so the preview a user drags a crop handle
 /// against and the full-resolution export are the same code path.
 public enum GeometryRenderer {
+    /// The transform and extent contract used by the geometry stage. Brush
+    /// coordinates are built from this value so the brush and rendered image
+    /// cannot drift through two independent approximations.
+    internal struct BrushGeometryTransform {
+        let sourceToDisplay: BrushCoordinateMapping.Matrix3x3
+        let displayToSource: BrushCoordinateMapping.Matrix3x3
+        let displayExtent: CGRect
+    }
+
+    internal static func makeBrushGeometryTransform(
+        sourceExtent: CGRect,
+        geometry: GeometryAdjustments
+    ) throws -> BrushGeometryTransform {
+        var matrix = BrushCoordinateMapping.Matrix3x3.identity
+        if geometry.flipHorizontal {
+            matrix = BrushCoordinateMapping.Matrix3x3.scale(x: -1, y: 1, around: CGPoint(x: 0.5, y: 0.5)) * matrix
+        }
+        if geometry.flipVertical {
+            matrix = BrushCoordinateMapping.Matrix3x3.scale(x: 1, y: -1, around: CGPoint(x: 0.5, y: 0.5)) * matrix
+        }
+        if geometry.rotationDegrees != 0 {
+            matrix = BrushCoordinateMapping.Matrix3x3.rotationClockwise(degrees: geometry.rotationDegrees) * matrix
+        }
+        if geometry.straightenDegrees != 0 {
+            matrix = BrushCoordinateMapping.Matrix3x3.rotationClockwise(degrees: geometry.straightenDegrees) * matrix
+        }
+        if geometry.perspectiveHorizontal != 0 || geometry.perspectiveVertical != 0 {
+            let shortSide = min(sourceExtent.width, sourceExtent.height)
+            let h = CGFloat(geometry.perspectiveHorizontal / 100) * shortSide * 0.25 / sourceExtent.width
+            let v = CGFloat(geometry.perspectiveVertical / 100) * shortSide * 0.25 / sourceExtent.height
+            let destination = [
+                CGPoint(x: h, y: v), CGPoint(x: 1 - h, y: -v),
+                CGPoint(x: 1 + h, y: 1 + v), CGPoint(x: -h, y: 1 - v)
+            ]
+            matrix = try BrushCoordinateMapping.Matrix3x3.homography(
+                from: [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)],
+                to: destination
+            ) * matrix
+        }
+        if let pins = geometry.cornerPins, !pins.isIdentity {
+            matrix = try BrushCoordinateMapping.Matrix3x3.homography(
+                from: [
+                    CGPoint(x: pins.topLeft.x, y: pins.topLeft.y),
+                    CGPoint(x: pins.topRight.x, y: pins.topRight.y),
+                    CGPoint(x: pins.bottomRight.x, y: pins.bottomRight.y),
+                    CGPoint(x: pins.bottomLeft.x, y: pins.bottomLeft.y)
+                ],
+                to: [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
+            ) * matrix
+        }
+        if let crop = geometry.crop, !crop.isFull {
+            matrix = BrushCoordinateMapping.Matrix3x3.scale(x: 1 / crop.width, y: 1 / crop.height)
+                * BrushCoordinateMapping.Matrix3x3.translation(x: -crop.x, y: -crop.y)
+                * matrix
+        }
+        guard let inverse = matrix.inverted else {
+            throw BrushCoordinateMappingError.nonInvertible
+        }
+
+        var displayWidth = sourceExtent.width
+        var displayHeight = sourceExtent.height
+        if geometry.rotationDegrees == 90 || geometry.rotationDegrees == 270 {
+            swap(&displayWidth, &displayHeight)
+        }
+        if let crop = geometry.crop, !crop.isFull {
+            displayWidth *= crop.width
+            displayHeight *= crop.height
+        }
+        return BrushGeometryTransform(
+            sourceToDisplay: matrix,
+            displayToSource: inverse,
+            displayExtent: CGRect(
+                x: sourceExtent.minX,
+                y: sourceExtent.minY,
+                width: displayWidth,
+                height: displayHeight
+            )
+        )
+    }
+
+    /// Builds the single geometry mapping used by brush coordinates and the
+    /// rendered geometry stage. Keeping construction at this boundary makes
+    /// preview/export call sites consume the same extent contract.
+    public static func brushCoordinateMapping(
+        sourceExtent: CGRect,
+        geometry: GeometryAdjustments
+    ) throws -> BrushCoordinateMapping {
+        try BrushCoordinateMapping(sourceExtent: sourceExtent, geometry: geometry)
+    }
+
     public static func apply(_ geometry: GeometryAdjustments, to image: CIImage) -> CIImage {
         guard !geometry.isIdentity else { return image }
 
@@ -213,7 +303,15 @@ public enum GeometryRenderer {
         let scaleX = extent.width / output.extent.width
         let scaleY = extent.height / output.extent.height
         let scaled = output.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        return scaled.cropped(to: extent)
+        // CIPerspectiveCorrection can return an extent whose origin and size
+        // reflect the pinned quadrilateral. Re-anchor the scaled result to
+        // the input canvas before cropping so downstream crop dimensions are
+        // independent of the pin values and agree with brush mapping.
+        let aligned = scaled.transformed(by: CGAffineTransform(
+            translationX: extent.minX - scaled.extent.minX,
+            y: extent.minY - scaled.extent.minY
+        ))
+        return aligned.cropped(to: extent)
     }
 
     private static func imagePoint(for point: NormalizedPoint, extent: CGRect) -> CGPoint {

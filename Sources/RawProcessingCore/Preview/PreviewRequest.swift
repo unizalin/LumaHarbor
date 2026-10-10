@@ -35,10 +35,14 @@ public enum PreviewQuality: Int, Comparable, Sendable, CaseIterable {
 public struct PreviewToken: Hashable, Sendable {
     public let subject: PreviewSubject
     public let generation: UInt64
+    /// Session context captured at submission so late actor-hop results can
+    /// be rejected even when the scheduler generation is still monotonic.
+    public let contextID: UUID?
 
-    public init(subject: PreviewSubject, generation: UInt64) {
+    public init(subject: PreviewSubject, generation: UInt64, contextID: UUID? = nil) {
         self.subject = subject
         self.generation = generation
+        self.contextID = contextID
     }
 }
 
@@ -51,6 +55,7 @@ public struct PreviewRequest: Sendable {
     public var quality: PreviewQuality
     public var previewOptions: ProfessionalPreviewOptions
     public var cameraProfileRequest: RawCameraProfileRequest?
+    public var contextID: UUID?
 
     public init(
         subject: PreviewSubject,
@@ -59,7 +64,8 @@ public struct PreviewRequest: Sendable {
         targetPixelDimension: Int,
         quality: PreviewQuality,
         previewOptions: ProfessionalPreviewOptions = .standard,
-        cameraProfileRequest: RawCameraProfileRequest? = nil
+        cameraProfileRequest: RawCameraProfileRequest? = nil,
+        contextID: UUID? = nil
     ) {
         self.subject = subject
         self.url = url
@@ -68,6 +74,7 @@ public struct PreviewRequest: Sendable {
         self.quality = quality
         self.previewOptions = previewOptions
         self.cameraProfileRequest = cameraProfileRequest
+        self.contextID = contextID
     }
 
     public var decodeQuality: DecodeQuality {
@@ -92,6 +99,10 @@ public struct PreviewImage: @unchecked Sendable {
     /// `PreviewImage(cgImage:pixelSize:)` call site stay source-compatible.
     public let whiteBalanceBaseline: RawWhiteBalanceBaseline?
     public let rawRenderRecipe: ResolvedRawRenderRecipe?
+    /// The exact source/display transform used by the brush stage for this
+    /// rendered revision. Kept optional for synthetic callers that construct a
+    /// bitmap directly without geometry metadata.
+    public let brushCoordinateMapping: BrushCoordinateMapping?
 
     public init(
         cgImage: CGImage,
@@ -103,6 +114,21 @@ public struct PreviewImage: @unchecked Sendable {
         self.pixelSize = pixelSize
         self.whiteBalanceBaseline = whiteBalanceBaseline
         self.rawRenderRecipe = rawRenderRecipe
+        self.brushCoordinateMapping = nil
+    }
+
+    public init(
+        cgImage: CGImage,
+        pixelSize: CGSize,
+        whiteBalanceBaseline: RawWhiteBalanceBaseline? = nil,
+        rawRenderRecipe: ResolvedRawRenderRecipe? = nil,
+        brushCoordinateMapping: BrushCoordinateMapping?
+    ) {
+        self.cgImage = cgImage
+        self.pixelSize = pixelSize
+        self.whiteBalanceBaseline = whiteBalanceBaseline
+        self.rawRenderRecipe = rawRenderRecipe
+        self.brushCoordinateMapping = brushCoordinateMapping
     }
 }
 

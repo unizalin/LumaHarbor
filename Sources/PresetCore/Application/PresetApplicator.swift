@@ -92,6 +92,19 @@ public struct PresetApplicator: Sendable {
         var result = mode == .replace
             ? .neutral(using: current.rawRenderingCompatibility)
             : current
+        // Presets/XMP describe global and professional fields only. A replace
+        // therefore resets those fields but must leave both local mask
+        // collections owned by the current photo untouched.
+        result.brushMasks = current.brushMasks
+        // Replace starts from neutral for ordinary leaves, but a white-balance
+        // leaf that cannot be resolved must leave the current legacy value
+        // intact. This includes finite out-of-range sidecar values; assigning
+        // it directly avoids the normal slider subscript clamp.
+        if mode == .replace,
+           patch.basic?.temperature != nil,
+           current.temperature.isFinite {
+            result.temperature = current.temperature
+        }
         var diagnostics: [PresetDiagnostic] = []
         var didApplyAdobeLeaf = false
 
@@ -269,8 +282,49 @@ public struct PresetApplicator: Sendable {
         to result: inout PhotoAdjustments,
         diagnostics: inout [PresetDiagnostic]
     ) -> Bool {
+        guard rawValue.isFinite else {
+            diagnostics.append(PresetDiagnostic(
+                severity: .warning,
+                code: "invalidWhiteBalanceValue",
+                field: field,
+                detail: "requested=nonFinite"
+            ))
+            return false
+        }
         guard isAbsolute else {
-            result[kind] = rawValue
+            if kind == .temperature, baseline == nil {
+                diagnostics.append(PresetDiagnostic(
+                    severity: .warning,
+                    code: "missingWhiteBalanceBaseline",
+                    field: field
+                ))
+                return false
+            }
+            if kind == .temperature, let baseline {
+                guard let allowed = WhiteBalancePresentation.allowedStoredOffsetRange(
+                    baselineKelvin: baseline
+                ) else {
+                    diagnostics.append(PresetDiagnostic(
+                        severity: .warning,
+                        code: "invalidWhiteBalanceBaseline",
+                        field: field,
+                        detail: "requested=\(rawValue)"
+                    ))
+                    return false
+                }
+                let clamped = min(max(rawValue, allowed.lowerBound), allowed.upperBound)
+                result[kind] = clamped
+                if clamped != rawValue {
+                    diagnostics.append(PresetDiagnostic(
+                        severity: .warning,
+                        code: "clampedWhiteBalance",
+                        field: field,
+                        detail: "requested=\(rawValue) clamped=\(clamped)"
+                    ))
+                }
+            } else {
+                result[kind] = rawValue
+            }
             return true
         }
         guard let baseline else {
@@ -282,8 +336,37 @@ public struct PresetApplicator: Sendable {
             ))
             return false
         }
+        guard baseline.isFinite,
+              kind != .temperature || WhiteBalancePresentation.allowedStoredOffsetRange(
+                  baselineKelvin: baseline
+              ) != nil else {
+            diagnostics.append(PresetDiagnostic(
+                severity: .warning,
+                code: "invalidWhiteBalanceBaseline",
+                field: field,
+                detail: "requested=\(rawValue)"
+            ))
+            return false
+        }
         let converted = (rawValue - baseline) / span
-        let clamped = AdjustmentCatalog.definition(for: kind).clamp(converted)
+        let clamped: Double
+        if kind == .temperature {
+            guard let resolved = WhiteBalancePresentation.storedOffsetIfResolvable(
+                forKelvin: rawValue,
+                baselineKelvin: baseline
+            ) else {
+                diagnostics.append(PresetDiagnostic(
+                    severity: .warning,
+                    code: "invalidWhiteBalanceBaseline",
+                    field: field,
+                    detail: "requested=\(rawValue)"
+                ))
+                return false
+            }
+            clamped = resolved
+        } else {
+            clamped = AdjustmentCatalog.definition(for: kind).clamp(converted)
+        }
         result[kind] = clamped
         if clamped != converted {
             diagnostics.append(PresetDiagnostic(

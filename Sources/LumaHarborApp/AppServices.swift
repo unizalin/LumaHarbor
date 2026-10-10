@@ -34,12 +34,20 @@ struct AppServices {
     /// that needs control over when the write completes.
     let saveAdjustments: @Sendable (PhotoAdjustments, PhotoAsset) async throws -> Void
 
+    /// Snapshot sidecar I/O uses the same injectable boundary as adjustments
+    /// so the editor can persist snapshot changes and the selection flow can
+    /// restore them when a photo is reopened.
+    let loadSnapshots: @Sendable (PhotoAsset) async throws -> [EditSnapshot]
+    let saveSnapshots: @Sendable ([EditSnapshot], PhotoAsset) async throws -> Void
+
     var editorDependencies: EditorDependencies {
         EditorDependencies(
             previewScheduler: previewScheduler,
             previewRenderer: previewRenderer,
             loadAdjustments: loadAdjustments,
-            saveAdjustments: saveAdjustments
+            saveAdjustments: saveAdjustments,
+            loadSnapshots: loadSnapshots,
+            saveSnapshots: saveSnapshots
         )
     }
 
@@ -88,6 +96,12 @@ struct AppServices {
             },
             saveAdjustments: { adjustments, photo in
                 try await libraryService.saveAdjustments(adjustments, for: photo)
+            },
+            loadSnapshots: { photo in
+                try await libraryService.snapshots(for: photo)
+            },
+            saveSnapshots: { snapshots, photo in
+                try await libraryService.saveSnapshots(snapshots, for: photo)
             }
         )
     }

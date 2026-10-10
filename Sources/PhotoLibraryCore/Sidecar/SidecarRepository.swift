@@ -245,6 +245,18 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
         }
 
         do {
+            // Admit the schema before decoding any version-specific payload.
+            // A newer sidecar may contain fields this build cannot decode at
+            // all (for example an unknown brush renderer), but it still must
+            // be reported as foreign data and left byte-for-byte in place.
+            if let schema = minimalSchemaVersion(in: data),
+               schema.value > PhotoSidecar.currentSchemaVersion
+                || (schema.value < 1 && schema.isOutOfRange) {
+                throw SidecarError.unsupportedSchemaVersion(
+                    found: schema.value,
+                    supported: PhotoSidecar.currentSchemaVersion
+                )
+            }
             let sidecar = try SidecarCoding.decode(PhotoSidecar.self, from: data)
             guard !sidecar.isFromNewerSchema else {
                 // Deliberately *not* quarantined: the file is valid, just newer.
@@ -277,9 +289,23 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
     }
 
     public func write(sidecar: PhotoSidecar) throws {
+        // Version admission happens before any replacement (including the
+        // first write). A newer valid file is foreign data and must remain
+        // byte-for-byte untouched.
+        guard sidecar.schemaVersion <= PhotoSidecar.currentSchemaVersion else {
+            throw SidecarError.unsupportedSchemaVersion(
+                found: sidecar.schemaVersion,
+                supported: PhotoSidecar.currentSchemaVersion
+            )
+        }
         try requireWritable()
+        var writable = sidecar
+        // An actual save is the shared upgrade boundary. Merely loading a
+        // v1-v4 sidecar never calls this method, so no-op reads remain free of
+        // version writes.
+        writable.schemaVersion = PhotoSidecar.currentSchemaVersion
         do {
-            let data = try encodedSidecarPreservingUnknownTopLevelFields(sidecar)
+            let data = try encodedSidecarPreservingUnknownTopLevelFields(writable)
             try AtomicFileWriter.write(
                 data,
                 to: sidecarURL(for: sidecar.photoID),
@@ -372,7 +398,7 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
         // portable data and remain untouched.
         let knownKeys = [
             "schemaVersion", "photoID", "sourceRelativePath", "sourceFingerprint",
-            "decoder", "adjustments", "curation", "createdAt", "modifiedAt", "variantOf"
+            "decoder", "adjustments", "curation", "snapshots", "createdAt", "modifiedAt", "variantOf"
         ]
         for key in knownKeys { existingObject.removeValue(forKey: key) }
         for (key, value) in encodedObject { existingObject[key] = value }
@@ -381,6 +407,31 @@ public struct FileSidecarRepository: SidecarStoring, @unchecked Sendable {
             withJSONObject: existingObject,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         )
+    }
+
+    /// Reads only the top-level schema marker. This intentionally does not
+    /// decode `PhotoSidecar` or any nested brush data: schema admission must
+    /// happen before version-specific payload validation.
+    private struct MinimalSchemaVersion {
+        let value: Int
+        let isOutOfRange: Bool
+    }
+
+    private func minimalSchemaVersion(in data: Data) -> MinimalSchemaVersion? {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any],
+              let number = dictionary["schemaVersion"] as? NSNumber else {
+            return nil
+        }
+        let value = number.doubleValue
+        guard value.isFinite, value.rounded() == value else { return nil }
+
+        // JSON numbers have a wider range than Swift's Int. Never feed an
+        // out-of-range Double into Int(_:), which traps; clamp to a sentinel
+        // that the admission gate rejects without decoding or quarantining.
+        if value >= Double(Int.max) { return MinimalSchemaVersion(value: Int.max, isOutOfRange: true) }
+        if value <= Double(Int.min) { return MinimalSchemaVersion(value: Int.min, isOutOfRange: true) }
+        return MinimalSchemaVersion(value: Int(value), isOutOfRange: false)
     }
 
     private func requireWritable() throws {

@@ -58,6 +58,7 @@ final class PhotoAdjustmentsTests: XCTestCase {
                 "shadows", "whites", "blacks", "vibrance", "saturation",
                 "advancedToneCurve", "hsl", "splitToning", "sharpening",
                 "noiseReduction", "vignette", "grain", "geometry", "localAdjustments",
+                "brushMasks",
                 "presence", "colorGrading", "monochrome", "renderingProfile", "rawCameraProfile", "lensCorrection",
                 "rawRenderingCompatibility"
             ]
@@ -90,6 +91,13 @@ final class PhotoAdjustmentsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
         XCTAssertEqual(decoded.exposure, 5)
         XCTAssertEqual(decoded.contrast, -100)
+    }
+
+    func testFiniteLegacyTemperatureOutsideTheCurrentSliderRangeIsPreservedOnLoad() throws {
+        let json = Data(#"{"temperature": 350}"#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: json)
+        XCTAssertEqual(decoded.temperature, 350)
+        XCTAssertEqual(decoded.clamped().temperature, 350)
     }
 
     func testEncodingIsStableForIdenticalValues() throws {
@@ -331,5 +339,29 @@ final class PhotoAdjustmentsTests: XCTestCase {
         var adjustments = PhotoAdjustments.neutral
         adjustments.localAdjustments = [LocalAdjustment(kind: .linearGradient)]
         XCTAssertFalse(adjustments.isNeutral)
+    }
+
+    func testLegacyBrushAndAdjustmentBrushMasksRemainIndependent() throws {
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.localAdjustments = [LocalAdjustment(kind: .brush)]
+        adjustments.brushMasks = [BrushMask(adjustments: BrushMaskPatch(exposure: 1))]
+
+        let decoded = try JSONDecoder().decode(PhotoAdjustments.self, from: JSONEncoder().encode(adjustments))
+        XCTAssertEqual(decoded.localAdjustments.map(\.kind), [.brush])
+        XCTAssertEqual(decoded.brushMasks.count, 1)
+        XCTAssertEqual(decoded.brushMasks[0].adjustments.exposure, 1)
+        XCTAssertEqual(adjustments.clamped().brushMasks, adjustments.brushMasks)
+        XCTAssertEqual(adjustments.resetting(.exposure).brushMasks, adjustments.brushMasks)
+    }
+
+    func testMalformedBrushPatchCannotBeEncodedOrDecodedSilently() throws {
+        var adjustments = PhotoAdjustments.neutral
+        var mask = BrushMask()
+        mask.adjustments.exposure = 6
+        adjustments.brushMasks = [mask]
+        XCTAssertThrowsError(try JSONEncoder().encode(adjustments))
+
+        let json = Data(#"{"brushMasks":[{"rendererVersion":1,"adjustments":{"exposure":6}}]}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(PhotoAdjustments.self, from: json))
     }
 }

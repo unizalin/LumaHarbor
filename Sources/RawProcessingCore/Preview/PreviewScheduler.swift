@@ -20,6 +20,10 @@ public actor PreviewScheduler {
     private var generationCounter: UInt64 = 0
     private var activeSubject: PreviewSubject?
     private var inFlight: [PreviewSubject: InFlight] = [:]
+    /// Every render task that has started but has not returned yet, including
+    /// superseded work removed from `inFlight`. Lifecycle diagnostics and
+    /// teardown must not mistake the latest-request dictionary for a join.
+    private var liveTasks: [UInt64: Task<Void, Never>] = [:]
     private var latestGeneration: [PreviewSubject: UInt64] = [:]
     /// `nonisolated` so `deinit` can finish the stream without hopping onto the
     /// actor, which it can't do.
@@ -60,7 +64,8 @@ public actor PreviewScheduler {
     @discardableResult
     public func submit(_ request: PreviewRequest) -> PreviewToken {
         generationCounter += 1
-        let token = PreviewToken(subject: request.subject, generation: generationCounter)
+        let token = PreviewToken(subject: request.subject, generation: generationCounter,
+            contextID: request.contextID)
 
         // Switching photos: everything queued for other photos is now pointless
         // work competing for the same GPU. Cancel it before starting the new one.
@@ -93,19 +98,35 @@ public actor PreviewScheduler {
         }
 
         inFlight[request.subject] = InFlight(generation: token.generation, task: task)
+        liveTasks[token.generation] = task
         return token
     }
 
     /// Cancels everything and forgets which photo is on screen. Called when the
     /// editor closes or the library goes offline.
     public func cancelAll() {
+        let tasks = Array(liveTasks.values)
         for (_, entry) in inFlight {
             entry.task.cancel()
             supersededCount += 1
         }
+        for task in tasks {
+            task.cancel()
+        }
         inFlight.removeAll()
         latestGeneration.removeAll()
         activeSubject = nil
+    }
+
+    /// Waits until every render that has actually started has returned,
+    /// including superseded work no longer represented by `inFlight`.
+    public func waitUntilQuiescent() async {
+        while !liveTasks.isEmpty {
+            let tasks = Array(liveTasks.values)
+            for task in tasks {
+                await task.value
+            }
+        }
     }
 
     /// True when `token` still describes the preview that belongs on screen.
@@ -156,6 +177,7 @@ public actor PreviewScheduler {
     /// Only clears the slot if it still holds *this* attempt — a late-finishing
     /// older task must not evict the newer one that replaced it.
     private func clearInFlight(_ token: PreviewToken) {
+        liveTasks[token.generation] = nil
         if inFlight[token.subject]?.generation == token.generation {
             inFlight[token.subject] = nil
         }

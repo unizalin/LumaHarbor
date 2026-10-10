@@ -1,0 +1,358 @@
+{
+  "baselineProductSHA": "1de07dcfeb2ed217a75d1c04978da6a5936f379a",
+  "contextCountEvidence": "declared-from-construction-path",
+  "contextCountLimitation": "Context allocations are not measured; v2 and v3 counts are construction-path declarations only.",
+  "gates": [
+    {
+      "baselinePeakRSSBytes": 145129472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 178683904,
+      "optimizedPeakRSSBytes": 145227776,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "baselinePeakRSSBytes": 166936576,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 200491008,
+      "optimizedPeakRSSBytes": 150814720,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "baselinePeakRSSBytes": 199557120,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 233111552,
+      "optimizedPeakRSSBytes": 208142336,
+      "result": "PASS",
+      "scenario": "cold"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 0,
+      "optimizedP50Seconds": 0.150028042,
+      "optimizedP95Seconds": 0.156140041,
+      "result": "FAIL",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 145833984,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 179388416,
+      "optimizedPeakRSSBytes": 145686528,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 1,
+      "optimizedP50Seconds": 0.1582235835,
+      "optimizedP95Seconds": 0.171911833,
+      "result": "FAIL",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 169787392,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 203341824,
+      "optimizedPeakRSSBytes": 152666112,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "budgetSeconds": 0.15,
+      "gate": "INTERACTIVE-150",
+      "maskCount": 10,
+      "optimizedP50Seconds": 0.16791795850000002,
+      "optimizedP95Seconds": 0.193294917,
+      "result": "FAIL",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 202801152,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 236355584,
+      "optimizedPeakRSSBytes": 221986816,
+      "result": "PASS",
+      "scenario": "warm"
+    },
+    {
+      "baselinePeakRSSBytes": 145948672,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 0,
+      "optimizedLimitBytes": 179503104,
+      "optimizedPeakRSSBytes": 145833984,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselinePeakRSSBytes": 168624128,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "optimizedLimitBytes": 202178560,
+      "optimizedPeakRSSBytes": 152813568,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselinePeakRSSBytes": 202473472,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "optimizedLimitBytes": 236027904,
+      "optimizedPeakRSSBytes": 218267648,
+      "result": "PASS",
+      "scenario": "changed"
+    },
+    {
+      "baselineMedianSeconds": 0.3610073955,
+      "gate": "PERF-EXPORT",
+      "maskCount": 1,
+      "optimizedLimitSeconds": 0.379057765275,
+      "optimizedMedianSeconds": 0.23003827049999998,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "absoluteLimitBytes": 805306368,
+      "baselinePeakRSSBytes": 396066816,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 1,
+      "optimizedPeakRSSBytes": 180862976,
+      "result": "PASS",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "baselineMedianSeconds": 2.796570771,
+      "gate": "PERF-EXPORT",
+      "maskCount": 10,
+      "optimizedLimitSeconds": 2.93639930955,
+      "optimizedMedianSeconds": 0.406267917,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "absoluteLimitBytes": 805306368,
+      "baselinePeakRSSBytes": 616497152,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 10,
+      "optimizedPeakRSSBytes": 489488384,
+      "result": "PASS",
+      "sourceKind": "synthetic-24mp"
+    },
+    {
+      "baselineMedianSeconds": 0.6073860415,
+      "gate": "PERF-EXPORT",
+      "maskCount": 1,
+      "optimizedLimitSeconds": 0.637755343575,
+      "optimizedMedianSeconds": 0.5142559165,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "real-raw"
+    },
+    {
+      "absoluteLimitBytes": null,
+      "baselinePeakRSSBytes": 507658240,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 1,
+      "optimizedPeakRSSBytes": 285212672,
+      "result": "PASS",
+      "sourceKind": "real-raw"
+    },
+    {
+      "baselineMedianSeconds": 2.3299067085,
+      "gate": "PERF-EXPORT",
+      "maskCount": 10,
+      "optimizedLimitSeconds": 2.446402043925,
+      "optimizedMedianSeconds": 0.5692232295,
+      "result": "PASS",
+      "rule": "absolute-budget-and-max-five-percent-regression",
+      "sourceKind": "real-raw"
+    },
+    {
+      "absoluteLimitBytes": null,
+      "baselinePeakRSSBytes": 724353024,
+      "gate": "PERF-MEM-EXPORT",
+      "maskCount": 10,
+      "optimizedPeakRSSBytes": 555761664,
+      "result": "PASS",
+      "sourceKind": "real-raw"
+    }
+  ],
+  "harnessSHA": "4fdbc1fb3abcfea5abe3b11ed03c267851de9116",
+  "instrumentationDigest": "0e312a9f77f644fd712785e2b572e5fb92e404a3773eabf170beb64b67adc400",
+  "optimizedProductSHA": "4fdbc1fb3abcfea5abe3b11ed03c267851de9116",
+  "overallResult": "DONE_WITH_CONCERNS",
+  "recordCount": 352,
+  "sampleArtifact": "brush-raw-export-samples.jsonl",
+  "schemaVersion": 1,
+  "summaries": {
+    "export/real-raw/1/B": {
+      "count": 8,
+      "p50Seconds": 0.6073860415,
+      "p95Seconds": 0.70584275,
+      "peakRSSBytes": 507658240
+    },
+    "export/real-raw/1/O": {
+      "count": 8,
+      "p50Seconds": 0.5142559165,
+      "p95Seconds": 0.560651875,
+      "peakRSSBytes": 285212672
+    },
+    "export/real-raw/10/B": {
+      "count": 8,
+      "p50Seconds": 2.3299067085,
+      "p95Seconds": 2.368139709,
+      "peakRSSBytes": 724353024
+    },
+    "export/real-raw/10/O": {
+      "count": 8,
+      "p50Seconds": 0.5692232295,
+      "p95Seconds": 0.580141917,
+      "peakRSSBytes": 555761664
+    },
+    "export/synthetic-24mp/1/B": {
+      "count": 8,
+      "p50Seconds": 0.3610073955,
+      "p95Seconds": 0.372134916,
+      "peakRSSBytes": 396066816
+    },
+    "export/synthetic-24mp/1/O": {
+      "count": 8,
+      "p50Seconds": 0.23003827049999998,
+      "p95Seconds": 0.231670875,
+      "peakRSSBytes": 180862976
+    },
+    "export/synthetic-24mp/10/B": {
+      "count": 8,
+      "p50Seconds": 2.796570771,
+      "p95Seconds": 2.902500792,
+      "peakRSSBytes": 616497152
+    },
+    "export/synthetic-24mp/10/O": {
+      "count": 8,
+      "p50Seconds": 0.406267917,
+      "p95Seconds": 0.656215709,
+      "peakRSSBytes": 489488384
+    },
+    "preview/changed/0/B": {
+      "count": 16,
+      "p50Seconds": 0.16743568749999999,
+      "p95Seconds": 0.181076833,
+      "peakRSSBytes": 145948672
+    },
+    "preview/changed/0/O": {
+      "count": 16,
+      "p50Seconds": 0.150692125,
+      "p95Seconds": 0.160450875,
+      "peakRSSBytes": 145833984
+    },
+    "preview/changed/1/B": {
+      "count": 16,
+      "p50Seconds": 0.1907097295,
+      "p95Seconds": 0.20085375,
+      "peakRSSBytes": 168624128
+    },
+    "preview/changed/1/O": {
+      "count": 16,
+      "p50Seconds": 0.1626327295,
+      "p95Seconds": 0.1708295,
+      "peakRSSBytes": 152813568
+    },
+    "preview/changed/10/B": {
+      "count": 16,
+      "p50Seconds": 0.3745802705,
+      "p95Seconds": 0.387283292,
+      "peakRSSBytes": 202473472
+    },
+    "preview/changed/10/O": {
+      "count": 16,
+      "p50Seconds": 0.171965792,
+      "p95Seconds": 0.184167875,
+      "peakRSSBytes": 218267648
+    },
+    "preview/cold/0/B": {
+      "count": 16,
+      "p50Seconds": 0.2544188125,
+      "p95Seconds": 0.271104958,
+      "peakRSSBytes": 145129472
+    },
+    "preview/cold/0/O": {
+      "count": 16,
+      "p50Seconds": 0.245722125,
+      "p95Seconds": 0.255030042,
+      "peakRSSBytes": 145227776
+    },
+    "preview/cold/1/B": {
+      "count": 16,
+      "p50Seconds": 0.26994829200000003,
+      "p95Seconds": 0.291842833,
+      "peakRSSBytes": 166936576
+    },
+    "preview/cold/1/O": {
+      "count": 16,
+      "p50Seconds": 0.25099645849999996,
+      "p95Seconds": 0.266466125,
+      "peakRSSBytes": 150814720
+    },
+    "preview/cold/10/B": {
+      "count": 16,
+      "p50Seconds": 0.4464279795,
+      "p95Seconds": 0.457758625,
+      "peakRSSBytes": 199557120
+    },
+    "preview/cold/10/O": {
+      "count": 16,
+      "p50Seconds": 0.2637623955,
+      "p95Seconds": 0.278242458,
+      "peakRSSBytes": 208142336
+    },
+    "preview/warm/0/B": {
+      "count": 16,
+      "p50Seconds": 0.162740416,
+      "p95Seconds": 0.179133583,
+      "peakRSSBytes": 145833984
+    },
+    "preview/warm/0/O": {
+      "count": 16,
+      "p50Seconds": 0.150028042,
+      "p95Seconds": 0.156140041,
+      "peakRSSBytes": 145686528
+    },
+    "preview/warm/1/B": {
+      "count": 16,
+      "p50Seconds": 0.18943818750000002,
+      "p95Seconds": 0.2113005,
+      "peakRSSBytes": 169787392
+    },
+    "preview/warm/1/O": {
+      "count": 16,
+      "p50Seconds": 0.1582235835,
+      "p95Seconds": 0.171911833,
+      "peakRSSBytes": 152666112
+    },
+    "preview/warm/10/B": {
+      "count": 16,
+      "p50Seconds": 0.375348271,
+      "p95Seconds": 0.388859625,
+      "peakRSSBytes": 202801152
+    },
+    "preview/warm/10/O": {
+      "count": 16,
+      "p50Seconds": 0.16791795850000002,
+      "p95Seconds": 0.193294917,
+      "peakRSSBytes": 221986816
+    }
+  },
+  "validation": "PASS",
+  "validationErrors": []
+}

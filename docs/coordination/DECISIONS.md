@@ -78,3 +78,24 @@ This file is append-only. When a decision is replaced, retain the original entry
 - Decision: Public releases use `MAJOR.MINOR.PATCH` as the product version. The current public version is `0.1.0`; internal build `3` remains separate deployment metadata for Mac and iPad.
 - Reason: Product names and public archive names must remain stable and understandable, while Apple deployment metadata still needs a synchronized, positive build number.
 - Impact: Public artifacts use only the product version. Technical evidence records product version, internal build, and tested commit separately. Repeated distribution requires a patch bump rather than reusing the same public version with a different build.
+
+## D-012 — Mainline integration adopts Sidecar v5 for brush-mask coexistence
+
+- Date: 2026-10-05
+- Decision: The mainline integration target raises `PhotoSidecar.currentSchemaVersion` to v5. It reads v1–v5, preserves unknown data, rejects v6+ without overwrite, and writes v5 at the shared effective-save boundary. The v5 contract includes `adjustments.brushMasks` while retaining curation and snapshots.
+- Reason: Mainline already carries the v4 snapshot contract; the integration must add brush-mask data without reverting to the source experiment's v3 or discarding mainline fields.
+- Impact: Curation migration and snapshot deletion paths must be rechecked against v5. Existing v3 decision D-006 remains historical and is not rewritten; no source signing or private fixture state enters the target.
+
+## D-013 — Legacy local brush and new brush masks coexist independently
+
+- Date: 2026-10-05
+- Decision: Existing `LocalAdjustmentKind.brush` / `LocalAdjustmentGeometry.brushStrokes` remain unchanged. New ordered `PhotoAdjustments.brushMasks` use their own model, coordinate mapping, render stage, preview/export wiring, and persistence; both may be present and render once each.
+- Reason: The two brush systems have different data contracts and compatibility histories. Reinterpreting or automatically converting the legacy local brush would risk data loss and alter established rendering semantics.
+- Impact: Integration tests must cover side-by-side persistence, rendering, undo/snapshot behavior, and removal of one system without mutating the other. No automatic legacy conversion or XMP mapping is introduced.
+
+## D-014 — PR #2 may enter main as a bounded Alpha exception
+
+- Date: 2026-10-10
+- Decision: The user explicitly accepts `DONE_WITH_CONCERNS` for PR #2 and authorizes the validated white-balance／ordered-brush／performance candidate to enter `main` as an Alpha exception. The exact validated product candidate is `5530e91f8f7cae86b6d6633cfd38f13d72bc896b`; the reviewed pre-decision PR head is `f6954887b593b774ae7df1049ba99ee4dd2e7e8e`. This decision and any later coordination-only commit do not change the validated product tree.
+- Reason: Required automated rendering, performance, parity, cancellation, memory, persistence, Release regression, Mac foreground and 30-gesture PERF-UI gates pass with no known unresolved data, pixel, or cancellation regression. Physical iPad／Pencil／keyboard／hands-on VoiceOver, qualified gray-card verification, controlled eyedropper directions, precise Simulator storage／zoom proof, and mid-gesture human race cases remain unavailable or only partially executed.
+- Impact: PR #2 may be marked Ready and squash-merged while retaining `DONE_WITH_CONCERNS`; the remaining `PARTIAL`／`NOT RUN` items stay mandatory follow-up work and are not converted to PASS or waived for future versions. The branch and worktree remain preserved after integration. The pushed `main` SHA must be used for the required Mac Release rebuild／installation check, while unavailable physical-device deployment remains `NOT RUN` or `BLOCKED`.

@@ -39,20 +39,19 @@ final class WhiteBalanceEyedropperTests: XCTestCase {
     }
 
     /// Green higher than the red/blue average reads as too green, so the
-    /// correction must add magenta -- a negative tint delta, matching this
-    /// codebase's existing convention that `PhotoAdjustments.tint` is
-    /// passed straight through as `CIRAWFilter.neutralTint`'s own offset
-    /// (positive tint = more magenta, the standard RAW-converter sign).
+    /// correction must add magenta. In the native RAW renderer this is a
+    /// positive Tint delta; assert rendered direction rather than the old
+    /// helper-sign convention.
     func testAGreenCastSampleAddsMagenta() {
         let sample = WhiteBalanceEyedropper.Sample(red: 0.5, green: 0.6, blue: 0.5)
         let delta = WhiteBalanceEyedropper.delta(neutralizing: sample)
-        XCTAssertLessThan(delta.tint, 0)
+        XCTAssertGreaterThan(delta.tint, 0)
     }
 
     func testAMagentaCastSampleAddsGreen() {
         let sample = WhiteBalanceEyedropper.Sample(red: 0.55, green: 0.4, blue: 0.55)
         let delta = WhiteBalanceEyedropper.delta(neutralizing: sample)
-        XCTAssertGreaterThan(delta.tint, 0)
+        XCTAssertLessThan(delta.tint, 0)
     }
 
     /// A warm-only cast (no green/magenta component) must not perturb tint,
@@ -98,5 +97,97 @@ final class WhiteBalanceEyedropperTests: XCTestCase {
         let delta = WhiteBalanceEyedropper.delta(neutralizing: sample)
         XCTAssertTrue(delta.temperature.isFinite)
         XCTAssertTrue(delta.tint.isFinite)
+    }
+
+    func testTemperatureDeltaUsesTheSharedKelvinPresentationMapping() {
+        let sample = WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4)
+        let ratio = sample.red / sample.blue
+        let delta = WhiteBalanceEyedropper.delta(neutralizing: sample)
+
+        XCTAssertEqual(
+            delta.temperature,
+            WhiteBalancePresentation.storedTemperatureOffset(forRedToBlueRatio: ratio),
+            accuracy: 0.0001
+        )
+    }
+
+    func testApplyingEyedropperDeltaClampsBothAxesWithAnExplicitBaseline() {
+        let current = PhotoAdjustments(temperature: 1_190, tint: -95)
+
+        let updated = WhiteBalanceEyedropper.applying(
+            delta: (temperature: 100, tint: -100),
+            to: current,
+            baselineKelvin: 5_500
+        )
+
+        XCTAssertEqual(updated.temperature, (50_000 - 5_500) / 45.0, accuracy: 1e-9)
+        XCTAssertEqual(updated.tint, -100)
+    }
+
+    func testApplyingEyedropperDeltaClampsTheFinalTemperatureAgainstThePhotoBaseline() {
+        let baseline = 4_536.72802734375
+        let sample = WhiteBalanceEyedropper.Sample(red: 0.6, green: 0.5, blue: 0.4)
+        let updated = WhiteBalanceEyedropper.applying(
+            delta: WhiteBalanceEyedropper.delta(neutralizing: sample),
+            to: .neutral,
+            baselineKelvin: baseline
+        )
+
+        XCTAssertEqual(updated.temperature, (WhiteBalancePresentation.minimumKelvin - baseline) / 45, accuracy: 0.000001)
+        XCTAssertEqual(
+            baseline + updated.temperature * WhiteBalancePresentation.kelvinPerStoredUnit,
+            WhiteBalancePresentation.minimumKelvin,
+            accuracy: 0.000001
+        )
+    }
+
+    func testFinalDeltaResolutionMatrixUsesIndependentKelvinBounds() throws {
+        for baseline in [2_000.0, 4_536.72802734375, 5_500, 10_000, 50_000] {
+            for oldOffset in [-2_000.0, -100, 0, 10, 2_000] {
+                for delta in [-120.0, 0, 120] {
+                    var current = PhotoAdjustments.neutral
+                    current.temperature = oldOffset
+                    let result = try XCTUnwrap(WhiteBalanceEyedropper.applyingResolved(
+                        delta: (delta, 0), to: current, baselineKelvin: baseline
+                    ))
+                    let lower = max(-1_200, (2_000 - baseline) / 45)
+                    let upper = min(1_200, (50_000 - baseline) / 45)
+                    let start = min(max(oldOffset, lower), upper)
+                    let expected = min(max(start + delta, lower), upper)
+                    XCTAssertEqual(result.adjustments.temperature, expected, accuracy: 1e-9)
+                    let kelvin = baseline + 45 * result.adjustments.temperature
+                    XCTAssertGreaterThanOrEqual(kelvin, 2_000 - 1e-6)
+                    XCTAssertLessThanOrEqual(kelvin, 50_000 + 1e-6)
+                    XCTAssertEqual(result.diagnostic == .clamped, expected != start + delta)
+                }
+            }
+        }
+    }
+
+    func testTooDarkSampleIsRejectedBeforeCalculatingAWhiteBalanceDelta() {
+        let sample = WhiteBalanceEyedropper.Sample(red: 0.01, green: 0.02, blue: 0.01)
+
+        XCTAssertEqual(WhiteBalanceEyedropper.issue(for: sample), .tooDark)
+        XCTAssertEqual(WhiteBalanceEyedropper.delta(neutralizing: sample).temperature, 0)
+        XCTAssertEqual(WhiteBalanceEyedropper.delta(neutralizing: sample).tint, 0)
+    }
+
+    func testClippedSampleIsRejectedBeforeCalculatingAWhiteBalanceDelta() {
+        let sample = WhiteBalanceEyedropper.Sample(red: 1, green: 0.98, blue: 0.97)
+
+        XCTAssertEqual(WhiteBalanceEyedropper.issue(for: sample), .clipped)
+        XCTAssertEqual(WhiteBalanceEyedropper.delta(neutralizing: sample).temperature, 0)
+        XCTAssertEqual(WhiteBalanceEyedropper.delta(neutralizing: sample).tint, 0)
+    }
+
+    func testNonFiniteOrOutOfRangeSampleIsRejected() {
+        XCTAssertEqual(
+            WhiteBalanceEyedropper.issue(for: .init(red: .nan, green: 0.5, blue: 0.5)),
+            .nonFinite
+        )
+        XCTAssertEqual(
+            WhiteBalanceEyedropper.issue(for: .init(red: -0.1, green: 0.5, blue: 0.5)),
+            .outOfRange
+        )
     }
 }

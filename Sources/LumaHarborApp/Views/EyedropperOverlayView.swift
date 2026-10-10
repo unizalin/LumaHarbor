@@ -25,6 +25,14 @@ struct EyedropperOverlayView: View {
     let image: CGImage
 
     @State private var lastSampleLocation: CGPoint?
+    @State private var samplingSnapshot: SamplingSnapshot?
+    @State private var samplingAttempted = false
+
+    private struct SamplingSnapshot {
+        let image: CGImage
+        let imageFrame: CGRect
+        let context: EditorSession.EyedropperSamplingContext
+    }
 
     var body: some View {
         ZStack {
@@ -43,6 +51,15 @@ struct EyedropperOverlayView: View {
                     .position(lastSampleLocation)
                     .allowsHitTesting(false)
             }
+            if let issue = editor.eyedropperIssue {
+                Text(issueMessage(for: issue))
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .allowsHitTesting(false)
+            }
         }
         .help(L10n.t("Click a point that should be neutral gray"))
     }
@@ -54,21 +71,56 @@ struct EyedropperOverlayView: View {
             }
             .onEnded { value in
                 sample(at: value.location, commit: true)
+                samplingSnapshot = nil
+                samplingAttempted = false
             }
     }
 
     private func sample(at location: CGPoint, commit: Bool) {
+        if !samplingAttempted {
+            samplingAttempted = true
+            guard imageFrame.width > 0, imageFrame.height > 0,
+                  let context = editor.beginEyedropperSampling(sourceImage: image) else {
+                editor.rejectEyedropperSample(editor.whiteBalanceCapability == .valid ? .staleFrame : .unavailableBaseline)
+                return
+            }
+            samplingSnapshot = SamplingSnapshot(image: image, imageFrame: imageFrame, context: context)
+        }
+        guard let snapshot = samplingSnapshot else { return }
+        guard snapshot.imageFrame.contains(location) else {
+            editor.rejectEyedropperSample(.outOfRange, context: snapshot.context)
+            if commit { samplingSnapshot = nil }
+            return
+        }
         let pixel = AspectFitRect.imagePixel(
             at: location,
-            imageFrame: imageFrame,
-            imageSize: CGSize(width: image.width, height: image.height)
+            imageFrame: snapshot.imageFrame,
+            imageSize: CGSize(width: snapshot.image.width, height: snapshot.image.height)
         )
-        guard let rgb = PixelSampler.sample(at: pixel, in: image) else { return }
+        guard let rgb = PixelSampler.sample(at: pixel, in: snapshot.image) else {
+            editor.rejectEyedropperSample(.outOfRange, context: snapshot.context)
+            if commit { samplingSnapshot = nil }
+            return
+        }
         lastSampleLocation = location
-        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: rgb.red, green: rgb.green, blue: rgb.blue))
+        editor.previewEyedropper(sample: WhiteBalanceEyedropper.Sample(red: rgb.red, green: rgb.green, blue: rgb.blue),
+                                 context: snapshot.context)
         if commit {
-            editor.commitEyedropper()
-            editor.setToolMode(.adjust)
+            if editor.commitEyedropper(context: snapshot.context) {
+                editor.setToolMode(.adjust)
+            }
+            samplingSnapshot = nil
+        }
+    }
+
+    private func issueMessage(for issue: WhiteBalanceEyedropper.SampleIssue) -> String {
+        switch issue {
+        case .nonFinite: return L10n.t("The sampled color is unavailable.")
+        case .outOfRange: return L10n.t("Choose a visible pixel inside the photo.")
+        case .tooDark: return L10n.t("Choose a brighter neutral area.")
+        case .clipped: return L10n.t("Choose a neutral area without clipped highlights.")
+        case .unavailableBaseline: return L10n.t("White balance is unavailable for this photo.")
+        case .staleFrame: return L10n.t("Wait for the current preview before sampling.")
         }
     }
 }

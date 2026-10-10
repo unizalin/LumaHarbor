@@ -33,6 +33,11 @@ final class AdjustmentCatalogTests: XCTestCase {
 
     func testInspectorValuesUseOneDecimalAndTenthStep() {
         for definition in AdjustmentCatalog.ordered {
+            if definition.kind == .temperature {
+                XCTAssertEqual(definition.fractionDigits, 0)
+                XCTAssertEqual(definition.step, 1)
+                continue
+            }
             XCTAssertEqual(definition.fractionDigits, 1, "\(definition.kind) should show one decimal")
             XCTAssertEqual(definition.step, 0.1, "\(definition.kind) should support tenth-step nudges")
         }
@@ -45,11 +50,17 @@ final class AdjustmentCatalogTests: XCTestCase {
     }
 
     func testNonExposureAdjustmentsUsePlusMinusOneHundred() {
-        for kind in AdjustmentKind.allCases where kind != .exposure {
+        for kind in AdjustmentKind.allCases where kind != .exposure && kind != .temperature {
             let definition = AdjustmentCatalog.definition(for: kind)
             XCTAssertEqual(definition.minimumValue, -100, "\(kind)")
             XCTAssertEqual(definition.maximumValue, 100, "\(kind)")
         }
+    }
+
+    func testTemperatureUsesTheStoredWhiteBalanceRange() {
+        let definition = AdjustmentCatalog.definition(for: .temperature)
+        XCTAssertEqual(definition.minimumValue, -1_200)
+        XCTAssertEqual(definition.maximumValue, 1_200)
     }
 
     func testClampRejectsNonFiniteValues() {

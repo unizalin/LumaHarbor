@@ -57,11 +57,14 @@ final class AdjustmentGroupPanelsContractTests: XCTestCase {
     func testIPadNudgeButtonsUseHighContrastWhiteGlyphs() throws {
         let source = try Self.loadSource("AdjustmentValueInput.swift")
 
-        XCTAssertTrue(source.contains("#if os(iOS)"))
         XCTAssertTrue(
             source.contains(".foregroundStyle(Color.white)"),
             "iPad plus/minus glyphs must remain white on the dark circular control"
         )
+        XCTAssertTrue(source.contains("AdjustmentControlMetrics.nudgeHitTarget"),
+                      "the shared nudge controls must keep the platform-specific hit target")
+        XCTAssertFalse(source.contains("#if os(iOS)\n            stepButton"),
+                       "Mac must expose the same pointer nudge buttons as iPad")
     }
 
     /// Inspector hierarchy/typography/preview spec (2026-09-14) §5.4/§5.6:

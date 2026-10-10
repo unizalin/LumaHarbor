@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lumaharbor.invalid/schemas/brush-performance-acceptance-v1.json",
+  "title": "LumaHarbor brush scheduler and cancellation acceptance artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "productSHA",
+    "harnessSHA",
+    "configuration",
+    "sampleCount",
+    "records",
+    "gates",
+    "result"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "productSHA": { "$ref": "#/$defs/commitSHA" },
+    "harnessSHA": { "$ref": "#/$defs/commitSHA" },
+    "configuration": { "const": "release" },
+    "sampleCount": { "type": "integer", "minimum": 1 },
+    "records": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/syntheticRecord" },
+          { "$ref": "#/$defs/cancellationRecord" },
+          { "$ref": "#/$defs/memoryRecord" }
+        ]
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "$ref": "#/$defs/coverageGate" },
+        { "$ref": "#/$defs/cancellationGate" },
+        { "$ref": "#/$defs/memoryGate" }
+      ],
+      "items": false
+    },
+    "result": { "enum": ["FAIL", "DONE_WITH_CONCERNS"] }
+  },
+  "$defs": {
+    "commitSHA": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0
+    },
+    "durationArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/duration" }
+    },
+    "workerCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started", "finished", "activeAfterJoin"],
+      "properties": {
+        "started": { "type": "integer", "minimum": 1 },
+        "finished": { "type": "integer", "minimum": 0 },
+        "activeAfterJoin": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "stageDurations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "validationSampling",
+        "coverageRaster",
+        "coverageIncludingSampling",
+        "blendMaterialization",
+        "totalMaterialized"
+      ],
+      "properties": {
+        "validationSampling": { "type": "null" },
+        "coverageRaster": { "type": "null" },
+        "coverageIncludingSampling": { "$ref": "#/$defs/durationArray" },
+        "blendMaterialization": { "type": "null" },
+        "totalMaterialized": { "$ref": "#/$defs/durationArray" }
+      }
+    },
+    "stageIsolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "reason"],
+      "properties": {
+        "result": { "const": "NOT RUN" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "syntheticRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "scenario",
+        "variant",
+        "maskCount",
+        "width",
+        "height",
+        "strokeCountPerMask",
+        "pointCountPerStroke",
+        "sampleCount",
+        "coverageDurationsSeconds",
+        "durationsSeconds",
+        "stageDurationsSeconds",
+        "stageIsolation",
+        "preferMetal",
+        "seed"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 3 },
+        "scenario": { "const": "synthetic-1600px" },
+        "variant": { "const": "O" },
+        "maskCount": { "enum": [0, 1, 10] },
+        "width": { "const": 1600 },
+        "height": { "const": 1067 },
+        "strokeCountPerMask": { "const": 10 },
+        "pointCountPerStroke": { "const": 100 },
+        "sampleCount": { "type": "integer", "minimum": 1 },
+        "coverageDurationsSeconds": { "$ref": "#/$defs/durationArray" },
+        "durationsSeconds": { "$ref": "#/$defs/durationArray" },
+        "stageDurationsSeconds": { "$ref": "#/$defs/stageDurations" },
+        "stageIsolation": { "$ref": "#/$defs/stageIsolation" },
+        "preferMetal": { "type": "boolean" },
+        "seed": { "const": "LH-BRUSH-PERF-ACCEPTANCE-20261006" }
+      }
+    },
+    "cancellationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "scenario",
+        "variant",
+        "sampleCount",
+        "durationsSeconds",
+        "p95Seconds",
+        "workerCounts",
+        "cancelOutcome",
+        "timingBoundary",
+        "nonPreemptibleSectionsExcluded",
+        "result"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 3 },
+        "scenario": { "enum": ["preview-cancel", "export-cancel-24mp"] },
+        "variant": { "const": "O" },
+        "sampleCount": { "type": "integer", "minimum": 1 },
+        "durationsSeconds": { "$ref": "#/$defs/durationArray" },
+        "p95Seconds": { "$ref": "#/$defs/duration" },
+        "workerCounts": { "$ref": "#/$defs/workerCounts" },
+        "cancelOutcome": { "const": "cancelled-and-joined" },
+        "timingBoundary": { "type": "string", "minLength": 1 },
+        "nonPreemptibleSectionsExcluded": {
+          "const": ["raw-decode", "cgimage-destination-encode"]
+        },
+        "result": { "enum": ["PASS", "FAIL"] }
+      }
+    },
+    "memoryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "scenario",
+        "variant",
+        "warmupCycles",
+        "measuredCycles",
+        "warmPlateauRSSBytes",
+        "settledRSSBytes",
+        "rssLimitBytes",
+        "workerCounts",
+        "schedulerCounts",
+        "mappingChecks",
+        "histogramChecks",
+        "cancelOutcome",
+        "result"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 3 },
+        "scenario": { "const": "50-cancel-switch-preview" },
+        "variant": { "const": "O" },
+        "warmupCycles": { "const": 5 },
+        "measuredCycles": { "const": 50 },
+        "warmPlateauRSSBytes": { "type": "integer", "minimum": 1 },
+        "settledRSSBytes": { "type": "integer", "minimum": 1 },
+        "rssLimitBytes": { "type": "integer", "minimum": 1 },
+        "workerCounts": { "$ref": "#/$defs/workerCounts" },
+        "schedulerCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["deliveredB", "discardedA", "failed"],
+          "properties": {
+            "deliveredB": { "type": "integer", "minimum": 0 },
+            "discardedA": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "mappingChecks": { "type": "integer", "minimum": 0 },
+        "histogramChecks": { "type": "integer", "minimum": 0 },
+        "cancelOutcome": { "const": "all-cancelled-and-joined" },
+        "result": { "enum": ["PASS", "FAIL"] }
+      }
+    },
+    "coverageGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "result", "reason"],
+      "properties": {
+        "gate": { "const": "PERF-COVERAGE" },
+        "result": { "const": "NOT RUN" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "p95Seconds"],
+      "properties": {
+        "scenario": { "enum": ["preview-cancel", "export-cancel-24mp"] },
+        "p95Seconds": { "$ref": "#/$defs/duration" }
+      }
+    },
+    "cancellationGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "result", "budgetP95Seconds", "measurements"],
+      "properties": {
+        "gate": { "const": "PERF-CANCEL" },
+        "result": { "enum": ["PASS", "FAIL"] },
+        "budgetP95Seconds": { "const": 0.1 },
+        "measurements": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/measurement" }
+        }
+      }
+    },
+    "memoryGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate",
+        "result",
+        "warmPlateauRSSBytes",
+        "settledRSSBytes",
+        "rssLimitBytes"
+      ],
+      "properties": {
+        "gate": { "const": "PERF-MEM-50-CANCEL" },
+        "result": { "enum": ["PASS", "FAIL"] },
+        "warmPlateauRSSBytes": { "type": "integer", "minimum": 1 },
+        "settledRSSBytes": { "type": "integer", "minimum": 1 },
+        "rssLimitBytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

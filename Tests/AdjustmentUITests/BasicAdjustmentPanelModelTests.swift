@@ -74,6 +74,14 @@ final class BasicAdjustmentPanelModelTests: XCTestCase {
         XCTAssertTrue(panelSource.contains("editor.commitContinuousEdit()"))
     }
 
+    func testKelvinSliderClosesTheGestureAfterCommittingPreview() throws {
+        let panelSource = try panelSource()
+        XCTAssertTrue(
+            panelSource.contains("else { editor.commitContinuousEdit(); editor.endAdjustmentGesture() }"),
+            "Kelvin slider release must commit the preview before ending the batch gesture"
+        )
+    }
+
     private func panelSource() throws -> String {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

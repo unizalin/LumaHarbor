@@ -26,6 +26,17 @@ public enum PadAdjustmentPolicy {
         return clamp(rounded, to: range)
     }
 
+    /// Parses an editing draft without display rounding or clamping. Native
+    /// nudge actions must continue from the exact text the user entered.
+    static func parseExact(_ text: String, range: ClosedRange<Double>) -> Double? {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        guard let value = Double(normalized), value.isFinite, range.contains(value) else {
+            return nil
+        }
+        return value
+    }
+
     public static func formatted(_ value: Double, fractionDigits: Int) -> String {
         String(format: "%.*f", max(0, fractionDigits), value)
     }

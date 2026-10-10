@@ -11,6 +11,45 @@ import XCTest
 @MainActor
 final class LibraryViewModelTransitionTests: AppViewModelTestCase {
 
+    // MARK: - Snapshot persistence
+
+    func testSnapshotPersistsAndReloadsWhenPhotoReopens() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+
+        model.requestSelectPhoto(photo.id)
+        await waitUntilAppCondition("photo to open") {
+            await MainActor.run { model.editor.photo?.id == photo.id }
+        }
+
+        model.editor.createSnapshot(name: "Persistent Snapshot")
+        await waitUntilAppCondition("snapshot sidecar write") {
+            (try? await services.libraryService.snapshots(for: photo))?.count == 1
+        }
+
+        model.requestSelectPhoto(nil)
+        await waitUntilAppCondition("editor to close") {
+            await MainActor.run {
+                model.selectedPhotoID == nil && model.editor.photo == nil
+            }
+        }
+
+        model.requestSelectPhoto(photo.id)
+        await waitUntilAppCondition("snapshot to reload") {
+            await MainActor.run {
+                model.editor.photo?.id == photo.id
+                    && model.editor.snapshots.map(\.name) == ["Persistent Snapshot"]
+            }
+        }
+
+        XCTAssertEqual(model.editor.snapshots.map(\.name), ["Persistent Snapshot"])
+    }
+
     // MARK: - Removing a library with unsaved edits
 
     func testRemovingSelectedLibraryWithAFailingSaveDoesNotRemoveIt() async throws {
@@ -438,6 +477,43 @@ final class LibraryViewModelTransitionTests: AppViewModelTestCase {
         XCTAssertGreaterThan(
             publishCount, 0,
             "An editor-only state change must republish through LibraryViewModel, or InspectorView/EditorView never redraw"
+        )
+    }
+
+    func testBrushGestureCommitStaysWithinDirectEditorObservers() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+
+        var modelPublishCount = 0
+        var editorPublishCount = 0
+        let modelCancellable = model.objectWillChange.sink { modelPublishCount += 1 }
+        let editorCancellable = model.editor.objectWillChange.sink { editorPublishCount += 1 }
+        defer {
+            modelCancellable.cancel()
+            editorCancellable.cancel()
+        }
+
+        let mapping = try BrushCoordinateMapping(sourceSize: CGSize(width: 100, height: 100))
+        let point = CGPoint(x: 50, y: 50)
+        let context = try XCTUnwrap(model.editor.beginBrushMaskGesture(at: point, mapping: mapping))
+        XCTAssertTrue(model.editor.endBrushMaskGesture(at: point, context: context))
+
+        XCTAssertGreaterThan(editorPublishCount, 0, "Brush UI subscribers must still redraw")
+        XCTAssertEqual(
+            modelPublishCount,
+            0,
+            "The root library hierarchy must not be invalidated for a brush commit"
         )
     }
 

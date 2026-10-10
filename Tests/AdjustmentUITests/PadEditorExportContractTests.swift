@@ -101,6 +101,15 @@ final class PadEditorExportContractTests: XCTestCase {
         XCTAssertTrue(source.contains("setWipePosition"))
     }
 
+    func testPadToolbarRoutesSnapshotCompareAndBrushClipboardThroughSessionAPIs() throws {
+        let source = try Self.loadSource("PadEditorToolbar.swift")
+
+        XCTAssertTrue(source.contains("editor.setComparisonSnapshot("))
+        XCTAssertTrue(source.contains("brushMasks: adjustmentClipboard.brushMasks"))
+        XCTAssertFalse(source.contains("editor.comparisonSnapshot = nil"))
+        XCTAssertFalse(source.contains("editor.comparisonSnapshot = snap"))
+    }
+
     func testEditorWiresLibraryFilmstripWithoutDuplicatingPhotoData() throws {
         let source = try Self.loadEditorCompositionSource()
         XCTAssertTrue(source.contains("PadEditorFilmstrip"))

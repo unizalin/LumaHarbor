@@ -17,4 +17,7 @@ struct AdjustmentClipboard: Equatable {
     var geometry: GeometryAdjustments?
     /// `nil` unless the user explicitly opted in at copy time.
     var localAdjustments: [LocalAdjustment]?
+    /// New source-coordinate brushes share the same Local opt-in boundary but
+    /// remain a separate collection from legacy local adjustments.
+    var brushMasks: [BrushMask]?
 }

@@ -26,3 +26,19 @@ public func runOffActor<T: Sendable>(
         task.cancel()
     }
 }
+
+/// Async counterpart used when a detached render stage fans work out to
+/// child tasks (for example, independent brush-mask coverage). Cancellation
+/// is forwarded to the detached parent in exactly the same way as the
+/// synchronous overload above.
+public func runOffActor<T: Sendable>(
+    priority: TaskPriority,
+    _ body: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    let task = Task.detached(priority: priority, operation: body)
+    return try await withTaskCancellationHandler {
+        try await task.value
+    } onCancel: {
+        task.cancel()
+    }
+}

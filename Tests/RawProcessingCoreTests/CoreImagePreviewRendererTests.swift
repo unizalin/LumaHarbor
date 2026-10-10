@@ -36,6 +36,7 @@ private struct BaselineReportingDecoder: RawDecoding {
 private final class RequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storedRequest: RawDecodeRequest?
+    private var decodeCount = 0
 
     var request: RawDecodeRequest? {
         lock.lock()
@@ -43,9 +44,16 @@ private final class RequestRecorder: @unchecked Sendable {
         return storedRequest
     }
 
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return decodeCount
+    }
+
     func record(_ request: RawDecodeRequest) {
         lock.lock()
         storedRequest = request
+        decodeCount += 1
         lock.unlock()
     }
 }
@@ -91,6 +99,42 @@ final class CoreImagePreviewRendererTests: XCTestCase {
         _ = try await renderer.render(request)
 
         XCTAssertEqual(recorder.request?.rawRenderingCompatibility, .adobeProcess2012)
+    }
+
+    func testInteractiveDecodedPreviewCacheReusesOnlyAnExactFileAndRecipeKey() async throws {
+        let recorder = RequestRecorder()
+        let renderer = CoreImagePreviewRenderer(decoder: RecordingDecoder(recorder: recorder))
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("luna-preview-cache-\(UUID().uuidString).raw")
+        try Data([0x01]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let subject = PreviewSubject(UUID())
+        let base = PreviewRequest(
+            subject: subject,
+            url: url,
+            adjustments: .neutral,
+            targetPixelDimension: 256,
+            quality: .interactive
+        )
+        _ = try await renderer.render(base)
+        _ = try await renderer.render(base)
+        XCTAssertEqual(recorder.count, 1, "an identical warm preview should hit the bounded decoded cache")
+
+        var whiteBalanced = base
+        whiteBalanced.adjustments.temperature = 125
+        _ = try await renderer.render(whiteBalanced)
+        XCTAssertEqual(recorder.count, 2, "white balance is a decode input and must isolate cache entries")
+
+        try Data([0x01, 0x02]).write(to: url)
+        _ = try await renderer.render(base)
+        XCTAssertEqual(recorder.count, 3, "file state changes must invalidate a decoded preview entry")
+
+        var full = base
+        full.quality = .full
+        _ = try await renderer.render(full)
+        _ = try await renderer.render(full)
+        XCTAssertEqual(recorder.count, 5, "full-resolution requests are never retained in the preview cache")
     }
 
     func testRenderedPreviewCarriesTheDecodersWhiteBalanceBaseline() async throws {
@@ -157,5 +201,24 @@ final class CoreImagePreviewRendererTests: XCTestCase {
         let image = try await renderer.render(request)
 
         XCTAssertEqual(image.pixelSize, CGSize(width: 32, height: 24))
+    }
+
+    func testPreviewExposesBrushMappingAndAppliesSourceBrushBeforeGeometry() async throws {
+        let renderer = CoreImagePreviewRenderer(decoder: BaselineReportingDecoder(pixelSize: CGSize(width: 32, height: 24)))
+        var adjustments = PhotoAdjustments.neutral
+        adjustments.brushMasks = [BrushMask(
+            strokes: [BrushMaskStroke(points: [BrushMaskPoint(x: 0.75, y: 0.25)], size: 0.25)],
+            adjustments: BrushMaskPatch(exposure: 2)
+        )]
+        let request = PreviewRequest(
+            subject: PreviewSubject(UUID()),
+            url: URL(fileURLWithPath: "/tmp/lumaharbor-test.ARW"),
+            adjustments: adjustments,
+            targetPixelDimension: 256,
+            quality: .interactive
+        )
+        let image = try await renderer.render(request)
+        XCTAssertNotNil(image.brushCoordinateMapping)
+        XCTAssertNotEqual(image.cgImage.width, 0)
     }
 }

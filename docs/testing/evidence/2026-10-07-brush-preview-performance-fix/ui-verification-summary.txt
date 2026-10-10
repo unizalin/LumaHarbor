@@ -1,0 +1,61 @@
+LumaHarbor brush PERF-UI verification summary
+Date: 2026-10-10 Asia/Taipei
+
+Environment
+- macOS 26.7.1 arm64
+- Xcode 26.6 (17F113)
+- Release app
+- Fixture identifier: sony-arw-anonymous-01
+- Baseline B: 1de07dcfeb2ed217a75d1c04978da6a5936f379a
+- Candidate O product: 5530e91f8f7cae86b6d6633cfd38f13d72bc896b
+- Validation contract: 2c1d1e39bff060a62b208ed4371793b72a3f438b
+
+Measured UI run
+- Native drag gestures: B=30, O=30
+- O completed=30, cancelled=0
+- B heartbeat extra delay p50/p95/max=0.001875/51.763333/85.506416 ms
+- O heartbeat extra delay p50/p95/max=0.227499/26.152124/27.835166 ms
+- B warm preview p50/p95=255.5180415/267.056041 ms
+- O warm preview p50/p95=80.5402915/90.082959 ms
+
+Commands and exit codes
+
+1. Focused gesture/contract/recorder regression
+   swift test --scratch-path /private/tmp/LumaHarbor-BrushGestureCoordinate-TDD --filter 'BrushMaskContractTests|EditorSessionBrushMaskGestureTests|BrushUIHeartbeatRecorderTests'
+   Exit code: 0
+   Result: 29 tests, 0 failures
+
+2. Release app build
+   Scripts/build-app-bundle.sh release
+   Exit code: 0
+   Result: PASS
+
+3. iPad Simulator generic build
+   xcodebuild -project Apps/LumaHarborPad.xcodeproj -scheme LumaHarborPad -destination 'generic/platform=iOS Simulator' -derivedDataPath /private/tmp/LumaHarbor-BrushUIPerf-Final-iPad CODE_SIGNING_ALLOWED=NO build
+   Exit code: 0
+   Result: BUILD SUCCEEDED
+
+4. PERF-UI gate analyzer
+   python3 Scripts/analyze-brush-ui-heartbeat.py --baseline docs/testing/evidence/2026-10-07-brush-preview-performance-fix/ui-heartbeat-baseline.jsonl --optimized docs/testing/evidence/2026-10-07-brush-preview-performance-fix/ui-heartbeat-optimized.jsonl --output /private/tmp/LumaHarbor-PERF-UI-Evidence/perf-ui-gates-recheck.json --minimum-gestures 30
+   Exit code: 0
+   Result: PERF-UI-HEARTBEAT PASS; PERF-UI-WARM-PREVIEW PASS; PERF-UI PASS
+
+5. Analyzer unit tests
+   python3 -m unittest discover -s Scripts/tests -p 'test_analyze_*.py'
+   Exit code: 0
+   Result: 41 tests, 0 failures (UI heartbeat analyzer subset: 6 tests, 0 failures)
+
+6. Full Release regression
+   swift test -c release --skip-build
+   Exit code: 0
+   Result: 2733 tests, 22 skipped, 0 failures
+
+Gate results
+- PERF-UI-HEARTBEAT: PASS (O p95 26.152124 ms <= 50 ms; O max 27.835166 ms <= 100 ms)
+- PERF-UI-WARM-PREVIEW: PASS (O p95 90.082959 ms <= B p95 x 1.10 = 293.7616451 ms)
+- PERF-UI: PASS
+
+Boundaries
+- Accessibility was used only for setup, not for the 30 measured gestures.
+- No threshold, benchmark workload, image resolution, brush point, or adjustment was relaxed or removed.
+- Physical-device, Pencil, keyboard, hands-on VoiceOver, controlled eyedropper, and gray-card gates remain NOT RUN or PARTIAL as documented.

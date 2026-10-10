@@ -7,8 +7,10 @@ import Foundation
 /// every other case adds a gesture-driven overlay on top of the preview.
 ///
 /// `.crop` (Task 2.3), `.whiteBalance` (the eyedropper, Task 2.4),
-/// `.linearGradient` (Task 4.3), `.radialGradient`, `.brush` and `.spotHeal`
-/// (Task 4.5) are the dedicated local-editing tools.
+/// `.linearGradient` (Task 4.3), `.radialGradient`, `.brush`, `.brushMask`
+/// and `.spotHeal` are the dedicated local-editing tools.  `.brush` remains
+/// the legacy `LocalAdjustmentKind.brush` interaction; `.brushMask` is the
+/// independent source-coordinate adjustment-brush pipeline.
 public enum EditorToolMode: Equatable, Sendable {
     case adjust
     case crop
@@ -16,5 +18,6 @@ public enum EditorToolMode: Equatable, Sendable {
     case linearGradient
     case radialGradient
     case brush
+    case brushMask
     case spotHeal
 }

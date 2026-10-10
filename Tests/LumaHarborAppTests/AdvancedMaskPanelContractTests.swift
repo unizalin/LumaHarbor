@@ -61,7 +61,10 @@ final class AdvancedMaskPanelContractTests: XCTestCase {
 
     func testMaskAndSpotHealRowsExposeTheWholeStableTouchTarget() throws {
         let source = try Self.panelSource()
+        // The two legacy selection rows keep their explicit full-width hit
+        // targets; the adjustment-brush selection button contributes a third
+        // 44-point row through its full-width label.
         XCTAssertEqual(source.components(separatedBy: ".contentShape(Rectangle())").count - 1, 2)
-        XCTAssertEqual(source.components(separatedBy: ".frame(minHeight: 44, alignment: .leading)").count - 1, 2)
+        XCTAssertEqual(source.components(separatedBy: ".frame(minHeight: 44, alignment: .leading)").count - 1, 3)
     }
 }

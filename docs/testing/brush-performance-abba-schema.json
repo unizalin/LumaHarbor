@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lumaharbor.invalid/schemas/brush-performance-abba-v2.json",
+  "title": "LumaHarbor brush performance ABBA sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "productSHA", "harnessSHA", "instrumentationDigest",
+    "configuration", "defines", "scenario", "variant", "round", "order",
+    "sampleOrdinal", "seed", "maskCount", "nativeSize", "decodedSize",
+    "outputSize", "recipeIDs", "stageDurationsSeconds", "totalDurationSeconds",
+    "pixelError", "workerCounts", "cancelOutcome", "rssBytes", "thermalState",
+    "result", "unavailableReasons"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "productSHA": { "type": "string", "minLength": 7 },
+    "harnessSHA": { "type": "string", "minLength": 7 },
+    "instrumentationDigest": { "type": "string", "minLength": 7 },
+    "configuration": { "const": "release" },
+    "defines": { "type": "array", "maxItems": 0 },
+    "scenario": { "type": "string", "minLength": 1 },
+    "variant": { "enum": ["B", "O"] },
+    "round": { "enum": [1, 2] },
+    "order": { "type": "integer", "minimum": 0 },
+    "sampleOrdinal": { "type": "integer", "minimum": 0 },
+    "seed": { "type": "string", "minLength": 1 },
+    "maskCount": { "enum": [0, 1, 10] },
+    "nativeSize": { "$ref": "#/$defs/size" },
+    "decodedSize": { "$ref": "#/$defs/size" },
+    "outputSize": { "$ref": "#/$defs/size" },
+    "recipeIDs": { "type": ["array", "null"], "items": { "type": "string" } },
+    "stageDurationsSeconds": { "type": ["object", "null"] },
+    "totalDurationSeconds": { "type": "number", "minimum": 0 },
+    "pixelError": { "type": ["number", "null"], "minimum": 0 },
+    "workerCounts": { "type": ["object", "null"] },
+    "cancelOutcome": { "type": ["string", "null"] },
+    "rssBytes": { "type": ["integer", "null"], "minimum": 0 },
+    "thermalState": { "type": "string", "minLength": 1 },
+    "result": { "enum": ["MEASURED", "FAIL", "CANCELLED", "UNAVAILABLE"] },
+    "unavailableReasons": { "type": "object", "additionalProperties": { "type": "string" } }
+  },
+  "$defs": {
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

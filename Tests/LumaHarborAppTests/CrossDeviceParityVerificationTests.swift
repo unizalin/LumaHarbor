@@ -255,8 +255,8 @@ final class CrossDeviceParityVerificationTests: XCTestCase {
         }
     }
 
-    func testPhotoSidecarUsesLatestUnifiedSchemaV4() {
-        XCTAssertEqual(PhotoSidecar.currentSchemaVersion, 4,
-                       "Sidecar schema must be unified at version 4 for both Mac and iPad")
+    func testPhotoSidecarUsesLatestUnifiedSchemaV5() {
+        XCTAssertEqual(PhotoSidecar.currentSchemaVersion, 5,
+                       "Sidecar schema must be unified at version 5 for both Mac and iPad")
     }
 }

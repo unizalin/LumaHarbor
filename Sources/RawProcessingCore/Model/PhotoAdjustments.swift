@@ -28,6 +28,12 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     /// 4.2/4.4 wire up rendering. Order is significant and must survive a
     /// round trip, unlike every other field here which is a single value.
     public var localAdjustments: [LocalAdjustment]
+    /// Independent source-coordinate adjustment brushes. This intentionally
+    /// remains separate from the legacy `LocalAdjustmentKind.brush` model.
+    public var brushMasks: [BrushMask]
+    /// Source-shape bookkeeping used by experimental v3 curation migration.
+    /// It is deliberately excluded from value equality and encoding.
+    public private(set) var hasBrushMasksField: Bool
     public var presence: PresenceAdjustments
     public var colorGrading: ColorGradingAdjustments
     public var monochrome: MonochromeAdjustments
@@ -60,6 +66,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         grain: Grain = .neutral,
         geometry: GeometryAdjustments = .neutral,
         localAdjustments: [LocalAdjustment] = [],
+        brushMasks: [BrushMask] = [],
         presence: PresenceAdjustments = .neutral,
         colorGrading: ColorGradingAdjustments = .neutral,
         monochrome: MonochromeAdjustments = .neutral,
@@ -87,6 +94,8 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         self.grain = grain
         self.geometry = geometry
         self.localAdjustments = localAdjustments
+        self.brushMasks = brushMasks
+        self.hasBrushMasksField = true
         self.presence = presence
         self.colorGrading = colorGrading
         self.monochrome = monochrome
@@ -98,6 +107,66 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
 
     /// All sliders at their documented default with the native rendering policy.
     public static let neutral = PhotoAdjustments()
+
+    public static func == (lhs: PhotoAdjustments, rhs: PhotoAdjustments) -> Bool {
+        lhs.exposure == rhs.exposure
+            && lhs.temperature == rhs.temperature
+            && lhs.tint == rhs.tint
+            && lhs.contrast == rhs.contrast
+            && lhs.highlights == rhs.highlights
+            && lhs.shadows == rhs.shadows
+            && lhs.whites == rhs.whites
+            && lhs.blacks == rhs.blacks
+            && lhs.vibrance == rhs.vibrance
+            && lhs.saturation == rhs.saturation
+            && lhs.advancedToneCurve == rhs.advancedToneCurve
+            && lhs.hsl == rhs.hsl
+            && lhs.splitToning == rhs.splitToning
+            && lhs.sharpening == rhs.sharpening
+            && lhs.noiseReduction == rhs.noiseReduction
+            && lhs.vignette == rhs.vignette
+            && lhs.grain == rhs.grain
+            && lhs.geometry == rhs.geometry
+            && lhs.localAdjustments == rhs.localAdjustments
+            && lhs.brushMasks == rhs.brushMasks
+            && lhs.presence == rhs.presence
+            && lhs.colorGrading == rhs.colorGrading
+            && lhs.monochrome == rhs.monochrome
+            && lhs.renderingProfile == rhs.renderingProfile
+            && lhs.rawCameraProfile == rhs.rawCameraProfile
+            && lhs.lensCorrection == rhs.lensCorrection
+            && lhs.rawRenderingCompatibility == rhs.rawRenderingCompatibility
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(exposure)
+        hasher.combine(temperature)
+        hasher.combine(tint)
+        hasher.combine(contrast)
+        hasher.combine(highlights)
+        hasher.combine(shadows)
+        hasher.combine(whites)
+        hasher.combine(blacks)
+        hasher.combine(vibrance)
+        hasher.combine(saturation)
+        hasher.combine(advancedToneCurve)
+        hasher.combine(hsl)
+        hasher.combine(splitToning)
+        hasher.combine(sharpening)
+        hasher.combine(noiseReduction)
+        hasher.combine(vignette)
+        hasher.combine(grain)
+        hasher.combine(geometry)
+        hasher.combine(localAdjustments)
+        hasher.combine(brushMasks)
+        hasher.combine(presence)
+        hasher.combine(colorGrading)
+        hasher.combine(monochrome)
+        hasher.combine(renderingProfile)
+        hasher.combine(rawCameraProfile)
+        hasher.combine(lensCorrection)
+        hasher.combine(rawRenderingCompatibility)
+    }
 
     /// All sliders at their documented default under the requested baseline policy.
     public static func neutral(using policy: RawRenderingCompatibility) -> Self {
@@ -162,18 +231,26 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
     }
 
     public func clamped() -> PhotoAdjustments {
-        PhotoAdjustments(
-            exposure: exposure, temperature: temperature, tint: tint, contrast: contrast,
+        var copy = PhotoAdjustments(
+            exposure: exposure, temperature: 0, tint: tint, contrast: contrast,
             highlights: highlights, shadows: shadows, whites: whites, blacks: blacks,
             vibrance: vibrance, saturation: saturation,
             advancedToneCurve: advancedToneCurve, hsl: hsl, splitToning: splitToning,
             sharpening: sharpening, noiseReduction: noiseReduction, vignette: vignette,
             grain: grain, geometry: geometry, localAdjustments: localAdjustments,
+            brushMasks: brushMasks,
             presence: presence, colorGrading: colorGrading, monochrome: monochrome,
             renderingProfile: renderingProfile, rawCameraProfile: rawCameraProfile,
             lensCorrection: lensCorrection,
             rawRenderingCompatibility: rawRenderingCompatibility
         )
+        // A finite out-of-range temperature may be a legacy sidecar value.
+        // Preserve it until the baseline-aware resolver sees the actual RAW;
+        // only non-finite corruption collapses to neutral here.
+        copy.temperature = temperature.isFinite
+            ? temperature
+            : AdjustmentCatalog.definition(for: .temperature).defaultValue
+        return copy
     }
 
     /// Kinds that currently differ from their default.
@@ -190,7 +267,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         case shadows, whites, blacks, vibrance, saturation
         case advancedToneCurve, hsl, splitToning, sharpening, noiseReduction, vignette, grain
         case geometry
-        case localAdjustments
+        case localAdjustments, brushMasks
         case presence, colorGrading, monochrome, renderingProfile, lensCorrection
         case rawCameraProfile
         case rawRenderingCompatibility
@@ -209,7 +286,14 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         }
 
         self.exposure = try value(.exposure, .exposure)
-        self.temperature = try value(.temperature, .temperature)
+        // Temperature is decoder-relative; its safety depends on the RAW
+        // baseline, which is unavailable while decoding the sidecar. Preserve
+        // every finite legacy value and defer clamping to the resolver.
+        let temperatureDefinition = AdjustmentCatalog.definition(for: .temperature)
+        let rawTemperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+        self.temperature = rawTemperature?.isFinite == true
+            ? rawTemperature!
+            : temperatureDefinition.defaultValue
         self.tint = try value(.tint, .tint)
         self.contrast = try value(.contrast, .contrast)
         self.highlights = try value(.highlights, .highlights)
@@ -230,6 +314,10 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         // all — the same absent-key-means-empty convention `geometry`
         // itself used when it was the newly added field in Phase 2.
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustment].self, forKey: .localAdjustments) ?? []
+        self.hasBrushMasksField = container.contains(.brushMasks)
+        // Sidecars before v5 have no independent adjustment-brush collection.
+        // When present, BrushMask decoding enforces the strict v1 contract.
+        self.brushMasks = try container.decodeIfPresent([BrushMask].self, forKey: .brushMasks) ?? []
         // A sidecar written before P4 has none of these five keys.
         self.presence = try container.decodeIfPresent(PresenceAdjustments.self, forKey: .presence) ?? .neutral
         self.colorGrading = try container.decodeIfPresent(ColorGradingAdjustments.self, forKey: .colorGrading) ?? .neutral
@@ -263,6 +351,7 @@ public struct PhotoAdjustments: Codable, Equatable, Hashable, Sendable {
         try container.encode(grain, forKey: .grain)
         try container.encode(geometry, forKey: .geometry)
         try container.encode(localAdjustments, forKey: .localAdjustments)
+        try container.encode(brushMasks, forKey: .brushMasks)
         try container.encode(presence, forKey: .presence)
         try container.encode(colorGrading, forKey: .colorGrading)
         try container.encode(monochrome, forKey: .monochrome)

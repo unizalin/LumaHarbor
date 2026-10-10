@@ -50,6 +50,7 @@ final class AdjustmentClipboardWorkflowTests: AppViewModelTestCase {
         model.editor.setAdjustment(.exposure, to: 1.2)
         model.editor.updateAdjustments { $0.geometry.rotationDegrees = 90 }
         model.editor.updateAdjustments { $0.localAdjustments = [LocalAdjustment(kind: .spotHeal)] }
+        model.editor.updateAdjustments { $0.brushMasks = [BrushMask(name: "private")] }
 
         XCTAssertFalse(model.copyIncludesGeometry)
         XCTAssertFalse(model.copyIncludesLocalAdjustments)
@@ -59,6 +60,7 @@ final class AdjustmentClipboardWorkflowTests: AppViewModelTestCase {
         XCTAssertEqual(clipboard.patch.scalarValue(for: .basicExposure), 1.2)
         XCTAssertNil(clipboard.geometry, "Geometry must not be captured unless explicitly opted in")
         XCTAssertNil(clipboard.localAdjustments, "Local Adjustments must not be captured unless explicitly opted in")
+        XCTAssertNil(clipboard.brushMasks, "Adjustment brushes must follow the same explicit Local opt-in")
     }
 
     func testCopyAdjustmentsIncludesGeometryAndLocalAdjustmentsOnlyWhenToggledOn() async throws {
@@ -88,6 +90,62 @@ final class AdjustmentClipboardWorkflowTests: AppViewModelTestCase {
         let clipboard = try XCTUnwrap(model.adjustmentClipboard)
         XCTAssertEqual(clipboard.geometry?.rotationDegrees, 90)
         XCTAssertEqual(clipboard.localAdjustments, localAdjustments)
+    }
+
+    func testLocalOptInClipboardReplacesLocalAndBrushMasksIncludingExplicitEmptyArrays() async throws {
+        try seedPhotos(["DSC0001.ARW", "DSC0002.ARW"])
+        let store = AdjustmentStore()
+        let services = try makeServices(
+            loadAdjustments: { photo in await store.get(photo.id) },
+            saveAdjustments: { adjustments, photo in await store.set(photo.id, adjustments) }
+        )
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+        let model = await makeModel(services: services, libraryID: library.id)
+        let source = model.photos[0]
+        let target = model.photos[1]
+        let sourceMask = BrushMask(name: "source")
+        let targetMask = BrushMask(name: "target")
+
+        model.requestSelectPhoto(source.id)
+        await waitUntilAppCondition("the source photo to open") {
+            await MainActor.run { model.editor.photo?.id == source.id }
+        }
+        model.editor.updateAdjustments {
+            $0.localAdjustments = [LocalAdjustment(kind: .linearGradient)]
+            $0.brushMasks = [sourceMask]
+        }
+        model.copyIncludesLocalAdjustments = true
+        model.copyAdjustments()
+        let clipboard = try XCTUnwrap(model.adjustmentClipboard)
+        XCTAssertEqual(clipboard.localAdjustments?.count, 1)
+        XCTAssertEqual(clipboard.brushMasks, [sourceMask])
+
+        model.requestSelectPhoto(target.id)
+        await waitUntilAppCondition("the target photo to open") {
+            await MainActor.run { model.editor.photo?.id == target.id }
+        }
+        model.editor.updateAdjustments {
+            $0.localAdjustments = [LocalAdjustment(kind: .spotHeal)]
+            $0.brushMasks = [targetMask]
+        }
+        model.pasteAdjustments()
+        XCTAssertEqual(model.editor.adjustments.localAdjustments, clipboard.localAdjustments)
+        XCTAssertEqual(model.editor.adjustments.brushMasks, [sourceMask])
+
+        // An opted-in empty source is a deliberate clear, not "not selected".
+        model.requestSelectPhoto(source.id)
+        await waitUntilAppCondition("the source photo to reopen") {
+            await MainActor.run { model.editor.photo?.id == source.id }
+        }
+        model.editor.updateAdjustments {
+            $0.localAdjustments = []
+            $0.brushMasks = []
+        }
+        model.copyAdjustments()
+        let emptyClipboard = try XCTUnwrap(model.adjustmentClipboard)
+        XCTAssertEqual(emptyClipboard.localAdjustments, [])
+        XCTAssertEqual(emptyClipboard.brushMasks, [])
     }
 
     func testCopyAdjustmentsDoesNothingWithoutAnOpenPhoto() async throws {

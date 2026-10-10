@@ -47,6 +47,24 @@ final class PhotoLibraryServiceCurationTests: TemporaryDirectoryTestCase {
         return (service, root, photo)
     }
 
+    /// Seeds foreign input without asking the production writer to create an
+    /// unsupported schema. The writer must reject v6 before touching disk;
+    /// these tests exercise the service paths that encounter such a file.
+    private func injectNewerSchemaSidecar(
+        _ sidecar: PhotoSidecar,
+        repository: FileSidecarRepository
+    ) throws {
+        // Establish the normal sidecar directory and a valid v5 file first.
+        try repository.write(sidecar: sidecar)
+        let url = repository.sidecarURL(for: sidecar.photoID)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        object["schemaVersion"] = PhotoSidecar.currentSchemaVersion + 1
+        let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        try bytes.write(to: url, options: .atomic)
+    }
+
     func testSetRatingWritesSidecarFirstThenProjectsIntoSQLite() async throws {
         let (service, root, photo) = try await makeLibraryWithOnePhoto()
 
@@ -160,15 +178,14 @@ final class PhotoLibraryServiceCurationTests: TemporaryDirectoryTestCase {
     func testSavingAdjustmentsRejectsNewerSchemaSidecarWithoutOverwriting() async throws {
         let (service, root, photo) = try await makeLibraryWithOnePhoto()
         let repository = FileSidecarRepository(libraryRootURL: root)
-        var newerSidecar = PhotoSidecar(
+        let newerSidecar = PhotoSidecar(
             photoID: photo.id,
             sourceRelativePath: photo.relativePath,
             sourceFingerprint: photo.fingerprint,
             adjustments: PhotoAdjustments(exposure: 1.0),
             curation: PhotoCuration(rating: 4)
         )
-        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
-        try repository.write(sidecar: newerSidecar)
+        try injectNewerSchemaSidecar(newerSidecar, repository: repository)
         let sidecarURL = repository.sidecarURL(for: photo.id)
         let bytesBeforeSave = try Data(contentsOf: sidecarURL)
 
@@ -189,15 +206,14 @@ final class PhotoLibraryServiceCurationTests: TemporaryDirectoryTestCase {
     func testCurationMutationRejectsNewerSchemaSidecarWithoutOverwriting() async throws {
         let (service, root, photo) = try await makeLibraryWithOnePhoto()
         let repository = FileSidecarRepository(libraryRootURL: root)
-        var newerSidecar = PhotoSidecar(
+        let newerSidecar = PhotoSidecar(
             photoID: photo.id,
             sourceRelativePath: photo.relativePath,
             sourceFingerprint: photo.fingerprint,
             adjustments: PhotoAdjustments(exposure: 1.0),
             curation: PhotoCuration(rating: 2)
         )
-        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
-        try repository.write(sidecar: newerSidecar)
+        try injectNewerSchemaSidecar(newerSidecar, repository: repository)
         let sidecarURL = repository.sidecarURL(for: photo.id)
         let bytesBeforeSave = try Data(contentsOf: sidecarURL)
 
@@ -221,15 +237,14 @@ final class PhotoLibraryServiceCurationTests: TemporaryDirectoryTestCase {
         try indexStore.setRating(5, for: photo.id)
 
         let repository = FileSidecarRepository(libraryRootURL: root)
-        var newerSidecar = PhotoSidecar(
+        let newerSidecar = PhotoSidecar(
             photoID: photo.id,
             sourceRelativePath: photo.relativePath,
             sourceFingerprint: photo.fingerprint,
             adjustments: PhotoAdjustments(exposure: 1.0),
             curation: PhotoCuration(rating: 2)
         )
-        newerSidecar.schemaVersion = PhotoSidecar.currentSchemaVersion + 1
-        try repository.write(sidecar: newerSidecar)
+        try injectNewerSchemaSidecar(newerSidecar, repository: repository)
         let sidecarURL = repository.sidecarURL(for: photo.id)
         let bytesBeforeScan = try Data(contentsOf: sidecarURL)
 

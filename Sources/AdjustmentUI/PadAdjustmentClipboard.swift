@@ -8,15 +8,18 @@ public struct PadAdjustmentClipboard: Equatable, Sendable {
     public let patch: AdjustmentPatch
     public let geometry: GeometryAdjustments?
     public let localAdjustments: [LocalAdjustment]?
+    public let brushMasks: [BrushMask]?
 
     public init(
         patch: AdjustmentPatch,
         geometry: GeometryAdjustments? = nil,
-        localAdjustments: [LocalAdjustment]? = nil
+        localAdjustments: [LocalAdjustment]? = nil,
+        brushMasks: [BrushMask]? = nil
     ) {
         self.patch = patch
         self.geometry = geometry
         self.localAdjustments = localAdjustments
+        self.brushMasks = brushMasks
     }
 
     public static func copying(
@@ -28,7 +31,8 @@ public struct PadAdjustmentClipboard: Equatable, Sendable {
         PadAdjustmentClipboard(
             patch: AdjustmentPatch.extracting(fields, from: adjustments),
             geometry: includeGeometry ? adjustments.geometry : nil,
-            localAdjustments: includeLocalAdjustments ? adjustments.localAdjustments : nil
+            localAdjustments: includeLocalAdjustments ? adjustments.localAdjustments : nil,
+            brushMasks: includeLocalAdjustments ? adjustments.brushMasks : nil
         )
     }
 }

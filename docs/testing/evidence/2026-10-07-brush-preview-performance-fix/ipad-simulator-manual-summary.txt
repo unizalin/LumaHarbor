@@ -1,0 +1,63 @@
+LumaHarbor brush preview performance fix — iPad Simulator manual summary
+
+Date: 2026-10-08 Asia/Taipei
+Status: UI-SIM-01 PARTIAL
+Validated source HEAD: 1dda4ad3f5c26a488fc8cce4cfc3172c87dd2a08
+Validated product/harness HEAD: 7af212512f59768801081765808202fe84a85b25
+Target: iPad Pro 11-inch (M4), iOS 18.6 Simulator
+Configuration: Debug, unsigned Simulator build
+
+Build
+-----
+Command:
+  xcodebuild -project Apps/LumaHarborPad.xcodeproj \
+    -scheme LumaHarborPad \
+    -sdk iphonesimulator \
+    -destination '<iPad Simulator destination>' \
+    -configuration Debug \
+    -derivedDataPath '<temporary derived data>' \
+    CODE_SIGNING_ALLOWED=NO build
+Exit code: 0
+Result: PASS (** BUILD SUCCEEDED **)
+
+Install and launch
+------------------
+The freshly built org.lumaharbor.LumaHarborPad bundle was installed and launched
+with simctl. The first frame was blank while the document loaded; after warm-up,
+the editor rendered normally and displayed the saved-state indicator.
+Result: PASS
+
+Manual interaction slice
+------------------------
+1. Portrait launch and editor render: PASS.
+2. Rotate to landscape and preserve the editor/inspector layout: PASS.
+3. Open Local Adjustments and create one adjustment brush: PASS.
+4. Paint one stroke on adjustment-brush-canvas: PASS.
+5. Persisted aggregate after paint: 1 brush mask, 1 stroke, mode=paint.
+6. Undo the completed stroke: PASS; persisted aggregate became 1 mask, 0 strokes.
+7. Redo the completed stroke: PASS; persisted aggregate returned to 1 mask,
+   1 stroke, mode=paint.
+8. Increase the brush exposure from 0.0 to 0.1: PASS; the UI showed 0.1 and the
+   saved-state indicator.
+9. Terminate and relaunch the app, reopen Local Adjustments, and expand the
+   brush: PASS; 1 paint stroke and exposure=0.1 remained persisted.
+10. Accessibility semantics visible to the automation tree: PASS for this
+    limited inspection. The canvas, enable switch, delete action, brush-mode
+    group, size/feather/flow/density/exposure controls, Local Adjustments status,
+    and RAW non-destructive-editing notice had labels, roles, and values.
+
+Evidence boundary
+-----------------
+- Persistence checks read only anonymous counts and values from the Simulator
+  container. No document path, filename, photo identifier, or device identifier
+  is recorded here.
+- Screenshots were used locally for visual confirmation and were not committed
+  because the loaded document contains private photo content.
+- Narrow-window behavior, 0.75x/1x/2x canvas zoom, Files-open flow, hardware
+  keyboard interaction, hands-on VoiceOver navigation, Apple Pencil behavior,
+  physical-device rotation/Split View, PERF-UI heartbeat, and gray-card color
+  measurement were not run. Simulator results do not satisfy those gates.
+- The accessibility-tree inspection confirms exposed semantics only; it is not
+  a substitute for hands-on VoiceOver acceptance.
+
+Final result: UI-SIM-01 PARTIAL. No observed failure in the executed slice.

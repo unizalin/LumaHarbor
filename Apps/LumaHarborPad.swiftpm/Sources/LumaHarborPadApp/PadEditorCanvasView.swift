@@ -4,6 +4,36 @@ import Localization
 import PhotoLibraryCore
 import SwiftUI
 
+struct PadEditorRenderObservedContent<Content: View>: View {
+    @ObservedObject private var renderState: EditorRenderState
+    private let content: () -> Content
+
+    init(
+        renderState: EditorRenderState,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        _renderState = ObservedObject(wrappedValue: renderState)
+        self.content = content
+    }
+
+    var body: some View { content() }
+}
+
+struct PadEditorHistoryObservedContent<Content: View>: View {
+    @ObservedObject private var historyState: EditorHistoryState
+    private let content: () -> Content
+
+    init(
+        historyState: EditorHistoryState,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        _historyState = ObservedObject(wrappedValue: historyState)
+        self.content = content
+    }
+
+    var body: some View { content() }
+}
+
 /// Owns the image canvas, comparison modes, crop/mask overlays, zoom gesture,
 /// and the optional filmstrip. Editing state remains in the shared session.
 struct PadEditorCanvasView: View {
@@ -23,6 +53,12 @@ struct PadEditorCanvasView: View {
     private static let maximumCanvasScale: CGFloat = 5
 
     var body: some View {
+        PadEditorRenderObservedContent(renderState: editor.renderState) {
+            canvasBody
+        }
+    }
+
+    private var canvasBody: some View {
         ZStack {
             Color.black
             if editor.previewImage != nil || editor.originalImage != nil {
@@ -153,6 +189,9 @@ struct PadEditorCanvasView: View {
                 RadialMaskOverlayView(editor: editor, imageFrame: imageFrame)
             }
             if editor.toolMode == .brush {
+                LegacyBrushMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+            if editor.toolMode == .brushMask {
                 BrushMaskOverlayView(editor: editor, imageFrame: imageFrame)
             }
             if editor.toolMode == .linearGradient {
@@ -160,6 +199,9 @@ struct PadEditorCanvasView: View {
             }
             if editor.toolMode == .spotHeal {
                 SpotHealMaskOverlayView(editor: editor, imageFrame: imageFrame)
+            }
+            if editor.toolMode == .whiteBalance {
+                WhiteBalanceEyedropperOverlay(editor: editor, imageFrame: imageFrame, image: image)
             }
         }
         .frame(width: canvasSize.width, height: canvasSize.height)

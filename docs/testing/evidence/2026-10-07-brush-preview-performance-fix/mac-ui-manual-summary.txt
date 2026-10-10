@@ -1,0 +1,65 @@
+LumaHarbor Mac foreground QA summary
+Date: 2026-10-08 Asia/Taipei
+
+Candidate product SHA: 7af212512f59768801081765808202fe84a85b25
+Evidence/docs HEAD at execution: 8ffa60a7ab9b52bda60238ce8a2fbcdd1edfc9ae
+Configuration: Debug, build/LumaHarbor.app
+Platform: macOS 26.7.1 (25G313), arm64, Xcode 26.6 (17F113)
+Input: foreground mouse and keyboard automation through the macOS accessibility surface
+Fixture: controlled temporary copies of private Sony RAW files; source names and paths are intentionally omitted
+
+Evidence boundary
+-----------------
+- The final observations were repeated against the exact Debug app bundle path. An unrelated installed LumaHarbor instance was detected concurrently and its earlier smoke observations were excluded.
+- All edits and exports used temporary fixture copies. The private source RAW files were not modified.
+- No product source changed during this manual run.
+
+Results
+-------
+UI-MAC-01: PASS
+- Enter and blur each committed one exposure edit.
+- Escape discarded an uncommitted draft.
+- Plus and minus each produced one discrete edit and one Undo step.
+- Reset produced one edit and Undo restored the prior value.
+- Invalid text restored the previous value and exposed a localized finite-number/range error.
+- Undo/Redo while the field retained focus kept the text field and slider synchronized at 0.0 and 0.5.
+- With exposure holding an uncommitted 0.8 draft, an external contrast revision that left exposure at 0.5 invalidated the stale draft and restored 0.5.
+
+UI-MAC-02: PARTIAL
+- Eyedropper activation, one foreground sample commit, and explicit cancel passed.
+- The controlled warm/cold/green/magenta direction matrix, photo-switch race, and late-result isolation were not run because this fixture set has no qualified controlled color chart.
+
+UI-BRUSH-01: PARTIAL
+- Added two independent adjustment brushes and switched selection between them without crossing per-mask exposure state.
+- Size, feather, flow, density, enable off/on, paint, and erase controls passed.
+- The persisted sidecar contained two strokes on the first mask in order: paint then erase; each single-point gesture stored two path points.
+- Undo removed only the erase stroke; Redo restored it. Autosave settled after each release.
+- The destructive Delete button was not invoked in this manual run.
+
+UI-BRUSH-02: PARTIAL
+- Completed-stroke Undo/Redo and close-to-library/reopen persistence passed.
+- Mid-gesture photo switch, geometry change, snapshot, Undo/Redo, cancel, and window close were not driven manually. Their automated cancellation/session coverage remains PASS in the Release suite.
+
+STORE-01: PARTIAL
+- paint -> original-size export -> close to library -> reopen passed.
+- Reopen preserved two masks, first-mask exposure 0.1, and ordered paint/erase strokes.
+- Foreground export produced a 4000 x 6000 16-bit TIFF (144,013,192 bytes), so the UI path did not downscale the source.
+- Local off/on paste, batch/snapshot, and delete-last-snapshot were not run.
+
+PERF-UI: NOT RUN
+- No foreground 16 ms heartbeat recorder or 30-operation baseline/candidate gesture harness exists in this checkout. Visual interaction cannot substitute for the specified p95/max clock.
+
+UI-SIM-01: NOT RUN
+- No iPad Simulator interaction run was added in this pass.
+
+UI-DEVICE-01 / UI-INPUT-01: NOT RUN
+- CoreDevice listed the available iPad and iPhone as unavailable. Touch, Pencil, external keyboard, Split View, orientation, and VoiceOver therefore remain unverified.
+
+Gray-card color gate: NOT RUN
+- The private fixture inventory contained no filename-identified gray/grey/18-percent RAW card, and no qualified ROI/white-point reference was available.
+
+Commands and exit status
+------------------------
+Scripts/build-app-bundle.sh debug: exit 0
+sips export dimension/format inspection: exit 0
+CoreDevice inventory: exit 0; all relevant physical devices unavailable

@@ -1,0 +1,418 @@
+{
+  "gates": [
+    {
+      "baselinePeakRSSBytes": 67108864,
+      "candidatePeakRSSBytes": 55967744,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86261760,
+      "candidatePeakRSSBytes": 93569024,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 67010560,
+      "candidatePeakRSSBytes": 56098816,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 1,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselinePeakRSSBytes": 86425600,
+      "candidatePeakRSSBytes": 92094464,
+      "gate": "PERF-MEM-PREVIEW",
+      "maskCount": 10,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselineP50Seconds": 0.175096479,
+      "baselineP95Seconds": 0.192716625,
+      "candidateP50Seconds": 0.0087632915,
+      "candidateP95Seconds": 0.010057792,
+      "gate": "PERF-COVERAGE",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.02,
+      "regressionLimitSeconds": 0.18385130295,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselineP50Seconds": 1.7740909585,
+      "baselineP95Seconds": 1.814902165,
+      "candidateP50Seconds": 0.0649509375,
+      "candidateP95Seconds": 0.074801041,
+      "gate": "PERF-COVERAGE",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.08,
+      "regressionLimitSeconds": 1.862795506425,
+      "result": "PASS",
+      "round": 1,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselineP50Seconds": 0.175134167,
+      "baselineP95Seconds": 0.181174041,
+      "candidateP50Seconds": 0.008902687999999999,
+      "candidateP95Seconds": 0.010111,
+      "gate": "PERF-COVERAGE",
+      "maskCount": 1,
+      "p50BudgetSeconds": 0.02,
+      "regressionLimitSeconds": 0.18389087535,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "baselineP50Seconds": 1.7495884145,
+      "baselineP95Seconds": 1.783251168,
+      "candidateP50Seconds": 0.0641692705,
+      "candidateP95Seconds": 0.065651,
+      "gate": "PERF-COVERAGE",
+      "maskCount": 10,
+      "p50BudgetSeconds": 0.08,
+      "regressionLimitSeconds": 1.837067835225,
+      "result": "PASS",
+      "round": 2,
+      "scenario": "stress-vectors-production-preview"
+    },
+    {
+      "gate": "INTERACTIVE-150",
+      "reason": "real RAW workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-EXPORT",
+      "reason": "export workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-MEM-50-CANCEL",
+      "reason": "50-cycle workload was not part of this artifact",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-CANCEL",
+      "reason": "reported by the separate cancellation acceptance record",
+      "result": "NOT RUN"
+    },
+    {
+      "gate": "PERF-UI",
+      "reason": "requires device interaction evidence",
+      "result": "NOT RUN"
+    }
+  ],
+  "overallResult": "DONE_WITH_CONCERNS",
+  "recordCount": 64,
+  "sampleArtifact": "synthetic-stress-samples.jsonl",
+  "schemaVersion": 1,
+  "summaries": {
+    "stress-vectors-production-preview/masks-1/round-1/B": {
+      "count": 8,
+      "p50Seconds": 0.18079364599999997,
+      "p95Seconds": 0.216294583,
+      "peakRSSBytes": 67108864,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 0.175096479,
+          "p95Seconds": 0.192716625
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.004080063,
+          "p95Seconds": 0.004263125
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 1.166e-06,
+          "p95Seconds": 2.583e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 4.7708e-05,
+          "p95Seconds": 6.1333e-05
+        },
+        "rawDecode": {
+          "p50Seconds": 8.9375e-06,
+          "p95Seconds": 2.275e-05
+        },
+        "totalMaterialized": {
+          "p50Seconds": 0.17928954149999998,
+          "p95Seconds": 0.196862083
+        },
+        "validationSampling": {
+          "p50Seconds": 1.1646e-05,
+          "p95Seconds": 4.6084e-05
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-1/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.012105479,
+      "p95Seconds": 0.013244208,
+      "peakRSSBytes": 55967744,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 0.0087632915,
+          "p95Seconds": 0.010057792
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.002644979,
+          "p95Seconds": 0.002811167
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 8.75e-07,
+          "p95Seconds": 1.125e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 3.3271e-05,
+          "p95Seconds": 4.2375e-05
+        },
+        "rawDecode": {
+          "p50Seconds": 5.104000000000001e-06,
+          "p95Seconds": 5.625e-06
+        },
+        "totalMaterialized": {
+          "p50Seconds": 0.0120095415,
+          "p95Seconds": 0.013136166
+        },
+        "validationSampling": {
+          "p50Seconds": 0.00025710399999999997,
+          "p95Seconds": 0.000297209
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-1/round-2/B": {
+      "count": 8,
+      "p50Seconds": 0.18050585400000002,
+      "p95Seconds": 0.186025041,
+      "peakRSSBytes": 67010560,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 0.175134167,
+          "p95Seconds": 0.181174041
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.0037828130000000003,
+          "p95Seconds": 0.003882167
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 1.229e-06,
+          "p95Seconds": 2e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 5.2209e-05,
+          "p95Seconds": 5.6792e-05
+        },
+        "rawDecode": {
+          "p50Seconds": 9.959e-06,
+          "p95Seconds": 1.1625e-05
+        },
+        "totalMaterialized": {
+          "p50Seconds": 0.179116167,
+          "p95Seconds": 0.184981
+        },
+        "validationSampling": {
+          "p50Seconds": 1.16045e-05,
+          "p95Seconds": 1.2042e-05
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-1/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.012066832999999999,
+      "p95Seconds": 0.013336542,
+      "peakRSSBytes": 56098816,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 0.008902687999999999,
+          "p95Seconds": 0.010111
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.002490583,
+          "p95Seconds": 0.002571084
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 8.545e-07,
+          "p95Seconds": 1.292e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 3.8917e-05,
+          "p95Seconds": 5.5833e-05
+        },
+        "rawDecode": {
+          "p50Seconds": 5.5420000000000005e-06,
+          "p95Seconds": 6.042e-06
+        },
+        "totalMaterialized": {
+          "p50Seconds": 0.011960166500000001,
+          "p95Seconds": 0.013209583
+        },
+        "validationSampling": {
+          "p50Seconds": 0.000234646,
+          "p95Seconds": 0.000276333
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-10/round-1/B": {
+      "count": 8,
+      "p50Seconds": 1.7834120420000001,
+      "p95Seconds": 1.824322208,
+      "peakRSSBytes": 86261760,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 1.7740909585,
+          "p95Seconds": 1.814902165
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.0073332085,
+          "p95Seconds": 0.00746925
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 1.2499999999999999e-06,
+          "p95Seconds": 1.458e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 0.0004266445,
+          "p95Seconds": 0.000492042
+        },
+        "rawDecode": {
+          "p50Seconds": 1.0917e-05,
+          "p95Seconds": 1.1625e-05
+        },
+        "totalMaterialized": {
+          "p50Seconds": 1.782032,
+          "p95Seconds": 1.82299275
+        },
+        "validationSampling": {
+          "p50Seconds": 7.75625e-05,
+          "p95Seconds": 9.1833e-05
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-10/round-1/O": {
+      "count": 8,
+      "p50Seconds": 0.0709069165,
+      "p95Seconds": 0.081142583,
+      "peakRSSBytes": 93569024,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 0.0649509375,
+          "p95Seconds": 0.074801041
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.0051652715,
+          "p95Seconds": 0.005361792
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 1.0625e-06,
+          "p95Seconds": 1.208e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 0.000109896,
+          "p95Seconds": 0.000112291
+        },
+        "rawDecode": {
+          "p50Seconds": 5.8545e-06,
+          "p95Seconds": 6.125e-06
+        },
+        "totalMaterialized": {
+          "p50Seconds": 0.0707917495,
+          "p95Seconds": 0.0810125
+        },
+        "validationSampling": {
+          "p50Seconds": 0.0032716875000000003,
+          "p95Seconds": 0.003812749
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-10/round-2/B": {
+      "count": 8,
+      "p50Seconds": 1.7588935625,
+      "p95Seconds": 1.792668667,
+      "peakRSSBytes": 86425600,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 1.7495884145,
+          "p95Seconds": 1.783251168
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.007337166500000001,
+          "p95Seconds": 0.007585833
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 1.375e-06,
+          "p95Seconds": 1.458e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 0.000410145,
+          "p95Seconds": 0.000422874
+        },
+        "rawDecode": {
+          "p50Seconds": 1.0833e-05,
+          "p95Seconds": 1.1167e-05
+        },
+        "totalMaterialized": {
+          "p50Seconds": 1.7576114585,
+          "p95Seconds": 1.791239083
+        },
+        "validationSampling": {
+          "p50Seconds": 7.51665e-05,
+          "p95Seconds": 9.1708e-05
+        }
+      }
+    },
+    "stress-vectors-production-preview/masks-10/round-2/O": {
+      "count": 8,
+      "p50Seconds": 0.07009947899999999,
+      "p95Seconds": 0.071512916,
+      "peakRSSBytes": 92094464,
+      "stageDurationsSeconds": {
+        "coverageRaster": {
+          "p50Seconds": 0.0641692705,
+          "p95Seconds": 0.065651
+        },
+        "finalMakeCGImage": {
+          "p50Seconds": 0.005176,
+          "p95Seconds": 0.005363167
+        },
+        "globalAdjustmentGraph": {
+          "p50Seconds": 9.374999999999999e-07,
+          "p95Seconds": 1.208e-06
+        },
+        "perMaskAdjustmentBlend": {
+          "p50Seconds": 0.0001038755,
+          "p95Seconds": 0.000112791
+        },
+        "rawDecode": {
+          "p50Seconds": 5.7295e-06,
+          "p95Seconds": 6.708e-06
+        },
+        "totalMaterialized": {
+          "p50Seconds": 0.0699803965,
+          "p95Seconds": 0.071395417
+        },
+        "validationSampling": {
+          "p50Seconds": 0.0030454775,
+          "p95Seconds": 0.003243376
+        }
+      }
+    }
+  },
+  "validation": "PASS",
+  "validationErrors": []
+}

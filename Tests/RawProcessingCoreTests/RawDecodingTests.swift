@@ -6,6 +6,16 @@ import XCTest
 /// "damaged" and "unsupported" to be told apart, and each maps to a different
 /// thing the user is asked to do.
 final class RawDecodingTests: XCTestCase {
+    func testDirectWhiteBalanceRequestRejectsNonFiniteTintInsteadOfResettingIt() {
+        for tint in [Double.nan, .infinity, -.infinity] {
+            XCTAssertNil(CoreImageRawDecoder.resolvedWhiteBalance(
+                for: RawWhiteBalance(temperatureOffsetKelvin: 450, tintOffset: tint),
+                baselineTemperature: 5500,
+                baselineTint: 0
+            ))
+        }
+    }
+
     private var directory: URL!
 
     override func setUpWithError() throws {
@@ -126,6 +136,41 @@ final class RawDecodingTests: XCTestCase {
     func testOnlyFullDecodeIgnoresAPixelBudget() {
         XCTAssertNil(DecodeQuality.full.maximumPixelDimension)
         XCTAssertEqual(DecodeQuality.interactive(maximumPixelDimension: 900).maximumPixelDimension, 900)
+    }
+
+    func testDecoderResolvesTheOffsetAgainstItsActualBaseline() throws {
+        let baseline = 4_536.72802734375
+        let request = RawWhiteBalance(
+            temperatureOffsetKelvin: -175.79691980772682 * WhiteBalancePresentation.kelvinPerStoredUnit,
+            tintOffset: 0
+        )
+
+        let result = CoreImageRawDecoder.resolvedWhiteBalance(
+            for: request,
+            baselineTemperature: baseline,
+            baselineTint: 0
+        )
+
+        let resolved = try XCTUnwrap(result)
+        XCTAssertEqual(
+            resolved.temperatureOffsetKelvin,
+            WhiteBalancePresentation.minimumKelvin - baseline,
+            accuracy: 0.01,
+            "the decoder must never receive the negative Kelvin from the legacy formula"
+        )
+        XCTAssertEqual(resolved.tintOffset, 0)
+    }
+
+    func testDecoderRejectsAnInvalidBaselineBeforeAssigningNativeFilterValues() {
+        let request = RawWhiteBalance(temperatureOffsetKelvin: 900, tintOffset: 25)
+
+        XCTAssertNil(
+            CoreImageRawDecoder.resolvedWhiteBalance(
+                for: request,
+                baselineTemperature: .nan,
+                baselineTint: 0
+            )
+        )
     }
 
     func testAdobePolicyKeepsThePreserveDefaultsDecoderVectorSeparateFromSliderValues() {

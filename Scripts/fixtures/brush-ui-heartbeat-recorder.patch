@@ -1,0 +1,694 @@
+diff --git a/Sources/AdjustmentUI/BrushMaskOverlayView.swift b/Sources/AdjustmentUI/BrushMaskOverlayView.swift
+index 6a23cac..a6b3bc1 100644
+--- a/Sources/AdjustmentUI/BrushMaskOverlayView.swift
++++ b/Sources/AdjustmentUI/BrushMaskOverlayView.swift
+@@ -14,6 +14,7 @@ public struct BrushMaskOverlayView: View {
+     private let imageFrame: CGRect
+ 
+     @State private var gestureContext: BrushMaskGestureContext?
++    @State private var performanceGestureID: UUID?
+     @State private var cursorLocation: CGPoint?
+ 
+     public init(editor: EditorSession, imageFrame: CGRect) {
+@@ -76,9 +77,22 @@ public struct BrushMaskOverlayView: View {
+                     .accessibilityHidden(true)
+             }
+         }
++        .onAppear {
++            BrushUIPerformanceProbe.shared.activate()
++        }
++        .onReceive(editor.$previewImage) { image in
++            if image != nil {
++                BrushUIPerformanceProbe.shared.previewFrameBecameVisible()
++            }
++        }
+         .onDisappear {
++            BrushUIPerformanceProbe.shared.cancelGesture(
++                id: performanceGestureID,
++                reason: .viewDisappeared
++            )
+             editor.cancelBrushMaskGesture()
+             gestureContext = nil
++            performanceGestureID = nil
+             cursorLocation = nil
+         }
+     }
+@@ -118,11 +132,21 @@ public struct BrushMaskOverlayView: View {
+                 cursorLocation = location
+                 guard let mapping else { return }
+                 if gestureContext == nil {
++                    performanceGestureID = BrushUIPerformanceProbe.shared.beginGesture(
++                        kind: editor.brushMaskGestureSettings.mode.rawValue
++                    )
+                     gestureContext = editor.beginBrushMaskGesture(
+                         at: startLocation,
+                         mapping: mapping,
+                         settings: editor.brushMaskGestureSettings
+                     )
++                    if gestureContext == nil {
++                        BrushUIPerformanceProbe.shared.cancelGesture(
++                            id: performanceGestureID,
++                            reason: .gestureCancelled
++                        )
++                        performanceGestureID = nil
++                    }
+                 }
+                 guard let context = gestureContext else { return }
+                 _ = editor.appendBrushMaskPoint(at: location, context: context)
+@@ -130,10 +154,17 @@ public struct BrushMaskOverlayView: View {
+             .onEnded { value in
+                 defer {
+                     gestureContext = nil
++                    performanceGestureID = nil
+                     cursorLocation = nil
+                 }
+                 guard let context = gestureContext else { return }
+-                if !editor.endBrushMaskGesture(at: canvasPoint(value.location), context: context) {
++                if editor.endBrushMaskGesture(at: canvasPoint(value.location), context: context) {
++                    BrushUIPerformanceProbe.shared.requestGestureEnd(id: performanceGestureID)
++                } else {
++                    BrushUIPerformanceProbe.shared.cancelGesture(
++                        id: performanceGestureID,
++                        reason: .gestureCancelled
++                    )
+                     editor.cancelBrushMaskGesture()
+                 }
+             }
+diff --git a/Sources/AdjustmentUI/BrushUIHeartbeatRecorder.swift b/Sources/AdjustmentUI/BrushUIHeartbeatRecorder.swift
+new file mode 100644
+index 0000000..019167f
+--- /dev/null
++++ b/Sources/AdjustmentUI/BrushUIHeartbeatRecorder.swift
+@@ -0,0 +1,416 @@
++import Foundation
++
++public struct BrushUIHeartbeatConfiguration: Equatable, Sendable {
++    public let schemaVersion: Int
++    public let buildIdentifier: String
++    public let variant: String
++    public let buildConfiguration: String
++    public let fixtureIdentifier: String
++    public let expectedHeartbeatIntervalNanoseconds: UInt64
++    public let maximumFrameCount: Int
++
++    public init(
++        schemaVersion: Int = 1,
++        buildIdentifier: String,
++        variant: String,
++        buildConfiguration: String,
++        fixtureIdentifier: String,
++        expectedHeartbeatIntervalNanoseconds: UInt64,
++        maximumFrameCount: Int = 4_096
++    ) {
++        precondition(expectedHeartbeatIntervalNanoseconds > 0)
++        precondition(maximumFrameCount > 0)
++        self.schemaVersion = schemaVersion
++        self.buildIdentifier = buildIdentifier
++        self.variant = variant
++        self.buildConfiguration = buildConfiguration
++        self.fixtureIdentifier = fixtureIdentifier
++        self.expectedHeartbeatIntervalNanoseconds = expectedHeartbeatIntervalNanoseconds
++        self.maximumFrameCount = maximumFrameCount
++    }
++}
++
++public struct BrushUIPerformanceProbeConfiguration: Equatable, Sendable {
++    public let outputURL: URL
++    public let recorderConfiguration: BrushUIHeartbeatConfiguration
++
++    public init?(environment: [String: String]) {
++        guard let outputPath = environment["LUMAHARBOR_PERF_UI_OUTPUT"],
++              !outputPath.isEmpty,
++              let variant = environment["LUMAHARBOR_PERF_UI_VARIANT"],
++              variant == "B" || variant == "O",
++              let buildIdentifier = environment["LUMAHARBOR_PERF_UI_BUILD"],
++              !buildIdentifier.isEmpty,
++              let buildConfiguration = environment["LUMAHARBOR_PERF_UI_CONFIGURATION"],
++              !buildConfiguration.isEmpty,
++              let fixtureIdentifier = environment["LUMAHARBOR_PERF_UI_FIXTURE"],
++              !fixtureIdentifier.isEmpty else {
++            return nil
++        }
++
++        let heartbeatNanoseconds: UInt64
++        if let rawHeartbeat = environment["LUMAHARBOR_PERF_UI_HEARTBEAT_NS"] {
++            guard let parsed = UInt64(rawHeartbeat), parsed > 0 else { return nil }
++            heartbeatNanoseconds = parsed
++        } else {
++            heartbeatNanoseconds = 16_666_667
++        }
++
++        let maximumFrameCount: Int
++        if let rawMaximum = environment["LUMAHARBOR_PERF_UI_MAX_FRAMES"] {
++            guard let parsed = Int(rawMaximum), parsed > 0 else { return nil }
++            maximumFrameCount = parsed
++        } else {
++            maximumFrameCount = 4_096
++        }
++
++        outputURL = URL(fileURLWithPath: outputPath)
++        recorderConfiguration = BrushUIHeartbeatConfiguration(
++            buildIdentifier: buildIdentifier,
++            variant: variant,
++            buildConfiguration: buildConfiguration,
++            fixtureIdentifier: fixtureIdentifier,
++            expectedHeartbeatIntervalNanoseconds: heartbeatNanoseconds,
++            maximumFrameCount: maximumFrameCount
++        )
++    }
++}
++
++public enum BrushUISampleCompleteness: String, Codable, Equatable, Sendable {
++    case complete
++    case incomplete
++}
++
++public enum BrushUIGestureCancellationReason: String, Codable, Equatable, Sendable {
++    case gestureCancelled
++    case viewDisappeared
++    case applicationBackgrounded
++    case applicationTerminated
++    case recorderOverflow
++    case nonMonotonicClock
++    case missingFinalHeartbeat
++    case missingHeartbeatIntervals
++}
++
++public struct BrushUIHeartbeatFrame: Codable, Equatable, Sendable {
++    public let intervalNanoseconds: UInt64
++    public let extraDelayNanoseconds: UInt64
++    public let missedHeartbeatCount: Int
++}
++
++public struct BrushUIGestureSample: Encodable, Equatable, Sendable {
++    public let schemaVersion: Int
++    public let buildIdentifier: String
++    public let variant: String
++    public let buildConfiguration: String
++    public let fixtureIdentifier: String
++    public let gestureKind: String
++    public let gestureID: UUID
++    public let expectedHeartbeatIntervalNanoseconds: UInt64
++    public let monotonicStartNanoseconds: UInt64
++    public let pointerUpNanoseconds: UInt64?
++    public let visibleFrameNanoseconds: UInt64?
++    public let monotonicEndNanoseconds: UInt64
++    public let frames: [BrushUIHeartbeatFrame]
++    public let completeness: BrushUISampleCompleteness
++    public let cancellationReason: BrushUIGestureCancellationReason?
++
++    private enum CodingKeys: String, CodingKey {
++        case schemaVersion
++        case buildIdentifier
++        case variant
++        case buildConfiguration
++        case fixtureIdentifier
++        case gestureKind
++        case gestureID
++        case expectedHeartbeatIntervalNanoseconds
++        case monotonicStartNanoseconds
++        case pointerUpNanoseconds
++        case visibleFrameNanoseconds
++        case monotonicEndNanoseconds
++        case frames
++        case completeness
++        case cancellationReason
++    }
++
++    public func encode(to encoder: Encoder) throws {
++        var container = encoder.container(keyedBy: CodingKeys.self)
++        try container.encode(schemaVersion, forKey: .schemaVersion)
++        try container.encode(buildIdentifier, forKey: .buildIdentifier)
++        try container.encode(variant, forKey: .variant)
++        try container.encode(buildConfiguration, forKey: .buildConfiguration)
++        try container.encode(fixtureIdentifier, forKey: .fixtureIdentifier)
++        try container.encode(gestureKind, forKey: .gestureKind)
++        try container.encode(gestureID, forKey: .gestureID)
++        try container.encode(expectedHeartbeatIntervalNanoseconds, forKey: .expectedHeartbeatIntervalNanoseconds)
++        try container.encode(monotonicStartNanoseconds, forKey: .monotonicStartNanoseconds)
++        if let pointerUpNanoseconds {
++            try container.encode(pointerUpNanoseconds, forKey: .pointerUpNanoseconds)
++        } else {
++            try container.encodeNil(forKey: .pointerUpNanoseconds)
++        }
++        if let visibleFrameNanoseconds {
++            try container.encode(visibleFrameNanoseconds, forKey: .visibleFrameNanoseconds)
++        } else {
++            try container.encodeNil(forKey: .visibleFrameNanoseconds)
++        }
++        try container.encode(monotonicEndNanoseconds, forKey: .monotonicEndNanoseconds)
++        try container.encode(frames, forKey: .frames)
++        try container.encode(completeness, forKey: .completeness)
++        if let cancellationReason {
++            try container.encode(cancellationReason, forKey: .cancellationReason)
++        } else {
++            try container.encodeNil(forKey: .cancellationReason)
++        }
++    }
++}
++
++/// Newline-delimited evidence sink. The runtime schedules calls to this type
++/// off the main thread so evidence I/O cannot inflate the heartbeat it records.
++public final class BrushUIHeartbeatJSONLWriter: @unchecked Sendable {
++    private let fileHandle: FileHandle
++    private let lock = NSLock()
++    private let encoder: JSONEncoder
++
++    public init(outputURL: URL) throws {
++        let directory = outputURL.deletingLastPathComponent()
++        try FileManager.default.createDirectory(
++            at: directory,
++            withIntermediateDirectories: true
++        )
++        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
++        fileHandle = try FileHandle(forWritingTo: outputURL)
++        try fileHandle.truncate(atOffset: 0)
++        encoder = JSONEncoder()
++        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
++    }
++
++    deinit {
++        try? fileHandle.close()
++    }
++
++    public func append(_ sample: BrushUIGestureSample) throws {
++        var data = try encoder.encode(sample)
++        data.append(0x0A)
++        lock.lock()
++        defer { lock.unlock() }
++        try fileHandle.seekToEnd()
++        try fileHandle.write(contentsOf: data)
++    }
++
++    public func synchronize() throws {
++        lock.lock()
++        defer { lock.unlock() }
++        try fileHandle.synchronize()
++    }
++}
++
++/// Pure state machine for the 16 ms foreground UI heartbeat acceptance gate.
++///
++/// Callers supply monotonic timestamps. Keeping the clock and main-runloop
++/// driver outside this type makes the gesture boundaries and fail-closed
++/// behavior deterministic under unit test.
++public struct BrushUIHeartbeatRecorder: Sendable {
++    private struct ActiveGesture: Sendable {
++        let id: UUID
++        let kind: String
++        let startedAtNanoseconds: UInt64
++        var pointerUpNanoseconds: UInt64?
++        var visibleFrameNanoseconds: UInt64?
++        var frames: [BrushUIHeartbeatFrame]
++    }
++
++    public let configuration: BrushUIHeartbeatConfiguration
++    public private(set) var completedSamples: [BrushUIGestureSample] = []
++
++    private var lastHeartbeatNanoseconds: UInt64?
++    private var activeGesture: ActiveGesture?
++
++    public init(configuration: BrushUIHeartbeatConfiguration) {
++        self.configuration = configuration
++    }
++
++    @discardableResult
++    public mutating func beginGesture(
++        id: UUID = UUID(),
++        kind: String,
++        atNanoseconds timestamp: UInt64
++    ) -> Bool {
++        guard activeGesture == nil else { return false }
++        if let lastHeartbeatNanoseconds, timestamp < lastHeartbeatNanoseconds {
++            return false
++        }
++        activeGesture = ActiveGesture(
++            id: id,
++            kind: kind,
++            startedAtNanoseconds: timestamp,
++            pointerUpNanoseconds: nil,
++            visibleFrameNanoseconds: nil,
++            frames: []
++        )
++        return true
++    }
++
++    @discardableResult
++    public mutating func markVisibleFrame(
++        id: UUID? = nil,
++        atNanoseconds timestamp: UInt64
++    ) -> Bool {
++        guard var gesture = activeGesture,
++              id == nil || id == gesture.id,
++              let pointerUp = gesture.pointerUpNanoseconds,
++              gesture.visibleFrameNanoseconds == nil,
++              timestamp >= pointerUp else {
++            return false
++        }
++        gesture.visibleFrameNanoseconds = timestamp
++        activeGesture = gesture
++        return true
++    }
++
++    @discardableResult
++    public mutating func requestGestureEnd(
++        id: UUID? = nil,
++        atNanoseconds timestamp: UInt64
++    ) -> Bool {
++        guard var gesture = activeGesture,
++              id == nil || id == gesture.id,
++              gesture.pointerUpNanoseconds == nil,
++              timestamp >= gesture.startedAtNanoseconds else {
++            return false
++        }
++        gesture.pointerUpNanoseconds = timestamp
++        activeGesture = gesture
++        return true
++    }
++
++    @discardableResult
++    public mutating func cancelGesture(
++        id: UUID? = nil,
++        reason: BrushUIGestureCancellationReason,
++        atNanoseconds timestamp: UInt64
++    ) -> Bool {
++        guard let gesture = activeGesture,
++              id == nil || id == gesture.id else {
++            return false
++        }
++        finish(
++            gesture,
++            atNanoseconds: max(timestamp, gesture.startedAtNanoseconds),
++            completeness: .incomplete,
++            reason: reason
++        )
++        return true
++    }
++
++    @discardableResult
++    public mutating func markMissingFinalHeartbeat(atNanoseconds timestamp: UInt64) -> Bool {
++        guard let gesture = activeGesture, gesture.pointerUpNanoseconds != nil else {
++            return false
++        }
++        finish(
++            gesture,
++            atNanoseconds: max(timestamp, gesture.startedAtNanoseconds),
++            completeness: .incomplete,
++            reason: .missingFinalHeartbeat
++        )
++        return true
++    }
++
++    public mutating func recordHeartbeat(atNanoseconds timestamp: UInt64) {
++        guard let previous = lastHeartbeatNanoseconds else {
++            lastHeartbeatNanoseconds = timestamp
++            return
++        }
++
++        guard timestamp > previous else {
++            if let gesture = activeGesture {
++                finish(
++                    gesture,
++                    atNanoseconds: max(timestamp, gesture.startedAtNanoseconds),
++                    completeness: .incomplete,
++                    reason: .nonMonotonicClock
++                )
++            }
++            return
++        }
++
++        lastHeartbeatNanoseconds = timestamp
++        guard var gesture = activeGesture else { return }
++
++        // An interval whose leading edge predates pointer-down includes idle
++        // time outside the gesture and cannot be used as gesture evidence.
++        if previous >= gesture.startedAtNanoseconds {
++            guard gesture.frames.count < configuration.maximumFrameCount else {
++                finish(
++                    gesture,
++                    atNanoseconds: timestamp,
++                    completeness: .incomplete,
++                    reason: .recorderOverflow
++                )
++                return
++            }
++
++            let interval = timestamp - previous
++            let expected = configuration.expectedHeartbeatIntervalNanoseconds
++            let remainder = interval % expected
++            let roundingThreshold = expected / 2 + expected % 2
++            let roundedPeriods = interval / expected + (remainder >= roundingThreshold ? 1 : 0)
++            gesture.frames.append(BrushUIHeartbeatFrame(
++                intervalNanoseconds: interval,
++                extraDelayNanoseconds: interval > expected ? interval - expected : 0,
++                missedHeartbeatCount: Int(clamping: roundedPeriods > 0 ? roundedPeriods - 1 : 0)
++            ))
++            activeGesture = gesture
++        }
++
++        if let visibleFrame = gesture.visibleFrameNanoseconds, timestamp >= visibleFrame {
++            if gesture.frames.isEmpty {
++                finish(
++                    gesture,
++                    atNanoseconds: timestamp,
++                    completeness: .incomplete,
++                    reason: .missingHeartbeatIntervals
++                )
++            } else {
++                finish(
++                    gesture,
++                    atNanoseconds: timestamp,
++                    completeness: .complete,
++                    reason: nil
++                )
++            }
++        }
++    }
++
++    public mutating func drainCompletedSamples() -> [BrushUIGestureSample] {
++        defer { completedSamples.removeAll(keepingCapacity: true) }
++        return completedSamples
++    }
++
++    private mutating func finish(
++        _ gesture: ActiveGesture,
++        atNanoseconds timestamp: UInt64,
++        completeness: BrushUISampleCompleteness,
++        reason: BrushUIGestureCancellationReason?
++    ) {
++        completedSamples.append(BrushUIGestureSample(
++            schemaVersion: configuration.schemaVersion,
++            buildIdentifier: configuration.buildIdentifier,
++            variant: configuration.variant,
++            buildConfiguration: configuration.buildConfiguration,
++            fixtureIdentifier: configuration.fixtureIdentifier,
++            gestureKind: gesture.kind,
++            gestureID: gesture.id,
++            expectedHeartbeatIntervalNanoseconds: configuration.expectedHeartbeatIntervalNanoseconds,
++            monotonicStartNanoseconds: gesture.startedAtNanoseconds,
++            pointerUpNanoseconds: gesture.pointerUpNanoseconds,
++            visibleFrameNanoseconds: gesture.visibleFrameNanoseconds,
++            monotonicEndNanoseconds: timestamp,
++            frames: gesture.frames,
++            completeness: completeness,
++            cancellationReason: reason
++        ))
++        activeGesture = nil
++    }
++}
+diff --git a/Sources/AdjustmentUI/BrushUIPerformanceProbe.swift b/Sources/AdjustmentUI/BrushUIPerformanceProbe.swift
+new file mode 100644
+index 0000000..0892c9a
+--- /dev/null
++++ b/Sources/AdjustmentUI/BrushUIPerformanceProbe.swift
+@@ -0,0 +1,190 @@
++import Foundation
++
++#if os(macOS)
++import AppKit
++#elseif os(iOS)
++import UIKit
++#endif
++
++/// Opt-in runtime bridge between the real brush gesture and the pure heartbeat
++/// recorder. It is disabled unless all PERF-UI environment fields are present.
++@MainActor
++public final class BrushUIPerformanceProbe: NSObject {
++    public static let shared = BrushUIPerformanceProbe(
++        environment: ProcessInfo.processInfo.environment
++    )
++
++    public var isEnabled: Bool { recorder != nil }
++
++    private var recorder: BrushUIHeartbeatRecorder?
++    private let writer: BrushUIHeartbeatJSONLWriter?
++    private let writerQueue = DispatchQueue(label: "app.lumaharbor.perf-ui-evidence", qos: .utility)
++    private var heartbeatTimer: Timer?
++    private var observersInstalled = false
++
++    public init(environment: [String: String]) {
++        if let configuration = BrushUIPerformanceProbeConfiguration(environment: environment),
++           let writer = try? BrushUIHeartbeatJSONLWriter(outputURL: configuration.outputURL) {
++            recorder = BrushUIHeartbeatRecorder(configuration: configuration.recorderConfiguration)
++            self.writer = writer
++        } else {
++            recorder = nil
++            writer = nil
++        }
++        super.init()
++    }
++
++    public func activate() {
++        guard var recorder, heartbeatTimer == nil else { return }
++        installLifecycleObserversIfNeeded()
++
++        let now = DispatchTime.now().uptimeNanoseconds
++        recorder.recordHeartbeat(atNanoseconds: now)
++        self.recorder = recorder
++
++        let interval = TimeInterval(recorder.configuration.expectedHeartbeatIntervalNanoseconds) / 1_000_000_000
++        let timer = Timer(
++            timeInterval: interval,
++            target: self,
++            selector: #selector(heartbeatTimerFired),
++            userInfo: nil,
++            repeats: true
++        )
++        timer.tolerance = 0
++        RunLoop.main.add(timer, forMode: .common)
++        heartbeatTimer = timer
++    }
++
++    @discardableResult
++    public func beginGesture(kind: String) -> UUID? {
++        activate()
++        guard var recorder else { return nil }
++        let id = UUID()
++        guard recorder.beginGesture(
++            id: id,
++            kind: kind,
++            atNanoseconds: DispatchTime.now().uptimeNanoseconds
++        ) else {
++            return nil
++        }
++        self.recorder = recorder
++        return id
++    }
++
++    public func requestGestureEnd(id: UUID?) {
++        guard let id, var recorder else { return }
++        _ = recorder.requestGestureEnd(
++            id: id,
++            atNanoseconds: DispatchTime.now().uptimeNanoseconds
++        )
++        self.recorder = recorder
++        persistCompletedSamples()
++    }
++
++    public func previewFrameBecameVisible() {
++        guard var recorder else { return }
++        _ = recorder.markVisibleFrame(
++            atNanoseconds: DispatchTime.now().uptimeNanoseconds
++        )
++        self.recorder = recorder
++    }
++
++    public func cancelGesture(
++        id: UUID?,
++        reason: BrushUIGestureCancellationReason
++    ) {
++        guard var recorder else { return }
++        _ = recorder.cancelGesture(
++            id: id,
++            reason: reason,
++            atNanoseconds: DispatchTime.now().uptimeNanoseconds
++        )
++        self.recorder = recorder
++        persistCompletedSamples()
++    }
++
++    @objc private func heartbeatTimerFired() {
++        guard var recorder else { return }
++        recorder.recordHeartbeat(atNanoseconds: DispatchTime.now().uptimeNanoseconds)
++        self.recorder = recorder
++        persistCompletedSamples()
++    }
++
++    private func persistCompletedSamples() {
++        guard var recorder else { return }
++        let samples = recorder.drainCompletedSamples()
++        self.recorder = recorder
++        guard !samples.isEmpty, let writer else { return }
++
++        writerQueue.async {
++            for sample in samples {
++                try? writer.append(sample)
++            }
++        }
++    }
++
++    private func installLifecycleObserversIfNeeded() {
++        guard !observersInstalled else { return }
++        observersInstalled = true
++
++        #if os(macOS)
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(applicationBecameInactive),
++            name: NSApplication.didResignActiveNotification,
++            object: nil
++        )
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(applicationBecameActive),
++            name: NSApplication.didBecomeActiveNotification,
++            object: nil
++        )
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(applicationWillTerminate),
++            name: NSApplication.willTerminateNotification,
++            object: nil
++        )
++        #elseif os(iOS)
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(applicationBecameInactive),
++            name: UIApplication.didEnterBackgroundNotification,
++            object: nil
++        )
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(applicationBecameActive),
++            name: UIApplication.didBecomeActiveNotification,
++            object: nil
++        )
++        NotificationCenter.default.addObserver(
++            self,
++            selector: #selector(applicationWillTerminate),
++            name: UIApplication.willTerminateNotification,
++            object: nil
++        )
++        #endif
++    }
++
++    @objc private func applicationBecameInactive() {
++        cancelGesture(id: nil, reason: .applicationBackgrounded)
++        heartbeatTimer?.invalidate()
++        heartbeatTimer = nil
++    }
++
++    @objc private func applicationBecameActive() {
++        activate()
++    }
++
++    @objc private func applicationWillTerminate() {
++        cancelGesture(id: nil, reason: .applicationTerminated)
++        heartbeatTimer?.invalidate()
++        heartbeatTimer = nil
++        guard let writer else { return }
++        writerQueue.sync {
++            try? writer.synchronize()
++        }
++    }
++}

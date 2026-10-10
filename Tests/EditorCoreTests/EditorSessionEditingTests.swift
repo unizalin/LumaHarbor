@@ -63,6 +63,9 @@ final class EditorSessionEditingTests: XCTestCase {
             adjustments: .neutral,
             isReadOnly: false
         )
+        editor.setWhiteBalanceBaselineForTesting(
+            RawWhiteBalanceBaseline(temperatureKelvin: 5_500, tint: 0)
+        )
         return editor
     }
 
@@ -321,6 +324,32 @@ final class EditorSessionEditingTests: XCTestCase {
             editor.displayedAdjustments.temperature, firstPreviewTemperature + firstPreviewTemperature,
             "re-sampling must not stack the two deltas together"
         )
+    }
+
+    func testCompareModeToggleInvalidatesAnActiveEyedropperRelease() {
+        let editor = makeOpenEditor()
+        editor.setAdjustment(.exposure, to: 1)
+        editor.enableComparisonForTesting()
+        editor.beginEyedropperForTesting()
+        editor.previewEyedropper(sample: .init(red: 0.6, green: 0.5, blue: 0.4))
+        XCTAssertTrue(editor.hasEyedropperPreview)
+
+        editor.setCompareMode(.sideBySide)
+
+        XCTAssertFalse(editor.hasEyedropperPreview)
+        XCTAssertFalse(editor.commitEyedropper())
+    }
+
+    func testSettingTheExistingCompareModeKeepsAnEyedropperPreviewAlive() {
+        let editor = makeOpenEditor()
+        editor.beginEyedropperForTesting()
+        editor.previewEyedropper(sample: .init(red: 0.8, green: 0.7, blue: 0.6))
+
+        XCTAssertTrue(editor.hasEyedropperPreview)
+        editor.setCompareMode(.single)
+
+        XCTAssertTrue(editor.hasEyedropperPreview)
+        XCTAssertTrue(editor.commitEyedropper())
     }
 
     func testPreviewEyedropperDoesNothingWithoutAnOpenPhoto() {

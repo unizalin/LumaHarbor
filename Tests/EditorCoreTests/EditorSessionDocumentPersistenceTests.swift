@@ -63,6 +63,10 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
         )
     }
 
+    private func brushMapping() throws -> BrushCoordinateMapping {
+        try BrushCoordinateMapping(sourceSize: CGSize(width: 100, height: 100))
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 3,
         _ condition: () async throws -> Bool
@@ -214,6 +218,45 @@ final class EditorSessionDocumentPersistenceTests: XCTestCase {
 
         let onDisk = try await store.loadAdjustments(documentID: document.id)
         XCTAssertEqual(onDisk.exposure, 0, "a failed save must not be visible on disk as the new value")
+        XCTAssertEqual(try Data(contentsOf: rawURL), original)
+    }
+
+    /// Task 6 STORE-01: a real brush gesture autosaves through the document
+    /// store, and a fresh repository/session sees the same source-coordinate
+    /// mask after reopening. The original RAW remains byte-identical.
+    func testBrushGestureAutosavesAndReopensThroughFreshDocumentStore() async throws {
+        let root = try makeFixtureRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rawURL = root.appendingPathComponent("fixture.ARW")
+        try Data(repeating: 0x53, count: 4096).write(to: rawURL)
+        let original = try Data(contentsOf: rawURL)
+        let storeRoot = root.appendingPathComponent("Store")
+
+        let store = PhotoDocumentStore(rootURL: storeRoot)
+        let document = try await store.openInPlace(rawURL, bookmarkData: nil).document
+        let editor = makeEditor(store: store)
+        editor.open(
+            photo: photo(for: document), sourceURL: document.workingURL,
+            adjustments: .neutral, isReadOnly: false
+        )
+        let mapper = try brushMapping()
+        let context = try XCTUnwrap(editor.beginBrushMaskGesture(
+            at: CGPoint(x: 10, y: 20), mapping: mapper,
+            settings: BrushMaskGestureSettings(adjustments: BrushMaskPatch(exposure: 1))
+        ))
+        XCTAssertTrue(editor.endBrushMaskGesture(context: context))
+        let flushed = await editor.flushPendingEdits()
+        XCTAssertTrue(flushed)
+
+        let saved = try await store.loadAdjustments(documentID: document.id)
+        XCTAssertEqual(saved.brushMasks.count, 1)
+        XCTAssertEqual(saved.brushMasks.first?.strokes.first?.points.first?.x, 0.1)
+        XCTAssertEqual(saved.brushMasks.first?.adjustments.exposure, 1)
+
+        let reopenedStore = PhotoDocumentStore(rootURL: storeRoot)
+        let reopenedDocument = try await reopenedStore.loadDocument(id: document.id)
+        let reopenedAdjustments = try await reopenedStore.loadAdjustments(documentID: reopenedDocument.id)
+        XCTAssertEqual(reopenedAdjustments.brushMasks, saved.brushMasks)
         XCTAssertEqual(try Data(contentsOf: rawURL), original)
     }
 
