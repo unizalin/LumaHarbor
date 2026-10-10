@@ -3,6 +3,8 @@ import Localization
 import RawProcessingCore
 import SwiftUI
 
+private let brushGestureCoordinateSpace = "adjustment-brush-overlay"
+
 /// Shared canvas overlay for the source-coordinate adjustment brush.
 ///
 /// This view deliberately has no legacy `LocalAdjustment` access.  Both Mac
@@ -79,6 +81,7 @@ public struct BrushMaskOverlayView: View {
                     .accessibilityHidden(true)
             }
         }
+        .coordinateSpace(name: brushGestureCoordinateSpace)
         .onAppear {
             BrushUIPerformanceProbe.shared.activate()
         }
@@ -125,18 +128,16 @@ public struct BrushMaskOverlayView: View {
     }
 
     private var paintGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(brushGestureCoordinateSpace))
             .onChanged { value in
-                let location = canvasPoint(value.location)
-                let startLocation = canvasPoint(value.startLocation)
-                cursorLocation = location
+                cursorLocation = value.location
                 guard let mapping else { return }
                 if gestureContext == nil {
                     performanceGestureID = BrushUIPerformanceProbe.shared.beginGesture(
                         kind: editor.brushMaskGestureSettings.mode.rawValue
                     )
                     gestureContext = editor.beginBrushMaskGesture(
-                        at: startLocation,
+                        at: value.startLocation,
                         mapping: mapping,
                         settings: editor.brushMaskGestureSettings
                     )
@@ -149,7 +150,7 @@ public struct BrushMaskOverlayView: View {
                     }
                 }
                 guard let context = gestureContext else { return }
-                _ = editor.appendBrushMaskPoint(at: location, context: context)
+                _ = editor.appendBrushMaskPoint(at: value.location, context: context)
             }
             .onEnded { value in
                 defer {
@@ -158,7 +159,7 @@ public struct BrushMaskOverlayView: View {
                     cursorLocation = nil
                 }
                 guard let context = gestureContext else { return }
-                if editor.endBrushMaskGesture(at: canvasPoint(value.location), context: context) {
+                if editor.endBrushMaskGesture(at: value.location, context: context) {
                     BrushUIPerformanceProbe.shared.requestGestureEnd(id: performanceGestureID)
                 } else {
                     BrushUIPerformanceProbe.shared.cancelGesture(
@@ -168,10 +169,6 @@ public struct BrushMaskOverlayView: View {
                     editor.cancelBrushMaskGesture()
                 }
             }
-    }
-
-    private func canvasPoint(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: imageFrame.minX + point.x, y: imageFrame.minY + point.y)
     }
 
     private func displayDiameter(stroke: BrushMaskStroke, mapping: BrushCoordinateMapping) -> CGFloat {

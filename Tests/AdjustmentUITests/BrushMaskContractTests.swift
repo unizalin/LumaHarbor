@@ -88,6 +88,15 @@ final class BrushMaskContractTests: XCTestCase {
         XCTAssertTrue(overlay.contains("endBrushMaskGesture"))
     }
 
+    func testBrushGestureUsesTheOverlayCoordinateSpaceWithoutReapplyingTheImageOrigin() throws {
+        let overlay = try source("Sources/AdjustmentUI/BrushMaskOverlayView.swift")
+        XCTAssertTrue(overlay.contains(".coordinateSpace(name: brushGestureCoordinateSpace)"))
+        XCTAssertTrue(overlay.contains("coordinateSpace: .named(brushGestureCoordinateSpace)"))
+        XCTAssertTrue(overlay.contains("at: value.startLocation"))
+        XCTAssertTrue(overlay.contains("at: value.location"))
+        XCTAssertFalse(overlay.contains("private func canvasPoint"))
+    }
+
     func testExistingBrushStrokesUseOneCanvasPerMaskInsteadOfOneViewPerStroke() throws {
         let overlay = try source("Sources/AdjustmentUI/BrushMaskOverlayView.swift")
         XCTAssertTrue(overlay.contains("Canvas { context"))
