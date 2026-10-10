@@ -1,10 +1,10 @@
 # Brush preview performance fix evidence
 
-日期：2026-10-08（Asia/Taipei）
+日期：2026-10-10（Asia/Taipei）
 
 狀態：`DONE_WITH_CONCERNS`
 
-本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress、真實 RAW／original-size export 原始 JSONL、gate JSON、Mac 前景人工摘要、iPad Simulator 人工摘要與 checksum。`DONE_WITH_CONCERNS` 表示 Mac 與 Simulator 已完成可執行 slice，但實體裝置、輸入、heartbeat、灰卡與部分手動競態仍未完成；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
+本目錄保存 128×128 tile follow-up 候選版本上的 synthetic stress、真實 RAW／original-size export、30 次前景 UI heartbeat 原始 JSONL、gate JSON、Mac 前景人工摘要、iPad Simulator 人工摘要與 checksum。`DONE_WITH_CONCERNS` 表示 Mac PERF-UI 與 Simulator 可執行 slice 已完成，但實體裝置、輸入、灰卡與部分手動競態仍未完成；本輪必要的程式、效能、記憶體、取消、pixel parity、worker 收斂與獨立唯讀審查已完成。公開 artifact 已掃描，不含私人 RAW 路徑、憑證或個人設定。
 
 ## 版本與環境
 
@@ -12,7 +12,8 @@
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`
-- Candidate O：`7af212512f59768801081765808202fe84a85b25`
+- Renderer candidate O：`7af212512f59768801081765808202fe84a85b25`
+- PERF-UI candidate O：`5530e91f8f7cae86b6d6633cfd38f13d72bc896b`
 - Harness：`7af212512f59768801081765808202fe84a85b25`
 - Synthetic instrumentation digest：`a29a2e92c11fffa3b9cb05dfbdbc7714a91777b5ee792b41ba4ae6dd125f5f70`
 - 平台：macOS arm64e，Release，`thermalState=nominal`
@@ -42,6 +43,17 @@ swift test -c release \
   --filter 'BrushMaskScalarOracleTests|BrushMaskCancellationTests|BrushMaskRendererTests|CoreImagePreviewRendererTests'
 
 swift test -c release
+
+swift test --scratch-path '<task scratch>' \
+  --filter 'BrushMaskContractTests|EditorSessionBrushMaskGestureTests|BrushUIHeartbeatRecorderTests'
+
+Scripts/build-app-bundle.sh release
+
+python3 Scripts/analyze-brush-ui-heartbeat.py \
+  --baseline '<evidence>/ui-heartbeat-baseline.jsonl' \
+  --optimized '<evidence>/ui-heartbeat-optimized.jsonl' \
+  --output '<evidence>/ui-heartbeat-gates.json' \
+  --minimum-gestures 30
 ```
 
 ## Stage 計時與根因
@@ -83,7 +95,17 @@ swift test -c release
 - `PERF-MEM-EXPORT`：4/4 PASS；real RAW 10-mask candidate peak RSS `503,316,480` bytes。
 - 50-cycle scheduler：PASS；55/55 workers finished、active after join 0、B delivered 55、A discarded 55、failed 0；settled RSS `49,168,384` bytes，limit `89,735,168` bytes。
 - Focused regression：31 tests、0 failures；repeated-geometry paint／erase scalar oracle max R8 byte error `0`；128×128 acceptance contract PASS。
-- Full Release suite：2715 tests、22 skipped、0 failures。
+- Full Release suite：`2c1d1e3` 驗證狀態 2733 tests、22 skipped、0 failures。
+- Analyzer unit tests：41/41 PASS；其中 UI heartbeat analyzer 6/6 PASS。
+
+### 前景 UI heartbeat（30 次原生拖曳）
+
+- Baseline B：30/30 完整樣本；heartbeat 額外延遲 p50/p95/max=`0.002/51.763/85.506 ms`；warm preview p50/p95=`255.518/267.056 ms`。
+- Candidate O `5530e91`：30/30 完整樣本、0 取消；heartbeat 額外延遲 p50/p95/max=`0.227/26.152/27.835 ms`；warm preview p50/p95=`80.540/90.083 ms`。
+- `PERF-UI-HEARTBEAT`：p95 ≤50 ms、max ≤100 ms，PASS。
+- `PERF-UI-WARM-PREVIEW`：O p95 不得高於 B p95×1.10=`293.762 ms`，PASS。
+- `PERF-UI`：PASS。正式樣本使用 Release App、同一匿名 fixture、16.666667 ms heartbeat 與原生 drag；Accessibility 只用於進入筆刷模式，未用於 30 次量測動作。
+- 正式量測前發現筆刷手勢把已在 overlay 座標系的 `DragGesture.location` 再加一次 `imageFrame` 原點，導致中心點超出 mapping 並立即取消。`5530e91` 改用明確 named coordinate space，移除重複位移；29 個筆刷 gesture／contract／recorder focused tests PASS。
 
 ### Mac 前景人工 slice
 
@@ -94,7 +116,7 @@ swift test -c release
 - `UI-BRUSH-02` PARTIAL：完成筆畫 Undo／Redo 與 close-to-library／reopen 通過；中途競態未手動執行。
 - `STORE-01` PARTIAL：前景原尺寸 16-bit TIFF 匯出為 4000×6000、144,013,192 bytes，重開保存通過；其餘 clipboard／batch／snapshot 子項未跑。
 - `UI-SIM-01` PARTIAL：iPad Pro 11-inch (M4)、iOS 18.6 Simulator 的 fresh Debug build／install／launch、直向與橫向、建立一支 adjustment brush、paint、完成筆畫 Undo／Redo、局部曝光 0.0→0.1，以及 terminate／relaunch 後保存均通過；accessibility tree 具備主要筆刷控制的 label／role／value。窄視窗、0.75x／1x／2x zoom、Files-open flow、鍵盤與 hands-on VoiceOver 未跑。
-- `PERF-UI`、實體裝置／Pencil／鍵盤／VoiceOver 與灰卡維持 NOT RUN。CoreDevice 的相關 iPad／iPhone 均 unavailable；fixture inventory 沒有可識別的合格灰卡。
+- `PERF-UI` PASS。實體裝置／Pencil／鍵盤／VoiceOver 與灰卡維持 NOT RUN。CoreDevice 的相關 iPad／iPhone 均 unavailable；fixture inventory 沒有可識別的合格灰卡。
 - 詳細步驟與邊界見 `mac-ui-manual-summary.txt` 與 `ipad-simulator-manual-summary.txt`。
 
 ## Artifact checksum
@@ -108,7 +130,11 @@ swift test -c release
 | `verification-summary.txt` | `3c4d813d9466b5eb3e2859383bad46c5bc0d9882a30bf5c08374275aa2a4b87d` |
 | `mac-ui-manual-summary.txt` | `368e231192e184880e5b85d20200e0504bdf475682f1e1a05f810aa9da2b575d` |
 | `ipad-simulator-manual-summary.txt` | `9eb21384cb643c2b1fa97131ceacf8174d74ec8caeeef5941755f97cfa86c268` |
+| `ui-heartbeat-baseline.jsonl` | `773dd5f56d742f5a935fbb65f7eb606649006181317f96c18ed1d71c077a465b` |
+| `ui-heartbeat-optimized.jsonl` | `7e5db5a014461df2c8ee09dc74a4ab82b54655b2064afd1c9d8a8d108473a5d4` |
+| `ui-heartbeat-gates.json` | `63cef0e75a08de299d6b544ff5fec643031f5e9addaae3c8a12c033f03686357` |
+| `ui-verification-summary.txt` | `da6c746e686dee2305d790ab4390b4cac6e9556fc3bcc1b75ba308ca36bc848e` |
 
-`verification-summary.txt` 另保存 128×128 合約的 RED／GREEN、focused regression、50-cycle 與完整 Release suite 的命令、exit code 與摘要。
+`verification-summary.txt` 另保存 128×128 合約的 RED／GREEN、focused regression、50-cycle 與當輪完整 Release suite；`ui-verification-summary.txt` 保存 PERF-UI 環境、commit、命令、exit code、最新完整 Release suite 與 gate 結果。
 
 2026-10-08 的 Mac 文件差異另經 agy → Gemini 3.1 Pro High 唯讀審查。初審指出 `CURRENT.md` 未說明端到端合併值與 stage total 的差異；本文件補上兩組數據的來源與邊界後，follow-up verdict=`APPROVED`、無 finding。完整紀錄見[Mac 文件 Gemini review](../../reports/2026-10-08-brush-preview-performance-fix-mac-ui-gemini-review.md)。

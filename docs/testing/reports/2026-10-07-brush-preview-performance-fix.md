@@ -1,10 +1,10 @@
 # LumaHarbor 筆刷預覽效能修正驗收報告
 
-日期：2026-10-08（Asia/Taipei）
+日期：2026-10-10（Asia/Taipei）
 
 狀態：`DONE_WITH_CONCERNS`
 
-本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收與 iPad Simulator slice。Mac follow-up 補齊筆刷 Delete／Undo／Redo、Local off/on paste、batch sync、snapshot restore／刪除，並修正實測發現的快照未持久化缺陷；Simulator 補跑 Files 選取／Quick Look 後返回、真實 Split View 窄窗、paint、autosave 與重啟保存。`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、中途手勢競態、Files 直接交件、精確 Simulator zoom/source mapping、PERF-UI heartbeat、實體裝置／輸入與灰卡項目。
+本輪已處理原驗收矩陣中的 7 個效能 FAIL。問題集中為兩個根因：warm RAW 每次 render 重複 decode，以及筆刷 coverage 對每個 mask 做全圖 raster／合成。Gemini 唯讀審查指出的 256×256／128×128 規格落差也已修正；程式、自動驗收與獨立審查均已完成。2026-10-08 另以此分支的 Debug app 完成可執行的 Mac 前景驗收與 iPad Simulator slice。Mac follow-up 補齊筆刷 Delete／Undo／Redo、Local off/on paste、batch sync、snapshot restore／刪除，並修正實測發現的快照未持久化缺陷；Simulator 補跑 Files 選取／Quick Look 後返回、真實 Split View 窄窗、paint、autosave 與重啟保存。2026-10-10 再完成 30 次 Release 前景 UI heartbeat，並修正量測暴露的 overlay gesture 座標重複位移。`DONE_WITH_CONCERNS` 保留給未完成的受控滴管矩陣、中途手勢競態、Files 直接交件、精確 Simulator zoom/source mapping、實體裝置／輸入與灰卡項目。
 
 ## 根因與分段數據
 
@@ -35,6 +35,9 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 - `Tests/RawProcessingCoreTests/BrushMaskRendererTests.swift`：加入 128×128 tile acceptance contract，已先以 256 取得預期 RED，再改為 128 取得 GREEN。
 - `Sources/LumaHarborApp/AppServices.swift`、`Sources/LumaHarborApp/ViewModels/LibraryViewModel.swift`：將既有快照 sidecar 讀寫接入 Mac App 組裝層，並在照片選取的 generation／cancellation 邊界內載入快照。
 - `Tests/LumaHarborAppTests/LibraryViewModelTransitionTests.swift`：加入建立快照、等待 sidecar、關閉並重開後重新載入的 app-level 回歸測試；先保存預期 RED，再由 `5d32550` 修正為 GREEN。
+- `Sources/EditorCore/EditorSession.swift`、Mac／iPad editor views 與 `LibraryViewModel.swift`：把 render、history、brush display 的 observation boundary 分離，避免每個 preview frame 或已提交筆畫使整個 editor/root hierarchy 重算。
+- `Sources/AdjustmentUI/BrushMaskOverlayView.swift`：一個 mask 使用一個 Canvas，並以明確 named overlay coordinate space 傳入 gesture location。量測時確認舊路徑把已是父座標的 location 再加 `imageFrame` 原點，造成 mapping 超界；`5530e91` 移除重複位移。
+- `Sources/AdjustmentUI/BrushUIHeartbeatRecorder.swift`、`BrushUIPerformanceProbe.swift`、`Scripts/analyze-brush-ui-heartbeat.py`：加入 opt-in 16 ms heartbeat、gesture/pointer-up/visible-frame 邊界、fail-closed JSONL 與 B/O gate analyzer。
 
 沒有降低解析度、刪除筆刷點、跳過調整、改 benchmark workload 或放寬門檻。
 
@@ -61,6 +64,16 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 
 `PERF-EXPORT` 4/4、`PERF-MEM-EXPORT` 4/4 PASS。O p50：synthetic 24MP 1／10 masks=`123.601/382.940 ms`；真實 RAW 1／10 masks=`436.667/562.844 ms`。
 
+### 前景 UI heartbeat
+
+| 指標 | Baseline B | Candidate O `5530e91` | 門檻 | 結果 |
+| --- | ---: | ---: | ---: | --- |
+| heartbeat 額外延遲 p95 | 51.763 ms | 26.152 ms | ≤50 ms | PASS |
+| heartbeat 額外延遲 max | 85.506 ms | 27.835 ms | ≤100 ms | PASS |
+| warm preview p95 | 267.056 ms | 90.083 ms | ≤B×1.10（293.762 ms） | PASS |
+
+B/O 各 30 次 Release 前景手勢；O 30/30 完整、0 取消。正式 O 樣本使用原生 drag，Accessibility 只負責進入筆刷模式，未落在計時中的 gesture 動作。
+
 ## Gate 狀態
 
 | Gate／檢查 | 結果 |
@@ -75,10 +88,10 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 | Pixel parity／scalar oracle | PASS，max R8 byte error 0 |
 | Cancellation focused matrix | PASS，9/9 |
 | 50-cycle worker convergence／RSS | PASS，55/55 joined，active 0 |
-| Analyzer unit tests | PASS，9/9 |
+| Analyzer unit tests | PASS，41/41；UI heartbeat analyzer 子集合 6/6 |
 | 128×128 tile acceptance contract | PASS，RED／GREEN 已保存 |
 | Focused Release tests | PASS，31/31 |
-| Full Release regression | PASS，`5d32550` 後重跑 2716 tests、22 skipped、0 failures |
+| Full Release regression | PASS，`2c1d1e3` 驗證狀態 2733 tests、22 skipped、0 failures |
 | Gemini 程式／spec 唯讀審查 | `APPROVED_WITH_CONCERNS`；唯一 minor 已由 `7af2125` 解決 |
 | Gemini Mac 文件唯讀審查 | 初審 `CHANGES_REQUESTED`；端到端與 stage total 的來源說明補正後，follow-up=`APPROVED`、無 finding |
 | `UI-MAC-01` 原生數值欄位 | PASS；Enter／blur／Escape／±／reset／非法值／焦點中 Undo/Redo 同步／同值外部 revision 使舊草稿失效均通過 |
@@ -86,7 +99,7 @@ coverage raster 是 synthetic stress 的主要成本；RAW decode 與 per-mask a
 | `UI-BRUSH-01` | PASS；paint／erase、兩支筆刷切換、size／feather／flow／density、enable、select、Delete、Undo／Redo、autosave 與重開均通過；刪除一支不改另一支 mask／stroke |
 | `UI-BRUSH-02` | PARTIAL；完成筆畫 Undo/Redo 與 close-to-library／reopen 通過；中途換圖／geometry／snapshot／cancel／close 未手動執行 |
 | `STORE-01` | PASS；paint→原尺寸 TIFF export→close→reopen、Local off/on paste、batch sync、snapshot restore、快照寫入／重開、刪除最後快照／重開均通過；快照接線缺陷已修正並加入回歸測試 |
-| `PERF-UI` | NOT RUN；沒有 16 ms heartbeat 與 30 次 B/O UI gesture recorder |
+| `PERF-UI` | PASS；B/O 各 30 次完整 Release 前景手勢，O heartbeat p95/max=`26.152/27.835 ms`，warm preview p95=`90.083 ms` |
 | `UI-SIM-01` | PARTIAL；fresh build／install／launch、直向／橫向、Files 選取／Quick Look 後返回、真實 Split View 窄窗、筆刷 paint、完成筆畫 Undo／Redo、曝光變更、autosave 與 relaunch persistence 通過；Files 直接交件、app-copy／in-place、精確 0.75x／1x／2x source mapping、鍵盤與 hands-on VoiceOver 未完成 |
 | `UI-DEVICE-01`／`UI-INPUT-01` | NOT RUN；CoreDevice 中 iPad／iPhone 均為 unavailable |
 | 灰卡色彩 gate | NOT RUN；未找到合格 RAW 灰卡與受控 ROI reference |
@@ -113,4 +126,4 @@ Task 2 follow-up 另從 Files 選取測試 RAW；檔案先進入 Quick Look，�
 
 ## 尚未完成與 bounded next action
 
-產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成並推送既有候選分支。Mac 筆刷功能與資料保存 gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference，也沒有 16 ms heartbeat recorder。下一個 bounded action 是先依證據 README 的 schema 實作與驗證 PERF-UI recorder，或在裝置／四色與灰卡素材到位後補對應矩陣。Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker。必要 gate 未完成前維持 Draft；遠端 `main` 尚未變動。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。
+產品效能修正、自動驗收、兩輪獨立唯讀 review、Mac 可執行 follow-up、PERF-UI，以及 Simulator 的 Files 選取／Split View／窄窗保存 follow-up 已完成。Mac 筆刷功能、資料保存與前景 heartbeat gate 已補為 PASS；中途手勢與受控四色滴管因操作通道／素材限制仍為 PARTIAL／NOT RUN。實體 iPad 與 iPhone 重新查詢仍為 offline；checkout 沒有合格灰卡／ROI reference。下一個 bounded action 是在裝置與受控素材到位後補實體 iPad／Pencil／鍵盤／VoiceOver、四色滴管與灰卡矩陣；Simulator Files 直接交件與精確 zoom/source mapping 需要可觀測 storage mode／倍率及可散布 marker。必要 gate 未完成前維持 Draft；本輪 `ae8c59a`、`5530e91` 與驗證契約 `2c1d1e3` 尚未 push，遠端 `main` 未變動。未經使用者另行授權，不 merge、rebase、刪除 branch/worktree 或修改其他 worktree。

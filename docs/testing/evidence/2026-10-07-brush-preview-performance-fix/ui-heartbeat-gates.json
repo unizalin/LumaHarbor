@@ -1,0 +1,54 @@
+{
+  "baseline": {
+    "buildConfiguration": "Release",
+    "buildIdentifier": "1de07dcfeb2ed217a75d1c04978da6a5936f379a",
+    "expectedHeartbeatIntervalNanoseconds": 16666667,
+    "fixtureIdentifier": "sony-arw-anonymous-01",
+    "frameCount": 331,
+    "gestureCount": 30,
+    "heartbeatExtraDelayMaxMilliseconds": 85.506416,
+    "heartbeatExtraDelayP50Milliseconds": 0.001875,
+    "heartbeatExtraDelayP95Milliseconds": 51.763333,
+    "variant": "B",
+    "warmPreviewP50Milliseconds": 255.5180415,
+    "warmPreviewP95Milliseconds": 267.056041
+  },
+  "gates": [
+    {
+      "gate": "PERF-UI-HEARTBEAT",
+      "maxLimitMilliseconds": 100,
+      "optimizedMaxMilliseconds": 27.835166,
+      "optimizedP95Milliseconds": 26.152124,
+      "p95LimitMilliseconds": 50,
+      "result": "PASS"
+    },
+    {
+      "baselineP95Milliseconds": 267.056041,
+      "gate": "PERF-UI-WARM-PREVIEW",
+      "maximumRegressionPercent": 10,
+      "optimizedLimitMilliseconds": 293.7616451,
+      "optimizedP95Milliseconds": 90.082959,
+      "result": "PASS"
+    },
+    {
+      "gate": "PERF-UI",
+      "result": "PASS"
+    }
+  ],
+  "optimized": {
+    "buildConfiguration": "Release",
+    "buildIdentifier": "5530e91f8f7cae86b6d6633cfd38f13d72bc896b",
+    "expectedHeartbeatIntervalNanoseconds": 16666667,
+    "fixtureIdentifier": "sony-arw-anonymous-01",
+    "frameCount": 137,
+    "gestureCount": 30,
+    "heartbeatExtraDelayMaxMilliseconds": 27.835166,
+    "heartbeatExtraDelayP50Milliseconds": 0.227499,
+    "heartbeatExtraDelayP95Milliseconds": 26.152124,
+    "variant": "O",
+    "warmPreviewP50Milliseconds": 80.5402915,
+    "warmPreviewP95Milliseconds": 90.082959
+  },
+  "result": "PASS",
+  "schemaVersion": 1
+}
