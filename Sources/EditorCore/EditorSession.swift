@@ -105,6 +105,48 @@ public struct BrushMaskGestureContext: Equatable, Sendable {
 
 public typealias BrushMaskGestureToken = BrushMaskGestureContext
 
+/// Render-only editor state lives on its own observable boundary so a new
+/// preview frame does not invalidate every adjustment control that observes
+/// `EditorSession`.  The canvas and the two small preview-diagnostic surfaces
+/// subscribe to this object directly.
+@MainActor
+public final class EditorRenderState: ObservableObject {
+    @Published public internal(set) var previewImage: CGImage?
+    @Published public internal(set) var previewQuality: PreviewQuality = .interactive
+    @Published public internal(set) var isRendering = false
+    @Published public internal(set) var latestRawRenderRecipe: ResolvedRawRenderRecipe?
+    @Published public internal(set) var decodeFailed = false
+    @Published public internal(set) var histogram: HistogramData?
+
+    public init() {}
+}
+
+/// History and persistence affordances redraw the small toolbar/status
+/// surfaces that show them. They do not invalidate adjustment controls or
+/// the canvas when autosave moves through pending/saving/saved.
+@MainActor
+public final class EditorHistoryState: ObservableObject {
+    @Published public internal(set) var saveState: SaveState = .unchanged
+    @Published public internal(set) var canUndo = false
+    @Published public internal(set) var canRedo = false
+
+    public init() {}
+}
+
+/// A committed brush stroke changes canvas pixels without changing the brush
+/// controls. Keeping this revision separate lets the overlay redraw once
+/// without rebuilding the local-adjustment inspector.
+@MainActor
+public final class EditorBrushDisplayState: ObservableObject {
+    @Published public internal(set) var revision: UInt64 = 0
+
+    public init() {}
+
+    internal func advance() {
+        revision &+= 1
+    }
+}
+
 /// Drives the editing surface for one photo.
 @MainActor
 public final class EditorSession: ObservableObject {
@@ -125,15 +167,16 @@ public final class EditorSession: ObservableObject {
 
     @Published public private(set) var photo: PhotoAsset?
     @Published public private(set) var sourceURL: URL?
-    @Published public private(set) var previewImage: CGImage?
+    public let renderState = EditorRenderState()
+    public var previewImage: CGImage? { renderState.previewImage }
     @Published public private(set) var originalImage: CGImage?
-    @Published public private(set) var previewQuality: PreviewQuality = .interactive
-    @Published public private(set) var isRendering = false
+    public var previewQuality: PreviewQuality { renderState.previewQuality }
+    public var isRendering: Bool { renderState.isRendering }
     /// Provenance for the frame currently displayed. Cleared on photo changes
     /// and failures so diagnostics cannot leak from a previous RAW.
-    @Published public private(set) var latestRawRenderRecipe: ResolvedRawRenderRecipe?
+    public var latestRawRenderRecipe: ResolvedRawRenderRecipe? { renderState.latestRawRenderRecipe }
     /// Monotonic editing context used by native input and async frame guards.
-    @Published public private(set) var adjustmentRevision: UInt64 = 0
+    public private(set) var adjustmentRevision: UInt64 = 0
     @Published public private(set) var whiteBalanceCapability: WhiteBalancePresentation.Capability = .unavailable
     @Published public private(set) var whiteBalanceDiagnostic: WhiteBalancePresentation.ResolutionDiagnostic = .none
     @Published public private(set) var eyedropperIssue: WhiteBalanceEyedropper.SampleIssue?
@@ -147,7 +190,7 @@ public final class EditorSession: ObservableObject {
     /// was actually running (round 3 smoke test: opening a corrupt RAW,
     /// dismissing the alert, and being stuck looking like it's still
     /// decoding forever).
-    @Published public private(set) var decodeFailed = false
+    public var decodeFailed: Bool { renderState.decodeFailed }
 
     /// The RGB histogram of the currently displayed preview frame -- parity
     /// design spec §6.2: it must track `previewImage`, not the RAW file's
@@ -155,11 +198,13 @@ public final class EditorSession: ObservableObject {
     /// decode failure, or once the photo closes; never a stale histogram
     /// left over from a previous photo or a superseded frame (see
     /// `scheduleHistogramComputation(for:generation:)`).
-    @Published public private(set) var histogram: HistogramData?
+    public var histogram: HistogramData? { renderState.histogram }
 
-    @Published public private(set) var saveState: SaveState = .unchanged
-    @Published public private(set) var canUndo = false
-    @Published public private(set) var canRedo = false
+    public let historyState = EditorHistoryState()
+    public var saveState: SaveState { historyState.saveState }
+    public var canUndo: Bool { historyState.canUndo }
+    public var canRedo: Bool { historyState.canRedo }
+    public let brushDisplayState = EditorBrushDisplayState()
     @Published public var isShowingOriginal = false
     @Published public var alert: EditorAlert?
 
@@ -310,6 +355,11 @@ public final class EditorSession: ObservableObject {
         var acceptsNextPoint: Bool
     }
     private var activeBrushMaskGesture: ActiveBrushMaskGesture?
+    /// A committed stroke already redraws through the canvas and local-panel
+    /// views that observe `EditorSession` directly.  The app-level model uses
+    /// this synchronous scope to avoid forwarding the same burst of changes
+    /// through the entire library/root hierarchy as well.
+    public private(set) var isCommittingBrushMaskGesture = false
 
     public var hasEyedropperPreview: Bool { previewedEyedropperAdjustments != nil }
 
@@ -516,17 +566,17 @@ public final class EditorSession: ObservableObject {
         self.snapshots = snapshots
         self.previewOptions = .standard
         self.comparisonSnapshot = nil
-        self.previewImage = nil
-        self.latestRawRenderRecipe = nil
-        self.decodeFailed = false
-        self.histogram = nil
+        renderState.previewImage = nil
+        renderState.latestRawRenderRecipe = nil
+        renderState.decodeFailed = false
+        renderState.histogram = nil
         self.originalImage = nil
         self.isShowingOriginal = false
         self.compareMode = .single
         self.wipePosition = 0.5
-        self.saveState = .unchanged
+        self.historyState.saveState = .unchanged
         self.lastDisplayedGeneration = 0
-        self.adjustmentRevision &+= 1
+        self.advanceAdjustmentRevision()
         self.whiteBalanceBaseline = nil
         self.whiteBalanceCapability = .loading
         self.whiteBalanceDiagnostic = .none
@@ -569,10 +619,10 @@ public final class EditorSession: ObservableObject {
         saveOperationGeneration &+= 1
         photo = nil
         sourceURL = nil
-        previewImage = nil
-        latestRawRenderRecipe = nil
-        decodeFailed = false
-        histogram = nil
+        renderState.previewImage = nil
+        renderState.latestRawRenderRecipe = nil
+        renderState.decodeFailed = false
+        renderState.histogram = nil
         originalImage = nil
         compareMode = .single
         wipePosition = 0.5
@@ -580,8 +630,8 @@ public final class EditorSession: ObservableObject {
         previewOptions = .standard
         comparisonSnapshot = nil
         history = EditHistory(initial: .neutral)
-        saveState = .unchanged
-        adjustmentRevision &+= 1
+        historyState.saveState = .unchanged
+        advanceAdjustmentRevision()
         whiteBalanceBaseline = nil
         whiteBalanceCapability = .unavailable
         whiteBalanceDiagnostic = .none
@@ -618,7 +668,7 @@ public final class EditorSession: ObservableObject {
 
     public func setAdjustment(_ kind: AdjustmentKind, to value: Double) {
         guard photo != nil, value.isFinite else { return }
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision()
         editRevision &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
@@ -651,7 +701,7 @@ public final class EditorSession: ObservableObject {
     /// value from just before the reset as the baseline.
     public func resetAdjustment(_ kind: AdjustmentKind) {
         guard photo != nil else { return }
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision()
         editRevision &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
@@ -667,7 +717,7 @@ public final class EditorSession: ObservableObject {
 
     public func resetAll() {
         guard photo != nil else { return }
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision()
         editRevision &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
@@ -691,7 +741,7 @@ public final class EditorSession: ObservableObject {
     /// caller-supplied out-of-range value from reaching the render pipeline.
     public func updateAdjustments(_ transform: (inout PhotoAdjustments) -> Void) {
         guard photo != nil else { return }
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision()
         editRevision &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
@@ -716,7 +766,7 @@ public final class EditorSession: ObservableObject {
 
     public func undo() {
         activeBrushMaskGesture = nil
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision()
         editRevision &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
@@ -885,6 +935,8 @@ public final class EditorSession: ObservableObject {
               isCurrentBrushMaskGesture(active, context: context) else {
             return false
         }
+        isCommittingBrushMaskGesture = true
+        defer { isCommittingBrushMaskGesture = false }
         activeBrushMaskGesture = nil
         let strokes = active.paths.compactMap { path -> BrushMaskStroke? in
             guard !path.points.isEmpty else { return nil }
@@ -915,8 +967,11 @@ public final class EditorSession: ObservableObject {
             updated.brushMasks.append(mask)
         }
         guard history.record(updated) else { return false }
-        selectedBrushMaskID = maskID
-        didChangeAdjustments()
+        if selectedBrushMaskID != maskID {
+            selectedBrushMaskID = maskID
+        }
+        brushDisplayState.advance()
+        didChangeAdjustments(notifyAdjustmentObservers: false)
         return true
     }
 
@@ -1046,7 +1101,7 @@ public final class EditorSession: ObservableObject {
 
     public func redo() {
         activeBrushMaskGesture = nil
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision()
         editRevision &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
@@ -1468,21 +1523,21 @@ public final class EditorSession: ObservableObject {
     }
 
     private func refreshWhiteBalanceDiagnostic() {
+        let diagnostic: WhiteBalancePresentation.ResolutionDiagnostic
         if previewedEyedropperAdjustments != nil {
-            whiteBalanceDiagnostic = eyedropperCandidateDiagnostic
-            return
+            diagnostic = eyedropperCandidateDiagnostic
+        } else if committedWhiteBalanceDiagnostic == .clamped {
+            diagnostic = .clamped
+        } else if let baseline = whiteBalanceBaseline?.temperatureKelvin {
+            diagnostic = WhiteBalancePresentation.resolve(
+                storedOffset: history.current.temperature, baselineKelvin: baseline
+            ).diagnostic
+        } else {
+            diagnostic = .none
         }
-        if committedWhiteBalanceDiagnostic == .clamped {
-            whiteBalanceDiagnostic = .clamped
-            return
+        if whiteBalanceDiagnostic != diagnostic {
+            whiteBalanceDiagnostic = diagnostic
         }
-        guard let baseline = whiteBalanceBaseline?.temperatureKelvin else {
-            whiteBalanceDiagnostic = .none
-            return
-        }
-        whiteBalanceDiagnostic = WhiteBalancePresentation.resolve(
-            storedOffset: history.current.temperature, baselineKelvin: baseline
-        ).diagnostic
     }
 
     private func resolveNewTemperature(_ value: Double) -> WhiteBalancePresentation.Resolution? {
@@ -1561,18 +1616,27 @@ public final class EditorSession: ObservableObject {
         commitContinuousEdit()
     }
 
-    private func didChangeAdjustments() {
+    private func advanceAdjustmentRevision(notifyObservers: Bool = true) {
+        if notifyObservers {
+            objectWillChange.send()
+        }
+        adjustmentRevision &+= 1
+    }
+
+    private func didChangeAdjustments(notifyAdjustmentObservers: Bool = true) {
         activeBrushMaskGesture = nil
         saveOperationGeneration &+= 1
         editRevision &+= 1
-        adjustmentRevision &+= 1
+        advanceAdjustmentRevision(notifyObservers: notifyAdjustmentObservers)
         previewIntentVersion &+= 1
         activeEyedropperContext = nil
         requiresFreshEyedropperGesture = true
         previewedEyedropperAdjustments = nil
         eyedropperCandidateRevision = nil
         eyedropperCandidatePhotoID = nil
-        eyedropperIssue = nil
+        if eyedropperIssue != nil {
+            eyedropperIssue = nil
+        }
         committedWhiteBalanceDiagnostic = .none
         refreshWhiteBalanceDiagnostic()
         refreshUndoState()
@@ -1586,16 +1650,24 @@ public final class EditorSession: ObservableObject {
             // Undid or reset back to what's already on disk: nothing to write.
             autosaveTask?.cancel()
             autosaveTask = nil
-            saveState = .unchanged
+            if historyState.saveState != .unchanged {
+                historyState.saveState = .unchanged
+            }
         } else {
-            saveState = .pending
+            if historyState.saveState != .pending {
+                historyState.saveState = .pending
+            }
             scheduleAutosave()
         }
     }
 
     private func refreshUndoState() {
-        canUndo = history.canUndo
-        canRedo = history.canRedo
+        if historyState.canUndo != history.canUndo {
+            historyState.canUndo = history.canUndo
+        }
+        if historyState.canRedo != history.canRedo {
+            historyState.canRedo = history.canRedo
+        }
     }
 
     /// Exact history depths used by editor-core regression tests.  The
@@ -1607,7 +1679,7 @@ public final class EditorSession: ObservableObject {
 
     private func requestPreview(quality: PreviewQuality) {
         guard let photo, let sourceURL, let services else { return }
-        isRendering = true
+        renderState.isRendering = true
         // Captured synchronously, before the `await` below -- this is
         // exactly what distinguishes "a decode requested while a preset or
         // eyedropper preview is active" from a normal/committed one,
@@ -1749,15 +1821,15 @@ public final class EditorSession: ObservableObject {
             }
             lastDisplayedGeneration = result.token.generation
             displayedFrameContext = result.token.contextID.flatMap { frameContexts[$0] }
-            previewImage = result.image.cgImage
-            latestRawRenderRecipe = result.image.rawRenderRecipe
-            decodeFailed = false
+            renderState.previewImage = result.image.cgImage
+            renderState.latestRawRenderRecipe = result.image.rawRenderRecipe
+            renderState.decodeFailed = false
             scheduleHistogramComputation(for: result.image.cgImage, generation: result.token.generation)
-            previewQuality = result.quality
+            renderState.previewQuality = result.quality
             let baseline = result.image.whiteBalanceBaseline
             if whiteBalanceBaseline?.temperatureKelvin.bitPattern != baseline?.temperatureKelvin.bitPattern
                 || whiteBalanceBaseline?.tint.bitPattern != baseline?.tint.bitPattern {
-                adjustmentRevision &+= 1
+                advanceAdjustmentRevision()
                 activeEyedropperContext = nil
                 requiresFreshEyedropperGesture = true
                 previewedEyedropperAdjustments = nil
@@ -1768,7 +1840,7 @@ public final class EditorSession: ObservableObject {
             )
             refreshWhiteBalanceDiagnostic()
             // An interactive frame means the settled render is still to come.
-            isRendering = result.quality == .interactive
+            renderState.isRendering = result.quality == .interactive
             // Recomputed from this specific frame's own origin every time,
             // rather than only ever set `true` -- a *non*-preview frame
             // landing (e.g. `cancelPresetPreview`'s restore, or a real edit)
@@ -1778,8 +1850,8 @@ public final class EditorSession: ObservableObject {
         case .failed(let token, let error):
             guard let photo, token.subject.rawValue == photo.id.rawValue else { return }
             guard token.generation > lastDisplayedGeneration else { return }
-            isRendering = false
-            latestRawRenderRecipe = nil
+            renderState.isRendering = false
+            renderState.latestRawRenderRecipe = nil
             switch previewContextRelevance(for: token) {
             case .some(true):
                 // Round 3: a preset preview that genuinely changes the
@@ -1803,11 +1875,11 @@ public final class EditorSession: ObservableObject {
             // or restoring the committed render after a preview -- so it
             // keeps the modal alert: spec requires a real error stay visible
             // here, not just the preview-only path above.
-            previewImage = nil
+            renderState.previewImage = nil
             displayedFrameContext = nil
-            decodeFailed = true
+            renderState.decodeFailed = true
             histogramTask?.cancel()
-            histogram = nil
+            renderState.histogram = nil
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't show this photo"), for: error)
         }
     }
@@ -1842,7 +1914,7 @@ public final class EditorSession: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             guard generation == self.lastDisplayedGeneration else { return }
             guard revision == self.editRevision, intent == self.previewIntentVersion else { return }
-            self.histogram = computed
+            self.renderState.histogram = computed
         }
     }
 
@@ -1850,7 +1922,7 @@ public final class EditorSession: ObservableObject {
 
     private func scheduleAutosave() {
         guard !isReadOnlyLibrary else {
-            saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
+            historyState.saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
             return
         }
         autosaveTask?.cancel()
@@ -1865,14 +1937,14 @@ public final class EditorSession: ObservableObject {
     public func save() async {
         guard let photo, let services, saveState.isDirty else { return }
         guard !isReadOnlyLibrary else {
-            saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
+            historyState.saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
             return
         }
         let adjustments = history.current
         saveOperationGeneration &+= 1
         let operationGeneration = saveOperationGeneration
         let photoID = photo.id
-        saveState = .saving
+        historyState.saveState = .saving
         do {
             try await services.saveAdjustments(adjustments, photo)
             guard operationGeneration == saveOperationGeneration,
@@ -1881,14 +1953,14 @@ public final class EditorSession: ObservableObject {
             lastSavedAdjustments = adjustments
             // Only report success once the atomic write actually returned.
             if history.current == adjustments {
-                saveState = .saved(Date())
+                historyState.saveState = .saved(Date())
             }
             onSaved?(photo.id, !adjustments.isNeutral)
         } catch {
             guard operationGeneration == saveOperationGeneration,
                   self.photo?.id == photoID,
                   history.current == adjustments else { return }
-            saveState = .failed(SafeErrorPresentation.message(for: error))
+            historyState.saveState = .failed(SafeErrorPresentation.message(for: error))
             alert = SafeErrorPresentation.alert(title: L10n.t("Couldn't save your edits"), for: error)
         }
     }
@@ -1914,7 +1986,7 @@ public final class EditorSession: ObservableObject {
         if isReadOnlyLibrary {
             // Nothing can be written. Saying so here is what stops the caller
             // navigating away and dropping the edit on the floor.
-            saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
+            historyState.saveState = .failed(L10n.t("This drive is read-only, so edits can't be saved."))
             alert = EditorAlert(
                 title: L10n.t("Couldn't save your edits"),
                 message: L10n.t("This drive is read-only, so LumaHarbor can't write next to your photos."),

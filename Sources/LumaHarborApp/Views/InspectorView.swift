@@ -174,7 +174,9 @@ struct InspectorView: View {
                 if !navigation.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     searchResultsList
                 } else {
-                    HistogramPanel(histogram: model.editor.histogram)
+                    EditorRenderObservedContent(renderState: model.editor.renderState) {
+                        HistogramPanel(histogram: model.editor.histogram)
+                    }
                     inspectorGroup(.basic, sectionID: .basic, title: L10n.t("Basic")) {
                         RenderingProfilePanel(editor: model.editor)
                         BasicAdjustmentPanel(editor: model.editor, kinds: MacBasicAdjustmentPanel.toneKinds)
@@ -278,18 +280,24 @@ struct InspectorView: View {
     private var infoContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                HistogramPanel(histogram: model.editor.histogram)
-                Divider()
-                if let photo = model.editor.photo {
-                    MetadataPanel(
-                        snapshot: EditorMetadataSnapshot(photo: photo),
-                        photo: model.selectedPhoto ?? photo,
-                        model: model,
-                        recipe: model.editor.latestRawRenderRecipe
-                    )
+                EditorRenderObservedContent(renderState: model.editor.renderState) {
+                    HistogramPanel(histogram: model.editor.histogram)
                 }
                 Divider()
-                SaveStatePanel(state: model.editor.saveState)
+                if let photo = model.editor.photo {
+                    EditorRenderObservedContent(renderState: model.editor.renderState) {
+                        MetadataPanel(
+                            snapshot: EditorMetadataSnapshot(photo: photo),
+                            photo: model.selectedPhoto ?? photo,
+                            model: model,
+                            recipe: model.editor.latestRawRenderRecipe
+                        )
+                    }
+                }
+                Divider()
+                EditorHistoryObservedContent(historyState: model.editor.historyState) {
+                    SaveStatePanel(state: model.editor.saveState)
+                }
                 Divider()
                 SnapshotsPanel(editor: model.editor)
             }

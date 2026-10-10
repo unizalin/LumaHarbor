@@ -1,3 +1,4 @@
+import Combine
 import CoreGraphics
 import Foundation
 import XCTest
@@ -102,6 +103,36 @@ final class EditorSessionBrushMaskGestureTests: XCTestCase {
         XCTAssertEqual(editor.adjustments.brushMasks[0].strokes.count, 2)
         XCTAssertEqual(editor.undoCountForTesting, 1)
         XCTAssertEqual(editor.redoCountForTesting, 0)
+    }
+
+    func testAdditionalStrokePublishesOnlyTheBrushDisplayBoundary() throws {
+        let editor = makeEditor()
+        let brushID = try XCTUnwrap(editor.addBrushMask(name: "A"))
+        editor.selectBrushMask(id: brushID)
+        editor.setToolMode(.brushMask)
+
+        var editorPublishCount = 0
+        var brushDisplayPublishCount = 0
+        let editorCancellable = editor.objectWillChange.sink { editorPublishCount += 1 }
+        let displayCancellable = editor.brushDisplayState.objectWillChange.sink {
+            brushDisplayPublishCount += 1
+        }
+        defer {
+            editorCancellable.cancel()
+            displayCancellable.cancel()
+        }
+
+        let mapper = try mapping()
+        let point = CGPoint(x: 50, y: 50)
+        let context = try XCTUnwrap(editor.beginBrushMaskGesture(at: point, mapping: mapper))
+        XCTAssertTrue(editor.endBrushMaskGesture(at: point, context: context))
+
+        XCTAssertEqual(brushDisplayPublishCount, 1)
+        XCTAssertEqual(
+            editorPublishCount,
+            0,
+            "A stroke must not rebuild controls whose values did not change"
+        )
     }
 
     func testCompetingEditInvalidatesReleaseAndDoesNotAddHistory() throws {

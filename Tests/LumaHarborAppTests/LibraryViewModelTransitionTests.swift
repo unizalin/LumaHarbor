@@ -480,6 +480,43 @@ final class LibraryViewModelTransitionTests: AppViewModelTestCase {
         )
     }
 
+    func testBrushGestureCommitStaysWithinDirectEditorObservers() async throws {
+        try seedPhotos(["DSC0001.ARW"])
+        let services = try makeServices()
+        let library = try await addLibrary(services)
+        await runScan(services, libraryID: library.id)
+
+        let model = await makeModel(services: services, libraryID: library.id)
+        let photo = try XCTUnwrap(model.photos.first)
+        model.editor.open(
+            photo: photo,
+            sourceURL: photo.url(inLibraryRootedAt: library.rootURL),
+            adjustments: .neutral,
+            isReadOnly: false
+        )
+
+        var modelPublishCount = 0
+        var editorPublishCount = 0
+        let modelCancellable = model.objectWillChange.sink { modelPublishCount += 1 }
+        let editorCancellable = model.editor.objectWillChange.sink { editorPublishCount += 1 }
+        defer {
+            modelCancellable.cancel()
+            editorCancellable.cancel()
+        }
+
+        let mapping = try BrushCoordinateMapping(sourceSize: CGSize(width: 100, height: 100))
+        let point = CGPoint(x: 50, y: 50)
+        let context = try XCTUnwrap(model.editor.beginBrushMaskGesture(at: point, mapping: mapping))
+        XCTAssertTrue(model.editor.endBrushMaskGesture(at: point, context: context))
+
+        XCTAssertGreaterThan(editorPublishCount, 0, "Brush UI subscribers must still redraw")
+        XCTAssertEqual(
+            modelPublishCount,
+            0,
+            "The root library hierarchy must not be invalidated for a brush commit"
+        )
+    }
+
     // MARK: - Manifest write failure next-step text
 
     /// Found by hand 2026-08-19 testing a genuinely full drive: the alert's

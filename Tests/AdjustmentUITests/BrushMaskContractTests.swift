@@ -73,4 +73,27 @@ final class BrushMaskContractTests: XCTestCase {
         XCTAssertTrue(panel.contains("adjustments.exposure"))
         XCTAssertTrue(overlay.contains("displayDiameter"))
     }
+
+    func testBrushGestureFeedsOptInUIHeartbeatProbeWithoutReplacingProductGestureFlow() throws {
+        let overlay = try source("Sources/AdjustmentUI/BrushMaskOverlayView.swift")
+        XCTAssertTrue(overlay.contains("BrushUIPerformanceProbe.shared.activate"))
+        XCTAssertTrue(overlay.contains("BrushUIPerformanceProbe.shared.beginGesture"))
+        XCTAssertTrue(overlay.contains("BrushUIPerformanceProbe.shared.requestGestureEnd"))
+        XCTAssertTrue(overlay.contains("BrushUIPerformanceProbe.shared.previewFrameBecameVisible"))
+        XCTAssertTrue(overlay.contains("BrushUIPerformanceProbe.shared.cancelGesture"))
+        XCTAssertTrue(overlay.contains("editor.renderState.$previewImage"))
+        XCTAssertFalse(overlay.contains("editor.$previewImage"))
+        XCTAssertTrue(overlay.contains("beginBrushMaskGesture"))
+        XCTAssertTrue(overlay.contains("appendBrushMaskPoint"))
+        XCTAssertTrue(overlay.contains("endBrushMaskGesture"))
+    }
+
+    func testExistingBrushStrokesUseOneCanvasPerMaskInsteadOfOneViewPerStroke() throws {
+        let overlay = try source("Sources/AdjustmentUI/BrushMaskOverlayView.swift")
+        XCTAssertTrue(overlay.contains("Canvas { context"))
+        XCTAssertFalse(overlay.contains("ForEach(mask.strokes)"))
+        XCTAssertTrue(overlay.contains("context.stroke"))
+        XCTAssertTrue(overlay.contains("stroke.mode == .erase ? .orange : .accentColor"))
+        XCTAssertTrue(overlay.contains("displayDiameter(stroke: stroke, mapping: mapping)"))
+    }
 }

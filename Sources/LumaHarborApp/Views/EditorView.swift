@@ -4,6 +4,62 @@ import PhotoLibraryCore
 import Localization
 import SwiftUI
 
+/// Invalidates only the wrapped render surface when a preview frame changes.
+/// The surrounding editor/inspector hierarchy continues to observe
+/// `EditorSession` for semantic editing state.
+struct EditorRenderObservedContent<Content: View>: View {
+    @ObservedObject private var renderState: EditorRenderState
+    private let content: () -> Content
+
+    init(
+        renderState: EditorRenderState,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        _renderState = ObservedObject(wrappedValue: renderState)
+        self.content = content
+    }
+
+    var body: some View { content() }
+}
+
+struct EditorHistoryObservedContent<Content: View>: View {
+    @ObservedObject private var historyState: EditorHistoryState
+    private let content: () -> Content
+
+    init(
+        historyState: EditorHistoryState,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        _historyState = ObservedObject(wrappedValue: historyState)
+        self.content = content
+    }
+
+    var body: some View { content() }
+}
+
+private struct EditorHistoryControls: View {
+    @ObservedObject var historyState: EditorHistoryState
+    let editor: EditorSession
+
+    var body: some View {
+        Group {
+            Button {
+                editor.undo()
+            } label: {
+                Label(L10n.t("Undo"), systemImage: "arrow.uturn.backward")
+            }
+            .disabled(!historyState.canUndo)
+
+            Button {
+                editor.redo()
+            } label: {
+                Label(L10n.t("Redo"), systemImage: "arrow.uturn.forward")
+            }
+            .disabled(!historyState.canRedo)
+        }
+    }
+}
+
 /// Centre pane: the large preview plus the filmstrip (spec §6.2).
 struct EditorView: View {
     @EnvironmentObject private var model: LibraryViewModel
@@ -43,7 +99,9 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            previewArea
+            EditorRenderObservedContent(renderState: model.editor.renderState) {
+                previewArea
+            }
             if effectiveShowFilmstrip {
                 Divider()
                 FilmstripView()
@@ -464,19 +522,10 @@ struct EditorView: View {
             .disabled(!model.editor.canCompareWithOriginal)
             .help(L10n.t("Compare Mode"))
 
-            Button {
-                model.editor.undo()
-            } label: {
-                Label(L10n.t("Undo"), systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!model.editor.canUndo)
-
-            Button {
-                model.editor.redo()
-            } label: {
-                Label(L10n.t("Redo"), systemImage: "arrow.uturn.forward")
-            }
-            .disabled(!model.editor.canRedo)
+            EditorHistoryControls(
+                historyState: model.editor.historyState,
+                editor: model.editor
+            )
         }
 
         ToolbarItemGroup(placement: .automatic) {
@@ -519,7 +568,9 @@ struct EditorView: View {
         }
 
         ToolbarItem(placement: .automatic) {
-            SaveStateLabel(state: model.editor.saveState)
+            EditorHistoryObservedContent(historyState: model.editor.historyState) {
+                SaveStateLabel(state: model.editor.saveState)
+            }
         }
 
         ToolbarItem(placement: .primaryAction) {

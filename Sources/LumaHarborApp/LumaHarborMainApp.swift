@@ -48,12 +48,18 @@ public struct LumaHarborMainApp: App {
 @MainActor
 final class LumaHarborAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var modelObservation: AnyCancellable?
+    private var historyObservation: AnyCancellable?
     private var menuDelegateProxies: [ObjectIdentifier: UndoRedoMenuDelegateProxy] = [:]
     var mainMenuProvider: () -> NSMenu? = { NSApplication.shared.mainMenu }
 
     weak var model: LibraryViewModel? {
         didSet {
             modelObservation = model?.objectWillChange.sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.installUndoRedoMenuRouting(in: self?.mainMenuProvider())
+                }
+            }
+            historyObservation = model?.editor.historyState.objectWillChange.sink { [weak self] _ in
                 DispatchQueue.main.async { [weak self] in
                     self?.installUndoRedoMenuRouting(in: self?.mainMenuProvider())
                 }

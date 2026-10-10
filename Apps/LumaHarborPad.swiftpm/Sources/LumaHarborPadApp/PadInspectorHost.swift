@@ -458,16 +458,20 @@ struct PadInspectorHost: View {
     private var infoPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PadHistogramBlock(histogram: editor.histogram)
+                PadEditorRenderObservedContent(renderState: editor.renderState) {
+                    PadHistogramBlock(histogram: editor.histogram)
+                }
                 Divider()
                 if let photo = editor.photo {
                     let curationPhoto = library.photos.first(where: { $0.id == photo.id }) ?? photo
-                    PadMetadataBlock(
-                        snapshot: EditorMetadataSnapshot(photo: curationPhoto),
-                        photo: curationPhoto,
-                        batchCoordinator: batchCoordinator,
-                        recipe: editor.latestRawRenderRecipe
-                    )
+                    PadEditorRenderObservedContent(renderState: editor.renderState) {
+                        PadMetadataBlock(
+                            snapshot: EditorMetadataSnapshot(photo: curationPhoto),
+                            photo: curationPhoto,
+                            batchCoordinator: batchCoordinator,
+                            recipe: editor.latestRawRenderRecipe
+                        )
+                    }
                 } else {
                     Text(L10n.t("Photo not yet loaded."))
                         .font(.caption)
@@ -476,7 +480,9 @@ struct PadInspectorHost: View {
                         .padding()
                 }
                 Divider()
-                PadSaveStateBlock(saveState: editor.saveState)
+                PadEditorHistoryObservedContent(historyState: editor.historyState) {
+                    PadSaveStateBlock(saveState: editor.saveState)
+                }
                 Divider()
                 if editor.photo != nil {
                     SnapshotsPanel(editor: editor)

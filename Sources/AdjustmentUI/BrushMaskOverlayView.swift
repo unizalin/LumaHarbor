@@ -11,13 +11,16 @@ import SwiftUI
 /// saved paths, preview and export stay in the same coordinate space.
 public struct BrushMaskOverlayView: View {
     @ObservedObject private var editor: EditorSession
+    @ObservedObject private var brushDisplayState: EditorBrushDisplayState
     private let imageFrame: CGRect
 
     @State private var gestureContext: BrushMaskGestureContext?
+    @State private var performanceGestureID: UUID?
     @State private var cursorLocation: CGPoint?
 
     public init(editor: EditorSession, imageFrame: CGRect) {
         self.editor = editor
+        self.brushDisplayState = editor.brushDisplayState
         self.imageFrame = imageFrame
     }
 
@@ -76,38 +79,49 @@ public struct BrushMaskOverlayView: View {
                     .accessibilityHidden(true)
             }
         }
+        .onAppear {
+            BrushUIPerformanceProbe.shared.activate()
+        }
+        .onReceive(editor.renderState.$previewImage) { image in
+            if image != nil {
+                BrushUIPerformanceProbe.shared.previewFrameBecameVisible()
+            }
+        }
         .onDisappear {
+            BrushUIPerformanceProbe.shared.cancelGesture(
+                id: performanceGestureID,
+                reason: .viewDisappeared
+            )
             editor.cancelBrushMaskGesture()
             gestureContext = nil
+            performanceGestureID = nil
             cursorLocation = nil
         }
     }
 
-    @ViewBuilder
     private func maskOverlay(_ mask: BrushMask) -> some View {
         let selected = mask.id == selectedMaskID
-        ForEach(mask.strokes) { stroke in
-            strokeView(stroke, selected: selected)
+        return Canvas { context, _ in
+            guard let mapping else { return }
+            for stroke in mask.strokes where !stroke.points.isEmpty {
+                let points = stroke.points.compactMap { try? mapping.sourceToDisplay($0) }
+                guard let first = points.first else { continue }
+                let width = max(displayDiameter(stroke: stroke, mapping: mapping), 2)
+                let color: Color = stroke.mode == .erase ? .orange : .accentColor
+                var path = Path()
+                path.move(to: first)
+                for point in points.dropFirst() {
+                    path.addLine(to: point)
+                }
+                context.stroke(
+                    path,
+                    with: .color(color.opacity(selected ? 0.75 : 0.35)),
+                    style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
+                )
+            }
         }
-    }
-
-    private func strokeView(_ stroke: BrushMaskStroke, selected: Bool) -> AnyView {
-        guard let mapping, !stroke.points.isEmpty else { return AnyView(EmptyView()) }
-        let points = stroke.points.compactMap { try? mapping.sourceToDisplay($0) }
-        guard let first = points.first else { return AnyView(EmptyView()) }
-        let width = max(displayDiameter(stroke: stroke, mapping: mapping), 2)
-        let color: Color = stroke.mode == .erase ? .orange : .accentColor
-        return AnyView(Path { path in
-            path.move(to: first)
-            for point in points.dropFirst() { path.addLine(to: point) }
-        }
-        .stroke(color.opacity(selected ? 0.75 : 0.35), style: StrokeStyle(
-            lineWidth: width,
-            lineCap: .round,
-            lineJoin: .round
-        ))
         .allowsHitTesting(false)
-        .accessibilityHidden(true))
+        .accessibilityHidden(true)
     }
 
     private var paintGesture: some Gesture {
@@ -118,11 +132,21 @@ public struct BrushMaskOverlayView: View {
                 cursorLocation = location
                 guard let mapping else { return }
                 if gestureContext == nil {
+                    performanceGestureID = BrushUIPerformanceProbe.shared.beginGesture(
+                        kind: editor.brushMaskGestureSettings.mode.rawValue
+                    )
                     gestureContext = editor.beginBrushMaskGesture(
                         at: startLocation,
                         mapping: mapping,
                         settings: editor.brushMaskGestureSettings
                     )
+                    if gestureContext == nil {
+                        BrushUIPerformanceProbe.shared.cancelGesture(
+                            id: performanceGestureID,
+                            reason: .gestureCancelled
+                        )
+                        performanceGestureID = nil
+                    }
                 }
                 guard let context = gestureContext else { return }
                 _ = editor.appendBrushMaskPoint(at: location, context: context)
@@ -130,10 +154,17 @@ public struct BrushMaskOverlayView: View {
             .onEnded { value in
                 defer {
                     gestureContext = nil
+                    performanceGestureID = nil
                     cursorLocation = nil
                 }
                 guard let context = gestureContext else { return }
-                if !editor.endBrushMaskGesture(at: canvasPoint(value.location), context: context) {
+                if editor.endBrushMaskGesture(at: canvasPoint(value.location), context: context) {
+                    BrushUIPerformanceProbe.shared.requestGestureEnd(id: performanceGestureID)
+                } else {
+                    BrushUIPerformanceProbe.shared.cancelGesture(
+                        id: performanceGestureID,
+                        reason: .gestureCancelled
+                    )
                     editor.cancelBrushMaskGesture()
                 }
             }

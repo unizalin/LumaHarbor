@@ -98,8 +98,10 @@ struct PadEditorInspectorContainer: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 12) {
                 inspectorPanelDragHandle
-                saveStatusIndicator
-                undoRedoControls
+                PadEditorHistoryObservedContent(historyState: editor.historyState) {
+                    saveStatusIndicator
+                    undoRedoControls
+                }
             }
             Spacer(minLength: 0)
             inspectorMinimizeButton

@@ -267,6 +267,7 @@ public final class LibraryViewModel: ObservableObject {
 
     public init() {
         editorForwarding = editor.objectWillChange.sink { [weak self] in
+            guard self?.editor.isCommittingBrushMaskGesture != true else { return }
             self?.objectWillChange.send()
         }
         presetLibraryForwarding = presetLibrary.objectWillChange.sink { [weak self] in
