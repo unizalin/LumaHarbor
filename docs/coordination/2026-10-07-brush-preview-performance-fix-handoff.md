@@ -18,7 +18,7 @@
 - Base：`origin/main`=`82542e73aae8f16b0ba7e4d9d36a8a42451a7319`。
 - Baseline B：`1de07dcfeb2ed217a75d1c04978da6a5936f379a`。
 - 延續候選父版本：`eae30121ec7ef089b4a048a50151993c205e2686`；這是本 task 的相依例外，不表示已整合到 `main`。
-- Branch 先前版本已推送至 `origin/luna/brush-preview-performance-fix`；本輪 `ae8c59a`、`5530e91`、`2c1d1e3` 與待提交文件尚未 push。Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 維持 OPEN；遠端 `main` 尚未變動；沒有 merge 或 rebase，不得覆蓋其他 worktree。
+- Branch 先前版本已推送至 `origin/luna/brush-preview-performance-fix`；本輪 `ae8c59a`、`5530e91`、`2c1d1e3` 與驗收文件提交尚未 push。Draft PR [#2](https://github.com/unizalin/LumaHarbor/pull/2) 維持 OPEN；遠端 `main` 尚未變動；沒有 merge 或 rebase，不得覆蓋其他 worktree。
 
 ## Changes
 
