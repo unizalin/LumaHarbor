@@ -417,8 +417,9 @@ final class EditorWorkflowUXContractTests: XCTestCase {
         let toolbar = try Self.extractProperty(named: "toolbarContent", from: source)
 
         XCTAssertTrue(toolbar.contains(#"Label(L10n.t("Back to Library""#))
-        XCTAssertTrue(toolbar.contains("model.editor.undo()"))
-        XCTAssertTrue(toolbar.contains("model.editor.redo()"))
+        XCTAssertTrue(toolbar.contains("EditorHistoryControls("))
+        XCTAssertTrue(source.contains("editor.undo()"))
+        XCTAssertTrue(source.contains("editor.redo()"))
         XCTAssertTrue(toolbar.contains("CompareButton()"))
         XCTAssertFalse(
             toolbar.contains("focusMode"),
