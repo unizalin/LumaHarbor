@@ -111,12 +111,12 @@ git diff --check
 | 暫不整合 | 上述條件未成立 | 保留 Draft，成果留在遠端分支 |
 
 - [x] 若採 Alpha 例外，只針對本次 exact candidate 記錄，不能永久解除其他版本的驗收要求；未知風險必須明列。2026-10-10 使用者明確接受 PR #2 的 `DONE_WITH_CONCERNS`；D-014 綁定 validated product `5530e91` 與 reviewed pre-decision head `f695488`，未完成 gate 保留。
-- [ ] 真正授權後透過 PR 整合，核對 merged SHA 與遠端 main；不得 force-push 或覆寫其他 worktree。
-- [ ] 依 AGENTS 的產品版本推送規則，以實際 main SHA 建置／同步 Mac Release 並核對版本、簽章及啟動；可用且獲授權的 iPad 同步驗證，不可用則記 NOT RUN。若對外散布新版，依 D-011 更新產品版本，避免重複發行相同版本。
-- [ ] 應用程式安裝成功不取代未完成的功能驗收；不刪除保留的 branch／worktree 或歷史證據。
+- [x] 真正授權後透過 PR 整合，核對 merged SHA 與遠端 main；不得 force-push 或覆寫其他 worktree。PR #2 已 squash-merged，merge commit 為 `8e64407c49d3bea108d9951ba878e29303670296`，合併當下遠端 main 已核對為同一 SHA；後續純文件紀錄不改變產品 tree。
+- [x] 依 AGENTS 的產品版本推送規則，以實際 main SHA 建置／同步 Mac Release 並核對版本、簽章及啟動；Mac `0.1.0 (3)` 已 PASS。實體 iPad 為 `unavailable`，signed install／版本核對／launch 記為 `BLOCKED`；未對外建立新的版本發行。
+- [x] 應用程式安裝成功不取代未完成的功能驗收；來源 branch／worktree 與歷史證據均保留。
 
 ## 執行順序與交接
 
 順序：Task 1 → Task 2 → Task 3 → Task 4 → Task 5。先完成可直接執行的工作，再提出有具體結果的整合決策；不用等實機才能更新 README 或跑 Simulator。
 
-本次交付僅為計畫與 coordination 索引。下一個有界動作是 **Task 1：更新根目錄 README 的 Sidecar v5、白平衡／筆刷能力與 Alpha 驗收限制**。沒有新增測試結果、沒有改變 READY 判定，也沒有授權 main 合併。
+Task 1～5 已依 D-014 的 Alpha 例外完成：README／驗收文件已同步，PR #2 已整合至 `main`，Mac Release 已由 merged SHA 重建、安裝並完成 launch smoke。尚未具備的實體裝置、受控灰卡／滴管與中途手勢人工項目維持原 gate 狀態。
